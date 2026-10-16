@@ -18,7 +18,7 @@ const captureLibrary = `${application}/Contents/Frameworks/libopen_media_capture
 const report = {
   mode, application, executable, invocation: 'installed-main-executable-capture-mode',
   harnessCommit: process.env.GITHUB_SHA ?? '',
-  sourceCommit: mode === 'baseline' ? undefined : process.env.GITHUB_SHA ?? '',
+  sourceCommit: mode === 'baseline' ? undefined : process.env.OPEN_MEDIA_TEST_SOURCE_COMMIT ?? process.env.GITHUB_SHA ?? '',
   sourceRelease: mode === 'baseline' ? 'v0.1.4' : undefined,
   startedAt: new Date().toISOString(), commands: [],
 };

@@ -1,0 +1,124 @@
+name: Diagnose installed macOS recording
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed recording workflow run containing the test application
+        required: true
+        default: '38924684917'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  installed-diagnostics:
+    name: Reproduce recording and collect native crash evidence
+    runs-on: macos-26
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Read the original test run identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          mkdir -p test-results/macos-capture capture-test-app
+          gh run view "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha,headBranch,event,workflowName,url,status,conclusion > test-results/macos-capture/source-run.json
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          name: open-media-macos-arm64-capture-test-${{ inputs.source_run_id }}
+          path: capture-test-app
+      - name: Verify the original application checksum and source identity
+        run: |
+          shasum -a 256 -c capture-test-app/SHA256SUMS
+          cp capture-test-app/installed.json test-results/macos-capture/source-installed.json
+          cp capture-test-app/SHA256SUMS test-results/macos-capture/source-SHA256SUMS
+          node --input-type=module - <<'NODE'
+          import assert from 'node:assert/strict';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const run = JSON.parse(readFileSync('test-results/macos-capture/source-run.json', 'utf8'));
+          const installed = JSON.parse(readFileSync('capture-test-app/installed.json', 'utf8'));
+          assert.match(run.headSha, /^[0-9a-f]{40}$/);
+          assert.equal(installed.sourceCommit, run.headSha, 'The downloaded application must match the source run.');
+          appendFileSync(process.env.GITHUB_ENV, `OPEN_MEDIA_TEST_SOURCE_COMMIT=${run.headSha}\n`);
+          NODE
+      - name: Record the actual diagnostic host
+        run: |
+          {
+            sw_vers
+            uname -a
+            xcrun lldb --version
+            echo "Harness commit: $GITHUB_SHA"
+            echo "Application commit: $OPEN_MEDIA_TEST_SOURCE_COMMIT"
+            echo "Runner image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+          } 2>&1 | tee test-results/macos-capture/environment.log
+          test "$(uname -m)" = arm64
+          test "$(sw_vers -productVersion | cut -d. -f1)" = 26
+      - name: Install the unchanged application and verify its identity
+        id: installed
+        run: |
+          mkdir -p "$RUNNER_TEMP/open-media-capture-diagnostics"
+          ditto -x -k capture-test-app/Open-Media_macos-arm64_capture-test.zip "$RUNNER_TEMP/open-media-capture-diagnostics"
+          sudo ditto "$RUNNER_TEMP/open-media-capture-diagnostics/Open Media.app" '/Applications/Open Media.app'
+          node scripts/check-macos-capture.mjs installed
+          node --input-type=module - <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const source = JSON.parse(readFileSync('test-results/macos-capture/source-installed.json', 'utf8'));
+          const installed = JSON.parse(readFileSync('test-results/macos-capture/installed.json', 'utf8'));
+          assert.equal(installed.executableSHA256, source.executableSHA256, 'The executable must be byte-identical to the previous test.');
+          NODE
+      - name: Reproduce real recording with the border
+        id: with-border
+        if: always() && steps.installed.outcome == 'success'
+        run: node scripts/check-macos-capture.mjs with-border
+      - name: Reproduce real recording without the border
+        id: without-border
+        if: always() && steps.installed.outcome == 'success'
+        run: node scripts/check-macos-capture.mjs without-border
+      - name: Obtain debugger backtraces and application crash reports
+        if: always() && steps.installed.outcome == 'success'
+        run: node scripts/collect-macos-capture-diagnostics.mjs --debugger
+      - name: Collect any available crash reports if installation failed
+        if: always() && steps.installed.outcome != 'success'
+        run: node scripts/collect-macos-capture-diagnostics.mjs
+      - name: Summarize diagnostic scope
+        if: always()
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          {
+            echo '## Recording crash diagnosis'
+            echo
+            echo "Original application run: $SOURCE_RUN_ID"
+            echo "Application commit: ${OPEN_MEDIA_TEST_SOURCE_COMMIT:-unavailable}"
+            echo "Diagnostic harness commit: $GITHUB_SHA"
+            echo
+            echo '| Check | Result |'
+            echo '| --- | --- |'
+            echo '| Unchanged installed application | ${{ steps.installed.outcome }} |'
+            echo '| Real recording with border | ${{ steps.with-border.outcome }} |'
+            echo '| Real recording without border | ${{ steps.without-border.outcome }} |'
+            echo
+            echo 'The application is not rebuilt or re-signed. Debugger refusal is retained as diagnostic evidence. Recording failures remain failures. Only application crash reports and logs from the open-media process are collected.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: open-media-macos-capture-diagnostics-${{ github.run_id }}
+          path: test-results/macos-capture/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

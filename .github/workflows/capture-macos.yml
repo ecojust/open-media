@@ -150,6 +150,9 @@ jobs:
         id: without-border
         if: always() && steps.installed.outcome == 'success'
         run: node scripts/check-macos-capture.mjs without-border
+      - name: Collect application crash reports and system logs
+        if: always()
+        run: node scripts/collect-macos-capture-diagnostics.mjs
       - name: Summarize observed results
         if: always()
         run: |
