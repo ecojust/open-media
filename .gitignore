@@ -1,0 +1,12 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.DS_Store
+*.log
+test-results/
+.release-staging/
+release-output/
+.media-runtime/
+src-tauri/resources/media/*
+!src-tauri/resources/media/README.txt

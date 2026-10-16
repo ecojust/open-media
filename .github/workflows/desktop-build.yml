@@ -1,0 +1,180 @@
+name: Build Open Media desktop
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Application checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+        env:
+          BROWSER_ARTIFACTS: test-results/browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: open-media-checks-${{ github.run_id }}
+          path: test-results/browser/
+          if-no-files-found: warn
+          retention-days: 14
+  runtime-source:
+    name: Corresponding media source
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/cache@v4
+        with:
+          path: .media-runtime/downloads
+          key: media-source-${{ hashFiles('scripts/media-runtime.lock.json') }}
+      - name: Package complete corresponding source
+        run: |
+          mkdir -p source-artifacts
+          node scripts/media-runtime.mjs sources --output source-artifacts/open-media-runtime-source.tar.gz
+          sha256sum source-artifacts/open-media-runtime-source.tar.gz | sed 's|source-artifacts/||' > source-artifacts/SHA256SUMS
+          cp THIRD_PARTY_NOTICES.md source-artifacts/
+          cp LICENSE source-artifacts/
+          printf '{"commit":"%s","kind":"corresponding-source"}\n' '${{ github.sha }}' > source-artifacts/build.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-media-runtime-source-${{ github.run_id }}
+          path: source-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+  desktop:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - platform: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - platform: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 100
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+      - uses: actions/cache@v4
+        id: media-cache
+        with:
+          path: |
+            src-tauri/resources/media
+            .media-runtime/downloads
+          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh') }}
+      - name: Install media build tools on Windows
+        if: runner.os == 'Windows' && steps.media-cache.outputs.cache-hit != 'true'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            make diffutils perl nasm
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+      - name: Install media build tools on macOS
+        if: runner.os == 'macOS' && steps.media-cache.outputs.cache-hit != 'true'
+        run: brew install nasm pkg-config
+      - name: Prepare verified media sources
+        if: steps.media-cache.outputs.cache-hit != 'true'
+        run: node scripts/media-runtime.mjs prepare
+      - name: Build media tools on Windows
+        if: runner.os == 'Windows' && steps.media-cache.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: bash scripts/build-media-runtime.sh
+      - name: Build media tools on macOS
+        if: runner.os == 'macOS' && steps.media-cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-media-runtime.sh
+      - name: Verify the bundled executables
+        run: node scripts/media-runtime.mjs verify
+      - name: Save verified media runtime independently of application packaging
+        if: steps.media-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            src-tauri/resources/media
+            .media-runtime/downloads
+          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh') }}
+      - name: Install application dependencies
+        run: npm ci
+      - name: Build application frontend
+        run: npm run build
+      - name: Verify native operations with packaged runtime
+        env:
+          OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
+          OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib
+      - name: Package application
+        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+      - name: Collect installers and provenance
+        env:
+          MEDIA_TARGET: ${{ matrix.target }}
+          MEDIA_PLATFORM: ${{ matrix.platform }}
+          MEDIA_COMMIT: ${{ github.sha }}
+        run: node scripts/collect-desktop.mjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: open-media-build-log-${{ matrix.platform }}-${{ github.run_id }}
+          path: .media-runtime/logs/
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-media-${{ matrix.platform }}-${{ github.run_id }}
+          path: desktop-artifacts/
+          if-no-files-found: error
+          retention-days: 30

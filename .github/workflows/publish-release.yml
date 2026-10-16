@@ -1,0 +1,49 @@
+name: Publish verified desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful desktop build run ID
+        required: true
+        type: string
+      expected_commit:
+        description: Full source commit SHA matching that build
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-desktop-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify release guardrails
+        run: node --test tests/release.test.mjs
+      - name: Verify artifacts and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_BUILD_RUN: ${{ inputs.build_run_id }}
+          RELEASE_EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: node scripts/publish-release.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-verification-${{ github.run_id }}
+          path: release-output/*
+          if-no-files-found: warn
+          retention-days: 14
