@@ -1,4 +1,6 @@
 pub mod capture;
+#[cfg(any(feature = "desktop", test))]
+pub mod capture_picker;
 #[cfg(any(target_os = "windows", test))]
 mod capture_windows;
 pub mod engine;
@@ -13,6 +15,7 @@ mod desktop {
             self, CaptureDevice, CaptureManager, CaptureOptions, CaptureStartCancellation,
             CaptureStatus,
         },
+        capture_picker::{self, CapturePicker, PickerContext, PickerPreferences, PickerSelection},
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
         preview::{self, PreviewResult},
     };
@@ -210,6 +213,76 @@ mod desktop {
         .await
     }
     #[tauri::command]
+    pub async fn pick_capture_source(
+        request_id: String,
+        preferences: PickerPreferences,
+        window: tauri::WebviewWindow,
+        app: tauri::AppHandle,
+        state: State<'_, MediaState>,
+        picker: State<'_, CapturePicker>,
+    ) -> engine::Result<Option<PickerSelection>> {
+        capture_picker::require_main(&window)?;
+        {
+            let mut capture = state
+                .capture
+                .try_lock()
+                .map_err(|_| "录制操作正在处理，请稍后再选择录制范围。")?;
+            if capture.status().state != "idle" {
+                return Err("请先停止当前录制，再选择新的录制范围。".into());
+            }
+        }
+        let receiver = picker.start(
+            &app,
+            request_id,
+            preferences,
+            state.runtime()?,
+            state.resource.clone(),
+        )?;
+        blocking(move || {
+            receiver
+                .recv()
+                .map_err(|_| "录制选择已关闭，请重试。".to_string())?
+        })
+        .await
+    }
+    #[tauri::command]
+    pub fn cancel_capture_picker(
+        request_id: String,
+        window: tauri::WebviewWindow,
+        app: tauri::AppHandle,
+        picker: State<'_, CapturePicker>,
+    ) -> engine::Result<()> {
+        capture_picker::require_main(&window)?;
+        picker.cancel(&app, &request_id)
+    }
+    #[tauri::command]
+    pub fn get_capture_picker_context(
+        request_id: String,
+        window: tauri::WebviewWindow,
+        picker: State<'_, CapturePicker>,
+    ) -> engine::Result<PickerContext> {
+        picker.context(&request_id, window.label())
+    }
+    #[tauri::command]
+    pub fn capture_picker_ready(
+        request_id: String,
+        window: tauri::WebviewWindow,
+        app: tauri::AppHandle,
+        picker: State<'_, CapturePicker>,
+    ) -> engine::Result<()> {
+        picker.ready(&app, &request_id, window.label())
+    }
+    #[tauri::command]
+    pub fn complete_capture_picker(
+        request_id: String,
+        selection: Option<PickerSelection>,
+        window: tauri::WebviewWindow,
+        app: tauri::AppHandle,
+        picker: State<'_, CapturePicker>,
+    ) -> engine::Result<()> {
+        picker.complete(&app, &request_id, window.label(), selection)
+    }
+    #[tauri::command]
     pub async fn get_capture_status(state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
         let state = state.inner().clone();
         blocking(move || Ok(state.capture.lock().unwrap().status())).await
@@ -333,6 +406,7 @@ mod desktop {
         let app = tauri::Builder::default()
             .plugin(tauri_plugin_dialog::init())
             .manage(Closing::default())
+            .manage(CapturePicker::default())
             .setup(|app| {
                 let data = app.path().app_data_dir()?;
                 fs::create_dir_all(&data)?;
@@ -354,11 +428,22 @@ mod desktop {
             })
             .on_window_event(|window, event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    window
+                        .state::<CapturePicker>()
+                        .cancel_window(window.app_handle(), window.label());
+                    if window.label() != "main" {
+                        return;
+                    }
                     let closing = window.state::<Closing>();
                     if !closing.0.load(Ordering::SeqCst) {
                         api.prevent_close();
                         let _ = window.emit("native-close-requested", ());
                     }
+                }
+                if matches!(event, tauri::WindowEvent::Destroyed) {
+                    window
+                        .state::<CapturePicker>()
+                        .cancel_window(window.app_handle(), window.label());
                 }
             })
             .invoke_handler(tauri::generate_handler![
@@ -371,6 +456,11 @@ mod desktop {
                 get_media_jobs,
                 cancel_media_job,
                 list_capture_devices,
+                pick_capture_source,
+                cancel_capture_picker,
+                get_capture_picker_context,
+                capture_picker_ready,
+                complete_capture_picker,
                 get_capture_status,
                 start_capture,
                 cancel_capture_start,
@@ -385,6 +475,9 @@ mod desktop {
             .expect("无法启动应用");
         app.run(|handle, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                handle
+                    .state::<CapturePicker>()
+                    .cancel_window(handle, "main");
                 if !handle.state::<Closing>().0.load(Ordering::SeqCst) {
                     api.prevent_exit();
                     let _ = handle.emit("native-close-requested", ());

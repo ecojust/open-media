@@ -209,6 +209,8 @@ async function main() {
     await page.getByTestId('nav-record').click()
     await page.getByLabel('开始倒计时').selectOption('0')
     await page.getByTestId('record-start').click()
+    await page.getByTestId('capture-picker-confirm').click()
+    await expect(page.getByTestId('recording-source')).toBeVisible()
     await expect(page.getByTestId('record-stop')).toBeVisible()
     await page.waitForTimeout(400)
     await page.getByTestId('nav-edit').click()

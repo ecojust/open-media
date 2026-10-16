@@ -16,17 +16,17 @@ const captureDevices = [{ id: 'screen:1', name: '屏幕一', kind: 'screen', wid
 
 function workspace(name, overrides = {}) {
   const script = readFileSync(new URL(`../src/components/${name}.vue`, import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
-  const exposed = name === 'RecorderWorkspace' ? 'phase, elapsed, error, countdown, begin, stop, pauseOrResume, sourceType, screenId, windowId, selectedSourceId, devicesLoading, loadDevices, outputPreset, outputWidth, outputHeight, regionX, regionY, regionWidth, regionHeight, configurationError, actualSource' : 'exporting, error, jobId, exportGif, cancel'
+  const exposed = name === 'RecorderWorkspace' ? 'phase, elapsed, error, countdown, begin, stop, pauseOrResume, selection, pickerPreferences, actualSource, browserPicker, chooseBrowserSource' : 'exporting, error, jobId, exportGif, cancel'
   const compiled = ts.transpileModule(`${script.replace(/^import .*$/gm, '')}\nreturn { ${exposed} }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   const mounted = [], unmounted = [], timers = new Map(), events = []
   let nextTimer = 1
   const injected = {
-    ref: vue.ref, computed: vue.computed, nextTick: vue.nextTick, watch: vue.watch,
+    ref: vue.ref, shallowRef: vue.shallowRef, computed: vue.computed, nextTick: vue.nextTick, watch: vue.watch,
     onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback),
     defineProps: () => ({ assets: [asset], native: true }), defineEmits: () => (...args) => events.push(args), defineExpose: () => {},
     window: { addEventListener() {}, removeEventListener() {} },
     setInterval: callback => { const id = nextTimer++; timers.set(id, callback); return id }, clearInterval: id => timers.delete(id),
-    listCaptureDevices: async () => captureDevices, startCapture: async () => ({ state: 'recording', elapsed: 0, segments: 0 }),
+    listCaptureDevices: async () => captureDevices, pickCaptureSource: async () => ({ sourceId: 'screen:1', sourceName: '屏幕一', sourceWidth: 2560, sourceHeight: 1440 }), cancelCapturePicker: async () => {}, startCapture: async () => ({ state: 'recording', elapsed: 0, segments: 0 }),
     getCaptureStatus: async () => ({ state: 'recording', elapsed: 1, segments: 0 }),
     pauseCapture: async () => ({ state: 'paused', elapsed: 1, segments: 1 }),
     resumeCapture: async () => ({ state: 'recording', elapsed: 1, segments: 1 }), stopCapture: async () => null, cancelCaptureStart: async () => {},
@@ -166,96 +166,119 @@ test('failed native stop honors a still-recording status and preserves its origi
   } finally { harness.dispose() }
 })
 
-test('window recording sends the exact selected window and fixed output dimensions', async () => {
-  const calls = []
-  const harness = workspace('RecorderWorkspace', { startCapture: async options => { calls.push(options); return { state: 'recording', elapsed: 0, segments: 0, sourceId: options.sourceId, sourceName: '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: options.outputSize } } })
+test('opening the recorder never enumerates sources or requests permission', async () => {
+  let enumerated = 0, selected = 0
+  const harness = workspace('RecorderWorkspace', { listCaptureDevices: async () => { enumerated++; return captureDevices }, pickCaptureSource: async () => { selected++; return null } })
   try {
     await settle()
-    harness.state.sourceType.value = 'window'
-    harness.state.outputPreset.value = '720p'
-    harness.state.countdown.value = 0
+    assert.equal(enumerated, 0)
+    assert.equal(selected, 0)
+    assert.equal(harness.state.phase.value, 'idle')
+    assert.deepEqual(harness.events, [])
     await harness.state.begin()
+    assert.equal(selected, 1)
+    assert.equal(harness.state.phase.value, 'idle')
+    assert.deepEqual(harness.events, [['recording-change', true], ['recording-change', false]])
+  } finally { harness.dispose() }
+})
+
+test('selected window and output dimensions are passed exactly after the picker confirms', async () => {
+  const calls = [], picker = deferred()
+  const chosen = { sourceId: 'window:24', sourceName: '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: { width: 1280, height: 720 } }
+  const harness = workspace('RecorderWorkspace', {
+    pickCaptureSource: () => picker.promise,
+    startCapture: async options => { calls.push(options); return { state: 'recording', elapsed: 0, segments: 0, sourceId: options.sourceId, sourceName: '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: options.outputSize } },
+  })
+  try {
+    harness.state.countdown.value = 0
+    const start = harness.state.begin()
+    assert.equal(harness.state.phase.value, 'selecting')
+    assert.equal(calls.length, 0, '打开范围选择器不允许开始编码')
+    assert.deepEqual(harness.events, [['recording-change', true]], '选择器出现时立即阻止项目切换与关闭')
+    picker.resolve(chosen)
+    await start
     assert.equal(harness.state.phase.value, 'recording')
     assert.equal(calls[0].sourceId, 'window:24')
     assert.deepEqual(calls[0].outputSize, { width: 1280, height: 720 })
     assert.equal('region' in calls[0], false)
     assert.deepEqual(harness.state.actualSource.value, { label: '演示窗口', width: 1200, height: 900, outputWidth: 1280, outputHeight: 720 })
+    assert.equal(harness.state.pickerPreferences.value.mode, 'window')
   } finally { harness.dispose() }
 })
 
-test('refresh keeps a selected source and invalidates a disappeared window without screen fallback', async () => {
-  let listed = captureDevices
-  let starts = 0
-  const harness = workspace('RecorderWorkspace', { listCaptureDevices: async () => listed, startCapture: async () => { starts++; return { state: 'recording', elapsed: 0, segments: 0 } } })
+test('drawn region uses source-relative physical pixels returned by the picker', async () => {
+  const calls = [], chosen = { sourceId: 'screen:2', sourceName: '副屏幕', sourceWidth: 2560, sourceHeight: 1440, region: { x: 202, y: 110, width: 640, height: 480 }, outputSize: { width: 1280, height: 720 } }
+  const harness = workspace('RecorderWorkspace', {
+    pickCaptureSource: async () => chosen,
+    startCapture: async options => { calls.push(options); return { state: 'recording', elapsed: 0, segments: 0 } },
+  })
   try {
-    await settle()
-    harness.state.screenId.value = 'screen:2'
-    await harness.state.loadDevices()
-    assert.equal(harness.state.screenId.value, 'screen:2')
-    harness.state.sourceType.value = 'window'
-    await settle()
-    await harness.state.loadDevices()
-    assert.equal(harness.state.windowId.value, 'window:24')
-    listed = captureDevices.filter(device => device.kind !== 'window')
-    await harness.state.loadDevices()
-    assert.equal(harness.state.selectedSourceId.value, '')
+    harness.state.countdown.value = 0
+    await harness.state.begin()
+    assert.equal(calls[0].sourceId, chosen.sourceId)
+    assert.deepEqual(calls[0].region, chosen.region)
+    assert.deepEqual(calls[0].outputSize, chosen.outputSize)
+    assert.equal(harness.state.pickerPreferences.value.mode, 'region')
+  } finally { harness.dispose() }
+})
+
+test('cancelling source selection waits for native acknowledgement and never starts capture', async () => {
+  const picker = deferred(), cancelled = []
+  let pickerId, starts = 0
+  const harness = workspace('RecorderWorkspace', {
+    pickCaptureSource: id => { pickerId = id; return picker.promise },
+    cancelCapturePicker: async id => { cancelled.push(id) },
+    startCapture: async () => { starts++; return { state: 'recording', elapsed: 0, segments: 0 } },
+  })
+  try {
+    harness.state.countdown.value = 0
+    const start = harness.state.begin()
+    await harness.state.stop()
+    assert.deepEqual(cancelled, [pickerId])
+    assert.equal(harness.state.phase.value, 'selecting', '恢复主窗口前必须保留活动保护')
+    picker.resolve({ sourceId: 'window:24' })
+    await start
+    assert.equal(starts, 0, '晚到的选择结果不能绕过取消')
+    assert.equal(harness.state.phase.value, 'idle')
+    assert.equal(harness.state.error.value, '')
+    assert.deepEqual(harness.events, [['recording-change', true], ['recording-change', false]])
+  } finally { harness.dispose() }
+})
+
+test('permission failures return a retryable idle state and retry opens a new picker', async () => {
+  let selections = 0, starts = 0
+  const harness = workspace('RecorderWorkspace', {
+    pickCaptureSource: async () => { if (++selections === 1) throw new Error('未获得屏幕录制权限，请允许后重试。'); return { sourceId: 'screen:1' } },
+    startCapture: async () => { starts++; return { state: 'recording', elapsed: 0, segments: 0 } },
+  })
+  try {
     harness.state.countdown.value = 0
     await harness.state.begin()
     assert.equal(starts, 0)
     assert.equal(harness.state.phase.value, 'idle')
-    assert.match(harness.state.error.value, /可用窗口/)
-    harness.state.sourceType.value = 'screen'
-    await settle()
+    assert.match(harness.state.error.value, /屏幕录制权限/)
     await harness.state.begin()
     assert.equal(starts, 1)
+    assert.equal(harness.state.phase.value, 'recording')
+    assert.equal(harness.state.error.value, '')
   } finally { harness.dispose() }
 })
 
-test('pending source discovery prevents recording with a stale selection', async () => {
-  const pending = deferred()
+test('unmount cancels an open native picker and rejects its late selection', async () => {
+  const picker = deferred(), cancelled = []
   let starts = 0
-  const harness = workspace('RecorderWorkspace', { listCaptureDevices: () => pending.promise, startCapture: async () => { starts++; return { state: 'recording', elapsed: 0, segments: 0 } } })
-  try {
-    assert.equal(harness.state.devicesLoading.value, true)
-    harness.state.countdown.value = 0
-    await harness.state.begin()
-    assert.equal(starts, 0)
-    pending.resolve(captureDevices)
-    await settle()
-    await harness.state.begin()
-    assert.equal(starts, 1)
-  } finally { harness.dispose() }
-})
-
-test('region and custom dimensions validate before starting any native capture', async () => {
-  const calls = []
-  const harness = workspace('RecorderWorkspace', { startCapture: async options => { calls.push(options); return { state: 'recording', elapsed: 0, segments: 0 } } })
-  try {
-    await settle()
-    harness.state.countdown.value = 0
-    harness.state.sourceType.value = 'region'
-    harness.state.regionX.value = 2400
-    harness.state.regionWidth.value = 320
-    await harness.state.begin()
-    assert.equal(calls.length, 0)
-    assert.match(harness.state.error.value, /超出屏幕范围/)
-    harness.state.regionX.value = 200
-    harness.state.regionY.value = 100
-    harness.state.regionWidth.value = 640
-    harness.state.regionHeight.value = 480
-    harness.state.outputPreset.value = 'custom'
-    harness.state.outputWidth.value = 641
-    harness.state.outputHeight.value = 480
-    await harness.state.begin()
-    assert.equal(calls.length, 0)
-    assert.match(harness.state.error.value, /偶数整数/)
-    harness.state.outputWidth.value = 640
-    await harness.state.begin()
-    assert.equal(calls.length, 1)
-    assert.equal(calls[0].sourceId, 'screen:1')
-    assert.deepEqual(calls[0].region, { x: 200, y: 100, width: 640, height: 480 })
-    assert.deepEqual(calls[0].outputSize, { width: 640, height: 480 })
-  } finally { harness.dispose() }
+  const harness = workspace('RecorderWorkspace', {
+    pickCaptureSource: () => picker.promise,
+    cancelCapturePicker: async id => { cancelled.push(id) },
+    startCapture: async () => { starts++; return { state: 'recording', elapsed: 0, segments: 0 } },
+  })
+  harness.state.countdown.value = 0
+  const start = harness.state.begin()
+  harness.dispose()
+  assert.equal(cancelled.length, 1)
+  picker.resolve({ sourceId: 'screen:1' })
+  await start
+  assert.equal(starts, 0)
 })
 
 test('cancelling a pending native start keeps recovery controls when final stop fails', async () => {
@@ -270,6 +293,7 @@ test('cancelling a pending native start keeps recovery controls when final stop 
     await settle()
     harness.state.countdown.value = 0
     const starting = harness.state.begin()
+    await settle()
     assert.equal(harness.state.phase.value, 'starting')
     await harness.state.stop()
     pending.resolve({ state: 'recording', elapsed: 1, segments: 0 })
@@ -294,6 +318,7 @@ test('native start cancellation reaches the pending request before it returns', 
     await settle()
     harness.state.countdown.value = 0
     const starting = harness.state.begin()
+    await settle()
     assert.match(requestId, /^[0-9a-f-]{36}$/)
     await harness.state.stop()
     assert.deepEqual(cancelled, [requestId])
@@ -301,7 +326,7 @@ test('native start cancellation reaches the pending request before it returns', 
     pending.reject(new Error('录制已取消。'))
     await starting
     assert.equal(harness.state.phase.value, 'idle')
-    assert.match(harness.state.error.value, /已取消/)
+    assert.equal(harness.state.error.value, '')
   } finally { harness.dispose() }
 })
 

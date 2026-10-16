@@ -13,6 +13,8 @@ export interface CaptureRegion extends CaptureSize { x: number; y: number }
 export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
 export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize }
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
+export interface CapturePickerPreferences { mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize }
+export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize }
 
 export function isDesktop(): boolean { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window }
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -63,6 +65,8 @@ export async function beginMediaJob(spec: MediaJobSpec): Promise<MediaJob | null
 export async function getMediaJobs(): Promise<MediaJob[]> { return isDesktop() ? call('get_media_jobs') : [] }
 export async function cancelMediaJob(id: string): Promise<void> { return call('cancel_media_job', { id }) }
 export async function listCaptureDevices(requestPermission = false): Promise<CaptureDevice[]> { return call('list_capture_devices', { requestPermission }) }
+export async function pickCaptureSource(requestId: string, preferences: CapturePickerPreferences): Promise<CaptureSelection | null> { return call('pick_capture_source', { requestId, preferences }) }
+export async function cancelCapturePicker(requestId: string): Promise<void> { return call('cancel_capture_picker', { requestId }) }
 export async function getCaptureStatus(): Promise<CaptureStatus> { return call('get_capture_status') }
 export async function startCapture(options: CaptureOptions): Promise<CaptureStatus> { return call('start_capture', { options }) }
 export async function cancelCaptureStart(requestId: string): Promise<void> { return call('cancel_capture_start', { requestId }) }

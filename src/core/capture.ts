@@ -29,6 +29,17 @@ export interface BrowserCaptureSource {
   region?: CaptureRegion
 }
 
+export interface BrowserCaptureSelection {
+  region?: CaptureRegion
+  outputSize?: CaptureOutputSize
+}
+
+export interface BrowserCaptureSelectionRequest {
+  stream: MediaStream
+  source: BrowserCaptureSource
+  signal: AbortSignal
+}
+
 export interface BrowserCaptureOptions {
   fps: number
   microphone: boolean
@@ -36,12 +47,43 @@ export interface BrowserCaptureOptions {
   sourceType?: 'screen' | 'window' | 'region'
   region?: CaptureRegion
   outputSize?: CaptureOutputSize
+  chooseSource?: (request: BrowserCaptureSelectionRequest) => Promise<BrowserCaptureSelection | null>
   countdown?: number
   signal?: AbortSignal
   onCountdown?: (remaining: number) => void
   onFinished?: (recording: CapturedRecording) => void
   onError?: (error: Error) => void
   onPhase?: (phase: CapturePhase) => void
+}
+
+function cancelledCapture(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new DOMException('已取消录制。', 'AbortError')
+}
+
+/** Discard device streams that resolve after a pending permission request is cancelled. */
+function waitForCapture<T>(pending: Promise<T>, signal: AbortSignal, discard?: (value: T) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const aborted = () => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', aborted)
+      reject(cancelledCapture(signal))
+    }
+    pending.then(value => {
+      if (settled) { discard?.(value); return }
+      settled = true
+      signal.removeEventListener('abort', aborted)
+      resolve(value)
+    }, error => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', aborted)
+      reject(error)
+    })
+    signal.addEventListener('abort', aborted, { once: true })
+    if (signal.aborted) aborted()
+  })
 }
 
 export interface BrowserCapture {
@@ -93,14 +135,18 @@ export function captureErrorMessage(error: unknown): string {
 export async function startBrowserCapture(options: BrowserCaptureOptions): Promise<BrowserCapture> {
   if (!browserCaptureAvailable()) throw new Error('当前环境不支持屏幕采集，请使用桌面录制或支持屏幕共享的浏览器。')
   if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
-  if (options.outputSize) validateOutputSize(options.outputSize)
-  if (options.sourceType === 'region' && !options.region) throw new Error('请先设置屏幕录制区域。')
-  if (options.sourceType === 'window' && options.region) throw new Error('窗口录制不能使用屏幕区域坐标，请选择屏幕区域录制。')
+  if (!options.chooseSource) {
+    if (options.outputSize) validateOutputSize(options.outputSize)
+    if (options.sourceType === 'region' && !options.region) throw new Error('请先设置屏幕录制区域。')
+    if (options.sourceType === 'window' && options.region) throw new Error('窗口录制不能使用屏幕区域坐标，请选择屏幕区域录制。')
+  }
   const fps = Math.min(60, Math.max(1, Math.round(options.fps || 30)))
-  const screen = await navigator.mediaDevices.getDisplayMedia({
+  const screenRequest = navigator.mediaDevices.getDisplayMedia({
     video: { frameRate: { ideal: fps, max: fps }, ...(options.sourceType ? { displaySurface: options.sourceType === 'window' ? 'window' : 'monitor' } : {}) },
     audio: options.systemAudio,
   })
+  const releaseStream = (stream: MediaStream) => stream.getTracks().forEach(track => track.stop())
+  const screen = await (options.signal ? waitForCapture(screenRequest, options.signal, releaseStream) : screenRequest)
   let microphone: MediaStream | undefined
   let context: AudioContext | undefined
   let sourceVideo: HTMLVideoElement | undefined
@@ -111,8 +157,11 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
   let onTransformFailure: ((error: Error) => void) | undefined
   let recorder: MediaRecorder
   const ownedTracks = new Set<MediaStreamTrack>(screen.getTracks())
+  const preparation = new AbortController()
+  const sourceEnded = () => preparation.abort(new Error('屏幕共享已结束，请重新选择录制来源。'))
+  screen.getVideoTracks().forEach(track => track.addEventListener('ended', sourceEnded, { once: true }))
   let abortCapture: () => void
-  const onAbort = () => abortCapture()
+  const onAbort = () => { preparation.abort(new DOMException('已取消录制。', 'AbortError')); abortCapture() }
   const stopRendering = () => {
     if (renderTimer !== undefined) { clearInterval(renderTimer); renderTimer = undefined }
     if (renderFrame !== undefined) { sourceVideo?.cancelVideoFrameCallback(renderFrame); renderFrame = undefined }
@@ -123,6 +172,8 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     if (sourceVideo) { sourceVideo.pause(); sourceVideo.srcObject = null; sourceVideo.remove(); sourceVideo = undefined }
     for (const track of ownedTracks) track.stop()
     void context?.close().catch(() => {})
+    screen.getVideoTracks().forEach(track => track.removeEventListener('ended', sourceEnded))
+    if (!preparation.signal.aborted) preparation.abort(new DOMException('已取消录制。', 'AbortError'))
     options.signal?.removeEventListener('abort', onAbort)
   }
   abortCapture = dispose
@@ -132,7 +183,9 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     const videoTrack = screen.getVideoTracks().find(track => track.readyState === 'live')
     if (!videoTrack) throw new Error('没有可用的屏幕画面。')
     const settings = videoTrack.getSettings()
-    const transformsVideo = !!(options.region || options.outputSize)
+    let region = options.region ? { ...options.region } : undefined
+    let outputSize = options.outputSize ? { ...options.outputSize } : undefined
+    let transformsVideo = !!(region || outputSize)
     const source: BrowserCaptureSource = {
       type: settings.displaySurface === 'monitor' ? 'screen' : settings.displaySurface === 'window' ? 'window' : settings.displaySurface === 'browser' ? 'tab' : 'unknown',
       label: videoTrack.label || '所选录制来源',
@@ -150,9 +203,8 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       source.height = sourceVideo?.videoHeight || current.height || source.height
       if (!transformsVideo) { source.outputWidth = source.width; source.outputHeight = source.height }
     }
-    if (options.region && source.type !== 'screen') throw new Error('屏幕区域录制需要选择整个屏幕；当前选择的是窗口、标签页或无法确认的来源，请重新选择。')
     let outputVideoTracks = screen.getVideoTracks()
-    if (transformsVideo) {
+    if (transformsVideo || options.chooseSource) {
       const video = document.createElement('video')
       sourceVideo = video
       video.muted = true
@@ -164,27 +216,42 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
           video.removeEventListener('loadeddata', ready)
           video.removeEventListener('error', failed)
           videoTrack.removeEventListener('ended', failed)
-          options.signal?.removeEventListener('abort', aborted)
+          preparation.signal.removeEventListener('abort', aborted)
         }
         const ready = () => { if (video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 2) { clear(); resolve() } }
         const failed = () => { clear(); reject(new Error('无法读取所选录制画面，请重新选择来源。')) }
-        const aborted = () => { clear(); reject(new DOMException('已取消录制。', 'AbortError')) }
+        const aborted = () => { clear(); reject(cancelledCapture(preparation.signal)) }
         const timer = setTimeout(failed, 15000)
         video.addEventListener('loadeddata', ready)
         video.addEventListener('error', failed)
         videoTrack.addEventListener('ended', failed)
-        options.signal?.addEventListener('abort', aborted, { once: true })
+        preparation.signal.addEventListener('abort', aborted, { once: true })
         void video.play().then(ready, failed)
-        if (options.signal?.aborted) aborted()
+        if (preparation.signal.aborted) aborted()
         else ready()
       })
-      if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
+      if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
       source.width = video.videoWidth
       source.height = video.videoHeight
-      const region = options.region ? { ...options.region } : undefined
+      source.outputWidth = source.width
+      source.outputHeight = source.height
+    }
+    if (options.chooseSource) {
+      const selected = await waitForCapture(options.chooseSource({ stream: screen, source: { ...source }, signal: preparation.signal }), preparation.signal)
+      if (!selected) throw new DOMException('已取消录制来源选择。', 'AbortError')
+      region = selected.region ? { ...selected.region } : undefined
+      outputSize = selected.outputSize ? { ...selected.outputSize } : undefined
+      transformsVideo = !!(region || outputSize)
+      updateSource()
+    }
+    if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
+    if (outputSize) validateOutputSize(outputSize)
+    if (region && source.type !== 'screen') throw new Error('屏幕区域录制需要选择整个屏幕；当前选择的是窗口、标签页或无法确认的来源，请重新选择。')
+    if (transformsVideo) {
+      const video = sourceVideo!
       if (region) { validateCaptureRegion(region, source.width, source.height); source.region = region }
-      source.outputWidth = options.outputSize?.width ?? region?.width ?? source.width
-      source.outputHeight = options.outputSize?.height ?? region?.height ?? source.height
+      source.outputWidth = outputSize?.width ?? region?.width ?? source.width
+      source.outputHeight = outputSize?.height ?? region?.height ?? source.height
       const canvas = document.createElement('canvas')
       canvas.width = source.outputWidth
       canvas.height = source.outputHeight
@@ -231,12 +298,14 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
         }
         renderFrame = video.requestVideoFrameCallback(nextFrame)
       }
+    } else if (sourceVideo) {
+      sourceVideo.pause(); sourceVideo.srcObject = null; sourceVideo.remove(); sourceVideo = undefined
     }
     if (options.microphone) {
-      microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
+      microphone = await waitForCapture(navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }), preparation.signal, releaseStream)
       microphone.getTracks().forEach(track => ownedTracks.add(track))
     }
-    if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
+    if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
     const tracks = [...outputVideoTracks]
     const audioTracks = [...(options.systemAudio ? screen.getAudioTracks() : []), ...(microphone?.getAudioTracks() ?? [])]
     if (audioTracks.length > 1) {
@@ -248,16 +317,17 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       await context.resume()
     } else tracks.push(...audioTracks)
     for (let remaining = Math.max(0, Math.min(10, Math.floor(options.countdown ?? 0))); remaining > 0; remaining--) {
-      if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
+      if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
       options.onCountdown?.(remaining)
       await new Promise<void>((resolve, reject) => {
-        const aborted = () => { clearTimeout(timer); reject(new DOMException('已取消录制。', 'AbortError')) }
-        const timer = setTimeout(() => { options.signal?.removeEventListener('abort', aborted); resolve() }, 1000)
-        options.signal?.addEventListener('abort', aborted, { once: true })
+        const aborted = () => { clearTimeout(timer); reject(cancelledCapture(preparation.signal)) }
+        const timer = setTimeout(() => { preparation.signal.removeEventListener('abort', aborted); resolve() }, 1000)
+        preparation.signal.addEventListener('abort', aborted, { once: true })
+        if (preparation.signal.aborted) aborted()
       })
     }
     options.onCountdown?.(0)
-    if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
+    if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
     if (transformFailure) throw transformFailure
     if (!screen.getVideoTracks().some(track => track.readyState === 'live')) throw new Error('屏幕共享已结束，请重新选择录制来源。')
     const stream = new MediaStream(tracks)
@@ -321,6 +391,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       options.onFinished?.(result)
     })
     screen.getVideoTracks().forEach(track => track.addEventListener('ended', () => { void stop() }, { once: true }))
+    screen.getVideoTracks().forEach(track => track.removeEventListener('ended', sourceEnded))
     recorder.start(1000)
     return {
       stream,

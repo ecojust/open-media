@@ -198,16 +198,17 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib 2>&1 | tee .media-runtime/logs/native.log
       - name: Package application
         id: native-package
-        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked 2>&1 | tee .media-runtime/logs/package.log
+        run: npx tauri build --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked 2>&1 | tee .media-runtime/logs/package.log
       - name: Verify native recording helper
         id: capture-helper
         if: runner.os == 'macOS'
         run: |
           set -o pipefail
-          src-tauri/resources/capture/open-media-capture --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
-          helper="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app/Contents/Resources/capture/open-media-capture"
+          helper="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app/Contents/Helpers/open-media-capture"
           test -x "$helper"
           codesign --verify "$helper"
+          codesign --verify --deep --strict "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app"
+          "$helper" --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
       - name: Collect installers and provenance
         env:
           MEDIA_TARGET: ${{ matrix.target }}

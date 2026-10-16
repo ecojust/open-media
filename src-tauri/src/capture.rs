@@ -265,7 +265,7 @@ impl CaptureManager {
         if self.helper.is_none() {
             self.helper = find_helper(None);
         }
-        let devices = list_devices_with_helper(runtime, self.helper.as_deref(), false, cancelled)?;
+        let devices = list_devices_with_helper(runtime, self.helper.as_deref(), true, cancelled)?;
         let source = select_source(&devices, &options)?;
         options.output_size = Some(resolve_output(&source, &options)?);
         options.source_id = Some(source.id.clone());
@@ -625,7 +625,8 @@ fn wait_until_ready(
     helper: bool,
     cancelled: &AtomicBool,
 ) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut stage = String::new();
+    let mut deadline = Instant::now() + Duration::from_secs(20);
     loop {
         check_cancelled(cancelled)?;
         if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
@@ -635,6 +636,14 @@ fn wait_until_ready(
             ));
         }
         let progress = fs::read_to_string(progress).unwrap_or_default();
+        if helper {
+            if let Some(current) = helper_stage(&progress) {
+                if current != stage {
+                    stage = current.into();
+                    deadline = Instant::now() + helper_stage_timeout(current);
+                }
+            }
+        }
         let ready = if helper {
             progress.lines().any(|line| line.trim() == "READY")
         } else {
@@ -647,10 +656,37 @@ fn wait_until_ready(
             return Ok(());
         }
         if Instant::now() >= deadline {
-            return Err("未收到录制画面，请检查所选窗口是否可见以及屏幕和麦克风权限。".into());
+            let message = match stage.as_str() {
+                "sources" => "等待屏幕录制授权超时。请完成系统授权；若权限已经开启，请完全退出应用后从应用程序目录重新打开，再次选择录制范围。",
+                "microphone" => "等待麦克风授权或设备启动超时，请完成系统授权或关闭麦克风录制。",
+                "encoder" => "创建录制文件超时，请降低输出尺寸后重新开始。",
+                "indicator" => "系统未能登记录制指示框，请重新选择录制范围。",
+                "stream" => "启动屏幕采集超时，请重新选择可见的屏幕或窗口；若刚修改权限，请完全退出并重新打开应用。",
+                _ => "未收到可编码的录制画面，请检查所选窗口是否可见，并尝试较小的输出尺寸。",
+            };
+            return Err(format!(
+                "{message}{}",
+                tail(&fs::read_to_string(error_file).unwrap_or_default(), 1200)
+            ));
         }
         thread::sleep(Duration::from_millis(40));
     }
+}
+fn helper_stage(progress: &str) -> Option<&str> {
+    progress.lines().rev().find_map(|line| {
+        let stage = line.strip_prefix("STAGE ")?.trim();
+        matches!(
+            stage,
+            "sources" | "microphone" | "encoder" | "indicator" | "stream" | "frame"
+        )
+        .then_some(stage)
+    })
+}
+fn helper_stage_timeout(stage: &str) -> Duration {
+    Duration::from_secs(match stage {
+        "sources" | "microphone" => 120,
+        _ => 20,
+    })
 }
 fn select_source(devices: &[CaptureDevice], options: &CaptureOptions) -> Result<CaptureDevice> {
     let selected = options
@@ -724,8 +760,16 @@ fn unsupported_capture() -> Result<std::process::Command> {
 }
 fn find_helper(resource: Option<&Path>) -> Option<PathBuf> {
     resource
-        .map(|r| r.join("capture/open-media-capture"))
+        .and_then(|r| {
+            r.parent()
+                .map(|contents| contents.join("Helpers/open-media-capture"))
+        })
         .filter(|p| p.is_file())
+        .or_else(|| {
+            resource
+                .map(|r| r.join("capture/open-media-capture"))
+                .filter(|p| p.is_file())
+        })
         .or_else(|| {
             option_env!("OPEN_MEDIA_CAPTURE_HELPER_PATH")
                 .map(PathBuf::from)
@@ -772,7 +816,7 @@ fn resolve_source(
     }
     #[cfg(not(target_os = "windows"))]
     {
-        list_devices_with_helper(runtime, helper, false, cancelled)?
+        list_devices_with_helper(runtime, helper, true, cancelled)?
             .into_iter()
             .find(|d| d.id == id && (d.kind == "window" || d.kind == "screen"))
             .ok_or_else(|| "所选窗口或屏幕已不可用，请恢复窗口后继续录制。".into())
@@ -791,11 +835,24 @@ pub fn list_devices_with_resource(
     resource: &Path,
     request_permission: bool,
 ) -> Result<Vec<CaptureDevice>> {
+    list_devices_with_resource_cancellable(
+        runtime,
+        resource,
+        request_permission,
+        &AtomicBool::new(false),
+    )
+}
+pub fn list_devices_with_resource_cancellable(
+    runtime: &Runtime,
+    resource: &Path,
+    request_permission: bool,
+    cancelled: &AtomicBool,
+) -> Result<Vec<CaptureDevice>> {
     list_devices_with_helper(
         runtime,
         find_helper(Some(resource)).as_deref(),
         request_permission,
-        &AtomicBool::new(false),
+        cancelled,
     )
 }
 fn list_devices_with_helper(
@@ -831,7 +888,7 @@ fn list_devices_with_helper(
             "-i",
             "dummy",
         ]);
-        let (_, _, stderr) = run_source_listing(command, cancelled)?;
+        let (_, _, stderr) = run_source_listing(command, cancelled, Duration::from_secs(25))?;
         devices.extend(parse_devices(&String::from_utf8_lossy(&stderr), false));
         return Ok(devices);
     }
@@ -852,7 +909,8 @@ fn list_helper_sources(
     if request_permission {
         command.arg("--request-permission");
     }
-    let (status, stdout, stderr) = run_source_listing(command, cancelled)?;
+    let timeout = Duration::from_secs(if request_permission { 120 } else { 25 });
+    let (status, stdout, stderr) = run_source_listing(command, cancelled, timeout)?;
     if !status.success() {
         return Err(format!(
             "无法读取录制窗口。{}",
@@ -865,6 +923,7 @@ fn list_helper_sources(
 fn run_source_listing(
     mut command: std::process::Command,
     cancelled: &AtomicBool,
+    timeout: Duration,
 ) -> Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>)> {
     check_cancelled(cancelled)?;
     let root = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -880,7 +939,7 @@ fn run_source_listing(
         ))
         .spawn()
         .map_err(|e| format!("无法读取录制设备：{e}"))?;
-    let deadline = Instant::now() + Duration::from_secs(25);
+    let deadline = Instant::now() + timeout;
     loop {
         if let Err(error) = check_cancelled(cancelled) {
             let _ = child.kill();
@@ -904,7 +963,10 @@ fn run_source_listing(
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err("读取设备超时，请检查设备权限后刷新。".into());
+                return Err(format!(
+                    "等待录制来源或系统授权超时，请完成授权后重新选择；若权限已经开启，请完全退出并重新打开应用。{}",
+                    tail(&String::from_utf8_lossy(&fs::read(&stderr).unwrap_or_default()), 1000)
+                ));
             }
         }
     }
@@ -962,6 +1024,32 @@ pub fn parse_devices(text: &str, mac: bool) -> Vec<CaptureDevice> {
 #[cfg(test)]
 mod capture_tests {
     use super::*;
+    #[test]
+    fn helper_progress_distinguishes_permission_wait_from_missing_frames() {
+        assert_eq!(helper_stage("STAGE sources\n"), Some("sources"));
+        assert_eq!(
+            helper_stage("STAGE sources\nSTAGE encoder\nSTAGE frame\nREADY\n"),
+            Some("frame")
+        );
+        assert_eq!(helper_stage("READY\n"), None);
+        assert_eq!(helper_stage("STAGE unsupported\n"), None);
+        assert_eq!(helper_stage_timeout("sources"), Duration::from_secs(120));
+        assert_eq!(helper_stage_timeout("microphone"), Duration::from_secs(120));
+        assert_eq!(helper_stage_timeout("frame"), Duration::from_secs(20));
+    }
+    #[test]
+    fn packaged_helper_prefers_signed_code_location_and_supports_old_resources() {
+        let directory = tempfile::tempdir().unwrap();
+        let resources = directory.path().join("Contents/Resources");
+        let legacy = resources.join("capture/open-media-capture");
+        let helper = directory.path().join("Contents/Helpers/open-media-capture");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, "legacy").unwrap();
+        assert_eq!(find_helper(Some(&resources)), Some(legacy));
+        fs::create_dir_all(helper.parent().unwrap()).unwrap();
+        fs::write(&helper, "helper").unwrap();
+        assert_eq!(find_helper(Some(&resources)), Some(helper));
+    }
     fn source(kind: &str, width: u32, height: u32) -> CaptureDevice {
         CaptureDevice {
             id: format!("{kind}:selected"),
@@ -1102,7 +1190,7 @@ mod capture_tests {
                     "ultrafast",
                 ])
                 .arg(child_output);
-            run_source_listing(command, &token)
+            run_source_listing(command, &token, Duration::from_secs(25))
         });
         let deadline = Instant::now() + Duration::from_secs(3);
         while !output.exists() && Instant::now() < deadline {
@@ -1179,14 +1267,18 @@ mod capture_tests {
             .stderr(Stdio::from(fs::File::create(&errors).unwrap()))
             .spawn()
             .unwrap();
-        assert!(wait_until_ready(
+        let error = wait_until_ready(
             &mut failed,
             &root.path().join("never-ready"),
             &errors,
             false,
-            &AtomicBool::new(false)
+            &AtomicBool::new(false),
         )
-        .is_err());
+        .unwrap_err();
+        assert!(
+            error.contains("not-a-capture-device"),
+            "The actual encoder error must survive: {error}"
+        );
         stop_child(&mut failed, Duration::from_secs(1));
         assert!(failed.try_wait().unwrap().is_some());
     }

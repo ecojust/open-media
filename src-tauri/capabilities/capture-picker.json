@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture-picker",
+  "description": "Temporary recording selection windows use session-checked application commands.",
+  "windows": ["capture-picker-*"],
+  "permissions": []
+}

@@ -152,6 +152,110 @@ async function run() {
     assert.deepEqual(cleanup, { denied: true, deniedStopped: true, cancelled: true, cancelledStopped: true })
     console.log('PASS denied microphone and cancelled countdown release screen capture')
 
+    const selected = await page.evaluate(async () => {
+      window.createPatternSource(320, 180, 'monitor')
+      const OriginalRecorder = window.MediaRecorder
+      let encoders = 0, microphoneRequests = 0, countdowns = 0
+      window.MediaRecorder = class extends OriginalRecorder { constructor(...args) { super(...args); encoders++ } }
+      const audioContext = new AudioContext()
+      const oscillator = audioContext.createOscillator()
+      const destination = audioContext.createMediaStreamDestination()
+      oscillator.connect(destination); oscillator.start()
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { microphoneRequests++; return destination.stream } })
+      let select, request, ready
+      const opened = new Promise(resolve => { ready = resolve })
+      try {
+        const pending = window.capture.startBrowserCapture({
+          fps: 20, microphone: true, systemAudio: false, sourceType: 'region',
+          onCountdown: () => countdowns++,
+          chooseSource: context => { request = context; ready(); return new Promise(resolve => { select = resolve }) },
+        })
+        const requestedSynchronously = !!window.lastDisplayConstraints
+        await opened
+        await new Promise(resolve => setTimeout(resolve, 350))
+        const waiting = { encoders, microphoneRequests, countdowns, sameStream: request.stream === window.screenStream, live: request.stream.getVideoTracks()[0].readyState === 'live', source: request.source }
+        select({ region: { x: 160, y: 0, width: 160, height: 180 }, outputSize: { width: 160, height: 180 } })
+        const capture = await pending
+        await new Promise(resolve => setTimeout(resolve, 500))
+        const recording = await capture.stop()
+        return { requestedSynchronously, waiting, encoders, microphoneRequests, duration: recording.duration, source: capture.source, bytes: Array.from(new Uint8Array(await recording.blob.arrayBuffer())), stopped: window.screenStream.getTracks().every(track => track.readyState === 'ended') && destination.stream.getTracks().every(track => track.readyState === 'ended'), videoReleased: window.createdCaptureVideos.every(video => video.srcObject === null && video.paused) }
+      } finally { window.MediaRecorder = OriginalRecorder; window.cleanupSource(); await audioContext.close() }
+    })
+    assert.equal(selected.requestedSynchronously, true)
+    assert.equal(selected.waiting.encoders, 0); assert.equal(selected.waiting.microphoneRequests, 0); assert.equal(selected.waiting.countdowns, 0)
+    assert.equal(selected.waiting.sameStream, true); assert.equal(selected.waiting.live, true)
+    assert.equal(selected.waiting.source.type, 'screen'); assert.equal(selected.waiting.source.width, 320); assert.equal(selected.waiting.source.height, 180)
+    assert.equal(selected.encoders, 1); assert.equal(selected.microphoneRequests, 1)
+    assert.ok(selected.duration >= 0.4 && selected.duration < 0.75, 'choosing the area is excluded from recorded time')
+    assert.deepEqual(selected.source.region, { x: 160, y: 0, width: 160, height: 180 })
+    assert.equal(selected.stopped, true); assert.equal(selected.videoReleased, true)
+    if (decoder) {
+      const file = join(directory, 'selected-area.webm')
+      writeFileSync(file, Buffer.from(selected.bytes))
+      const streams = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', file], { encoding: 'utf8' })).streams
+      assert.ok(streams.some(stream => stream.codec_type === 'video' && stream.width === 160 && stream.height === 180))
+      assert.ok(streams.some(stream => stream.codec_type === 'audio'))
+      const pixels = execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+      for (const offset of [0, (90 * 160 + 80) * 3, (179 * 160 + 159) * 3]) assert.ok(pixels[offset + 2] > 220 && pixels[offset] < 25 && pixels[offset + 1] < 25, 'confirmed area is the blue half of the actual source')
+    }
+    console.log('PASS interactive selection waits for confirmation before microphone, countdown and encoding; confirmed crop produces real video')
+
+    const selectionCancelled = await page.evaluate(async () => {
+      const results = []
+      for (const action of ['abort', 'ended', 'cancel', 'invalid-output', 'invalid-region', 'window-region']) {
+        window.createPatternSource(320, 180, action === 'window-region' ? 'window' : 'monitor')
+        const OriginalRecorder = window.MediaRecorder
+        let encoders = 0, microphoneRequests = 0, request, choose, ready
+        window.MediaRecorder = class extends OriginalRecorder { constructor(...args) { super(...args); encoders++ } }
+        Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { microphoneRequests++; throw new Error('Microphone must wait for valid confirmation') } })
+        const abort = new AbortController()
+        const opened = new Promise(resolve => { ready = resolve })
+        try {
+          const pending = window.capture.startBrowserCapture({ fps: 20, microphone: true, systemAudio: false, signal: abort.signal, chooseSource: context => { request = context; ready(); return new Promise(resolve => { choose = resolve }) } })
+          const failed = pending.then(() => ({ unexpected: true }), error => ({ name: error.name, message: error.message }))
+          await opened
+          if (action === 'abort') abort.abort()
+          else if (action === 'ended') window.screenStream.getVideoTracks()[0].dispatchEvent(new Event('ended'))
+          else if (action === 'invalid-output') choose({ outputSize: { width: 63, height: 64 } })
+          else if (action === 'invalid-region') choose({ region: { x: 319, y: 0, width: 160, height: 90 } })
+          else if (action === 'window-region') choose({ region: { x: 0, y: 0, width: 160, height: 90 } })
+          else choose(null)
+          const error = await Promise.race([failed, new Promise((_, reject) => setTimeout(() => reject(new Error('Pending area selection did not cancel within 1 second')), 1000))])
+          choose({ outputSize: { width: 160, height: 90 } })
+          await new Promise(resolve => setTimeout(resolve, 10))
+          results.push({ action, ...error, encoders, microphoneRequests, aborted: request.signal.aborted, stopped: window.screenStream.getTracks().every(track => track.readyState === 'ended'), videoReleased: window.createdCaptureVideos.every(video => video.srcObject === null && video.paused) })
+        } finally { window.MediaRecorder = OriginalRecorder; window.cleanupSource() }
+      }
+      return results
+    })
+    for (const item of selectionCancelled) {
+      assert.equal(item.encoders, 0); assert.equal(item.microphoneRequests, 0); assert.equal(item.aborted, true); assert.equal(item.stopped, true); assert.equal(item.videoReleased, true)
+      if (['abort', 'cancel'].includes(item.action)) assert.equal(item.name, 'AbortError')
+      else if (item.action === 'ended') assert.match(item.message, /屏幕共享已结束/)
+      else if (item.action === 'invalid-output') assert.match(item.message, /偶数/)
+      else if (item.action === 'invalid-region') assert.match(item.message, /超出所选屏幕范围/)
+      else assert.match(item.message, /需要选择整个屏幕/)
+    }
+    console.log('PASS cancelled or ended area selection closes promptly and releases capture without creating an encoder or microphone')
+
+    const latePermission = await page.evaluate(async () => {
+      window.createPatternSource(320, 180, 'monitor')
+      let grant, opened = false
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: () => new Promise(resolve => { grant = resolve }) })
+      const abort = new AbortController()
+      const pending = window.capture.startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, signal: abort.signal, chooseSource: async () => { opened = true; return {} } })
+      const failed = pending.then(() => false, error => error.name === 'AbortError')
+      abort.abort()
+      const cancelled = await Promise.race([failed, new Promise((_, reject) => setTimeout(() => reject(new Error('Pending source permission did not cancel within 1 second')), 1000))])
+      grant(window.screenStream)
+      await new Promise(resolve => setTimeout(resolve, 10))
+      const stopped = window.screenStream.getTracks().every(track => track.readyState === 'ended')
+      window.cleanupSource()
+      return { cancelled, opened, stopped }
+    })
+    assert.deepEqual(latePermission, { cancelled: true, opened: false, stopped: true })
+    console.log('PASS cancelling before system source permission resolves also releases any late stream')
+
     const transformed = await page.evaluate(async () => {
       const cases = [
         { width: 320, height: 180, surface: 'monitor', options: { sourceType: 'region', region: { x: 160, y: 0, width: 160, height: 180 }, outputSize: { width: 160, height: 180 } } },

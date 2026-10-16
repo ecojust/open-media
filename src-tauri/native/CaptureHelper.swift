@@ -141,6 +141,25 @@ func letterboxedFrame(_ source: CVPixelBuffer, contentSize: CGSize? = nil, pool:
     return output
 }
 
+func appendFrame(_ buffer: CVPixelBuffer, writer: AVAssetWriter, input: AVAssetWriterInput,
+                 adapter: AVAssetWriterInputPixelBufferAdaptor, at time: CMTime,
+                 sessionStart: inout CMTime?) throws -> Bool {
+    guard writer.status == .writing else {
+        throw writer.error ?? CaptureFailure("视频编码已停止。")
+    }
+    // An input may remain not-ready until its writing session starts. Start
+    // that session once, before applying input backpressure to the first frame.
+    if sessionStart == nil {
+        writer.startSession(atSourceTime: time)
+        sessionStart = time
+    }
+    guard input.isReadyForMoreMediaData else { return false }
+    guard adapter.append(buffer, withPresentationTime: time) else {
+        throw writer.error ?? CaptureFailure("无法写入录制画面。")
+    }
+    return true
+}
+
 func writeJSON<T: Encodable>(_ value: T) throws {
     let data = try JSONEncoder().encode(value)
     FileHandle.standardOutput.write(data)
@@ -148,7 +167,36 @@ func writeJSON<T: Encodable>(_ value: T) throws {
 }
 
 func writeError(_ error: Error) {
-    FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8))
+    FileHandle.standardError.write(Data((captureError(error, during: "录制").localizedDescription + "\n").utf8))
+}
+
+func reportStage(_ name: String) {
+    FileHandle.standardOutput.write(Data("STAGE \(name)\n".utf8))
+}
+
+func captureError(_ error: Error, during stage: String) -> CaptureFailure {
+    if let failure = error as? CaptureFailure { return failure }
+    let original = error as NSError
+    var details = ["\(original.domain) \(original.code)：\(original.localizedDescription)"]
+    if let underlying = original.userInfo[NSUnderlyingErrorKey] as? NSError {
+        details.append("\(underlying.domain) \(underlying.code)：\(underlying.localizedDescription)")
+    }
+    let action: String
+    if original.domain.contains("ScreenCaptureKit"), original.code == -3801 {
+        action = "系统未允许屏幕录制访问。请在系统设置的屏幕录制权限中允许 Open Media；若已经开启，请完全退出应用后从应用程序目录重新打开，再次选择录制范围。"
+    } else {
+        action = "\(stage)失败。"
+    }
+    return CaptureFailure("\(action) 系统信息：\(details.joined(separator: "；"))")
+}
+
+@MainActor func shareableContent(excludingDesktop: Bool = true) async throws -> SCShareableContent {
+    do {
+        // A recording or source selection is an explicit user action. Let the
+        // capture API decide access; legacy preflight results can be stale after
+        // the user changes permission in System Settings.
+        return try await SCShareableContent.excludingDesktopWindows(excludingDesktop, onScreenWindowsOnly: true)
+    } catch { throw captureError(error, during: "读取屏幕和窗口") }
 }
 
 func retimeAudioSample(_ sample: CMSampleBuffer, to hostPTS: CMTime) throws -> CMSampleBuffer {
@@ -170,9 +218,6 @@ func retimeAudioSample(_ sample: CMSampleBuffer, to hostPTS: CMTime) throws -> C
 }
 
 @MainActor func listSources(requestPermission: Bool) async throws -> [Source] {
-    if requestPermission, !CGPreflightScreenCaptureAccess(), !CGRequestScreenCaptureAccess() {
-        throw CaptureFailure("请在系统设置中允许 Open Media 的屏幕录制权限，然后重新打开应用并刷新来源。")
-    }
     var sources: [Source] = []
     for (index, screen) in NSScreen.screens.enumerated() {
         guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
@@ -182,12 +227,21 @@ func retimeAudioSample(_ sample: CMSampleBuffer, to hostPTS: CMTime) throws -> C
         sources.append(Source(id: "screen:\(id)", name: "屏幕 \(index + 1) · \(screen.localizedName)", kind: "screen",
                               width: size.0, height: size.1, bounds: Bounds(rect), scaleFactor: scale))
     }
-    // Reading available sources never requests access or starts a recording.
-    // The operating system provides window titles after screen access is granted.
-    if CGPreflightScreenCaptureAccess() {
-        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+    // Passive device discovery never prompts. Explicit source selection uses
+    // the capture API itself so a stale preflight result cannot hide windows.
+    if requestPermission || CGPreflightScreenCaptureAccess() {
+        let content = try await shareableContent()
         let ownPID = getpid(), parentPID = getppid()
-        for window in content.windows.sorted(by: { $0.windowID < $1.windowID }) {
+        let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        var order: [CGWindowID: Int] = [:]
+        for (position, info) in windowInfo.enumerated() {
+            if let identifier = info[kCGWindowNumber as String] as? NSNumber { order[identifier.uint32Value] = position }
+        }
+        let windows = content.windows.sorted {
+            let first = order[$0.windowID] ?? Int.max, second = order[$1.windowID] ?? Int.max
+            return first == second ? $0.windowID < $1.windowID : first < second
+        }
+        for window in windows {
             guard window.isOnScreen, window.windowLayer == 0,
                   let title = window.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
                   window.frame.width >= 16, window.frame.height >= 16,
@@ -280,11 +334,8 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
 
     @MainActor func start(options: Options, output: URL) async throws {
         self.options = options
-        // Screen access is requested only in response to an explicit start command.
-        if !CGPreflightScreenCaptureAccess(), !CGRequestScreenCaptureAccess() {
-            throw CaptureFailure("请在系统设置的屏幕录制权限中允许 Open Media，然后重新选择录制来源。")
-        }
-        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
+        reportStage("sources")
+        let content = try await shareableContent()
         try requireActive()
         let parts = options.sourceId.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 2, let identifier = UInt32(parts[1]) else { throw CaptureFailure("请选择有效的录制来源。") }
@@ -308,10 +359,16 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         sourceScale = screenScale(for: sourceBounds)
         let sourceSize = pixelSize(sourceBounds, scale: sourceScale)
         try options.validate(sourceWidth: sourceSize.0, sourceHeight: sourceSize.1, isWindow: selectedWindow != nil)
-        if options.microphone { try await prepareMicrophone(options.audioDevice) }
+        if options.microphone {
+            reportStage("microphone")
+            try await prepareMicrophone(options.audioDevice)
+        }
         try requireActive()
 
-        let writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
+        reportStage("encoder")
+        let writer: AVAssetWriter
+        do { writer = try AVAssetWriter(outputURL: output, fileType: .mp4) }
+        catch { throw captureError(error, during: "创建录制文件") }
         let video = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: options.outputSize.width,
@@ -344,8 +401,11 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             guard writer.canAdd(audio) else { throw CaptureFailure("无法初始化麦克风音轨。") }
             writer.add(audio); self.audio = audio
         }
-        guard writer.startWriting() else { throw writer.error ?? CaptureFailure("无法创建录制文件。") }
+        guard writer.startWriting() else {
+            throw captureError(writer.error ?? CaptureFailure("无法创建录制文件。"), during: "初始化视频编码")
+        }
 
+        reportStage("indicator")
         let border = RecordingBorder()
         border.update(borderRect(source: sourceBounds, region: options.region, scale: sourceScale))
         self.border = border
@@ -354,17 +414,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             filter = SCContentFilter(desktopIndependentWindow: window)
         } else if let display = selectedDisplay {
             // Build the exclusion after the indicator exists so it never appears in recorded pixels.
-            let updated = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            try requireActive()
-            let ownApplications = updated.applications.filter { $0.processID == getpid() }
-            let ownWindows = updated.windows.filter { $0.owningApplication?.processID == getpid() || $0.windowID == CGWindowID(border.panel.windowNumber) }
-            if !ownApplications.isEmpty {
-                filter = SCContentFilter(display: display, excludingApplications: ownApplications, exceptingWindows: [])
-            } else if !ownWindows.isEmpty {
-                filter = SCContentFilter(display: display, excludingWindows: ownWindows)
-            } else {
-                throw CaptureFailure("无法排除录制指示框，请重新开始录制。")
-            }
+            filter = try await displayFilter(display, excluding: border)
         } else { throw CaptureFailure("录制来源不可用。") }
 
         let configuration = SCStreamConfiguration()
@@ -402,8 +452,11 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             microphoneClock = microphone.synchronizationClock
         }
         try requireActive()
-        try await stream.startCapture()
+        reportStage("stream")
+        do { try await stream.startCapture() }
+        catch { throw captureError(error, during: "启动屏幕采集") }
         try requireActive()
+        reportStage("frame")
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: .nanoseconds(1_000_000_000 / options.fps))
         timer.setEventHandler { [weak self] in self?.appendVideoFrame() }
@@ -415,6 +468,27 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
 
     private func requireActive() throws {
         if stopping { throw CaptureFailure("录制已取消。") }
+    }
+
+    @MainActor private func displayFilter(_ display: SCDisplay, excluding border: RecordingBorder) async throws -> SCContentFilter {
+        // Showing a window and publishing it to the capture service are separate
+        // operations. Retry discovery rather than failing a valid first start.
+        let deadline = Date().addingTimeInterval(3)
+        repeat {
+            try requireActive()
+            let updated = try await shareableContent(excludingDesktop: false)
+            try requireActive()
+            let ownApplications = updated.applications.filter { $0.processID == getpid() }
+            if !ownApplications.isEmpty {
+                return SCContentFilter(display: display, excludingApplications: ownApplications, exceptingWindows: [])
+            }
+            let ownWindows = updated.windows.filter {
+                $0.owningApplication?.processID == getpid() || $0.windowID == CGWindowID(border.panel.windowNumber)
+            }
+            if !ownWindows.isEmpty { return SCContentFilter(display: display, excludingWindows: ownWindows) }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        } while Date() < deadline
+        throw CaptureFailure("系统尚未登记录制指示框，未开始采集画面。请重新选择录制范围。")
     }
 
     @MainActor private func prepareMicrophone(_ deviceID: String?) async throws {
@@ -450,19 +524,13 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
 
     private func appendVideoFrame() {
         guard !stopping, let writer = writer, let video = video,
-              let pixels = pixels, let buffer = latestFrame, video.isReadyForMoreMediaData else { return }
-        guard writer.status == .writing else {
-            reportFailure(writer.error ?? CaptureFailure("视频编码已停止。")); return
-        }
+              let pixels = pixels, let buffer = latestFrame else { return }
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         if let previous = lastVideoPTS, CMTimeCompare(now, previous) <= 0 { return }
-        if !started {
-            writer.startSession(atSourceTime: now)
-            firstPTS = now
-        }
-        guard pixels.append(buffer, withPresentationTime: now) else {
-            reportFailure(writer.error ?? CaptureFailure("无法写入录制画面。")); return
-        }
+        do {
+            guard try appendFrame(buffer, writer: writer, input: video, adapter: pixels,
+                                  at: now, sessionStart: &firstPTS) else { return }
+        } catch { reportFailure(captureError(error, during: "写入录制画面")); return }
         lastVideoPTS = now
         if !started {
             started = true
@@ -488,7 +556,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         lastAudioPTS = hostPTS
     }
 
-    func stream(_ stream: SCStream, didStopWithError error: Error) { reportFailure(error) }
+    func stream(_ stream: SCStream, didStopWithError error: Error) { reportFailure(captureError(error, during: "屏幕采集")) }
 
     private func reportFailure(_ error: Error) {
         DispatchQueue.main.async { [weak self] in self?.stop(error: error) }
@@ -647,7 +715,7 @@ func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize) throws 
     guard writer.canAdd(input) else { throw CaptureFailure("视频编码验证无法添加视频轨道。") }
     writer.add(input)
     guard writer.startWriting() else { throw writer.error ?? CaptureFailure("视频编码验证无法启动。") }
-    writer.startSession(atSourceTime: .zero)
+    var sessionStart: CMTime?
     var optionalBuffer: CVPixelBuffer?
     guard CVPixelBufferCreate(kCFAllocatorDefault, sourceSize.width, sourceSize.height, kCVPixelFormatType_32BGRA, nil, &optionalBuffer) == kCVReturnSuccess,
           let buffer = optionalBuffer else { throw CaptureFailure("视频编码验证无法创建画面。") }
@@ -665,9 +733,13 @@ func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize) throws 
     let frame = try letterboxedFrame(buffer, pool: pool, context: CIContext(options: [.useSoftwareRenderer: true]))
     for frameIndex in 0..<6 {
         let deadline = Date().addingTimeInterval(5)
-        while !input.isReadyForMoreMediaData, writer.status == .writing, Date() < deadline { usleep(1000) }
-        guard input.isReadyForMoreMediaData,
-              adapter.append(frame, withPresentationTime: CMTime(value: Int64(frameIndex), timescale: 30)) else {
+        var appended = false
+        repeat {
+            appended = try appendFrame(frame, writer: writer, input: input, adapter: adapter,
+                                       at: CMTime(value: Int64(frameIndex), timescale: 30), sessionStart: &sessionStart)
+            if !appended { usleep(1000) }
+        } while !appended && Date() < deadline
+        guard appended else {
             throw writer.error ?? CaptureFailure("视频编码验证无法写入画面。")
         }
     }
@@ -677,6 +749,14 @@ func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize) throws 
     writer.finishWriting { finished.signal() }
     guard finished.wait(timeout: .now() + 10) == .success, writer.status == .completed else {
         throw writer.error ?? CaptureFailure("视频编码验证无法完成文件。")
+    }
+    var rejectedFinishedWriter = false
+    do {
+        _ = try appendFrame(frame, writer: writer, input: input, adapter: adapter,
+                            at: CMTime(value: 6, timescale: 30), sessionStart: &sessionStart)
+    } catch { rejectedFinishedWriter = true }
+    guard rejectedFinishedWriter, let start = sessionStart, CMTimeCompare(start, .zero) == 0 else {
+        throw CaptureFailure("编码器状态验证失败：结束的编码器必须报告错误，写入起点必须保持不变。")
     }
     let asset = AVURLAsset(url: file)
     guard let track = asset.tracks(withMediaType: .video).first,
