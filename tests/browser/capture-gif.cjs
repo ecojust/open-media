@@ -48,6 +48,33 @@ async function run() {
         Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => stream })
         Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => makeAudio() })
       }
+      window.createPatternSource = (width, height, surface) => {
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const context = canvas.getContext('2d')
+        const paint = () => {
+          context.fillStyle = '#ff0000'; context.fillRect(0, 0, canvas.width / 2, canvas.height)
+          context.fillStyle = '#0000ff'; context.fillRect(canvas.width / 2, 0, canvas.width / 2, canvas.height)
+        }
+        paint()
+        const timer = setInterval(paint, 50)
+        const stream = canvas.captureStream(20)
+        const track = stream.getVideoTracks()[0]
+        const settings = track.getSettings.bind(track)
+        Object.defineProperty(track, 'getSettings', { configurable: true, value: () => ({ ...settings(), displaySurface: surface }) })
+        window.screenStream = stream
+        window.resizePatternSource = (nextWidth, nextHeight) => { canvas.width = nextWidth; canvas.height = nextHeight; paint() }
+        window.lastDisplayConstraints = undefined
+        Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: constraints => { window.lastDisplayConstraints = constraints; return Promise.resolve(stream) } })
+        window.cleanupSource = () => { clearInterval(timer); stream.getTracks().forEach(track => track.stop()) }
+      }
+      window.createdCaptureVideos = []
+      const createElement = document.createElement.bind(document)
+      document.createElement = (tag, ...args) => {
+        const element = createElement(tag, ...args)
+        if (tag === 'video') window.createdCaptureVideos.push(element)
+        return element
+      }
     }, { capture: source('capture'), gif: source('gif'), mediaImport: source('media-import') })
 
     const recording = await page.evaluate(async () => {
@@ -70,7 +97,7 @@ async function run() {
       const importedMetadata = { width: imported.width, height: imported.height, duration: imported.duration }
       window.mediaImport.revokeMediaAsset(imported)
       window.cleanupSource()
-      return { size: output.blob.size, duration: output.duration, mime: output.mime, bytes: Array.from(new Uint8Array(await output.blob.arrayBuffer())), before, after, stopped, finished, repeated: repeated.blob === output.blob, importedMetadata }
+      return { size: output.blob.size, duration: output.duration, mime: output.mime, bytes: Array.from(new Uint8Array(await output.blob.arrayBuffer())), before, after, stopped, finished, repeated: repeated.blob === output.blob, importedMetadata, originalVideoTrack: capture.stream.getVideoTracks()[0] === window.screenStream.getVideoTracks()[0] }
     })
     assert.ok(recording.size > 1000)
     assert.ok(recording.duration >= 0.85 && recording.duration < 1.4)
@@ -78,6 +105,7 @@ async function run() {
     assert.equal(recording.stopped, true)
     assert.equal(recording.finished, 1)
     assert.equal(recording.repeated, true)
+    assert.equal(recording.originalVideoTrack, true, 'original-size recording preserves the selected source stream')
     assert.equal(recording.importedMetadata.width, 320)
     assert.equal(recording.importedMetadata.height, 180)
     assert.ok(Number.isFinite(recording.importedMetadata.duration) && recording.importedMetadata.duration > 0.5)
@@ -123,6 +151,153 @@ async function run() {
     })
     assert.deepEqual(cleanup, { denied: true, deniedStopped: true, cancelled: true, cancelledStopped: true })
     console.log('PASS denied microphone and cancelled countdown release screen capture')
+
+    const transformed = await page.evaluate(async () => {
+      const cases = [
+        { width: 320, height: 180, surface: 'monitor', options: { sourceType: 'region', region: { x: 160, y: 0, width: 160, height: 180 }, outputSize: { width: 160, height: 180 } } },
+        { width: 320, height: 180, surface: 'window', options: { sourceType: 'window', outputSize: { width: 128, height: 128 } } },
+        { width: 180, height: 320, surface: 'monitor', options: { sourceType: 'screen', outputSize: { width: 160, height: 90 } } },
+      ]
+      const results = []
+      for (const item of cases) {
+        window.createPatternSource(item.width, item.height, item.surface)
+        const pending = window.capture.startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, ...item.options })
+        const requestedSynchronously = !!window.lastDisplayConstraints
+        const capture = await pending
+        await new Promise(resolve => setTimeout(resolve, 650))
+        const output = await capture.stop()
+        results.push({ source: capture.source, requestedSynchronously, constraints: window.lastDisplayConstraints, bytes: Array.from(new Uint8Array(await output.blob.arrayBuffer())), sourceStopped: window.screenStream.getTracks().every(track => track.readyState === 'ended'), outputStopped: capture.stream.getTracks().every(track => track.readyState === 'ended'), videoReleased: window.createdCaptureVideos.every(video => video.srcObject === null && video.paused) })
+        window.cleanupSource()
+      }
+      return results
+    })
+    for (let index = 0; index < transformed.length; index++) {
+      const item = transformed[index]
+      assert.equal(item.requestedSynchronously, true, 'screen selection retains click activation')
+      assert.equal(item.sourceStopped, true); assert.equal(item.outputStopped, true); assert.equal(item.videoReleased, true)
+      assert.equal(item.constraints.video.displaySurface, index === 1 ? 'window' : 'monitor')
+      assert.equal(item.source.type, index === 1 ? 'window' : 'screen')
+      if (decoder) {
+        const file = join(directory, `transformed-${index}.webm`)
+        writeFileSync(file, Buffer.from(item.bytes))
+        const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', file], { encoding: 'utf8' })).streams[0]
+        assert.equal(probe.width, item.source.outputWidth); assert.equal(probe.height, item.source.outputHeight)
+        const pixels = execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+        const pixel = (x, y) => [...pixels.subarray((y * probe.width + x) * 3, (y * probe.width + x) * 3 + 3)]
+        const blue = color => color[2] > 220 && color[0] < 25 && color[1] < 25
+        const red = color => color[0] > 220 && color[1] < 25 && color[2] < 25
+        const black = color => color.every(value => value < 15)
+        if (index === 0) {
+          assert.ok(blue(pixel(2, 2)) && blue(pixel(80, 90)) && blue(pixel(157, 177)), 'crop contains only selected blue half, with no red outline burned into output')
+          assert.deepEqual(item.source.region, { x: 160, y: 0, width: 160, height: 180 })
+        } else if (index === 1) {
+          assert.ok(black(pixel(64, 4)) && black(pixel(64, 124)), 'wide source preserves aspect with top and bottom padding')
+          assert.ok(red(pixel(20, 64)) && blue(pixel(108, 64)))
+        } else {
+          assert.ok(black(pixel(4, 45)) && black(pixel(156, 45)), 'portrait source preserves aspect with side padding')
+          assert.ok(red(pixel(65, 45)) && blue(pixel(95, 45)))
+        }
+      }
+    }
+    console.log('PASS actual window selection metadata, cropped pixels, portrait scaling, fixed output sizes and transform cleanup')
+
+    const resized = await page.evaluate(async () => {
+      const results = []
+      for (const outputSize of [undefined, { width: 128, height: 128 }]) {
+        window.createPatternSource(320, 180, 'window')
+        const capture = await window.capture.startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, sourceType: 'window', outputSize })
+        const initial = capture.source
+        await new Promise(resolve => setTimeout(resolve, 200))
+        window.resizePatternSource(180, 320)
+        let current
+        const deadline = performance.now() + 2000
+        do { await new Promise(resolve => setTimeout(resolve, 50)); current = capture.source } while ((current.width !== 180 || current.height !== 320) && performance.now() < deadline)
+        await new Promise(resolve => setTimeout(resolve, 250))
+        const output = await capture.stop()
+        results.push({ initial, current, bytes: Array.from(new Uint8Array(await output.blob.arrayBuffer())), stopped: capture.stream.getTracks().every(track => track.readyState === 'ended') && window.screenStream.getTracks().every(track => track.readyState === 'ended'), videoReleased: window.createdCaptureVideos.every(video => video.srcObject === null && video.paused) })
+        window.cleanupSource()
+      }
+      return results
+    })
+    for (let index = 0; index < resized.length; index++) {
+      const item = resized[index]
+      assert.equal(item.initial.width, 320); assert.equal(item.initial.height, 180)
+      assert.equal(item.current.width, 180); assert.equal(item.current.height, 320)
+      assert.equal(item.current.outputWidth, index ? 128 : 180); assert.equal(item.current.outputHeight, index ? 128 : 320)
+      assert.equal(item.stopped, true); assert.equal(item.videoReleased, true)
+      if (decoder && index) {
+        const file = join(directory, 'resized-fixed.webm')
+        writeFileSync(file, Buffer.from(item.bytes))
+        const frames = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'frame=width,height', '-of', 'json', file], { encoding: 'utf8' })).frames
+        assert.ok(frames.length > 4)
+        assert.ok(frames.every(frame => frame.width === 128 && frame.height === 128), 'window resize preserves the selected output dimensions in every encoded frame')
+      }
+    }
+    console.log('PASS live source dimensions follow window resizing while fixed-size recording remains stable')
+
+    const still = await page.evaluate(async () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = 320; canvas.height = 180
+      const context = canvas.getContext('2d')
+      const stream = canvas.captureStream(0)
+      const track = stream.getVideoTracks()[0]
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: () => Promise.resolve(stream) })
+      setTimeout(() => { context.fillStyle = '#0000ff'; context.fillRect(0, 0, 320, 180); track.requestFrame() }, 100)
+      const capture = await window.capture.startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, outputSize: { width: 160, height: 90 } })
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      capture.pause()
+      const pausedAt = capture.elapsed
+      await new Promise(resolve => setTimeout(resolve, 600))
+      const afterPause = capture.elapsed
+      capture.resume()
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      const output = await capture.stop()
+      return { bytes: Array.from(new Uint8Array(await output.blob.arrayBuffer())), duration: output.duration, pausedAt, afterPause, stopped: stream.getTracks().every(track => track.readyState === 'ended') && capture.stream.getTracks().every(track => track.readyState === 'ended'), videoReleased: window.createdCaptureVideos.every(video => video.srcObject === null && video.paused) }
+    })
+    assert.ok(still.duration > 2.85 && still.duration < 3.2)
+    assert.equal(still.pausedAt, still.afterPause)
+    assert.equal(still.stopped, true); assert.equal(still.videoReleased, true)
+    if (decoder) {
+      const file = join(directory, 'still-recording.webm')
+      writeFileSync(file, Buffer.from(still.bytes))
+      const packets = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time', '-of', 'json', file], { encoding: 'utf8' })).packets
+      const ending = Math.max(...packets.map(packet => Number(packet.pts_time)))
+      assert.ok(packets.length > 30, 'a completely static source still produces regular output frames')
+      assert.ok(ending > still.duration - 0.2 && ending < still.duration + 0.15, `static ending ${ending} must follow recording time ${still.duration}, excluding the pause`)
+    }
+    console.log('PASS static source keeps its complete recorded duration and excludes paused time')
+
+    const rejected = await page.evaluate(async () => {
+      const results = []
+      for (const item of [
+        { surface: 'window', region: { x: 0, y: 0, width: 160, height: 90 } },
+        { surface: 'browser', region: { x: 0, y: 0, width: 160, height: 90 } },
+        { surface: undefined, region: { x: 0, y: 0, width: 160, height: 90 } },
+        { surface: 'monitor', region: { x: 300, y: 0, width: 160, height: 90 } },
+        { surface: 'monitor', region: { x: -1, y: 0, width: 160, height: 90 } },
+      ]) {
+        window.createPatternSource(320, 180, item.surface)
+        let error
+        try { await window.capture.startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, sourceType: 'region', region: item.region }) }
+        catch (reason) { error = reason.message }
+        results.push({ error, stopped: window.screenStream.getTracks().every(track => track.readyState === 'ended') })
+        window.cleanupSource()
+      }
+      window.createPatternSource(320, 180, 'monitor')
+      const abort = new AbortController()
+      setTimeout(() => abort.abort(), 150)
+      let cancelled = false
+      try { await window.capture.startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, outputSize: { width: 160, height: 90 }, countdown: 3, signal: abort.signal }) }
+      catch (reason) { cancelled = reason.name === 'AbortError' }
+      const cancelledStopped = window.screenStream.getTracks().every(track => track.readyState === 'ended')
+      const videosReleased = window.createdCaptureVideos.every(video => video.srcObject === null && video.paused)
+      window.cleanupSource()
+      return { results, cancelled, cancelledStopped, videosReleased }
+    })
+    assert.ok(rejected.results.slice(0, 3).every(item => /需要选择整个屏幕/.test(item.error) && item.stopped))
+    assert.ok(rejected.results.slice(3).every(item => /超出所选屏幕范围/.test(item.error) && item.stopped))
+    assert.equal(rejected.cancelled, true); assert.equal(rejected.cancelledStopped, true); assert.equal(rejected.videosReleased, true)
+    console.log('PASS mismatched screen selection and out-of-bounds regions fail safely; cancelling transformed capture releases resources')
 
     const gif = await page.evaluate(async () => {
       const url = URL.createObjectURL(window.savedBlob)

@@ -5,11 +5,11 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "f8df6c1057478905492b78087e726cc97968fb05c841c743044b81a3d6c6598d"
+      "sha256": "6781b55ce8e7c2063975a6296c9b8d847de305fc187d93747da6fcb42f1d384f"
     },
     {
       "path": "package-lock.json",
-      "sha256": "c6d592b10a5c5ef1c6ac838bcb12cb697117b82b443314319f13878dce8e49e9"
+      "sha256": "dd55798ebbb57ac6b4d0231820fba388dd027fbd14071d1b528bd85bcac62e6e"
     },
     {
       "path": "vite.config.ts",

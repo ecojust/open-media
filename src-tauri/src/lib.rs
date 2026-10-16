@@ -1,4 +1,6 @@
 pub mod capture;
+#[cfg(any(target_os = "windows", test))]
+mod capture_windows;
 pub mod engine;
 pub mod preview;
 #[cfg(test)]
@@ -7,7 +9,10 @@ mod tests;
 #[cfg(feature = "desktop")]
 mod desktop {
     use crate::{
-        capture::{self, CaptureDevice, CaptureManager, CaptureOptions, CaptureStatus},
+        capture::{
+            self, CaptureDevice, CaptureManager, CaptureOptions, CaptureStartCancellation,
+            CaptureStatus,
+        },
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
         preview::{self, PreviewResult},
     };
@@ -30,6 +35,7 @@ mod desktop {
         store: MediaStore,
         jobs: JobManager,
         capture: Arc<Mutex<CaptureManager>>,
+        capture_starts: Arc<CaptureStartCancellation>,
         resource: PathBuf,
         settings: PathBuf,
     }
@@ -190,14 +196,23 @@ mod desktop {
     }
     #[tauri::command]
     pub async fn list_capture_devices(
+        request_permission: Option<bool>,
         state: State<'_, MediaState>,
     ) -> engine::Result<Vec<CaptureDevice>> {
         let state = state.inner().clone();
-        blocking(move || capture::list_devices(&state.runtime()?)).await
+        blocking(move || {
+            capture::list_devices_with_resource(
+                &state.runtime()?,
+                &state.resource,
+                request_permission.unwrap_or(false),
+            )
+        })
+        .await
     }
     #[tauri::command]
-    pub fn get_capture_status(state: State<'_, MediaState>) -> CaptureStatus {
-        state.capture.lock().unwrap().status()
+    pub async fn get_capture_status(state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
+        let state = state.inner().clone();
+        blocking(move || Ok(state.capture.lock().unwrap().status())).await
     }
     #[tauri::command]
     pub async fn start_capture(
@@ -205,14 +220,27 @@ mod desktop {
         state: State<'_, MediaState>,
     ) -> engine::Result<CaptureStatus> {
         let state = state.inner().clone();
+        let request_id = options.request_id.clone().unwrap_or_else(engine::new_id);
+        let cancelled = state.capture_starts.token(&request_id)?;
         blocking(move || {
-            state
-                .capture
-                .lock()
-                .unwrap()
-                .start(&state.runtime()?, options)
+            let result = (|| {
+                state.capture.lock().unwrap().start_cancellable(
+                    &state.runtime()?,
+                    options,
+                    &cancelled,
+                )
+            })();
+            state.capture_starts.complete(&request_id);
+            result
         })
         .await
+    }
+    #[tauri::command]
+    pub fn cancel_capture_start(
+        request_id: String,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        state.capture_starts.cancel(&request_id)
     }
     #[tauri::command]
     pub async fn pause_capture(state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
@@ -317,7 +345,8 @@ mod desktop {
                     runtime: Arc::new(Mutex::new(runtime)),
                     store,
                     jobs: JobManager::default(),
-                    capture: Arc::new(Mutex::new(CaptureManager::default())),
+                    capture: Arc::new(Mutex::new(CaptureManager::with_resource(&resource))),
+                    capture_starts: Arc::new(CaptureStartCancellation::default()),
                     resource,
                     settings,
                 });
@@ -344,6 +373,7 @@ mod desktop {
                 list_capture_devices,
                 get_capture_status,
                 start_capture,
+                cancel_capture_start,
                 pause_capture,
                 resume_capture,
                 stop_capture,
@@ -362,6 +392,7 @@ mod desktop {
             }
             if matches!(event, tauri::RunEvent::Exit) {
                 let state = handle.state::<MediaState>();
+                state.capture_starts.cancel_all();
                 state.jobs.shutdown();
                 state.capture.lock().unwrap().abort();
             }

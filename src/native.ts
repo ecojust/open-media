@@ -8,9 +8,11 @@ export type MediaJobSpec =
   | { kind: 'convert'; asset: MediaAsset; format: string; width?: number; height?: number; fps?: number; quality?: 'draft' | 'balanced' | 'high'; audioOnly?: boolean; sampleRate?: number; videoBitrate?: number; audioBitrate?: number; trimStart?: number; trimEnd?: number }
   | { kind: 'gif'; asset: MediaAsset; segments: { start: number; end: number }[]; width: number; fps: number; loop?: boolean }
 export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress: number; name: string; outputPath?: string; error?: string }
-export interface CaptureOptions { fps: number; microphone: boolean; screenId?: string; audioDevice?: string; region?: { x: number; y: number; width: number; height: number } }
-export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string }
-export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'audio' }
+export interface CaptureSize { width: number; height: number }
+export interface CaptureRegion extends CaptureSize { x: number; y: number }
+export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
+export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize }
+export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
 
 export function isDesktop(): boolean { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window }
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -60,9 +62,10 @@ export async function beginMediaJob(spec: MediaJobSpec): Promise<MediaJob | null
 }
 export async function getMediaJobs(): Promise<MediaJob[]> { return isDesktop() ? call('get_media_jobs') : [] }
 export async function cancelMediaJob(id: string): Promise<void> { return call('cancel_media_job', { id }) }
-export async function listCaptureDevices(): Promise<CaptureDevice[]> { return call('list_capture_devices') }
+export async function listCaptureDevices(requestPermission = false): Promise<CaptureDevice[]> { return call('list_capture_devices', { requestPermission }) }
 export async function getCaptureStatus(): Promise<CaptureStatus> { return call('get_capture_status') }
 export async function startCapture(options: CaptureOptions): Promise<CaptureStatus> { return call('start_capture', { options }) }
+export async function cancelCaptureStart(requestId: string): Promise<void> { return call('cancel_capture_start', { requestId }) }
 export async function pauseCapture(): Promise<CaptureStatus> { return call('pause_capture') }
 export async function resumeCapture(): Promise<CaptureStatus> { return call('resume_capture') }
 export async function stopCapture(): Promise<MediaAsset | null> { const asset = await call<MediaAsset | null>('stop_capture'); return asset ? assetUrl(asset) : null }

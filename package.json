@@ -1,6 +1,6 @@
 {
   "name": "open-media",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5200 --strictPort",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
-    "test:browser": "npm run build && node tests/browser/workbench.cjs && node tests/browser/editor-preview.cjs && node tests/browser/capture-gif.cjs && node tests/browser/conversion.cjs && node tests/browser/native-lifecycle.cjs && node tests/browser/native-preview.cjs",
+    "test:browser": "npm run build && node tests/browser/workbench.cjs && node tests/browser/editor-preview.cjs && node tests/browser/capture-gif.cjs && node tests/browser/recorder-selection.cjs && node tests/browser/conversion.cjs && node tests/browser/native-lifecycle.cjs && node tests/browser/native-preview.cjs",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",

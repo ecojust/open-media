@@ -10,3 +10,4 @@ release-output/
 .media-runtime/
 src-tauri/resources/media/*
 !src-tauri/resources/media/README.txt
+src-tauri/resources/capture/open-media-capture

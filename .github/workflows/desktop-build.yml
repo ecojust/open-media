@@ -199,6 +199,15 @@ jobs:
       - name: Package application
         id: native-package
         run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked 2>&1 | tee .media-runtime/logs/package.log
+      - name: Verify native recording helper
+        id: capture-helper
+        if: runner.os == 'macOS'
+        run: |
+          set -o pipefail
+          src-tauri/resources/capture/open-media-capture --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
+          helper="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app/Contents/Resources/capture/open-media-capture"
+          test -x "$helper"
+          codesign --verify "$helper"
       - name: Collect installers and provenance
         env:
           MEDIA_TARGET: ${{ matrix.target }}
@@ -214,12 +223,14 @@ jobs:
           MEDIA_VERIFY_OUTCOME: ${{ steps.media-verify.outcome }}
           NATIVE_TEST_OUTCOME: ${{ steps.native-tests.outcome }}
           NATIVE_PACKAGE_OUTCOME: ${{ steps.native-package.outcome }}
+          CAPTURE_HELPER_OUTCOME: ${{ steps.capture-helper.outcome }}
         run: |
           if [[ "$MEDIA_PREPARE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/prepare.log; fi
           if [[ "$MEDIA_WINDOWS_OUTCOME" == failure || "$MEDIA_MACOS_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/build.log; fi
           if [[ "$MEDIA_VERIFY_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/verify.log; fi
           if [[ "$NATIVE_TEST_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/native.log; fi
           if [[ "$NATIVE_PACKAGE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/package.log; fi
+          if [[ "$CAPTURE_HELPER_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/capture-helper.log; fi
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

@@ -7,10 +7,35 @@ export interface CapturedRecording {
   name: string
 }
 
+export interface CaptureRegion {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface CaptureOutputSize {
+  width: number
+  height: number
+}
+
+export interface BrowserCaptureSource {
+  type: 'screen' | 'window' | 'tab' | 'unknown'
+  label: string
+  width: number
+  height: number
+  outputWidth: number
+  outputHeight: number
+  region?: CaptureRegion
+}
+
 export interface BrowserCaptureOptions {
   fps: number
   microphone: boolean
   systemAudio: boolean
+  sourceType?: 'screen' | 'window' | 'region'
+  region?: CaptureRegion
+  outputSize?: CaptureOutputSize
   countdown?: number
   signal?: AbortSignal
   onCountdown?: (remaining: number) => void
@@ -21,11 +46,28 @@ export interface BrowserCaptureOptions {
 
 export interface BrowserCapture {
   readonly stream: MediaStream
+  readonly source: BrowserCaptureSource
   readonly phase: CapturePhase
   readonly elapsed: number
   pause(): void
   resume(): void
   stop(): Promise<CapturedRecording>
+}
+
+/** Coordinates refer to pixels in the selected screen, before output scaling. */
+export function validateCaptureRegion(region: CaptureRegion, width: number, height: number): void {
+  if (![region.x, region.y, region.width, region.height].every(Number.isSafeInteger)
+    || region.x < 0 || region.y < 0 || region.width < 2 || region.height < 2
+    || region.x + region.width > width || region.y + region.height > height) {
+    throw new Error(`录制区域超出所选屏幕范围，请在 ${width} × ${height} 像素内设置位置和尺寸。`)
+  }
+}
+
+function validateOutputSize(size: CaptureOutputSize): void {
+  if (![size.width, size.height].every(Number.isSafeInteger) || size.width < 16 || size.height < 16
+    || size.width > 7680 || size.height > 4320 || size.width % 2 !== 0 || size.height % 2 !== 0) {
+    throw new Error('输出宽高须为不小于 16 的偶数，最大支持 7680 × 4320 像素。')
+  }
 }
 
 export function browserCaptureAvailable(): boolean {
@@ -51,30 +93,151 @@ export function captureErrorMessage(error: unknown): string {
 export async function startBrowserCapture(options: BrowserCaptureOptions): Promise<BrowserCapture> {
   if (!browserCaptureAvailable()) throw new Error('当前环境不支持屏幕采集，请使用桌面录制或支持屏幕共享的浏览器。')
   if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
+  if (options.outputSize) validateOutputSize(options.outputSize)
+  if (options.sourceType === 'region' && !options.region) throw new Error('请先设置屏幕录制区域。')
+  if (options.sourceType === 'window' && options.region) throw new Error('窗口录制不能使用屏幕区域坐标，请选择屏幕区域录制。')
   const fps = Math.min(60, Math.max(1, Math.round(options.fps || 30)))
   const screen = await navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: { ideal: fps, max: fps } },
+    video: { frameRate: { ideal: fps, max: fps }, ...(options.sourceType ? { displaySurface: options.sourceType === 'window' ? 'window' : 'monitor' } : {}) },
     audio: options.systemAudio,
   })
   let microphone: MediaStream | undefined
   let context: AudioContext | undefined
+  let sourceVideo: HTMLVideoElement | undefined
+  let renderTimer: ReturnType<typeof setInterval> | undefined
+  let renderFrame: number | undefined
+  let paintFinalFrame: (() => void) | undefined
+  let transformFailure: Error | undefined
+  let onTransformFailure: ((error: Error) => void) | undefined
   let recorder: MediaRecorder
   const ownedTracks = new Set<MediaStreamTrack>(screen.getTracks())
+  let abortCapture: () => void
+  const onAbort = () => abortCapture()
+  const stopRendering = () => {
+    if (renderTimer !== undefined) { clearInterval(renderTimer); renderTimer = undefined }
+    if (renderFrame !== undefined) { sourceVideo?.cancelVideoFrameCallback(renderFrame); renderFrame = undefined }
+  }
   const dispose = () => {
+    stopRendering()
+    paintFinalFrame = undefined
+    if (sourceVideo) { sourceVideo.pause(); sourceVideo.srcObject = null; sourceVideo.remove(); sourceVideo = undefined }
     for (const track of ownedTracks) track.stop()
     void context?.close().catch(() => {})
-    options.signal?.removeEventListener('abort', dispose)
+    options.signal?.removeEventListener('abort', onAbort)
   }
-  options.signal?.addEventListener('abort', dispose, { once: true })
+  abortCapture = dispose
+  options.signal?.addEventListener('abort', onAbort, { once: true })
   try {
     if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
-    if (!screen.getVideoTracks().some(track => track.readyState === 'live')) throw new Error('没有可用的屏幕画面。')
+    const videoTrack = screen.getVideoTracks().find(track => track.readyState === 'live')
+    if (!videoTrack) throw new Error('没有可用的屏幕画面。')
+    const settings = videoTrack.getSettings()
+    const transformsVideo = !!(options.region || options.outputSize)
+    const source: BrowserCaptureSource = {
+      type: settings.displaySurface === 'monitor' ? 'screen' : settings.displaySurface === 'window' ? 'window' : settings.displaySurface === 'browser' ? 'tab' : 'unknown',
+      label: videoTrack.label || '所选录制来源',
+      width: settings.width ?? 0,
+      height: settings.height ?? 0,
+      outputWidth: settings.width ?? 0,
+      outputHeight: settings.height ?? 0,
+    }
+    const updateSource = () => {
+      if (videoTrack.readyState !== 'live') return
+      const current = videoTrack.getSettings()
+      source.type = current.displaySurface === 'monitor' ? 'screen' : current.displaySurface === 'window' ? 'window' : current.displaySurface === 'browser' ? 'tab' : 'unknown'
+      source.label = videoTrack.label || source.label
+      source.width = sourceVideo?.videoWidth || current.width || source.width
+      source.height = sourceVideo?.videoHeight || current.height || source.height
+      if (!transformsVideo) { source.outputWidth = source.width; source.outputHeight = source.height }
+    }
+    if (options.region && source.type !== 'screen') throw new Error('屏幕区域录制需要选择整个屏幕；当前选择的是窗口、标签页或无法确认的来源，请重新选择。')
+    let outputVideoTracks = screen.getVideoTracks()
+    if (transformsVideo) {
+      const video = document.createElement('video')
+      sourceVideo = video
+      video.muted = true
+      video.playsInline = true
+      video.srcObject = new MediaStream([videoTrack])
+      await new Promise<void>((resolve, reject) => {
+        const clear = () => {
+          clearTimeout(timer)
+          video.removeEventListener('loadeddata', ready)
+          video.removeEventListener('error', failed)
+          videoTrack.removeEventListener('ended', failed)
+          options.signal?.removeEventListener('abort', aborted)
+        }
+        const ready = () => { if (video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 2) { clear(); resolve() } }
+        const failed = () => { clear(); reject(new Error('无法读取所选录制画面，请重新选择来源。')) }
+        const aborted = () => { clear(); reject(new DOMException('已取消录制。', 'AbortError')) }
+        const timer = setTimeout(failed, 15000)
+        video.addEventListener('loadeddata', ready)
+        video.addEventListener('error', failed)
+        videoTrack.addEventListener('ended', failed)
+        options.signal?.addEventListener('abort', aborted, { once: true })
+        void video.play().then(ready, failed)
+        if (options.signal?.aborted) aborted()
+        else ready()
+      })
+      if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
+      source.width = video.videoWidth
+      source.height = video.videoHeight
+      const region = options.region ? { ...options.region } : undefined
+      if (region) { validateCaptureRegion(region, source.width, source.height); source.region = region }
+      source.outputWidth = options.outputSize?.width ?? region?.width ?? source.width
+      source.outputHeight = options.outputSize?.height ?? region?.height ?? source.height
+      const canvas = document.createElement('canvas')
+      canvas.width = source.outputWidth
+      canvas.height = source.outputHeight
+      const painter = canvas.getContext('2d', { alpha: false })
+      if (!painter) throw new Error('无法创建录制画布，请重试。')
+      let lastPaint = 0
+      const paint = () => {
+        try {
+          if (video.readyState < 2) return
+          updateSource()
+          if (region && source.type !== 'screen') throw new Error('录制来源已不再是整个屏幕，已结束区域录制并保留内容。')
+          if (region) validateCaptureRegion(region, video.videoWidth, video.videoHeight)
+          const crop = region ?? { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight }
+          const scale = Math.min(canvas.width / crop.width, canvas.height / crop.height)
+          const width = crop.width * scale, height = crop.height * scale
+          painter.fillStyle = '#000000'
+          painter.fillRect(0, 0, canvas.width, canvas.height)
+          painter.drawImage(video, crop.x, crop.y, crop.width, crop.height, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height)
+          lastPaint = performance.now()
+        } catch (error) {
+          transformFailure = error instanceof Error ? error : new Error('录制画面处理失败。')
+          stopRendering()
+          onTransformFailure?.(transformFailure)
+        }
+      }
+      paint()
+      if (transformFailure) throw transformFailure
+      const transformed = canvas.captureStream(fps)
+      outputVideoTracks = transformed.getVideoTracks()
+      outputVideoTracks.forEach(track => ownedTracks.add(track))
+      paintFinalFrame = () => {
+        const track = outputVideoTracks[0] as CanvasCaptureMediaStreamTrack | undefined
+        track?.requestFrame?.()
+        paint()
+      }
+      // Keep timestamps advancing when the source remains still between updates.
+      renderTimer = setInterval(() => { if (performance.now() - lastPaint >= 800 / fps) paint() }, 1000 / fps)
+      if (typeof video.requestVideoFrameCallback === 'function') {
+        const nextFrame = () => {
+          renderFrame = undefined
+          if (sourceVideo !== video || transformFailure) return
+          paint()
+          if (!transformFailure) renderFrame = video.requestVideoFrameCallback(nextFrame)
+        }
+        renderFrame = video.requestVideoFrameCallback(nextFrame)
+      }
+    }
     if (options.microphone) {
       microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false })
       microphone.getTracks().forEach(track => ownedTracks.add(track))
     }
     if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
-    const tracks = [...screen.getVideoTracks()]
+    const tracks = [...outputVideoTracks]
     const audioTracks = [...(options.systemAudio ? screen.getAudioTracks() : []), ...(microphone?.getAudioTracks() ?? [])]
     if (audioTracks.length > 1) {
       context = new AudioContext()
@@ -95,6 +258,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     }
     options.onCountdown?.(0)
     if (options.signal?.aborted) throw new DOMException('已取消录制。', 'AbortError')
+    if (transformFailure) throw transformFailure
     if (!screen.getVideoTracks().some(track => track.readyState === 'live')) throw new Error('屏幕共享已结束，请重新选择录制来源。')
     const stream = new MediaStream(tracks)
     const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find(value => MediaRecorder.isTypeSupported(value))
@@ -113,13 +277,17 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     const elapsed = () => (accumulated + (phase === 'recording' ? performance.now() - startedAt : 0)) / 1000
     const stop = () => {
       if (phase !== 'stopped') {
+        updateSource()
         accumulated = elapsed() * 1000
         phase = 'stopped'
         options.onPhase?.(phase)
+        if (!transformFailure) paintFinalFrame?.()
         if (recorder.state !== 'inactive') recorder.stop()
       }
       return finished
     }
+    abortCapture = () => { void stop(); dispose() }
+    onTransformFailure = error => { options.onError?.(error); void stop() }
     recorder.addEventListener('dataavailable', event => {
       if (event.data.size) { chunks.push(event.data); bytes += event.data.size }
       if (bytes > 512 * 1024 * 1024 && phase !== 'stopped') {
@@ -131,6 +299,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       const error = ('error' in event && event.error instanceof Error) ? event.error : new Error('录屏编码失败。')
       options.onError?.(error)
       if (!settled) { settled = true; reject(error) }
+      accumulated = elapsed() * 1000
       dispose()
       phase = 'stopped'
       options.onPhase?.(phase)
@@ -155,6 +324,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     recorder.start(1000)
     return {
       stream,
+      get source() { updateSource(); return { ...source, ...(source.region ? { region: { ...source.region } } : {}) } },
       get phase() { return phase },
       get elapsed() { return elapsed() },
       pause() {
