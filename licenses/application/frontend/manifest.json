@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "0db4ebd52b1659ec735548011342e3e222f16e317e1471164f2f2dc7e84ce61a",
-      "reviewMethod": "Source review: application version updated to 0.1.4 and image conversion, crop, controls and project saving regression commands included. Dependency versions and original license files are unchanged."
+      "sha256": "676a179c61b8a5e11c8375a76d8004e587568ce6569dccd2fa8cad091da202b8",
+      "reviewMethod": "Source review: application version updated to 0.1.5 and application exit regression commands included. Dependency versions and original license files are unchanged."
     },
     {
       "path": "package-lock.json",
-      "sha256": "24d120a1b61f1438dc8eb685a3fd917efb35f7c833ce2c07f113915baddf5045",
-      "reviewMethod": "Source review: application version updated to 0.1.4 and image conversion, crop, controls and project saving regression commands included. Dependency versions and original license files are unchanged."
+      "sha256": "58008d39eafd20e6fbfe09000f57c5b42d2270686609a4ce4889d6981995a354",
+      "reviewMethod": "Source review: application version updated to 0.1.5 and application exit regression commands included. Dependency versions and original license files are unchanged."
     },
     {
       "path": "vite.config.ts",
