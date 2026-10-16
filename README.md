@@ -2,7 +2,12 @@
 
 本地录屏、视频剪辑、分段动图与媒体转换工作台。通过左侧工作区切换任务，在同一个项目中管理录制片段、视频、音频和图片。
 
-![视频剪辑工作区](docs/screenshots/editor-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/editor-dark.png">
+  <img src="docs/screenshots/editor-light.png" alt="旅行短片剪辑示例：六轨时间线、标题字幕、画中画、旁白、配乐和片段滤镜" width="1600">
+</picture>
+
+*40 秒旅行短片示例：9 个素材、6 条轨道、22 个片段，展示视频预览、分段字幕、离线旁白与滤镜调色。*
 
 ## 工作区
 
