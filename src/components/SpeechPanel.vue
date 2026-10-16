@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Project } from '../core/types'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity, type SpeechSource } from '../core/speech'
+import { compactVoiceCatalog } from '../core/voice-catalog'
 import { acceptSpeechJobs, beginSpeechJob, cancelSpeechJob, discardSpeechJob, getSpeechJob, getSpeechStatus, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
@@ -35,7 +36,10 @@ async function loadStatus(): Promise<void> {
       const result = await getSpeechStatus()
       if (disposed) return
       status.value = result
-      if (!result.voices.some(voice => voice.id === voiceId.value)) voiceId.value = result.voices.find(voice => voice.language.toLowerCase().startsWith('zh'))?.id || result.voices[0]?.id || ''
+      if (!result.voices.some(voice => voice.id === voiceId.value)) {
+        const catalog = compactVoiceCatalog(result.voices)
+        voiceId.value = catalog.find(voice => voice.language.toLowerCase().startsWith('zh'))?.id || catalog[0]?.id || ''
+      }
     } catch (cause) { if (!disposed) status.value = { ready: false, voices: [], error: errorText(cause) } }
     finally { loading.value = false; statusPromise = undefined }
   })()

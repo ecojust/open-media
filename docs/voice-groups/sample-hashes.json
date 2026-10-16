@@ -1,0 +1,723 @@
+[
+  {
+    "id": "af_maple",
+    "speakerId": 0,
+    "wavSha256": "bad979ccdc5ca9eaad1464b4718f1cf40b479d55d1361cf93d1ee3a68e7227be",
+    "durationSeconds": 3.183208,
+    "voiceWeightSha256": "bd5b230b916ea98c67a3a7a833a3ce43e535ce56a81503f4166ee9390b9ddeeb"
+  },
+  {
+    "id": "af_sol",
+    "speakerId": 1,
+    "wavSha256": "d3ab8bf209a2d20bcc52734dfc0423d6de3e452209e94407d122c600b559beb4",
+    "durationSeconds": 3.4355,
+    "voiceWeightSha256": "87c1d6d6a3f13f89ed54a6a67cc1ff75b926aebc3a2aac3086e6dd109a8147e6"
+  },
+  {
+    "id": "bf_vale",
+    "speakerId": 2,
+    "wavSha256": "0865633710dbe3ed68737c22992754eef9fb0f518296c09d4dc23dcff39c1b28",
+    "durationSeconds": 3.817375,
+    "voiceWeightSha256": "2536f7922d31d96e994135ac2bb73f5a3c01326476200513c57d988822c6ca4d"
+  },
+  {
+    "id": "zf_001",
+    "speakerId": 3,
+    "wavSha256": "18be384fa56a1c038cefd7c02fb4489300eaaa1df0e8e966f0b1b1ecd37be8bf",
+    "durationSeconds": 4.548542,
+    "voiceWeightSha256": "0a89ec12bb93fb9c74077924daf02568baad64e1f869389f5aaee01a386035f8"
+  },
+  {
+    "id": "zf_002",
+    "speakerId": 4,
+    "wavSha256": "19d33384f02a93eec7e1873776e1666f784e8131ae2f4b88ef5f6e16c65ed0aa",
+    "durationSeconds": 5.186917,
+    "voiceWeightSha256": "452f96e1e3c20b14b228b5336a8d7e833b105f837d98ef53b4ddfce18eed39bf"
+  },
+  {
+    "id": "zf_003",
+    "speakerId": 5,
+    "wavSha256": "1ac2fb9db6b9a3953c900e9404a7c9a14854b8e19253fc19e4bb455976cdf34d",
+    "durationSeconds": 5.266292,
+    "voiceWeightSha256": "a70654663d013a700f8afe42d57d1ce03ff49af8bdedbbb56c7e3da6e820b788"
+  },
+  {
+    "id": "zf_004",
+    "speakerId": 6,
+    "wavSha256": "487a3baaf1b5301b934c084908c40e33e0aa62dab50a3ac9e71319c1b031b40f",
+    "durationSeconds": 5.103542,
+    "voiceWeightSha256": "81fe28be1c496ccffa73078d5c2e6d9cc5e5f91e354d6ae0f494a9c28a42064d"
+  },
+  {
+    "id": "zf_005",
+    "speakerId": 7,
+    "wavSha256": "65be556eab933fb83d793b6697e86d2b215ae17dab1ff69f50cf54dddb4c64cb",
+    "durationSeconds": 5.4755,
+    "voiceWeightSha256": "a91d2c2adecbb7c191dac4fa35e213e8d370e0c733a9bf36797f513924dcb84c"
+  },
+  {
+    "id": "zf_006",
+    "speakerId": 8,
+    "wavSha256": "bdbadfeb55cce543b2d9ccb0f69ef67d4c95fd07985f371a32d04685b2d7e925",
+    "durationSeconds": 5.303958,
+    "voiceWeightSha256": "52dee405a0e609d6d2869eef05984745db435a73aea49db7418494d5cb53bf9d"
+  },
+  {
+    "id": "zf_007",
+    "speakerId": 9,
+    "wavSha256": "344a2535fdb3c9ebbc10f29b7a750eb112a0638029b42e5694f28cfd1f448130",
+    "durationSeconds": 5.467542,
+    "voiceWeightSha256": "23b6c4312208de7f195e4e78eef0ec9e498cd52907b1678ecb7a0a1996a51573"
+  },
+  {
+    "id": "zf_008",
+    "speakerId": 10,
+    "wavSha256": "f7cc524f373770a752954c858de308e66b052c416427245688c012e0d0fb5d43",
+    "durationSeconds": 5.307833,
+    "voiceWeightSha256": "23e20843a71fb8c5f6b984c8d4e74dd590251aeb8f620cb07a57e1485d726b0c"
+  },
+  {
+    "id": "zf_017",
+    "speakerId": 11,
+    "wavSha256": "4db41becef9a3e2c211f2a9feeacd4c9f62892286e98ab5ca70754eb4585749e",
+    "durationSeconds": 4.979542,
+    "voiceWeightSha256": "9c6513e77a8efb7172a4e4ebeb48b3b010152d8cd6a0f2fa1adb353248fd91ed"
+  },
+  {
+    "id": "zf_018",
+    "speakerId": 12,
+    "wavSha256": "2e3db0523f86a9e474dccb0d37e8752476048a83a38f8aa30b1e596aabd4d60e",
+    "durationSeconds": 5.914708,
+    "voiceWeightSha256": "a9ee6566c7500ce90cbd177f1d6f6cae533356e5f0e37edf3adbd0a8f2d44020"
+  },
+  {
+    "id": "zf_019",
+    "speakerId": 13,
+    "wavSha256": "9f111501d49744800c9a47e0af570553efef32f7cedf20ba6124fe84380767c9",
+    "durationSeconds": 6.008083,
+    "voiceWeightSha256": "ab5906846335ac1227c47fd04be8b7b10a47c3ee77729296cc4c0f3f8fe79073"
+  },
+  {
+    "id": "zf_021",
+    "speakerId": 14,
+    "wavSha256": "ac23561b3cf6ea6d96e6996103b257d6cd100969ec54394eb1ab8e3d76b06560",
+    "durationSeconds": 4.685667,
+    "voiceWeightSha256": "c16f939c566f786150be3e3cb6a61f7fd8d4214a26a46d3e80e1d61de06d54ec"
+  },
+  {
+    "id": "zf_022",
+    "speakerId": 15,
+    "wavSha256": "9bed8a0831bc214760c3ab20b467142085411e5fe58b92e10ced52659fa6c52b",
+    "durationSeconds": 6.179708,
+    "voiceWeightSha256": "c1cde40b2fd522355d2ae152d06d1033b04ad3528b7273cf25dd68f28a5563db"
+  },
+  {
+    "id": "zf_023",
+    "speakerId": 16,
+    "wavSha256": "3ae83fc503c3d11bca14538090b8491e0315affa6175cd9cff3ecc7708043b55",
+    "durationSeconds": 5.096875,
+    "voiceWeightSha256": "d02846dc3b8a89b4f81634b407ce8dd30d80db40fc952d54f05853a8e26a2190"
+  },
+  {
+    "id": "zf_024",
+    "speakerId": 17,
+    "wavSha256": "e72ccd6c108575745c6ba52d2d176a81000a6903874f68c6df0be4acd1cb2d10",
+    "durationSeconds": 5.933458,
+    "voiceWeightSha256": "2d0f2df7b25482f6870cfbe8e83c7d1e74ed8ef8ae72df749207ea9cec7c9102"
+  },
+  {
+    "id": "zf_026",
+    "speakerId": 18,
+    "wavSha256": "f249ddaad1497a61eab4214638c4b47d27f6e4bde65d5d37ef61f828953b1dc6",
+    "durationSeconds": 5.898792,
+    "voiceWeightSha256": "2a2434fed129796276c61947fc65bf7dadd569468ea4edaca81f3d59802bdc32"
+  },
+  {
+    "id": "zf_027",
+    "speakerId": 19,
+    "wavSha256": "a351fb4e9f8c8b22b85b4f4309c564cb8750d84a5eea2b7599fe707c76d25dde",
+    "durationSeconds": 4.594375,
+    "voiceWeightSha256": "9301e7a0b80eedff7f314076e07f9eb74b687afb7fcb2c64ca94168469858aae"
+  },
+  {
+    "id": "zf_028",
+    "speakerId": 20,
+    "wavSha256": "0f7ec127c06329cbbc3b1fe1a7dbcfef6fc5adc151bf2e684cabf92743d75837",
+    "durationSeconds": 5.33975,
+    "voiceWeightSha256": "8d15e55ad315708010c1528c633828e3179d5cbf0bfcd2db0fec27f63001eaec"
+  },
+  {
+    "id": "zf_032",
+    "speakerId": 21,
+    "wavSha256": "1a8fb3e68e98f26dd78699c131dc7f2e5fbeec802897352268c841a9eccd92a8",
+    "durationSeconds": 5.552333,
+    "voiceWeightSha256": "2ab0b9b1fe2f1e4cfa08b0126581df3316c12aadeadc51136c826255debd2058"
+  },
+  {
+    "id": "zf_036",
+    "speakerId": 22,
+    "wavSha256": "f366095ef9576068a4899963991b157ced7531df7b5c1d3508309e726b44bf72",
+    "durationSeconds": 5.113167,
+    "voiceWeightSha256": "b72873066ef9d57d4ea0605d32a82b2655010af51edbaecd6f926250d84efa4e"
+  },
+  {
+    "id": "zf_038",
+    "speakerId": 23,
+    "wavSha256": "fa08541f482827543913191614b1e0aa4c1c5d220b63e9563c345b29c58cf73c",
+    "durationSeconds": 5.655792,
+    "voiceWeightSha256": "569bb54ebf05c00c89eaf56218992474a8a0494d8f94a14e933ae6a5ea9f7e31"
+  },
+  {
+    "id": "zf_039",
+    "speakerId": 24,
+    "wavSha256": "b9d55a1f9de3d2ecd33070ad8fc63f24464d4e4088c1ecf418968b8e69d1734b",
+    "durationSeconds": 6.087917,
+    "voiceWeightSha256": "92ad68f36d16860dcf125fdf87a4572c7ab6d7efbe6a7197d6772242a2cbbb56"
+  },
+  {
+    "id": "zf_040",
+    "speakerId": 25,
+    "wavSha256": "08831580900a4d1693cfdca24a2421a061299381d76675ae1c5e08192822fdde",
+    "durationSeconds": 5.954208,
+    "voiceWeightSha256": "bae25bd2c4dd717ce65effa2350b28a55a73f53a0bcc2cca5876a15e984eaa2d"
+  },
+  {
+    "id": "zf_042",
+    "speakerId": 26,
+    "wavSha256": "5a23412d9d374fb49c38070c58bf023e74d993aef9fea872fc7d806b279a12dd",
+    "durationSeconds": 5.958708,
+    "voiceWeightSha256": "713160091b44d962ab73e3bf66f0c2f0b9677aaf0c2f0e62faa94ed451540d1e"
+  },
+  {
+    "id": "zf_043",
+    "speakerId": 27,
+    "wavSha256": "e45c81b6a9a1de53e62ca6238305c9ab4afe8d6286d638bb6608b331f95d4fe8",
+    "durationSeconds": 5.405125,
+    "voiceWeightSha256": "7d257954b651436e354712738b22e8365ed908923a5d0f154690188b2c73ea78"
+  },
+  {
+    "id": "zf_044",
+    "speakerId": 28,
+    "wavSha256": "e0d783abaa383b04ff03f86762e2baec08ceef630e817d9b0a1c5b61fa25e78b",
+    "durationSeconds": 5.665,
+    "voiceWeightSha256": "e166c8b2a680d3f51f1765cedc4ed7a29308ea40081b03347d5cd95f52119cc0"
+  },
+  {
+    "id": "zf_046",
+    "speakerId": 29,
+    "wavSha256": "ea14b312328c76e367e6c2661d1e315f5b5f2be2778611a238bef904efe12c4a",
+    "durationSeconds": 5.866125,
+    "voiceWeightSha256": "73e8881e76670cfe803c8ab0ccc6b5daae22efdc3a67f8e0e80658a4be21d3af"
+  },
+  {
+    "id": "zf_047",
+    "speakerId": 30,
+    "wavSha256": "71da728c852f664d4471e7bf60bdad8c80450c21e24beb9448775ebec34918c3",
+    "durationSeconds": 5.27725,
+    "voiceWeightSha256": "620f92a680c5a28bd8eb601738721047b73008bdf5b880f34075181afbfdcb62"
+  },
+  {
+    "id": "zf_048",
+    "speakerId": 31,
+    "wavSha256": "a35230340d11d9db787e544333d0e5b2e01983102fe7b6ef6220df18a0ae329d",
+    "durationSeconds": 6.785708,
+    "voiceWeightSha256": "24e0aa66d1cb264e86adac5ea143f7fb0a9672a8b237ba1ad017aacc1fb0290a"
+  },
+  {
+    "id": "zf_049",
+    "speakerId": 32,
+    "wavSha256": "ca465a5a3c426efa053a3c828ef9db41344563c2b688fea217c70f249437fbd4",
+    "durationSeconds": 6.048625,
+    "voiceWeightSha256": "4808ba6dfc1c13af9921bb5072faf875b69bc54777281eb549592b1aa7e8a4bc"
+  },
+  {
+    "id": "zf_051",
+    "speakerId": 33,
+    "wavSha256": "31a950ae7731a592de9af34c8bcd4a619eab75c000fc22bd8d8bcfc93015967b",
+    "durationSeconds": 6.162708,
+    "voiceWeightSha256": "64df55d707d3c28dec15c5c9051653b6a6cbbbf85c52e56183d3922e53415e76"
+  },
+  {
+    "id": "zf_059",
+    "speakerId": 34,
+    "wavSha256": "027b6ffecee3c564205b6b6c442133b45127637961b974079727d4d43c8121e8",
+    "durationSeconds": 5.283208,
+    "voiceWeightSha256": "f12fd6e34f602445173f930c4f41b4d064e1a981b39b664591ad2476fb7425cc"
+  },
+  {
+    "id": "zf_060",
+    "speakerId": 35,
+    "wavSha256": "f05cccc941c37558ebb845b714933c353c91521e52249a68322fea76af154f1e",
+    "durationSeconds": 6.084083,
+    "voiceWeightSha256": "429ad8ffb6fc8b68d3b77f2ccafba5be50e4ec31d25f890d739a16449ca01748"
+  },
+  {
+    "id": "zf_067",
+    "speakerId": 36,
+    "wavSha256": "1d6349658b4f68c43b8641d8afd80e9b5b079fee8281200cdded9112edf3e21a",
+    "durationSeconds": 4.966458,
+    "voiceWeightSha256": "5669caef309a3746a47588d893d58fa61c721a94ca07e431c732ea9a2b4abc6a"
+  },
+  {
+    "id": "zf_070",
+    "speakerId": 37,
+    "wavSha256": "b3c52cc4d3160c38f6191f4c2e9d7ae98bae263ffab75d486a42c31f3158c878",
+    "durationSeconds": 6.318958,
+    "voiceWeightSha256": "f225305611865b09dc8cb36439143c02a404299b00508e00676655bb117342e2"
+  },
+  {
+    "id": "zf_071",
+    "speakerId": 38,
+    "wavSha256": "516e8a8910c30ea940da41fbef6ca9f1fb951356bf7556dc44e99b332dbed322",
+    "durationSeconds": 6.396833,
+    "voiceWeightSha256": "454cd5aaa9458f3b028e973d19902a002eb59fc743eb94fb3c7c9d5d7a190a07"
+  },
+  {
+    "id": "zf_072",
+    "speakerId": 39,
+    "wavSha256": "26b55c20d0c1a647a741ef369ccf8a3d64037da09ca3fd1a2329dfbb3f843362",
+    "durationSeconds": 5.390083,
+    "voiceWeightSha256": "2274b572b44723e80eee422a914c96b37ee42bf9b5ca60e7f656bede7860a1d3"
+  },
+  {
+    "id": "zf_073",
+    "speakerId": 40,
+    "wavSha256": "80ededeea8d608c3a1efd746153019f9e561370da7cbf119a50ff534483534bd",
+    "durationSeconds": 6.025125,
+    "voiceWeightSha256": "b8ecf6945ae7bb2a0353422b7af32d3b928c5fdccf3ea553bc61227a57bf4a2c"
+  },
+  {
+    "id": "zf_074",
+    "speakerId": 41,
+    "wavSha256": "e805e6529b8e3e03f10ad32c57495fb7143683d449dbf5dc46409ed00b9c8503",
+    "durationSeconds": 5.808625,
+    "voiceWeightSha256": "8e6726977c7494dfd567c580963630834c0971f66111e06c9467e6f7d912ea1e"
+  },
+  {
+    "id": "zf_075",
+    "speakerId": 42,
+    "wavSha256": "4e653e4d4e30e873099172e875bbe4e9679bbec39f4024d88ec8cc1e48cc08a0",
+    "durationSeconds": 6.359292,
+    "voiceWeightSha256": "84e70ca9aac5178ceaeb1eae95dd77278d71e60cfacaf9af99852922b4355560"
+  },
+  {
+    "id": "zf_076",
+    "speakerId": 43,
+    "wavSha256": "97ae6c862e58561a21697f2e4ba8474d8f6b23fe10e941b75823e705646b1efc",
+    "durationSeconds": 5.817625,
+    "voiceWeightSha256": "58351a1be5aa04f874bea0e5228fc0e0047dc2ee801e915d4f59513ca60a3194"
+  },
+  {
+    "id": "zf_077",
+    "speakerId": 44,
+    "wavSha256": "bed0e87ecc3dc623d45ad5d4d997ddc2c9c18eb34991d6cbd574d09a64506f48",
+    "durationSeconds": 5.111417,
+    "voiceWeightSha256": "e2fd07f3b62e204cd6632696e2a975678e7e6aa5a9b2cb4927f94d875c113625"
+  },
+  {
+    "id": "zf_078",
+    "speakerId": 45,
+    "wavSha256": "cf30b85a9aadd1ed8baecf4b693cc43e964b5081b7abc6e7f9db9f32bdc73593",
+    "durationSeconds": 6.086458,
+    "voiceWeightSha256": "82d591700a9ecb3cb14d3d05ec5aab18bd7a482d677bf6522cf96ed4c064b23b"
+  },
+  {
+    "id": "zf_079",
+    "speakerId": 46,
+    "wavSha256": "fbb8b3d0c502cc93f521d8ccd4fee8b0fc7868caa206669040f33a8db797cb76",
+    "durationSeconds": 5.716875,
+    "voiceWeightSha256": "2df9a9fbbd39a54077a2c5073c04c7e685ce0342b34f22fc85c25a1f7a3954c7"
+  },
+  {
+    "id": "zf_083",
+    "speakerId": 47,
+    "wavSha256": "b7eb338bf1552ded9433b397318cd4525ca3dfa593c03a0e4de4cf7f020b2855",
+    "durationSeconds": 5.154542,
+    "voiceWeightSha256": "5557cbc381e0f2cd2a29759fdda25eca664492f1cfa3fcc241e7adeaf4164661"
+  },
+  {
+    "id": "zf_084",
+    "speakerId": 48,
+    "wavSha256": "0625719c3f8202ded036d92519f4dbe3eec745c26255886149026453238f9caf",
+    "durationSeconds": 6.129083,
+    "voiceWeightSha256": "2b2d4fdefa9a6c3d9f472d91600308be8b827a929955ec66afe81aca50c99968"
+  },
+  {
+    "id": "zf_085",
+    "speakerId": 49,
+    "wavSha256": "180a51463c0ad66b903997809959818391764850d9edc364200a9620d51ccb82",
+    "durationSeconds": 5.81175,
+    "voiceWeightSha256": "2451d63f576c9ffbe91acd11f2720b6e76dc75b293d7350a9620a28c23da9ef8"
+  },
+  {
+    "id": "zf_086",
+    "speakerId": 50,
+    "wavSha256": "44b67f1aa73e47eff0ad9d230018d2930ab2236cd6e05c7d816a4f46892aa358",
+    "durationSeconds": 5.353708,
+    "voiceWeightSha256": "c228ba018bf56d5de1339bde10dcbea7700797b85351e4d57ee5307ac7d3ee99"
+  },
+  {
+    "id": "zf_087",
+    "speakerId": 51,
+    "wavSha256": "6a4e992d2c7379dfd830378b8c58acb1318d6c5a2d2090d6fb1556747f845def",
+    "durationSeconds": 5.972958,
+    "voiceWeightSha256": "e0347f1430b80781d910bf1499cf64d231c34b70d6e46f30f3598254d5114d44"
+  },
+  {
+    "id": "zf_088",
+    "speakerId": 52,
+    "wavSha256": "2108de14f63605973c9fbe0deda41ff367bfc87289823d4497f8bdbe8799765e",
+    "durationSeconds": 4.873458,
+    "voiceWeightSha256": "ee1e80cdeaffb55e1f6c41005c4966b8979b16bb808fa451739e06953d343c13"
+  },
+  {
+    "id": "zf_090",
+    "speakerId": 53,
+    "wavSha256": "6e3fc5ce121184b737c53eee7bbce80ec45ef99da56633cdc65a89d19014927f",
+    "durationSeconds": 5.9725,
+    "voiceWeightSha256": "fe90b3e651c3741edf6bc08a543c531c798ec53fab1fd944ab537e9257270c68"
+  },
+  {
+    "id": "zf_092",
+    "speakerId": 54,
+    "wavSha256": "f6f89ccedd59857f4a3a138ad9cac38622464c390e27edb7549b06cd292b0d35",
+    "durationSeconds": 5.021083,
+    "voiceWeightSha256": "ffd200defd2867f79886eb0e45540d53ed0dc00ceb222c5fa692f004958d3e11"
+  },
+  {
+    "id": "zf_093",
+    "speakerId": 55,
+    "wavSha256": "e549f3b6cb6bad82faf357b4cd3699c393c6e3d2e3b76f3b8d30ce03c6fc2bcd",
+    "durationSeconds": 5.283042,
+    "voiceWeightSha256": "d736ac1738c5ba567f8e5e9bfac8d9a774e9e3a3d001b5976a5d005c9179f811"
+  },
+  {
+    "id": "zf_094",
+    "speakerId": 56,
+    "wavSha256": "1dd29d09b4786339cf8ccf9b3c58143553c47d1ba104b79ea156640fc73ffb26",
+    "durationSeconds": 5.650042,
+    "voiceWeightSha256": "b37b96e3c51d12f152c9476cae42396ac38cdab76f09cc935f2fbcd8fa012f42"
+  },
+  {
+    "id": "zf_099",
+    "speakerId": 57,
+    "wavSha256": "ff26eec4b6c5511912f9c0049d805e4d866046029e436b9c25f1d679ed504be1",
+    "durationSeconds": 5.578625,
+    "voiceWeightSha256": "9582b2ffb5027c695f6775161a8856108fa68530c6c1e29d2354d455d9eaa937"
+  },
+  {
+    "id": "zm_009",
+    "speakerId": 58,
+    "wavSha256": "3605aed03975517497ea33cacd1db656483b2e64be57ade5c759bae3dfbbb78a",
+    "durationSeconds": 4.594083,
+    "voiceWeightSha256": "7b74d6ed22f201e2fa28758e78ce6197082779f2b80e69ea1bf877908609514a"
+  },
+  {
+    "id": "zm_010",
+    "speakerId": 59,
+    "wavSha256": "3967f6174a35cb6bd116c4cb8f07b82fc2c8f6fbe76f3ccc55b8d18f40c87748",
+    "durationSeconds": 4.697417,
+    "voiceWeightSha256": "73b088f7e0dc47adca4d6a642ee68843df90ff56ec2800c29d96609989d6de0a"
+  },
+  {
+    "id": "zm_011",
+    "speakerId": 60,
+    "wavSha256": "482d0bd633282a66b573f38110b57cd312ca28a7fd9563f6e7043906036847e8",
+    "durationSeconds": 4.663667,
+    "voiceWeightSha256": "ec4d7d934b9aa47e0e98e6ec802bb7b0a221be6f1b67d923d33b7082d9bbfe9f"
+  },
+  {
+    "id": "zm_012",
+    "speakerId": 61,
+    "wavSha256": "bffe3d097eb68f73002d7e8c7c8cf5a2f36e1527a025ee39f59682f6bbe85f86",
+    "durationSeconds": 5.055083,
+    "voiceWeightSha256": "50d1986f71ea1a2b3ab1bfc0c95bedc59e8de45e650bc5bde87fd99ceb83cdfb"
+  },
+  {
+    "id": "zm_013",
+    "speakerId": 62,
+    "wavSha256": "28ce626716d0c74ac58cd400018304a9f49f5705f623ed8144a047307f1f8ed2",
+    "durationSeconds": 4.394833,
+    "voiceWeightSha256": "2caa23e98910fb232a2bf6aab563666588a82bc37c99b67963ab304c5be66dff"
+  },
+  {
+    "id": "zm_014",
+    "speakerId": 63,
+    "wavSha256": "6a3a3331b49e4d3ec3456305113c9d563bd358929fffbc494038d5707268c9e4",
+    "durationSeconds": 5.107958,
+    "voiceWeightSha256": "565aa48a99d8a196ebdd1c72f4a0e5760fed65aa95992c887385d3aad9e1d2f8"
+  },
+  {
+    "id": "zm_015",
+    "speakerId": 64,
+    "wavSha256": "61fc3b625788b61a77151a195d5e2b306e7e71050b48fdb5473eccd09897fe2f",
+    "durationSeconds": 4.867708,
+    "voiceWeightSha256": "e695c8d72b3eb4a864f4735db7f4f93de100ff62704e619edfddbebfafb07312"
+  },
+  {
+    "id": "zm_016",
+    "speakerId": 65,
+    "wavSha256": "740afb80d0780c7dfbaa18ada614c8171d8e52c348c394ef140620f50d276de4",
+    "durationSeconds": 5.366042,
+    "voiceWeightSha256": "4dc408a11f1e8925ff8bca40c885e7596d08be63c2c61571234b96170f8e6d1b"
+  },
+  {
+    "id": "zm_020",
+    "speakerId": 66,
+    "wavSha256": "a760ab7e79f40926d9eef9634294724eedec8c8f82f51d06cbdaabce673c3e86",
+    "durationSeconds": 6.996583,
+    "voiceWeightSha256": "2a25ca83ddfd003c0b82d97899ff38734db8faf48e5e4076d68c69aea17705c8"
+  },
+  {
+    "id": "zm_025",
+    "speakerId": 67,
+    "wavSha256": "071f7a4c935013a41f0234414b44315494590e989a0a952883bd76e6eff14fd6",
+    "durationSeconds": 5.0865,
+    "voiceWeightSha256": "cbb4cd1df85b5dde4cf742c61d9b93e179574935c1162d06604bc4be6a8e990d"
+  },
+  {
+    "id": "zm_029",
+    "speakerId": 68,
+    "wavSha256": "15ef530e018deabdcd3544d8e6ffc54964d72288bd9779eba8f6352b3453d7f9",
+    "durationSeconds": 5.42275,
+    "voiceWeightSha256": "ff78cb9f64d43fe6179c9479257775bea94dc31eade9362b0c630749025d8ecd"
+  },
+  {
+    "id": "zm_030",
+    "speakerId": 69,
+    "wavSha256": "eb9a1dafa69dc5f9ed33af68b100af2d8cb5b08145097d13a0c664e4d0dd04b6",
+    "durationSeconds": 5.424417,
+    "voiceWeightSha256": "32f8fe4d5f626dfb67adb73499690fd4f5952763746efbcadcf2daad4a3560a6"
+  },
+  {
+    "id": "zm_031",
+    "speakerId": 70,
+    "wavSha256": "59c938ec663b3f942a6a136d4c2fcbb76ac8a57dd6add18a47270e81b2573a03",
+    "durationSeconds": 6.552958,
+    "voiceWeightSha256": "a5974232ed634be2ae40526101ee7c653120fdb354b1584f2bb38ed4fae4a39e"
+  },
+  {
+    "id": "zm_033",
+    "speakerId": 71,
+    "wavSha256": "654d61e93308c5690af5ce4436538000308c33c2f80fd23eba65e51e9b91ad63",
+    "durationSeconds": 5.396458,
+    "voiceWeightSha256": "758e64c15efad492beebf575eb96951e0500da980bf5e8a3850d078d0430dda1"
+  },
+  {
+    "id": "zm_034",
+    "speakerId": 72,
+    "wavSha256": "2edf3c21d7319816a791d776a94db8b925269ed911344697b740b118730789ce",
+    "durationSeconds": 5.392,
+    "voiceWeightSha256": "b371bef26b75c826de15c836103da3e037a44f605ffe744d68ad485d17e370ab"
+  },
+  {
+    "id": "zm_035",
+    "speakerId": 73,
+    "wavSha256": "2091481974b70ef85e5f7742fd3f494693550b2f1184a63cdc72f3436b657c3b",
+    "durationSeconds": 6.224542,
+    "voiceWeightSha256": "8b1c603f6e1eae300ac1a6f1199a5bb1ce9814d3e1e61f7536d21b564d680476"
+  },
+  {
+    "id": "zm_037",
+    "speakerId": 74,
+    "wavSha256": "d2879a5a2a0693c8d1b910b44522aa46587a5c610a5dd09309930ee4b20375cf",
+    "durationSeconds": 5.75,
+    "voiceWeightSha256": "535ec47cb6ed66c203f61ace51eddbc7a13ecaca2458c1d8d5a928fb3db4b315"
+  },
+  {
+    "id": "zm_041",
+    "speakerId": 75,
+    "wavSha256": "d6e526cdf90243cb4c75063111da0234a79ed85663c8e5c51cac2d6262c0340a",
+    "durationSeconds": 5.092375,
+    "voiceWeightSha256": "8b7bd5649a00c62e87a6099eb31d683664bfb0fd55bcd5211da62e95b3b78ffc"
+  },
+  {
+    "id": "zm_045",
+    "speakerId": 76,
+    "wavSha256": "4d61a56da5b188964517edeabe740dea2b14e5c764f9cf3b6c6233cf22d6f449",
+    "durationSeconds": 4.982,
+    "voiceWeightSha256": "68d5e7f3415811a076326178c2d9f5d3aa168cf27deb6ae3f0395ab97ad45225"
+  },
+  {
+    "id": "zm_050",
+    "speakerId": 77,
+    "wavSha256": "3f6c0637c66e91599fe1fe02ec0b64789ac0c902a03915ded407770e47f9dddb",
+    "durationSeconds": 5.067,
+    "voiceWeightSha256": "7869f25a5e71ea9b67a1893777e375ac411bdbfb75feff5efe25fad2fc766c8d"
+  },
+  {
+    "id": "zm_052",
+    "speakerId": 78,
+    "wavSha256": "75632fd6eb5ac37c4f391232a16527c7cc421274bc5bd4eb3079359355a128ee",
+    "durationSeconds": 5.52375,
+    "voiceWeightSha256": "e775a71cd74c5462d5a6c3f0ff7681f04419053043ad2dcbabaa13d0c6de0b08"
+  },
+  {
+    "id": "zm_053",
+    "speakerId": 79,
+    "wavSha256": "f7d2fa3da7ccebd4c9b5569cadfcc8032e6b7da6fc7635c20c0711dcf79fc5d5",
+    "durationSeconds": 6.244792,
+    "voiceWeightSha256": "a549dcf0456b2ba1515455e0a30d111b00d24e748880e03da1965cd4ff10baf7"
+  },
+  {
+    "id": "zm_054",
+    "speakerId": 80,
+    "wavSha256": "ccd7b18c777e56016415a359bb06225a350bc3c7c6377645c14e59a122cde879",
+    "durationSeconds": 6.478375,
+    "voiceWeightSha256": "4f7aeb1627fa1d406bcc1a83e4eeb8b014509dca492dec0ae7dd4d0d1cdbe8b3"
+  },
+  {
+    "id": "zm_055",
+    "speakerId": 81,
+    "wavSha256": "fbf4e798bb6322b8f08bd0ef4436033abf7728dfbe76e626a5e8912bd3ff62b7",
+    "durationSeconds": 5.273042,
+    "voiceWeightSha256": "3cf77a37899053b5a7c224f51a22371dc37d30667d87e1b481e760ac0f8f0da8"
+  },
+  {
+    "id": "zm_056",
+    "speakerId": 82,
+    "wavSha256": "8e610ea4dd0c9b94d7ccbf7e90a9fe8966ba5190c669146e27e24bf64874bb93",
+    "durationSeconds": 6.213708,
+    "voiceWeightSha256": "d5f48143152f376a940182741589fb1f588387e09f1a9263760981f8702af816"
+  },
+  {
+    "id": "zm_057",
+    "speakerId": 83,
+    "wavSha256": "d506dd17833019376f3facf9ddd1ee82d75a37f616c8e13437d00e0792392cc1",
+    "durationSeconds": 5.624875,
+    "voiceWeightSha256": "29cb23f82add956f25c7b663db2027d5a50abb7035c7cb15ee608e193a412f51"
+  },
+  {
+    "id": "zm_058",
+    "speakerId": 84,
+    "wavSha256": "375e88c5317211c4643415ee704f4e7adfcebab5acf7e7d01a4f31212c8031a3",
+    "durationSeconds": 5.124083,
+    "voiceWeightSha256": "0cafc2ef83710c4ce55b384107426cfdcb23aabf5699e106ff392f9571b4d4f3"
+  },
+  {
+    "id": "zm_061",
+    "speakerId": 85,
+    "wavSha256": "8263b27201d29f66ba62fc457f46037f1f37d96d6be7a0c951050672fa1ce52a",
+    "durationSeconds": 5.86425,
+    "voiceWeightSha256": "d57141bd480e7a4f1a3b5d3365ce53ac04cfe6dd9d0f2d3a052213f80657046d"
+  },
+  {
+    "id": "zm_062",
+    "speakerId": 86,
+    "wavSha256": "b09251b4af459e39fcde573d6f3e85ea1b2948319158738fdb9c61112755205c",
+    "durationSeconds": 6.040083,
+    "voiceWeightSha256": "171d8811bfeb198714b0d3733ed740eb56be0aa3e6d2bd7b127904116a199f93"
+  },
+  {
+    "id": "zm_063",
+    "speakerId": 87,
+    "wavSha256": "9c2e50e38f2aee17f024e203985b50cf7d4395a896759fb9e050d451857b6ba3",
+    "durationSeconds": 5.518208,
+    "voiceWeightSha256": "6fbe326e5852cd9dbac7eb7e9c9989a604e51074d251a8ff8365e050c83b2a6e"
+  },
+  {
+    "id": "zm_064",
+    "speakerId": 88,
+    "wavSha256": "20be4b690b67af35b80ee1d18f254a4db1e2626a7ecd346c35ed8915c7cd0d78",
+    "durationSeconds": 6.517667,
+    "voiceWeightSha256": "6e712d18758f2d8654c97fb274c23b5148dbafc1027ee6539446d4c8aff308cd"
+  },
+  {
+    "id": "zm_065",
+    "speakerId": 89,
+    "wavSha256": "6a356a127bd7c79accac396d85e515e33a5da8001585e2cc97a9107566eb1a1e",
+    "durationSeconds": 6.001458,
+    "voiceWeightSha256": "77918a32b75bf7902a6cee310cd22fb16de7ecbb9aa438a05039ebec73f9e0e8"
+  },
+  {
+    "id": "zm_066",
+    "speakerId": 90,
+    "wavSha256": "bc4d6eba116c6552d5e3e1c9dd07bc1533da2928d60083506abff7c1d29794d5",
+    "durationSeconds": 5.326583,
+    "voiceWeightSha256": "fcdd1d4c8b2808c4456418c76ed2321910b3f1b5c2646365af4ee0e8c6c53c4d"
+  },
+  {
+    "id": "zm_068",
+    "speakerId": 91,
+    "wavSha256": "ea719a2abd2c07621fbdb99bc049e09bbb7e826c1a8753177acff59badf22d58",
+    "durationSeconds": 5.978,
+    "voiceWeightSha256": "ae265665e29656ea0d151f3315c649d892ecf053391c3c3bec5f10bf18531a58"
+  },
+  {
+    "id": "zm_069",
+    "speakerId": 92,
+    "wavSha256": "b4aea2e9265a5edc96a6ffe59423299f6bd15f4372057897335608395a2798ce",
+    "durationSeconds": 6.143167,
+    "voiceWeightSha256": "54ac2dc25ee5d1dfa72f777ff538faf69033705019a9e15f3138deb79a965774"
+  },
+  {
+    "id": "zm_080",
+    "speakerId": 93,
+    "wavSha256": "ebf75468654038a6a9a34c702de0f3437a9fe27c7b29af810ada849d3c041e52",
+    "durationSeconds": 6.558333,
+    "voiceWeightSha256": "cbbcae6bfd6c2f3875b2163fffc8851aeae1b8bad2f1006a94ea4e6f9b44ae9e"
+  },
+  {
+    "id": "zm_081",
+    "speakerId": 94,
+    "wavSha256": "95c64881b929582a5495e91cf67235f3b6367b72f84213ce3a053d3264b7049a",
+    "durationSeconds": 6.499417,
+    "voiceWeightSha256": "ffc1341f044c95ad8ef598079df9e3a85d81d093268ae8422848a9b81d386fd2"
+  },
+  {
+    "id": "zm_082",
+    "speakerId": 95,
+    "wavSha256": "5500ab4a661157b8740a41a1305bdb29437bf03531538f5bc6a8638fbd432813",
+    "durationSeconds": 5.461708,
+    "voiceWeightSha256": "7351d7652d97ec5fcb7632b317d7c4e062fff3cf4ed0246167d3d15e97046c01"
+  },
+  {
+    "id": "zm_089",
+    "speakerId": 96,
+    "wavSha256": "1167305084a8afbc1b5d4c91caae9048f7dfd58ac01926fa06292d69d1fc84f7",
+    "durationSeconds": 5.59,
+    "voiceWeightSha256": "f4315ceab376b4082cc9cdd8028d37f9aa7d43ad67ddb85902a247df0913ca89"
+  },
+  {
+    "id": "zm_091",
+    "speakerId": 97,
+    "wavSha256": "4aaaaa33c03a6270e68b8d07ddd976964afae6e884fad091e1b8c3daabd5bb2c",
+    "durationSeconds": 5.55275,
+    "voiceWeightSha256": "6ab4a21b702ec57161f48e350de3fa0b0bd1d13a890657398cfa21452d85a9b3"
+  },
+  {
+    "id": "zm_095",
+    "speakerId": 98,
+    "wavSha256": "cdb568ff5c8eb7e7eba9cecc8bcf94c7219bccda586e9a38b67439de1e8baf6e",
+    "durationSeconds": 5.208583,
+    "voiceWeightSha256": "4d4dac7245ea4c4c4740137fca229932055e376aed2b1ad7cd0e3e3859a13b75"
+  },
+  {
+    "id": "zm_096",
+    "speakerId": 99,
+    "wavSha256": "499f7c6b4c9233028ba2fa1c6ce191a1b56aa7710642a3496e79087d1fcfbc4e",
+    "durationSeconds": 5.100833,
+    "voiceWeightSha256": "e6b76d86ca459d8ce87d2a41c812319b11e9563ecf1ba80a4e86a368d6c02fbc"
+  },
+  {
+    "id": "zm_097",
+    "speakerId": 100,
+    "wavSha256": "98ed1c70bc0090ff32a6c54820d1ed6521eb6e3304e9d69cba047541fa6e471d",
+    "durationSeconds": 5.132292,
+    "voiceWeightSha256": "e60ec05738261c2eb13c43f7429ece6b32e0992223b0a6336a9fcdec90fb8da4"
+  },
+  {
+    "id": "zm_098",
+    "speakerId": 101,
+    "wavSha256": "ed319c6b0c40ddcbe1260c3a1dd242c12d4cfece298b93a0f824d5910e07e5f9",
+    "durationSeconds": 6.21475,
+    "voiceWeightSha256": "7dd142334e863af31c7e0d0fbe491b8d54083ff5322441d550fcfc5e4111480d"
+  },
+  {
+    "id": "zm_100",
+    "speakerId": 102,
+    "wavSha256": "ff09a0ce13f5be9517280c8be785b55da106f050a7a19335e875e1143fe72fc9",
+    "durationSeconds": 6.159958,
+    "voiceWeightSha256": "112de52f1aab3b370fd01f4e2e1d8bb37fee2725e77e14b81c802d50687e0e6e"
+  }
+]

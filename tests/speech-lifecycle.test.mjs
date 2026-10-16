@@ -6,6 +6,7 @@ import * as vue from 'vue'
 import { createProject, createTextClip } from '../src/core/project.ts'
 import { addClip, clipDuration } from '../src/core/timeline.ts'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity } from '../src/core/speech.ts'
+import { compactVoiceCatalog } from '../src/core/voice-catalog.ts'
 
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 function fixture() {
@@ -27,7 +28,7 @@ function panel(overrides = {}, options = {}) {
     ref: vue.ref, computed: vue.computed, watch: vue.watch, nextTick: vue.nextTick,
     onBeforeUnmount: callback => unmount.push(callback), defineProps: () => props,
     defineEmits: () => (...event) => { events.push(event); if (event[0] === 'change' && options.applyChanges !== false) props.project = event[1] }, defineExpose: () => {},
-    planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, isDesktop: () => true,
+    planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, isDesktop: () => true,
     getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }),
     beginSpeechJob: async request => { calls.push(['begin', request]); return complete(request) },
     getSpeechJob: async id => { throw new Error(`unexpected poll ${id}`) },

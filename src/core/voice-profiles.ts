@@ -16,9 +16,10 @@ export const VOICE_PROFILE_SOURCE = {
   englishSample: 'Welcome. The morning sunlight falls gently through the window.',
   speed: 1,
   sampleRate: 24000,
+  silenceScale: 0.2,
 } as const
 
-// Stable descriptions of the bundled voices, sampled with the same text at 1× speed.
+// Historical voice measurements use the settings above, not current playback durations.
 // Details and measurement limits are recorded in docs/VOICE_PROFILES.md.
 export const VOICE_PROFILE_THRESHOLDS = {
   "zh-male": {

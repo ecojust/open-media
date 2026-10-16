@@ -1,0 +1,948 @@
+{
+  "source": {
+    "archiveSha256": "a1e94694776049035c4f2c6529f003aaece993c76aae9a78995831c3c4dcafc6",
+    "weightsSha256": "e64a5a581d8c2a350d848f51c3121657cd83aa07ed6109172177345874a7244c",
+    "modelSha256": "bda15858163726a492d02a9a727bc263551b86ac77f90812c4b30ff41d380e26",
+    "audioSampleCount": 103,
+    "chineseText": "你好，欢迎听这段声音。阳光洒在安静的窗边。",
+    "englishText": "Welcome. The morning sunlight falls gently through the window.",
+    "speed": 1,
+    "silenceScale": 0.2,
+    "sampleRate": 24000,
+    "allWaveformsDistinct": true,
+    "allVoiceWeightBlocksDistinct": true,
+    "numpyVersion": "2.3.5",
+    "scipyVersion": "1.17.0"
+  },
+  "method": {
+    "description": "Greedy representative coverage within Chinese gender categories; every member must directly meet both bounds with its representative. Retain zf_001 and all 3 English voices. Assign to the most similar eligible representative; representatives assign to themselves. Never use transitive equivalence.",
+    "weightFeatures": "Mean across 510 length-conditioned vectors, cosine similarity of resulting 256 dimensions.",
+    "acousticFeatures": "Real same-text WAV; 24kHz Hann STFT length600 hop240 FFT1024; frames power sum >0.00012; 40 mel bands 70–10000Hz; natural-log power DCT-II normalized, coefficients1–16 mean+std. Standardize32 dimensions within Chinese gender; Euclidean distance /sqrt(32).",
+    "minimumWeightCosine": 0.7,
+    "maximumAcousticDistance": 1.4,
+    "selectionTieBreak": "Maximum uncovered eligible member count, then highest total latent similarity across remaining members, then lower speakerId.",
+    "limitations": "Engineering thresholds for a smaller default catalogue, not perceptual identity. Single short fixed text; no human blind listening or trained speaker identity model. MFCC captures spectral shape and some pronunciation, not all emotion/accent. Source audio used historical silenceScale0.2. Current1.0 changes pauses, so do not describe historical durations as current synthesis. No model resources or old-project IDs should be removed."
+  },
+  "representativeIds": [
+    "zm_013",
+    "zm_014",
+    "zm_020",
+    "zm_029",
+    "zm_031",
+    "zm_033",
+    "zm_045",
+    "zm_052",
+    "zm_057",
+    "zm_066",
+    "zf_001",
+    "zf_002",
+    "zf_004",
+    "zf_019",
+    "zf_022",
+    "zf_038",
+    "zf_046",
+    "zf_047",
+    "zf_059",
+    "zf_067",
+    "zf_073",
+    "zf_093",
+    "af_maple",
+    "af_sol",
+    "bf_vale"
+  ],
+  "groups": [
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_013",
+      "speakerId": 62,
+      "style": "deep",
+      "members": [
+        "zm_010",
+        "zm_011",
+        "zm_012",
+        "zm_013",
+        "zm_034",
+        "zm_097"
+      ],
+      "evidence": [
+        {
+          "id": "zm_010",
+          "weightCosine": 0.823276,
+          "acousticDistance": 0.984607
+        },
+        {
+          "id": "zm_011",
+          "weightCosine": 0.839698,
+          "acousticDistance": 1.124283
+        },
+        {
+          "id": "zm_012",
+          "weightCosine": 0.781863,
+          "acousticDistance": 1.064463
+        },
+        {
+          "id": "zm_013",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_034",
+          "weightCosine": 0.798378,
+          "acousticDistance": 0.885272
+        },
+        {
+          "id": "zm_097",
+          "weightCosine": 0.768863,
+          "acousticDistance": 1.003391
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_014",
+      "speakerId": 63,
+      "style": "deep",
+      "members": [
+        "zm_009",
+        "zm_014",
+        "zm_015",
+        "zm_016",
+        "zm_030",
+        "zm_035",
+        "zm_064"
+      ],
+      "evidence": [
+        {
+          "id": "zm_009",
+          "weightCosine": 0.77083,
+          "acousticDistance": 1.285172
+        },
+        {
+          "id": "zm_014",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_015",
+          "weightCosine": 0.743677,
+          "acousticDistance": 1.274302
+        },
+        {
+          "id": "zm_016",
+          "weightCosine": 0.732236,
+          "acousticDistance": 1.385807
+        },
+        {
+          "id": "zm_030",
+          "weightCosine": 0.797835,
+          "acousticDistance": 1.24807
+        },
+        {
+          "id": "zm_035",
+          "weightCosine": 0.792427,
+          "acousticDistance": 1.220127
+        },
+        {
+          "id": "zm_064",
+          "weightCosine": 0.753583,
+          "acousticDistance": 1.087725
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_020",
+      "speakerId": 66,
+      "style": "bright",
+      "members": [
+        "zm_020",
+        "zm_041"
+      ],
+      "evidence": [
+        {
+          "id": "zm_020",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_041",
+          "weightCosine": 0.736393,
+          "acousticDistance": 1.311885
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_029",
+      "speakerId": 68,
+      "style": "deep",
+      "members": [
+        "zm_029"
+      ],
+      "evidence": [
+        {
+          "id": "zm_029",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_031",
+      "speakerId": 70,
+      "style": "relaxed",
+      "members": [
+        "zm_031",
+        "zm_037"
+      ],
+      "evidence": [
+        {
+          "id": "zm_031",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_037",
+          "weightCosine": 0.743741,
+          "acousticDistance": 1.276437
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_033",
+      "speakerId": 71,
+      "style": "deep",
+      "members": [
+        "zm_033"
+      ],
+      "evidence": [
+        {
+          "id": "zm_033",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_045",
+      "speakerId": 76,
+      "style": "bright",
+      "members": [
+        "zm_045",
+        "zm_050",
+        "zm_056",
+        "zm_058",
+        "zm_061",
+        "zm_069",
+        "zm_080",
+        "zm_096"
+      ],
+      "evidence": [
+        {
+          "id": "zm_045",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_050",
+          "weightCosine": 0.856571,
+          "acousticDistance": 1.175724
+        },
+        {
+          "id": "zm_056",
+          "weightCosine": 0.795133,
+          "acousticDistance": 1.284826
+        },
+        {
+          "id": "zm_058",
+          "weightCosine": 0.763386,
+          "acousticDistance": 1.378386
+        },
+        {
+          "id": "zm_061",
+          "weightCosine": 0.746969,
+          "acousticDistance": 1.215958
+        },
+        {
+          "id": "zm_069",
+          "weightCosine": 0.781321,
+          "acousticDistance": 1.118367
+        },
+        {
+          "id": "zm_080",
+          "weightCosine": 0.700048,
+          "acousticDistance": 1.007786
+        },
+        {
+          "id": "zm_096",
+          "weightCosine": 0.725217,
+          "acousticDistance": 0.901764
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_052",
+      "speakerId": 78,
+      "style": "bright",
+      "members": [
+        "zm_052",
+        "zm_100"
+      ],
+      "evidence": [
+        {
+          "id": "zm_052",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_100",
+          "weightCosine": 0.792628,
+          "acousticDistance": 1.290904
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_057",
+      "speakerId": 83,
+      "style": "natural",
+      "members": [
+        "zm_053",
+        "zm_054",
+        "zm_055",
+        "zm_057",
+        "zm_062",
+        "zm_065",
+        "zm_082",
+        "zm_095",
+        "zm_098"
+      ],
+      "evidence": [
+        {
+          "id": "zm_053",
+          "weightCosine": 0.830699,
+          "acousticDistance": 1.169912
+        },
+        {
+          "id": "zm_054",
+          "weightCosine": 0.789749,
+          "acousticDistance": 1.073759
+        },
+        {
+          "id": "zm_055",
+          "weightCosine": 0.814817,
+          "acousticDistance": 1.167029
+        },
+        {
+          "id": "zm_057",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_062",
+          "weightCosine": 0.804826,
+          "acousticDistance": 1.146964
+        },
+        {
+          "id": "zm_065",
+          "weightCosine": 0.716464,
+          "acousticDistance": 1.038301
+        },
+        {
+          "id": "zm_082",
+          "weightCosine": 0.77395,
+          "acousticDistance": 1.191842
+        },
+        {
+          "id": "zm_095",
+          "weightCosine": 0.706335,
+          "acousticDistance": 1.38859
+        },
+        {
+          "id": "zm_098",
+          "weightCosine": 0.754164,
+          "acousticDistance": 1.035017
+        }
+      ]
+    },
+    {
+      "category": "zh-male",
+      "locale": "zh-CN",
+      "representativeId": "zm_066",
+      "speakerId": 90,
+      "style": "natural",
+      "members": [
+        "zm_025",
+        "zm_063",
+        "zm_066",
+        "zm_068",
+        "zm_081",
+        "zm_089",
+        "zm_091"
+      ],
+      "evidence": [
+        {
+          "id": "zm_025",
+          "weightCosine": 0.720903,
+          "acousticDistance": 1.32137
+        },
+        {
+          "id": "zm_063",
+          "weightCosine": 0.78226,
+          "acousticDistance": 1.184849
+        },
+        {
+          "id": "zm_066",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zm_068",
+          "weightCosine": 0.799756,
+          "acousticDistance": 1.186333
+        },
+        {
+          "id": "zm_081",
+          "weightCosine": 0.754071,
+          "acousticDistance": 1.1446
+        },
+        {
+          "id": "zm_089",
+          "weightCosine": 0.842029,
+          "acousticDistance": 0.840073
+        },
+        {
+          "id": "zm_091",
+          "weightCosine": 0.847215,
+          "acousticDistance": 0.863026
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_001",
+      "speakerId": 3,
+      "style": "bright",
+      "members": [
+        "zf_001",
+        "zf_018",
+        "zf_021",
+        "zf_042"
+      ],
+      "evidence": [
+        {
+          "id": "zf_001",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_018",
+          "weightCosine": 0.733231,
+          "acousticDistance": 1.013357
+        },
+        {
+          "id": "zf_021",
+          "weightCosine": 0.741157,
+          "acousticDistance": 0.9309
+        },
+        {
+          "id": "zf_042",
+          "weightCosine": 0.787223,
+          "acousticDistance": 1.025137
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_002",
+      "speakerId": 4,
+      "style": "deep",
+      "members": [
+        "zf_002",
+        "zf_003",
+        "zf_006",
+        "zf_007",
+        "zf_008",
+        "zf_023",
+        "zf_026",
+        "zf_036",
+        "zf_088"
+      ],
+      "evidence": [
+        {
+          "id": "zf_002",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_003",
+          "weightCosine": 0.83445,
+          "acousticDistance": 0.772616
+        },
+        {
+          "id": "zf_006",
+          "weightCosine": 0.758713,
+          "acousticDistance": 1.105237
+        },
+        {
+          "id": "zf_007",
+          "weightCosine": 0.73669,
+          "acousticDistance": 1.298429
+        },
+        {
+          "id": "zf_008",
+          "weightCosine": 0.707634,
+          "acousticDistance": 0.992004
+        },
+        {
+          "id": "zf_023",
+          "weightCosine": 0.768616,
+          "acousticDistance": 0.826865
+        },
+        {
+          "id": "zf_026",
+          "weightCosine": 0.724728,
+          "acousticDistance": 1.152715
+        },
+        {
+          "id": "zf_036",
+          "weightCosine": 0.750407,
+          "acousticDistance": 1.134573
+        },
+        {
+          "id": "zf_088",
+          "weightCosine": 0.761726,
+          "acousticDistance": 0.762378
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_004",
+      "speakerId": 6,
+      "style": "natural",
+      "members": [
+        "zf_004",
+        "zf_005",
+        "zf_028"
+      ],
+      "evidence": [
+        {
+          "id": "zf_004",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_005",
+          "weightCosine": 0.717665,
+          "acousticDistance": 0.917428
+        },
+        {
+          "id": "zf_028",
+          "weightCosine": 0.717325,
+          "acousticDistance": 1.202357
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_019",
+      "speakerId": 13,
+      "style": "deep",
+      "members": [
+        "zf_019",
+        "zf_099"
+      ],
+      "evidence": [
+        {
+          "id": "zf_019",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_099",
+          "weightCosine": 0.827486,
+          "acousticDistance": 0.992694
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_022",
+      "speakerId": 15,
+      "style": "deep",
+      "members": [
+        "zf_022",
+        "zf_027",
+        "zf_094"
+      ],
+      "evidence": [
+        {
+          "id": "zf_022",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_027",
+          "weightCosine": 0.712313,
+          "acousticDistance": 0.9268
+        },
+        {
+          "id": "zf_094",
+          "weightCosine": 0.7053,
+          "acousticDistance": 0.822232
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_038",
+      "speakerId": 23,
+      "style": "bright",
+      "members": [
+        "zf_038"
+      ],
+      "evidence": [
+        {
+          "id": "zf_038",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_046",
+      "speakerId": 29,
+      "style": "deep",
+      "members": [
+        "zf_046",
+        "zf_079"
+      ],
+      "evidence": [
+        {
+          "id": "zf_046",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_079",
+          "weightCosine": 0.922786,
+          "acousticDistance": 0.856342
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_047",
+      "speakerId": 30,
+      "style": "deep",
+      "members": [
+        "zf_032",
+        "zf_040",
+        "zf_047",
+        "zf_051"
+      ],
+      "evidence": [
+        {
+          "id": "zf_032",
+          "weightCosine": 0.792985,
+          "acousticDistance": 1.064842
+        },
+        {
+          "id": "zf_040",
+          "weightCosine": 0.812753,
+          "acousticDistance": 1.08364
+        },
+        {
+          "id": "zf_047",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_051",
+          "weightCosine": 0.804412,
+          "acousticDistance": 1.142551
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_059",
+      "speakerId": 34,
+      "style": "natural",
+      "members": [
+        "zf_039",
+        "zf_044",
+        "zf_048",
+        "zf_049",
+        "zf_059",
+        "zf_060"
+      ],
+      "evidence": [
+        {
+          "id": "zf_039",
+          "weightCosine": 0.758803,
+          "acousticDistance": 1.094655
+        },
+        {
+          "id": "zf_044",
+          "weightCosine": 0.774246,
+          "acousticDistance": 1.014297
+        },
+        {
+          "id": "zf_048",
+          "weightCosine": 0.800909,
+          "acousticDistance": 0.768671
+        },
+        {
+          "id": "zf_049",
+          "weightCosine": 0.788798,
+          "acousticDistance": 1.170028
+        },
+        {
+          "id": "zf_059",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_060",
+          "weightCosine": 0.825335,
+          "acousticDistance": 1.067116
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_067",
+      "speakerId": 36,
+      "style": "bright",
+      "members": [
+        "zf_024",
+        "zf_067",
+        "zf_071",
+        "zf_075",
+        "zf_076",
+        "zf_077",
+        "zf_078",
+        "zf_083",
+        "zf_085",
+        "zf_086",
+        "zf_087",
+        "zf_092"
+      ],
+      "evidence": [
+        {
+          "id": "zf_024",
+          "weightCosine": 0.744258,
+          "acousticDistance": 1.110969
+        },
+        {
+          "id": "zf_067",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_071",
+          "weightCosine": 0.743646,
+          "acousticDistance": 1.130195
+        },
+        {
+          "id": "zf_075",
+          "weightCosine": 0.82738,
+          "acousticDistance": 0.936313
+        },
+        {
+          "id": "zf_076",
+          "weightCosine": 0.808716,
+          "acousticDistance": 0.860504
+        },
+        {
+          "id": "zf_077",
+          "weightCosine": 0.806362,
+          "acousticDistance": 0.971336
+        },
+        {
+          "id": "zf_078",
+          "weightCosine": 0.706628,
+          "acousticDistance": 1.152022
+        },
+        {
+          "id": "zf_083",
+          "weightCosine": 0.828737,
+          "acousticDistance": 0.85893
+        },
+        {
+          "id": "zf_085",
+          "weightCosine": 0.778384,
+          "acousticDistance": 1.074169
+        },
+        {
+          "id": "zf_086",
+          "weightCosine": 0.811606,
+          "acousticDistance": 0.769711
+        },
+        {
+          "id": "zf_087",
+          "weightCosine": 0.878261,
+          "acousticDistance": 0.955378
+        },
+        {
+          "id": "zf_092",
+          "weightCosine": 0.756988,
+          "acousticDistance": 1.104654
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_073",
+      "speakerId": 40,
+      "style": "bright",
+      "members": [
+        "zf_070",
+        "zf_073",
+        "zf_074",
+        "zf_084"
+      ],
+      "evidence": [
+        {
+          "id": "zf_070",
+          "weightCosine": 0.87918,
+          "acousticDistance": 1.270209
+        },
+        {
+          "id": "zf_073",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        },
+        {
+          "id": "zf_074",
+          "weightCosine": 0.934206,
+          "acousticDistance": 0.811184
+        },
+        {
+          "id": "zf_084",
+          "weightCosine": 0.864567,
+          "acousticDistance": 1.206018
+        }
+      ]
+    },
+    {
+      "category": "zh-female",
+      "locale": "zh-CN",
+      "representativeId": "zf_093",
+      "speakerId": 55,
+      "style": "bright",
+      "members": [
+        "zf_017",
+        "zf_043",
+        "zf_072",
+        "zf_090",
+        "zf_093"
+      ],
+      "evidence": [
+        {
+          "id": "zf_017",
+          "weightCosine": 0.822389,
+          "acousticDistance": 0.877705
+        },
+        {
+          "id": "zf_043",
+          "weightCosine": 0.79675,
+          "acousticDistance": 1.160734
+        },
+        {
+          "id": "zf_072",
+          "weightCosine": 0.79717,
+          "acousticDistance": 0.980112
+        },
+        {
+          "id": "zf_090",
+          "weightCosine": 0.785447,
+          "acousticDistance": 0.996746
+        },
+        {
+          "id": "zf_093",
+          "weightCosine": 1.0,
+          "acousticDistance": 0.0
+        }
+      ]
+    },
+    {
+      "category": "en-female",
+      "locale": "en-US",
+      "representativeId": "af_maple",
+      "speakerId": 0,
+      "style": "natural",
+      "members": [
+        "af_maple"
+      ],
+      "evidence": [
+        {
+          "id": "af_maple",
+          "weightCosine": 1,
+          "acousticDistance": 0
+        }
+      ]
+    },
+    {
+      "category": "en-female",
+      "locale": "en-US",
+      "representativeId": "af_sol",
+      "speakerId": 1,
+      "style": "natural",
+      "members": [
+        "af_sol"
+      ],
+      "evidence": [
+        {
+          "id": "af_sol",
+          "weightCosine": 1,
+          "acousticDistance": 0
+        }
+      ]
+    },
+    {
+      "category": "en-female",
+      "locale": "en-GB",
+      "representativeId": "bf_vale",
+      "speakerId": 2,
+      "style": "mature",
+      "members": [
+        "bf_vale"
+      ],
+      "evidence": [
+        {
+          "id": "bf_vale",
+          "weightCosine": 1,
+          "acousticDistance": 0
+        }
+      ]
+    }
+  ]
+}

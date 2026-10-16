@@ -1,0 +1,186 @@
+{
+  "representativeCount": 25,
+  "categoryEvidence": {
+    "zh-male": {
+      "voiceCount": 45,
+      "representativeCount": 10,
+      "weightAcousticDistanceSpearman": 0.48047662593887014,
+      "acousticDistancePercentiles": {
+        "0": 0.8199023614619192,
+        "25": 1.2059100666948637,
+        "50": 1.3764185569415988,
+        "75": 1.5493908772873541,
+        "95": 1.8973860272051775,
+        "100": 2.8766512196589074
+      }
+    },
+    "zh-female": {
+      "voiceCount": 55,
+      "representativeCount": 12,
+      "weightAcousticDistanceSpearman": 0.5753930638970889,
+      "acousticDistancePercentiles": {
+        "0": 0.6235764822413131,
+        "25": 1.1620131643950424,
+        "50": 1.3355264109077678,
+        "75": 1.5725909010589971,
+        "95": 2.016857324071185,
+        "100": 2.814233200371633
+      }
+    }
+  },
+  "minimumRepresentativeCosine": {
+    "id": "zm_080",
+    "weightCosine": 0.700048,
+    "acousticDistance": 1.007786
+  },
+  "maximumRepresentativeAcousticDistance": {
+    "id": "zm_095",
+    "weightCosine": 0.706335,
+    "acousticDistance": 1.38859
+  },
+  "styleCoverage": {
+    "zh-male": {
+      "deep": 4,
+      "bright": 3,
+      "relaxed": 1,
+      "natural": 2
+    },
+    "zh-female": {
+      "bright": 5,
+      "deep": 5,
+      "natural": 2
+    },
+    "en-female": {
+      "natural": 2,
+      "mature": 1
+    }
+  },
+  "unrepresentedStyle": "zh-female/relaxed: original voices are covered by other representatives; no group was altered to force style coverage.",
+  "groupBounds": [
+    {
+      "representativeId": "zm_013",
+      "minimumWeightCosine": 0.768863,
+      "maximumAcousticDistance": 1.124283
+    },
+    {
+      "representativeId": "zm_014",
+      "minimumWeightCosine": 0.732236,
+      "maximumAcousticDistance": 1.385807
+    },
+    {
+      "representativeId": "zm_020",
+      "minimumWeightCosine": 0.736393,
+      "maximumAcousticDistance": 1.311885
+    },
+    {
+      "representativeId": "zm_029",
+      "minimumWeightCosine": 1.0,
+      "maximumAcousticDistance": 0.0
+    },
+    {
+      "representativeId": "zm_031",
+      "minimumWeightCosine": 0.743741,
+      "maximumAcousticDistance": 1.276437
+    },
+    {
+      "representativeId": "zm_033",
+      "minimumWeightCosine": 1.0,
+      "maximumAcousticDistance": 0.0
+    },
+    {
+      "representativeId": "zm_045",
+      "minimumWeightCosine": 0.700048,
+      "maximumAcousticDistance": 1.378386
+    },
+    {
+      "representativeId": "zm_052",
+      "minimumWeightCosine": 0.792628,
+      "maximumAcousticDistance": 1.290904
+    },
+    {
+      "representativeId": "zm_057",
+      "minimumWeightCosine": 0.706335,
+      "maximumAcousticDistance": 1.38859
+    },
+    {
+      "representativeId": "zm_066",
+      "minimumWeightCosine": 0.720903,
+      "maximumAcousticDistance": 1.32137
+    },
+    {
+      "representativeId": "zf_001",
+      "minimumWeightCosine": 0.733231,
+      "maximumAcousticDistance": 1.025137
+    },
+    {
+      "representativeId": "zf_002",
+      "minimumWeightCosine": 0.707634,
+      "maximumAcousticDistance": 1.298429
+    },
+    {
+      "representativeId": "zf_004",
+      "minimumWeightCosine": 0.717325,
+      "maximumAcousticDistance": 1.202357
+    },
+    {
+      "representativeId": "zf_019",
+      "minimumWeightCosine": 0.827486,
+      "maximumAcousticDistance": 0.992694
+    },
+    {
+      "representativeId": "zf_022",
+      "minimumWeightCosine": 0.7053,
+      "maximumAcousticDistance": 0.9268
+    },
+    {
+      "representativeId": "zf_038",
+      "minimumWeightCosine": 1.0,
+      "maximumAcousticDistance": 0.0
+    },
+    {
+      "representativeId": "zf_046",
+      "minimumWeightCosine": 0.922786,
+      "maximumAcousticDistance": 0.856342
+    },
+    {
+      "representativeId": "zf_047",
+      "minimumWeightCosine": 0.792985,
+      "maximumAcousticDistance": 1.142551
+    },
+    {
+      "representativeId": "zf_059",
+      "minimumWeightCosine": 0.758803,
+      "maximumAcousticDistance": 1.170028
+    },
+    {
+      "representativeId": "zf_067",
+      "minimumWeightCosine": 0.706628,
+      "maximumAcousticDistance": 1.152022
+    },
+    {
+      "representativeId": "zf_073",
+      "minimumWeightCosine": 0.864567,
+      "maximumAcousticDistance": 1.270209
+    },
+    {
+      "representativeId": "zf_093",
+      "minimumWeightCosine": 0.785447,
+      "maximumAcousticDistance": 1.160734
+    },
+    {
+      "representativeId": "af_maple",
+      "minimumWeightCosine": 1,
+      "maximumAcousticDistance": 0
+    },
+    {
+      "representativeId": "af_sol",
+      "minimumWeightCosine": 1,
+      "maximumAcousticDistance": 0
+    },
+    {
+      "representativeId": "bf_vale",
+      "minimumWeightCosine": 1,
+      "maximumAcousticDistance": 0
+    }
+  ]
+}

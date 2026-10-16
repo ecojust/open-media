@@ -53,7 +53,8 @@ int main(int argc, char **argv) {
   cfg.model.num_threads = 2;
   cfg.model.provider = "cpu";
   cfg.max_num_sentences = 1;
-  cfg.silence_scale = 0.2f;
+  /* Preserve model pauses instead of compressing them after synthesis. */
+  cfg.silence_scale = 1.0f;
   cfg.rule_fsts = option(argc, argv, "--tts-rule-fsts");
   const char *output = option(argc, argv, "--output-filename");
   const char *speaker = option(argc, argv, "--sid");
@@ -62,7 +63,7 @@ int main(int argc, char **argv) {
   cfg.model.debug = debug && !strcmp(debug, "true");
   generation.sid = speaker ? atoi(speaker) : 3;
   generation.speed = speed ? (float)atof(speed) : 1.0f;
-  generation.silence_scale = 0.2f;
+  generation.silence_scale = cfg.silence_scale;
   if (!output || !cfg.model.kokoro.model || !cfg.model.kokoro.voices ||
       !cfg.model.kokoro.tokens || !cfg.model.kokoro.data_dir ||
       !cfg.model.kokoro.lexicon || !cfg.rule_fsts ||

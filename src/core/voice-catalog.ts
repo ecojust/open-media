@@ -1,5 +1,6 @@
 import type { SpeechVoice } from '../native'
 import { VOICE_PROFILES } from './voice-profiles.ts'
+import { VOICE_GROUPS } from './voice-groups.ts'
 
 export type VoiceCategoryId = 'zh-male' | 'zh-female' | 'en-female' | 'other'
 
@@ -18,6 +19,22 @@ export function voiceCategory(voice: SpeechVoice): VoiceCategoryId {
   if (locale.startsWith('zh') && gender === 'female') return 'zh-female'
   if (locale.startsWith('en') && gender === 'female') return 'en-female'
   return 'other'
+}
+
+/** Keep one available representative per bundled group, preserving an existing selection. */
+export function compactVoiceCatalog(voices: readonly SpeechVoice[], selectedId = ''): SpeechVoice[] {
+  const unique = [...new Map(voices.map(voice => [voice.id, voice])).values()]
+  const grouped = new Set<string>(), retained = new Set<string>()
+  for (const group of VOICE_GROUPS) {
+    const candidates = unique.filter(voice => group.members.includes(voice.id)
+      && voiceCategory(voice) === group.category && language(voice) === group.locale)
+    for (const voice of candidates) grouped.add(voice.id)
+    const representative = candidates.find(voice => voice.id === selectedId)
+      || candidates.find(voice => voice.id === group.representative)
+      || group.members.map(id => candidates.find(voice => voice.id === id)).find(Boolean)
+    if (representative) retained.add(representative.id)
+  }
+  return unique.filter(voice => !grouped.has(voice.id) || retained.has(voice.id))
 }
 
 export function voiceTypeLabel(voice: SpeechVoice): string {

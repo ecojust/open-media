@@ -72,16 +72,25 @@ async function verifyBundledVoiceCatalog(browser, url) {
     })
     await installNativeContract(page, voices)
     await page.goto(url)
+    const catalog = await page.evaluate(async voices => {
+      const { compactVoiceCatalog, voiceCategory } = await import('/src/core/voice-catalog.ts')
+      return compactVoiceCatalog(voices).map(voice => ({ ...voice, category: voiceCategory(voice) }))
+    }, voices)
+    assert.ok(catalog.length > 3 && catalog.length < voices.length / 2, '声音卡片应精简相似音色，保留明显少于完整目录的代表声音')
+    assert.ok(catalog.every(voice => voices.some(original => original.id === voice.id)), '精简目录必须保留真实声音标识')
     await page.getByTestId('create-project').click()
     await page.locator('.editor-tools').getByRole('button', { name: '文字转语音', exact: true }).click()
     const picker = page.getByTestId('voice-picker')
     await expect(picker).toBeVisible()
-    for (const [category, count] of [['中文男声', 45], ['中文女声', 55], ['英文女声', 3]]) {
+    for (const [category, categoryId] of [['中文男声', 'zh-male'], ['中文女声', 'zh-female'], ['英文女声', 'en-female']]) {
+      const expected = catalog.filter(voice => voice.category === categoryId), count = expected.length
+      assert.ok(count > 0, `${category}应保留可选择的声音`)
       const tab = picker.getByRole('tab', { name: new RegExp(`^${category}`) })
       await expect(tab).toContainText(String(count))
       await tab.click()
       await expect(tab).toHaveAttribute('aria-selected', 'true')
       await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(count)
+      assert.deepEqual(await picker.locator('.voice-card').evaluateAll(cards => cards.map(card => card.dataset.voiceId)), expected.map(voice => voice.id), '卡片应使用精简后的代表目录及原始标识')
       const portraits = picker.locator('.voice-artwork')
       await expect(portraits).toHaveCount(count)
       const artwork = await portraits.evaluateAll(async elements => {
@@ -108,21 +117,27 @@ async function verifyBundledVoiceCatalog(browser, url) {
       }
     }
     await picker.getByRole('tab', { name: /^中文男声/ }).click()
+    const maleVoices = catalog.filter(voice => voice.category === 'zh-male'), chosen = maleVoices.at(-1)
     const search = picker.getByLabel('搜索声音', { exact: true })
-    await search.fill('中文男声 100')
+    await search.fill(chosen.id)
     await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(1)
-    await picker.getByRole('button', { name: '选择 中文男声 100', exact: true }).click()
-    await expect(picker.getByRole('button', { name: '选择 中文男声 100', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await picker.getByRole('button', { name: `选择 ${chosen.name}`, exact: true }).click()
+    await expect(picker.getByRole('button', { name: `选择 ${chosen.name}`, exact: true })).toHaveAttribute('aria-pressed', 'true')
     await search.fill('不存在的音色')
     await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(0)
     await search.fill('')
-    await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(45)
+    await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(maleVoices.length)
     const styleLabel = await picker.locator('.voice-style').first().textContent()
     await search.fill(styleLabel)
     assert.ok(await picker.locator('.voice-style').count() > 0)
     assert.ok((await picker.locator('.voice-style').allTextContents()).every(label => label === styleLabel), '声音应支持按音色类型搜索')
     await search.fill('')
     assert.equal((await speechRequests(page)).length, 0, '浏览或选择声音不应启动合成')
+    await page.evaluate(() => { window.speechHarness.mode = 'completed' })
+    await picker.getByRole('button', { name: `试听 ${chosen.name}`, exact: true }).click()
+    await expect.poll(async () => (await speechRequests(page)).length).toBe(1)
+    assert.equal((await speechRequests(page))[0].voiceId, chosen.id, '代表音色试听必须发送原始模型声音标识')
+    await expect(picker.getByRole('button', { name: `试听 ${chosen.name}`, exact: true })).toBeEnabled()
     assert.deepEqual(foreignRequests, [], '卡片图片不应依赖网络服务')
     assert.deepEqual(errors, [])
     await picker.getByRole('tab', { name: /^中文女声/ }).click()
@@ -130,7 +145,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
     await page.setViewportSize({ width: 320, height: 850 })
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.screenshot({ animations: 'disabled', path: '/tmp/open-media-speech-editor/voice-catalog-compact.png' })
-    console.log('PASS 真实内置目录：45种中文男声、55种中文女声、3种英文女声分类、滚动、搜索和离线图片加载')
+    console.log(`PASS 内置目录：${catalog.length}种代表音色的分类、滚动、搜索、离线图片加载与原始声音标识试听请求`)
   } finally { await context.close() }
 }
 

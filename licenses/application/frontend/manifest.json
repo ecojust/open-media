@@ -5,12 +5,12 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "676a179c61b8a5e11c8375a76d8004e587568ce6569dccd2fa8cad091da202b8",
+      "sha256": "94871fa62ae7b3c71888e23dbe22decb51fd3b44c4388e39cdcf189ad966a664",
       "reviewMethod": "Source review: application version updated to 0.1.5 and application exit regression commands included. Dependency versions and original license files are unchanged."
     },
     {
       "path": "package-lock.json",
-      "sha256": "58008d39eafd20e6fbfe09000f57c5b42d2270686609a4ce4889d6981995a354",
+      "sha256": "b5f3f5a4658a3ef44f9e4658048fec9cbf34abeb17348eccad85325b712c9b15",
       "reviewMethod": "Source review: application version updated to 0.1.5 and application exit regression commands included. Dependency versions and original license files are unchanged."
     },
     {

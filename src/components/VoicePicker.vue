@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { SpeechVoice } from '../native'
-import { VOICE_CATEGORIES, voiceCategory, voiceSearchText, voiceStyle, voiceTypeLabel, type VoiceCategoryId } from '../core/voice-catalog'
+import { compactVoiceCatalog, VOICE_CATEGORIES, voiceCategory, voiceSearchText, voiceStyle, voiceTypeLabel, type VoiceCategoryId } from '../core/voice-catalog'
 import Icon from './Icon.vue'
 import voicePortraits from '../assets/voices/voice-portraits.png'
 
@@ -15,11 +15,12 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [id: string]; preview: [id: string] }>()
 const instanceId = useId(), search = ref(''), activeTab = ref<VoiceCategoryId>('zh-female')
 const tabs = ref<HTMLElement | null>(null), scroller = ref<HTMLElement | null>(null)
-const categories = computed(() => VOICE_CATEGORIES.map(category => ({ ...category, voices: props.voices.filter(voice => voiceCategory(voice) === category.id) })).filter(category => category.voices.length))
-const selectedVoice = computed(() => props.voices.find(voice => voice.id === props.modelValue))
+const catalog = computed(() => compactVoiceCatalog(props.voices, props.modelValue))
+const categories = computed(() => VOICE_CATEGORIES.map(category => ({ ...category, voices: catalog.value.filter(voice => voiceCategory(voice) === category.id) })).filter(category => category.voices.length))
+const selectedVoice = computed(() => catalog.value.find(voice => voice.id === props.modelValue))
 const visibleVoices = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
-  return props.voices.filter(voice => voiceCategory(voice) === activeTab.value && (!query || voiceSearchText(voice).includes(query)))
+  return catalog.value.filter(voice => voiceCategory(voice) === activeTab.value && (!query || voiceSearchText(voice).includes(query)))
 })
 const categoryLabel = computed(() => VOICE_CATEGORIES.find(category => category.id === activeTab.value)?.label || '声音')
 
