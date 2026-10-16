@@ -138,7 +138,10 @@ async function main() {
     await expect(page.locator('.project-title')).toHaveText('工作台验收')
     await expect(page.locator('.asset-card')).toHaveCount(2)
     await expect(page.locator('.timeline-clip')).toHaveCount(3)
-    assert.equal(await page.locator('.asset-thumb img').evaluate(image => image.complete && image.naturalWidth === 320), true)
+    const restoredImage = page.locator('.asset-thumb img')
+    await expect(restoredImage).toHaveJSProperty('complete', true)
+    await expect(restoredImage).toHaveJSProperty('naturalWidth', 320)
+    await expect(restoredImage).toHaveJSProperty('naturalHeight', 180)
   })
 
   await check('自动草稿包含素材，刷新恢复项目和全部轨道', async () => {
