@@ -132,6 +132,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked -
 
 录屏专项检查通过 `capture-macos.yml` 在 macOS ARM64 构建机上安装完整应用，分别验证带红框和不带红框的真实屏幕采集，并保留系统版本、签名、测试日志和录制文件。设备授权被拒绝时测试失败；编解码自测通过不等于屏幕采集通过。命令说明见[录屏组件说明](src-tauri/resources/capture/README.txt)。
 
+已完成的环境、结果和覆盖范围见[录屏专项验证记录](docs/RECORDING_CHECK.md)。
+
 ## 许可证与分发
 
 主应用代码采用 [MIT 许可证](LICENSE)。独立媒体与语音进程按各自许可证分发，语音启动组件采用 GPL-3.0-or-later。来源、固定版本和构建方式见[第三方声明](THIRD_PARTY_NOTICES.md)、[媒体运行时文档](docs/MEDIA_RUNTIME.md)与[语音运行时文档](docs/SPEECH_RUNTIME.md)。发行包同时提供完整媒体及语音运行时对应源码；请保留所有原有版权和许可证资料。
