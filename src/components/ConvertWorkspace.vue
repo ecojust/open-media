@@ -10,7 +10,7 @@ import { browserVideoExportSupported, exportTimelineWebM } from '../core/browser
 import { beginMediaJob, cancelMediaJob, getMediaJobs, getRuntimeStatus, saveBytes, selectRuntime, type MediaJob } from '../native'
 
 const props = defineProps<{ assets: MediaAsset[]; mode: 'image' | 'video'; native: boolean }>()
-const emit = defineEmits<{ import: [files?: File[]]; status: [message: string]; result: [asset: MediaAsset] }>()
+const emit = defineEmits<{ import: [files?: File[]]; status: [message: string]; result: [asset: MediaAsset]; 'busy-change': [busy: boolean, mode: 'image' | 'video'] }>()
 interface Result {
   id: string; sourceId: string; mode: 'image' | 'video'; name: string
   state: 'waiting' | 'running' | 'done' | 'error' | 'cancelled'
@@ -44,6 +44,7 @@ let currentBatch = new Set<string>()
 let destroyed = false
 let knownAssetIds = new Set<string>()
 const outputAssetIds = new Set<string>()
+watch(busy, value => emit('busy-change', value, props.mode), { flush: 'sync' })
 
 watch(available, assets => {
   const ids = new Set(assets.map(asset => asset.id))
@@ -211,7 +212,7 @@ async function chooseRuntime() {
 }
 function beforeUnload(event: BeforeUnloadEvent) { if (busy.value) { event.preventDefault(); event.returnValue = '' } }
 window.addEventListener('beforeunload', beforeUnload)
-onBeforeUnmount(() => { destroyed = true; void cancel(); window.removeEventListener('beforeunload', beforeUnload) })
+onBeforeUnmount(() => { destroyed = true; void cancel(); emit('busy-change', false, props.mode); window.removeEventListener('beforeunload', beforeUnload) })
 </script>
 
 <template>

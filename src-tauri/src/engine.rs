@@ -22,14 +22,16 @@ pub fn new_id() -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 pub fn process(path: &Path) -> Command {
-    let command = Command::new(path);
+    #[allow(unused_mut)]
+    let mut command = Command::new(path);
+    // Exclude the legacy chroma conversion path; newer vector instructions remain enabled.
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    command.args(["-cpuflags", "-mmxext"]);
     #[cfg(target_os = "windows")]
-    let command = {
+    {
         use std::os::windows::process::CommandExt;
-        let mut c = command;
-        c.creation_flags(0x08000000);
-        c
-    };
+        command.creation_flags(0x08000000);
+    }
     command
 }
 #[derive(Clone)]
@@ -232,11 +234,34 @@ impl MediaStore {
         } else {
             return Err("文件不包含支持的媒体内容。".into());
         };
-        let duration = value["format"]["duration"]
-            .as_str()
-            .and_then(|s| s.parse::<f64>().ok())
-            .filter(|d| d.is_finite() && *d >= 0.0)
-            .unwrap_or(if kind == "image" { 5.0 } else { 0.0 });
+        let metadata_duration = seconds(&value["format"]["duration"]).or_else(|| {
+            streams
+                .iter()
+                .filter_map(|stream| {
+                    seconds(&stream["duration"]).or_else(|| seconds(&stream["tags"]["DURATION"]))
+                })
+                .reduce(f64::max)
+        });
+        let duration = if let Some(duration) = metadata_duration {
+            duration
+        } else if kind == "image" {
+            5.0
+        } else {
+            packet_duration(runtime, path)?
+        };
+        let mut width = video.and_then(|s| s["width"].as_u64()).unwrap_or(0) as u32;
+        let mut height = video.and_then(|s| s["height"].as_u64()).unwrap_or(0) as u32;
+        if let Some(video) = video {
+            let rotation = video["side_data_list"]
+                .as_array()
+                .and_then(|items| items.iter().find_map(|item| numeric(&item["rotation"])))
+                .or_else(|| numeric(&video["tags"]["rotate"]))
+                .unwrap_or(0.0)
+                .rem_euclid(360.0);
+            if (rotation - 90.0).abs() < 0.01 || (rotation - 270.0).abs() < 0.01 {
+                std::mem::swap(&mut width, &mut height);
+            }
+        }
         let mime = match ext.as_str() {
             "png" => "image/png",
             "jpg" | "jpeg" => "image/jpeg",
@@ -265,8 +290,8 @@ impl MediaStore {
             kind: kind.into(),
             url: String::new(),
             duration,
-            width: video.and_then(|s| s["width"].as_u64()).unwrap_or(0) as u32,
-            height: video.and_then(|s| s["height"].as_u64()).unwrap_or(0) as u32,
+            width,
+            height,
             size: fs::metadata(path).map_err(|e| e.to_string())?.len(),
             mime: mime.into(),
             native_path: path.to_string_lossy().into(),
@@ -290,6 +315,84 @@ impl MediaStore {
             .unwrap_or(false)
     }
 }
+fn numeric(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|v| v.parse().ok()))
+        .filter(|n| n.is_finite())
+}
+fn seconds(value: &Value) -> Option<f64> {
+    numeric(value)
+        .or_else(|| {
+            let parts = value
+                .as_str()?
+                .split(':')
+                .map(str::parse::<f64>)
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .ok()?;
+            (parts.len() == 3).then(|| parts[0] * 3600.0 + parts[1] * 60.0 + parts[2])
+        })
+        .filter(|n| n.is_finite() && *n > 0.0)
+}
+fn packet_duration(runtime: &Runtime, path: &Path) -> Result<f64> {
+    let mut child = process(&runtime.probe)
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "packet=pts_time,dts_time,duration_time",
+            "-of",
+            "compact=p=0:nk=0",
+        ])
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("读取媒体时长失败：{error}"))?;
+    let stdout = child.stdout.take().ok_or("无法读取媒体时间戳。")?;
+    let mut first = f64::INFINITY;
+    let mut last = f64::NEG_INFINITY;
+    for line in BufReader::new(stdout).lines() {
+        let line = match line {
+            Ok(line) => line,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("读取媒体时间戳失败：{error}"));
+            }
+        };
+        let mut pts = None;
+        let mut dts = None;
+        let mut duration = 0.0;
+        for field in line.split('|') {
+            let Some((key, raw)) = field.split_once('=') else {
+                continue;
+            };
+            let Some(value) = raw.parse::<f64>().ok().filter(|v| v.is_finite()) else {
+                continue;
+            };
+            match key {
+                "pts_time" => pts = Some(value),
+                "dts_time" => dts = Some(value),
+                "duration_time" => duration = value.max(0.0),
+                _ => {}
+            }
+        }
+        if let Some(timestamp) = pts.or(dts) {
+            first = first.min(timestamp);
+            last = last.max(timestamp + duration);
+        }
+    }
+    if !child.wait().map_err(|e| e.to_string())?.success() {
+        return Err("无法完整读取媒体时间戳，请检查文件是否损坏。".into());
+    }
+    let duration = last - first;
+    if !duration.is_finite() || duration <= 0.0 {
+        return Err("无法确定媒体时长，请检查文件是否包含完整录制内容。".into());
+    }
+    Ok(duration)
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MediaJob {
@@ -792,6 +895,16 @@ fn tempo(speed: f64) -> String {
     result.push(format!("atempo={speed}"));
     result.join(",")
 }
+fn fade_parameters(clip: &Value, duration: f64) -> Result<(f64, f64, f64)> {
+    let fade_in = number(clip, "fadeIn", 0.0, 0.0, duration)?;
+    let fade_out = number(clip, "fadeOut", 0.0, 0.0, duration)?;
+    let peak = if fade_in + fade_out > duration {
+        duration / (fade_in + fade_out)
+    } else {
+        1.0
+    };
+    Ok((fade_in * peak, fade_out * peak, peak))
+}
 fn timeline_plan(
     store: &MediaStore,
     runtime: &Runtime,
@@ -897,12 +1010,11 @@ fn timeline_plan(
             let y = number(clip, "y", 0.0, -30000.0, 30000.0)? / project_h * height as f64;
             let rotation =
                 number(clip, "rotation", 0.0, -3600.0, 3600.0)? * std::f64::consts::PI / 180.0;
-            let opacity = number(clip, "opacity", 1.0, 0.0, 1.0)?;
+            let (fade_in, fade_out, fade_peak) = fade_parameters(clip, *duration)?;
+            let opacity = number(clip, "opacity", 1.0, 0.0, 1.0)? * fade_peak;
             let fit = clip["fit"].as_str().unwrap_or("contain");
             let scale=match fit{"cover"=>format!("scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}"),"fill"=>format!("scale={cw}:{ch}"),_=>format!("scale={cw}:{ch}:force_original_aspect_ratio=decrease,pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")};
             let mut chain=format!("[{index}:v]trim=start={trim_in}:end={trim_out},setpts=(PTS-STARTPTS)/{speed},format=rgba,{scale},setsar=1,colorchannelmixer=aa={opacity}");
-            let fade_in = number(clip, "fadeIn", 0.0, 0.0, *duration)?;
-            let fade_out = number(clip, "fadeOut", 0.0, 0.0, *duration)?;
             if fade_in > 0.0 {
                 chain += &format!(",fade=t=in:st=0:d={fade_in}:alpha=1");
             }
@@ -923,9 +1035,9 @@ fn timeline_plan(
         }
         let volume = number(clip, "volume", 1.0, 0.0, 4.0)?;
         if !image && volume > 0.0 && track["muted"] != true && store.has_audio(runtime, &path) {
+            let (fade_in, fade_out, fade_peak) = fade_parameters(clip, *duration)?;
+            let volume = volume * fade_peak;
             let mut chain=format!("[{index}:a]atrim=start={trim_in}:end={trim_out},asetpts=PTS-STARTPTS,{},volume={volume}",tempo(*speed));
-            let fade_in = number(clip, "fadeIn", 0.0, 0.0, *duration)?;
-            let fade_out = number(clip, "fadeOut", 0.0, 0.0, *duration)?;
             if fade_in > 0.0 {
                 chain += &format!(",afade=t=in:st=0:d={fade_in}");
             }

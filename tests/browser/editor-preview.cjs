@@ -112,28 +112,52 @@ async function main() {
     await page.mouse.down()
     await page.mouse.move(clipBox.x + clipBox.width / 2 + 44, clipBox.y + 18, { steps: 6 })
     await page.mouse.up()
-    await page.waitForFunction(() => Math.abs(window.editorState.value.tracks[1].clips[0].start - 3) < 0.04)
+    await page.waitForFunction(id => Math.abs(window.editorState.value.tracks[1].clips.find(clip => clip.id === id).start - 3) < 0.04, firstVideoId)
     const endHandle = await page.locator(`[data-clip-id="${firstVideoId}"] .trim-handle.end`).boundingBox()
     await page.mouse.move(endHandle.x + 4, endHandle.y + 18)
     await page.mouse.down()
     await page.mouse.move(endHandle.x + 26, endHandle.y + 18, { steps: 6 })
     await page.mouse.up()
-    await page.waitForFunction(() => Math.abs(window.editorState.value.tracks[1].clips[0].trimOut - 1.3) < 0.04)
+    await page.waitForFunction(id => Math.abs(window.editorState.value.tracks[1].clips.find(clip => clip.id === id).trimOut - 1.3) < 0.04, firstVideoId)
     await page.getByRole('button', { name: '分离到音轨' }).click()
-    await page.waitForFunction(() => window.editorState.value.tracks[2].clips.length === 1 && window.editorState.value.tracks[1].clips[0].volume === 0)
+    await page.waitForFunction(id => window.editorState.value.tracks[2].clips.length === 1 && window.editorState.value.tracks[1].clips.find(clip => clip.id === id).volume === 0, firstVideoId)
     await page.getByRole('button', { name: '画中画', exact: true }).click()
-    await page.waitForFunction(() => window.editorState.value.tracks[1].clips[0].width < 120)
+    await page.waitForFunction(id => window.editorState.value.tracks[1].clips.find(clip => clip.id === id).width < 120, firstVideoId)
     console.log('PASS 时间线拖动、源边缘裁剪、分离音轨、画中画属性回写')
 
     for (const width of [1280, 768, 320]) {
       await page.setViewportSize({ width, height: 850 })
+      await page.evaluate(width => { document.querySelector('#app').style.width = width === 320 ? 'calc(100% - 48px)' : '100%'; document.querySelector('#app').style.marginLeft = width === 320 ? '48px' : '0' }, width)
       await page.waitForTimeout(150)
       const sizes = await page.evaluate(() => ({ width: window.innerWidth, body: document.documentElement.scrollWidth, editor: document.querySelector('.video-editor').getBoundingClientRect().width }))
       assert(sizes.body <= sizes.width + 1, `${width}px 页面横向溢出：${JSON.stringify(sizes)}`)
       assert(sizes.editor <= sizes.width + 1)
+      const toolbarBounds = await page.locator('.video-editor').evaluate(element => ({ editor: element.getBoundingClientRect().right, button: element.querySelector('.editor-export').getBoundingClientRect().right }))
+      assert(toolbarBounds.button <= toolbarBounds.editor + 1, `${width}px 导出按钮被裁切`)
     }
+    await page.evaluate(async () => {
+      const { createProject, createTextClip } = await import('/src/core/project.ts')
+      const { addClip } = await import('/src/core/timeline.ts')
+      let project = createProject('切换预览验证', { width: 320, height: 180 })
+      project = addClip(project, project.tracks[0].id, createTextClip(project, { start: 0, trimOut: 1, x: 0, y: 0, width: 320, height: 180, text: '', background: '#2244dd' }))
+      project = addClip(project, project.tracks[0].id, createTextClip(project, { start: 5, trimOut: 1, text: '尾部' }))
+      window.editorState.value = project
+    })
+    await page.waitForFunction(() => {
+      const pixel = document.querySelector('[data-testid=video-preview]').getContext('2d').getImageData(2, 2, 1, 1).data
+      return pixel[2] > 150 && pixel[0] < 100 && document.querySelector('.time-code').textContent.startsWith('00:00:00')
+    })
+    console.log('PASS 切换项目同步重置播放头与实际预览画面')
+    await page.evaluate(() => {
+      document.querySelector('#app').style.setProperty('--ui-bg', '#151923')
+      document.querySelector('#app').style.setProperty('--ui-surface', '#1d2230')
+      document.querySelector('#app').style.setProperty('--ui-text', '#e3e8f2')
+    })
+    const theme = await page.locator('.video-editor').evaluate(element => ({ background: getComputedStyle(element).backgroundColor, text: getComputedStyle(element).color }))
+    assert.equal(theme.background, 'rgb(21, 25, 35)')
+    assert.equal(theme.text, 'rgb(227, 232, 242)')
     assert.deepEqual(errors, [])
-    console.log('PASS 编辑器 1280 / 768 / 320 像素布局无页面溢出')
+    console.log('PASS 编辑器 1280 / 768 / 320 像素布局与深色主题')
   } finally { await browser.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 }).finally(() => server?.kill())

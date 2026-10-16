@@ -7,6 +7,7 @@ export interface MediaAsset {
   name: string
   kind: AssetKind
   url: string
+  sourceUrl?: string
   duration: number
   width: number
   height: number

@@ -29,6 +29,7 @@ export async function exportProjectFile(project: Project, options: ProjectExport
     entries[`media/${asset.id}`] = new Uint8Array(await blob.arrayBuffer())
     asset.size = blob.size
     asset.url = ''
+    delete asset.sourceUrl
     delete asset.nativePath
   }
   aborted(options.signal)

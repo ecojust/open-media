@@ -83,6 +83,54 @@ export async function importMediaFile(file: File, nativePath?: string): Promise<
   }
 }
 
+/** Check real decoding instead of inferring playback support from a filename. */
+export function canPreviewMedia(asset: MediaAsset, timeoutMs = 12000): Promise<boolean> {
+  if (asset.kind === 'image') {
+    return new Promise(resolve => {
+      const image = new Image()
+      const timer = setTimeout(() => finish(false), timeoutMs)
+      const finish = (supported: boolean) => {
+        clearTimeout(timer)
+        image.onload = null
+        image.onerror = null
+        image.removeAttribute('src')
+        resolve(supported)
+      }
+      image.onload = () => finish(image.naturalWidth > 0 && image.naturalHeight > 0)
+      image.onerror = () => finish(false)
+      image.crossOrigin = 'anonymous'
+      image.src = asset.url
+    })
+  }
+  return new Promise(resolve => {
+    const media = document.createElement(asset.kind === 'audio' ? 'audio' : 'video')
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    const finish = (supported: boolean) => {
+      clearTimeout(timer)
+      media.onloadeddata = null
+      media.onerror = null
+      media.pause()
+      media.removeAttribute('src')
+      media.load()
+      resolve(supported)
+    }
+    media.onloadeddata = () => finish(true)
+    media.onerror = () => finish(false)
+    media.muted = true
+    media.preload = 'auto'
+    media.crossOrigin = 'anonymous'
+    media.src = asset.url
+  })
+}
+
+export async function ensureMediaPreview(asset: MediaAsset, makePreview: (asset: MediaAsset) => Promise<string>): Promise<MediaAsset> {
+  if (await canPreviewMedia(asset)) return asset
+  const url = await makePreview(asset)
+  const prepared: MediaAsset = { ...asset, sourceUrl: asset.sourceUrl || asset.url, url }
+  if (!await canPreviewMedia(prepared)) throw new Error(`「${asset.name}」已生成兼容预览，但当前环境仍无法解码。原始素材未修改。`)
+  return prepared
+}
+
 export function revokeMediaAsset(asset: MediaAsset): void {
   if (asset.url.startsWith('blob:')) URL.revokeObjectURL(asset.url)
 }

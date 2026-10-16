@@ -11,8 +11,9 @@ import Icon from './Icon.vue'
 const props = defineProps<{ project: Project; native: boolean; open: boolean }>()
 const emit = defineEmits<{ close: []; status: [message: string]; busy: [value: boolean]; job: [job: MediaJob] }>()
 const config = ref<ExportConfig>({ format: props.native ? 'mp4' : 'webm', width: props.project.width, height: props.project.height, fps: props.project.fps, quality: 'balanced' })
-const exporting = ref(false), progress = ref(0), error = ref(''), completed = ref('')
+const exporting = ref(false), cancelling = ref(false), progress = ref(0), error = ref(''), completed = ref('')
 let controller: AbortController | undefined, timer: ReturnType<typeof setTimeout> | undefined
+let destroyed = false
 const job = ref<MediaJob>()
 const duration = computed(() => projectDuration(props.project))
 const valid = computed(() => duration.value > 0 && Number.isInteger(config.value.width) && Number.isInteger(config.value.height) && config.value.width >= 16 && config.value.width <= 7680 && config.value.height >= 16 && config.value.height <= 7680 && config.value.fps >= 1 && config.value.fps <= 60)
@@ -23,40 +24,57 @@ function preset(value: string) {
   const height = Number(value); config.value.height = height; config.value.width = Math.round(height * props.project.width / props.project.height / 2) * 2
 }
 async function poll() {
-  if (!job.value) return
+  clearTimeout(timer)
+  if (!job.value || destroyed) return
+  const id = job.value.id
   try {
-    const current = (await getMediaJobs()).find(item => item.id === job.value!.id)
+    const current = (await getMediaJobs()).find(item => item.id === id)
+    if (destroyed || job.value?.id !== id) return
     if (!current) throw new Error('导出任务已不存在。')
     job.value = current; progress.value = current.progress
     if (current.state === 'completed') { completed.value = current.outputPath || '导出完成'; exporting.value = false; emit('status', '视频导出完成。'); return }
     if (current.state === 'failed' || current.state === 'cancelled') { error.value = current.error || (current.state === 'cancelled' ? '已取消导出。' : '导出失败。'); exporting.value = false; return }
     timer = setTimeout(() => void poll(), 600)
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause); timer = setTimeout(() => void poll(), 1500) }
+  } catch (cause) { if (!destroyed) { error.value = cause instanceof Error ? cause.message : String(cause); timer = setTimeout(() => void poll(), 1500) } }
 }
 async function start() {
   if (!valid.value || exporting.value) return
-  exporting.value = true; error.value = ''; completed.value = ''; progress.value = 0; job.value = undefined
+  clearTimeout(timer)
+  controller = new AbortController()
+  const signal = controller.signal
+  exporting.value = true; cancelling.value = false; error.value = ''; completed.value = ''; progress.value = 0; job.value = undefined
   try {
     if (props.native) {
-      const prepared = await prepareNativeProject(props.project)
+      const prepared = await prepareNativeProject(props.project, signal)
+      signal.throwIfAborted()
       const result = await beginMediaJob({ kind: 'timeline', ...prepared, config: { ...config.value } })
+      if (signal.aborted || destroyed) {
+        if (result) {
+          job.value = result
+          try { await cancelMediaJob(result.id); job.value = { ...result, state: 'cancelled' } }
+          catch (cause) { if (!destroyed) { error.value = `取消失败，请重试。${cause instanceof Error ? cause.message : String(cause)}`; cancelling.value = false; emit('job', result); void poll() }; return }
+        }
+        signal.throwIfAborted()
+        return
+      }
       if (!result) { exporting.value = false; return }
       job.value = result; emit('job', result); void poll()
     } else {
-      controller = new AbortController()
-      const blob = await exportTimelineWebM(props.project, { width: config.value.width, height: config.value.height, fps: config.value.fps, signal: controller.signal, onProgress: value => { progress.value = value } })
+      const blob = await exportTimelineWebM(props.project, { width: config.value.width, height: config.value.height, fps: config.value.fps, signal, onProgress: value => { progress.value = value } })
+      signal.throwIfAborted()
       downloadBlob(blob, `${props.project.title.replace(/[\\/:*?"<>|]/g, '-') || '视频'}.webm`)
       completed.value = '视频已导出，请查看下载文件。'; exporting.value = false; progress.value = 1; emit('status', '视频导出完成。')
     }
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause); exporting.value = false }
+  } catch (cause) { error.value = signal.aborted ? '已取消导出。' : cause instanceof Error ? cause.message : String(cause); exporting.value = false }
 }
 async function cancel() {
+  cancelling.value = true
   controller?.abort()
   if (job.value?.state === 'running') {
-    try { await cancelMediaJob(job.value.id); void poll() } catch (cause) { error.value = cause instanceof Error ? cause.message : String(cause) }
+    try { await cancelMediaJob(job.value.id); void poll() } catch (cause) { cancelling.value = false; error.value = cause instanceof Error ? cause.message : String(cause) }
   }
 }
-onBeforeUnmount(() => { controller?.abort(); clearTimeout(timer) })
+onBeforeUnmount(() => { destroyed = true; controller?.abort(); clearTimeout(timer); if (job.value?.state === 'running') void cancelMediaJob(job.value.id).catch(() => {}) })
 </script>
 
 <template>
@@ -75,11 +93,11 @@ onBeforeUnmount(() => { controller?.abort(); clearTimeout(timer) })
         </div>
         <p v-if="!native" class="note"><Icon name="info" :size="15"/>网页按播放时长实时生成 WebM，请保持当前窗口在前台。桌面端可导出更多格式。</p>
         <p v-if="config.format==='gif'" class="note">GIF 不包含声音。</p>
-        <div v-if="exporting" class="export-progress" role="status"><div class="progress-track"><i :style="{ width: `${Math.max(0, Math.min(1, progress)) * 100}%` }"/></div><span>{{ job || !native ? `正在导出 ${Math.round(progress * 100)}%` : '正在准备素材与字幕…' }}</span></div>
+        <div v-if="exporting" class="export-progress" role="status"><div class="progress-track"><i :style="{ width: `${Math.max(0, Math.min(1, progress)) * 100}%` }"/></div><span>{{ cancelling ? (native && !job ? '正在取消，请关闭尚未结束的文件选择窗口…' : '正在取消…') : job || !native ? `正在导出 ${Math.round(progress * 100)}%` : '正在准备素材与字幕…' }}</span></div>
         <p v-if="error" class="error-message" role="alert">{{ error }}</p>
         <p v-if="completed" class="success-message" role="status"><Icon name="check"/>{{ completed }}</p>
       </div>
-      <footer><button v-if="exporting" @click="cancel">取消导出</button><button v-else @click="emit('close')">关闭</button><button class="primary" :disabled="!valid || exporting" data-testid="start-export" @click="start"><Icon name="export" :size="16"/>{{ exporting ? '正在导出' : '开始导出' }}</button></footer>
+      <footer><button v-if="exporting" :disabled="cancelling" @click="cancel">{{ cancelling ? '正在取消' : '取消导出' }}</button><button v-else @click="emit('close')">关闭</button><button class="primary" :disabled="!valid || exporting" data-testid="start-export" @click="start"><Icon name="export" :size="16"/>{{ exporting ? '正在导出' : '开始导出' }}</button></footer>
     </section>
   </div>
 </template>

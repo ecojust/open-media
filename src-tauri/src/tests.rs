@@ -326,14 +326,17 @@ fn capture_device_parsing_distinguishes_screen_and_microphone() {
 }
 
 #[test]
-fn muted_video_keeps_picture_and_excludes_sound() {
+fn muted_video_keeps_picture_and_overlapping_fades() {
     let temp = tempfile::tempdir().unwrap();
     let rt = runtime();
     let asset = sample(temp.path(), &rt);
+    let mut faded = clip(&asset);
+    faded["fadeIn"] = json!(1.0);
+    faded["fadeOut"] = json!(1.0);
     let (_, probe) = run(
         temp.path(),
         &rt,
-        json!({"kind":"timeline","project":{"width":160,"height":120,"background":"#000000","assets":[asset.clone()],"tracks":[{"kind":"video","muted":true,"clips":[clip(&asset)]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"draft"}}),
+        json!({"kind":"timeline","project":{"width":160,"height":120,"background":"#000000","assets":[asset.clone()],"tracks":[{"kind":"video","muted":true,"clips":[faded]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"draft"}}),
         "muted.mp4",
     );
     assert!(probe["streams"]
@@ -363,8 +366,9 @@ fn muted_video_keeps_picture_and_excludes_sound() {
         .output()
         .unwrap();
     assert!(
-        pixels.stdout[0] > 120,
-        "muting must retain red video picture"
+        pixels.stdout[0] >= 25 && pixels.stdout[0] <= 60,
+        "muting retains the picture, and overlapping fades follow the preview envelope: {:?}",
+        pixels.stdout
     );
 }
 
@@ -417,5 +421,127 @@ fn container_encoders_and_odd_image_dimensions() {
         );
         assert_eq!(probe["streams"][0]["width"], 17);
         assert_eq!(probe["streams"][0]["height"], 19);
+    }
+}
+
+#[test]
+fn live_recording_without_duration_uses_packet_timestamps() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let original = sample(temp.path(), &rt);
+    let recording = temp.path().join("live-recording.webm");
+    let result = process(&rt.encoder)
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(&original.native_path)
+        .args([
+            "-c:v",
+            "libvpx-vp9",
+            "-deadline",
+            "realtime",
+            "-cpu-used",
+            "8",
+            "-c:a",
+            "libopus",
+            "-live",
+            "1",
+        ])
+        .arg(&recording)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let metadata = process(&rt.probe)
+        .args([
+            "-v",
+            "error",
+            "-show_format",
+            "-show_streams",
+            "-of",
+            "json",
+        ])
+        .arg(&recording)
+        .output()
+        .unwrap();
+    let metadata: Value = serde_json::from_slice(&metadata.stdout).unwrap();
+    assert!(
+        metadata["format"]["duration"].is_null(),
+        "fixture must lack format duration"
+    );
+    assert!(
+        metadata["streams"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|stream| stream["duration"].is_null()),
+        "fixture must lack stream duration"
+    );
+    let imported = MediaStore::new(temp.path())
+        .unwrap()
+        .import(&rt, &recording, None)
+        .unwrap();
+    assert!(
+        (imported.duration - 2.0).abs() < 0.1,
+        "duration {}",
+        imported.duration
+    );
+    assert_eq!(imported.kind, "video");
+    let (_, converted) = run(
+        temp.path(),
+        &rt,
+        json!({"kind":"convert","asset": imported,"format":"mp4","trimStart":0.25,"trimEnd":1.25}),
+        "live-export.mp4",
+    );
+    let duration = converted["format"]["duration"]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!((duration - 1.0).abs() < 0.15);
+}
+
+#[test]
+fn portrait_rotation_reports_display_dimensions() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let original = sample(temp.path(), &rt);
+    for rotation in [90, 270] {
+        let portrait = temp.path().join(format!("portrait-{rotation}.mp4"));
+        let result = process(&rt.encoder)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-display_rotation:v:0",
+                &rotation.to_string(),
+                "-i",
+            ])
+            .arg(&original.native_path)
+            .args(["-c", "copy"])
+            .arg(&portrait)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let imported = MediaStore::new(temp.path())
+            .unwrap()
+            .import(&rt, &portrait, None)
+            .unwrap();
+        assert_eq!(
+            (imported.width, imported.height),
+            (120, 160),
+            "display orientation {rotation}"
+        );
+        assert_eq!(
+            fs::read(&imported.native_path).unwrap(),
+            fs::read(&portrait).unwrap(),
+            "import must preserve original media and metadata"
+        );
     }
 }

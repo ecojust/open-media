@@ -36,7 +36,7 @@ case "$(uname -s)" in
 esac
 if ! command -v nasm >/dev/null 2>&1; then
   case "$(uname -m)" in
-    x86_64|amd64) assembly=(--disable-asm); vpx_platform=(--target=generic-gnu); ffmpeg_platform+=(--disable-x86asm) ;;
+    x86_64|amd64) assembly=(--disable-asm); vpx_platform=(--target=generic-gnu); ffmpeg_platform+=(--disable-x86asm --disable-inline-asm) ;;
   esac
 fi
 

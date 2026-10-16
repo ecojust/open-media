@@ -26,6 +26,8 @@ let controller: BrowserCapture | undefined
 let startAbort: AbortController | undefined
 let clock: ReturnType<typeof setInterval> | undefined
 let polling = false
+let nativeStateVersion = 0
+let recoveryError = ''
 let destroyed = false
 let deviceError = ''
 const active = computed(() => phase.value !== 'idle')
@@ -55,7 +57,6 @@ function finished(blob: Blob, name: string): void {
   if (destroyed) return
   finishedUrl.value = URL.createObjectURL(blob)
   void nextTick(() => { if (preview.value) { preview.value.srcObject = null; preview.value.src = finishedUrl.value; preview.value.muted = false } })
-  emit('status', '录制完成，已添加到素材库。')
 }
 async function loadDevices(): Promise<void> {
   if (!props.native) return
@@ -69,8 +70,10 @@ async function loadDevices(): Promise<void> {
 async function begin(): Promise<void> {
   if (active.value) return
   error.value = ''
+  recoveryError = ''
   elapsed.value = 0
   phase.value = 'starting'
+  nativeStateVersion++
   startAbort = new AbortController()
   clearPreview()
   try {
@@ -109,8 +112,9 @@ async function begin(): Promise<void> {
 }
 async function pauseOrResume(): Promise<void> {
   if (phase.value !== 'paused' && phase.value !== 'recording') return
+  const version = ++nativeStateVersion
   try {
-    if (props.native) { const result = phase.value === 'paused' ? await resumeCapture() : await pauseCapture(); phase.value = result.state === 'paused' ? 'paused' : 'recording'; elapsed.value = result.elapsed }
+    if (props.native) { const result = phase.value === 'paused' ? await resumeCapture() : await pauseCapture(); if (version !== nativeStateVersion || destroyed) return; phase.value = result.state === 'paused' ? 'paused' : 'recording'; elapsed.value = result.elapsed; recoveryError = ''; error.value = result.error ?? '' }
     else if (phase.value === 'paused') controller?.resume()
     else controller?.pause()
   } catch (cause) { error.value = captureErrorMessage(cause) }
@@ -118,6 +122,7 @@ async function pauseOrResume(): Promise<void> {
 async function stop(): Promise<void> {
   if (phase.value === 'starting') { startAbort?.abort(); return }
   if (phase.value !== 'recording' && phase.value !== 'paused') return
+  nativeStateVersion++
   phase.value = 'stopping'
   try {
     if (props.native) {
@@ -128,11 +133,26 @@ async function stop(): Promise<void> {
         capturedCount.value++
         await nextTick()
         if (preview.value) { preview.value.src = asset.url; preview.value.muted = false }
-        emit('status', '录制完成，已添加到素材库。')
       }
+      recoveryError = ''
+      error.value = ''
       phase.value = 'idle'
     } else await controller?.stop()
-  } catch (cause) { error.value = captureErrorMessage(cause); phase.value = 'idle' }
+  } catch (cause) {
+    const originalError = captureErrorMessage(cause)
+    error.value = originalError
+    if (!props.native) { phase.value = 'idle'; return }
+    recoveryError = originalError
+    try {
+      const status = await getCaptureStatus()
+      if (destroyed) return
+      elapsed.value = status.elapsed
+      phase.value = status.state === 'idle' || status.state === 'recording' ? status.state : 'paused'
+    } catch {
+      if (!destroyed) phase.value = 'paused'
+    }
+    error.value = originalError
+  }
 }
 function beforeUnload(event: BeforeUnloadEvent): void { if (active.value) { event.preventDefault(); event.returnValue = '' } }
 onMounted(() => {
@@ -142,11 +162,13 @@ onMounted(() => {
     if (controller) elapsed.value = controller.elapsed
     else if (props.native && ['recording', 'paused'].includes(phase.value) && !polling) {
       polling = true
+      const version = nativeStateVersion
       void getCaptureStatus().then(value => {
+        if (destroyed || version !== nativeStateVersion || !['recording', 'paused'].includes(phase.value)) return
         elapsed.value = value.elapsed
-        if (value.error) error.value = value.error
-        if (value.state === 'idle') phase.value = 'idle'
-      }).catch(cause => { error.value = captureErrorMessage(cause) }).finally(() => { polling = false })
+        error.value = recoveryError || value.error || ''
+        if (value.state === 'idle' || value.state === 'paused' || value.state === 'recording') phase.value = value.state
+      }).catch(cause => { if (!destroyed && version === nativeStateVersion && ['recording', 'paused'].includes(phase.value)) error.value = recoveryError || captureErrorMessage(cause) }).finally(() => { polling = false })
     }
   }, 300)
 })

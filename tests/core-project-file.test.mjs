@@ -29,6 +29,26 @@ test('便携项目打包真实素材且不包含本机路径，导入恢复可�
   } finally { URL.revokeObjectURL(asset.url) }
 })
 
+test('有预览代理时便携项目仍保存原始素材，移除所有本机URL', async () => {
+  const { project, blob, asset } = fixture()
+  const preview = new Blob(['preview-only'], { type: 'video/mp4' })
+  const previewUrl = URL.createObjectURL(preview)
+  project.assets[0].sourceUrl = asset.url
+  project.assets[0].url = previewUrl
+  try {
+    const file = await exportProjectFile(project)
+    const files = unzipSync(new Uint8Array(await file.arrayBuffer()))
+    assert.equal(new TextDecoder().decode(files[`media/${asset.id}`]), await blob.text())
+    const manifest = JSON.parse(new TextDecoder().decode(files['project.json']))
+    assert.equal(manifest.project.assets[0].sourceUrl, undefined)
+    assert.equal(manifest.project.assets[0].url, '')
+    const restored = await importProjectFile(file)
+    assert.equal(restored.project.assets[0].sourceUrl, undefined)
+    assert.equal(await restored.blobs.get(asset.id).text(), await blob.text())
+    restored.revoke()
+  } finally { URL.revokeObjectURL(asset.url); URL.revokeObjectURL(previewUrl) }
+})
+
 test('素材读取失败不会保存缺素材项目，超大包与取消操作明确报错', async () => {
   const { project, asset } = fixture()
   URL.revokeObjectURL(asset.url)

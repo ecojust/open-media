@@ -44,7 +44,7 @@ export function captureErrorMessage(error: unknown): string {
     if (error.name === 'NotReadableError') return '无法读取录制来源，请检查系统权限和设备是否被其他程序占用。'
     if (error.name === 'AbortError') return '已取消录制来源选择。'
   }
-  return error instanceof Error ? error.message : '录制失败，请重试。'
+  return error instanceof Error ? error.message : typeof error === 'string' && error.trim() ? error : '录制失败，请重试。'
 }
 
 /** Obtain screen permission before awaiting other work so the click activation is preserved. */

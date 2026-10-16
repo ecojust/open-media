@@ -88,6 +88,7 @@ export async function convertImage(source: string | Blob, options: ImageConvertO
   const url = ownedUrl ? URL.createObjectURL(source) : source
   const image = new Image()
   image.decoding = 'async'
+  image.crossOrigin = 'anonymous'
   image.src = url
   try {
     await image.decode()

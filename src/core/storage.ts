@@ -36,9 +36,10 @@ async function openDatabase(): Promise<IDBDatabase> {
 const blobKey = (projectId: string, assetId: string): string => `${projectId}:${assetId}`
 
 export async function fetchAssetBlob(asset: MediaAsset, signal?: AbortSignal): Promise<Blob> {
-  if (!asset.url) throw new Error(`素材“${asset.name}”不可读取，请重新导入。`)
+  const url = asset.sourceUrl || asset.url
+  if (!url) throw new Error(`素材“${asset.name}”不可读取，请重新导入。`)
   let response: Response
-  try { response = await fetch(asset.url, { signal }) } catch { throw new Error(`素材“${asset.name}”读取失败，请重新导入后再保存。`) }
+  try { response = await fetch(url, { signal }) } catch { throw new Error(`素材“${asset.name}”读取失败，请重新导入后再保存。`) }
   if (!response.ok) throw new Error(`素材“${asset.name}”读取失败（${response.status}）。`)
   const blob = await response.blob()
   if (!blob.size) throw new Error(`素材“${asset.name}”为空，项目未保存。`)
@@ -67,12 +68,13 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
     const [oldProject, existing] = await Promise.all([oldProjectRequest, Promise.all(existingRequests), readDone]).then(([previous, available]) => [previous as Project | undefined, available as (Blob | undefined)[]] as const)
     const pending = new Map<string, Blob>()
     for (const [index, asset] of clean.assets.entries()) {
+      const durableNativeAsset = asset.nativePath && asset.url && !asset.url.startsWith('blob:') && !asset.sourceUrl?.startsWith('blob:')
       const provided = blobs.get(asset.id)
       if (provided) {
         if (!provided.size) throw new Error(`素材“${asset.name}”为空，项目未保存。`)
         pending.set(asset.id, provided)
-      } else if (!asset.nativePath && !existing[index]) pending.set(asset.id, await fetchAssetBlob(asset))
-      if (!asset.nativePath) asset.url = ''
+      } else if (!durableNativeAsset && !existing[index]) pending.set(asset.id, await fetchAssetBlob(asset))
+      if (!durableNativeAsset) { asset.url = ''; delete asset.sourceUrl; delete asset.nativePath }
     }
     const writing = db.transaction(['projects', 'blobs'], 'readwrite')
     const writeDone = completed(writing)
@@ -111,8 +113,11 @@ export async function loadProject(id: string): Promise<ImportedProject> {
       const blob = values[index] as Blob | undefined
       if (blob) {
         blobs.set(asset.id, blob)
-        asset.url = URL.createObjectURL(blob)
-        urls.push(asset.url)
+        if (!asset.nativePath || !asset.url || asset.url.startsWith('blob:')) {
+          asset.url = URL.createObjectURL(blob)
+          if (!asset.nativePath) delete asset.sourceUrl
+          urls.push(asset.url)
+        }
       } else if (!asset.nativePath || !asset.url) throw new Error(`素材“${asset.name}”在本地存储中缺失，无法完整打开项目。`)
     })
     return { project, blobs, revoke: () => { urls.splice(0).forEach((url) => URL.revokeObjectURL(url)) } }

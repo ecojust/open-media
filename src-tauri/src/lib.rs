@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod engine;
+pub mod preview;
 #[cfg(test)]
 mod tests;
 
@@ -8,6 +9,7 @@ mod desktop {
     use crate::{
         capture::{self, CaptureDevice, CaptureManager, CaptureOptions, CaptureStatus},
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
+        preview::{self, PreviewResult},
     };
     use serde::Serialize;
     use serde_json::Value;
@@ -78,7 +80,8 @@ mod desktop {
             fs::write(&state.settings, path.to_string_lossy().as_bytes())
                 .map_err(|e| e.to_string())?;
             *state.runtime.lock().unwrap() = Ok(runtime);
-            Ok(Runtime::status(&state.runtime.lock().unwrap()))
+            let status = Runtime::status(&state.runtime.lock().unwrap());
+            Ok(status)
         })
         .await
     }
@@ -123,6 +126,14 @@ mod desktop {
     ) -> engine::Result<Asset> {
         let state = state.inner().clone();
         blocking(move || state.store.import_bytes(&state.runtime()?, &bytes, &name)).await
+    }
+    #[tauri::command]
+    pub async fn create_media_preview(
+        asset: Value,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<PreviewResult> {
+        let state = state.inner().clone();
+        blocking(move || preview::create_preview(&state.store, &state.runtime()?, &asset)).await
     }
     #[tauri::command]
     pub async fn begin_media_job(
@@ -322,6 +333,7 @@ mod desktop {
                 select_runtime,
                 pick_media_assets,
                 import_blob_asset,
+                create_media_preview,
                 begin_media_job,
                 get_media_jobs,
                 cancel_media_job,

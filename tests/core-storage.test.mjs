@@ -80,3 +80,35 @@ test('并发保存按调用顺序提交，较早的慢素材读取不会覆盖�
     restored.revoke()
   } finally { URL.revokeObjectURL(asset.url) }
 })
+
+test('原生草稿保留持久预览代理地址，同时保留原件Blob供再次打包', async () => {
+  globalThis.indexedDB = new IDBFactory()
+  const { project, asset, blob } = fixture()
+  const previewUrl = 'http://asset.localhost/app/media/preview/video.mp4'
+  const sourceUrl = 'http://asset.localhost/app/media/original/video.mkv'
+  Object.assign(project.assets[0], { nativePath: '/app/media/original/video.mkv', url: previewUrl, sourceUrl })
+  try {
+    await saveProject(project, new Map([[asset.id, blob]]))
+    const restored = await loadProject(project.id)
+    assert.equal(restored.project.assets[0].url, previewUrl)
+    assert.equal(restored.project.assets[0].sourceUrl, sourceUrl)
+    assert.equal(restored.project.assets[0].nativePath, '/app/media/original/video.mkv')
+    assert.equal(await restored.blobs.get(asset.id).text(), await blob.text())
+    restored.revoke()
+  } finally { URL.revokeObjectURL(asset.url) }
+})
+
+test('原生素材仍使用临时URL时保存原件字节，恢复后要求重新建立持久素材', async () => {
+  globalThis.indexedDB = new IDBFactory()
+  const { project, asset, blob } = fixture()
+  project.assets[0].nativePath = '/app/media/original/old-video.webm'
+  try {
+    await saveProject(project, new Map([[asset.id, blob]]))
+    URL.revokeObjectURL(asset.url)
+    const restored = await loadProject(project.id)
+    assert.equal(restored.project.assets[0].nativePath, undefined)
+    assert.notEqual(restored.project.assets[0].url, asset.url)
+    assert.equal(await (await fetch(restored.project.assets[0].url)).text(), await blob.text())
+    restored.revoke()
+  } finally { URL.revokeObjectURL(asset.url) }
+})

@@ -105,6 +105,11 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       const url = text(a.url ?? '', '素材地址', 2 * 1024 * 1024, true)
       if (url && !/^(?:blob:|data:(?:image|video|audio)\/|https?:\/\/|asset:\/\/)/i.test(url)) throw new Error('素材地址协议不受支持。')
       asset.url = url
+      if (a.sourceUrl !== undefined) {
+        const sourceUrl = text(a.sourceUrl, '原始素材地址', 2 * 1024 * 1024)
+        if (!/^(?:blob:|data:(?:image|video|audio)\/|https?:\/\/|asset:\/\/)/i.test(sourceUrl)) throw new Error('原始素材地址协议不受支持。')
+        asset.sourceUrl = sourceUrl
+      }
       if (a.nativePath !== undefined) asset.nativePath = text(a.nativePath, '素材文件路径', 32768)
     }
     return asset

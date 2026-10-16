@@ -28,13 +28,16 @@ const autoSave = ref(true), draftState = ref<'idle' | 'pending' | 'saved' | 'err
 const recent = ref<ProjectSummary[]>([]), status = ref('本地创作，自由表达'), busy = ref(''), error = ref(''), recording = ref(false), browserExporting = ref(false)
 const exportOpen = ref(false), settingsOpen = ref(false), jobsOpen = ref(false), runtime = ref<RuntimeStatus>({ ready: false }), jobs = ref<MediaJob[]>([])
 const mediaInput = ref<HTMLInputElement>(), projectInput = ref<HTMLInputElement>(), renameInput = ref<HTMLInputElement>(), renaming = ref(false), renameValue = ref(''), search = ref('')
-const blobs = new Map<string, Blob>(), ownedUrls = new Set<string>(), hydratedReleases: (() => void)[] = []
+const blobs = new Map<string, Blob>(), ownedUrls = new Set<string>(), hydratedReleases: { release: () => void; urls: Set<string> }[] = []
+const recoveryRecordings = ref<{ id: string; name: string; blob: Blob }[]>([])
+const switching = ref(false), pendingMedia = ref(0), imageConverting = ref(false), videoConverting = ref(false), gifConverting = ref(false)
+let captureQueue = Promise.resolve()
 let draftTimer: ReturnType<typeof setTimeout> | undefined, draftGeneration = 0, saveQueue = Promise.resolve(), jobsTimer: ReturnType<typeof setTimeout> | undefined, mediaQuery: MediaQueryList | undefined, unlistenClose: (() => void) | undefined, allowClose = false
 const effectiveTheme = computed(() => theme.value === 'system' ? systemDark.value ? 'dark' : 'light' : theme.value)
 const duration = computed(() => projectDuration(project.value)), workspaceTitle = computed(() => workspaces.find(item => item.id === view.value)?.title || '开始')
 const visibleRecent = computed(() => recent.value.filter(item => item.title.toLowerCase().includes(search.value.toLowerCase())))
 const runningJobs = computed(() => jobs.value.filter(job => job.state === 'running').length)
-function contentKey(value: Project) { const copy = cloneProject(value); copy.updatedAt = ''; for (const asset of copy.assets) { asset.url = ''; delete asset.nativePath }; return JSON.stringify(copy) }
+function contentKey(value: Project) { const copy = cloneProject(value); copy.updatedAt = ''; for (const asset of copy.assets) { asset.url = ''; delete asset.nativePath; delete asset.sourceUrl }; return JSON.stringify(copy) }
 const cleanKey = ref(contentKey(initial)), dirty = computed(() => contentKey(project.value) !== cleanKey.value)
 const draftLabel = computed(() => draftState.value === 'error' ? '草稿保存失败' : draftState.value === 'pending' ? '正在保存草稿…' : !autoSave.value ? '自动保存已关闭' : draftState.value === 'saved' ? '本地草稿已保存' : '自动保存已开启')
 function announce(message: string) { status.value = message }
@@ -75,10 +78,11 @@ function commit(next: Project, label = '已修改项目') {
   } catch (cause) { fail(cause) }
 }
 function moveHistory(direction: 'undo' | 'redo') {
+  if (switching.value || booting.value) return
   history.value = direction === 'undo' ? undoHistory(history.value) : redoHistory(history.value)
   project.value = cloneProject(history.value.present); announce(direction === 'undo' ? '已撤销' : '已重做'); scheduleDraft()
 }
-function toggleAutosave() { autoSave.value = !autoSave.value; draftGeneration++; clearTimeout(draftTimer); try { localStorage.setItem('open-media:autosave', String(autoSave.value)) } catch {} ; if (autoSave.value) void persist() }
+function toggleAutosave() { if (switching.value || booting.value) return; autoSave.value = !autoSave.value; draftGeneration++; clearTimeout(draftTimer); try { localStorage.setItem('open-media:autosave', String(autoSave.value)) } catch {} ; if (autoSave.value) void persist() }
 function setTheme(value: 'light' | 'dark' | 'system') { theme.value = value; try { localStorage.setItem('open-media:theme', value) } catch {} }
 function rememberAsset(asset: MediaAsset) { if (asset.url.startsWith('blob:')) ownedUrls.add(asset.url) }
 async function acceptAssets(assets: MediaAsset[], assetBlobs?: Map<string, Blob>) {
@@ -86,9 +90,9 @@ async function acceptAssets(assets: MediaAsset[], assetBlobs?: Map<string, Blob>
   for (const asset of assets) { rememberAsset(asset); if (assetBlobs?.has(asset.id)) blobs.set(asset.id, assetBlobs.get(asset.id)!) }
   commit(addAssets(project.value, assets), `已导入 ${assets.length} 个素材`)
 }
-async function acceptAsset(asset: MediaAsset) { await acceptAssets([asset]) }
+async function acceptAsset(asset: MediaAsset) { try { await acceptAssets([asset]); announce('录制已加入素材库，可前往视频剪辑继续编辑。') } catch (cause) { fail(cause) } }
 async function importFiles(files?: File[]) {
-  if (busy.value) return
+  if (busy.value || switching.value || booting.value) return false
   if (!files?.length) {
     if (!native) { mediaInput.value?.click(); return }
     busy.value = '正在导入素材…'
@@ -106,15 +110,42 @@ async function importFiles(files?: File[]) {
       assets.push(asset); if (!native) imported.set(asset.id, file)
     } catch (cause) { failures.push(`${file.name}：${cause instanceof Error ? cause.message : String(cause)}`) }
   }
-  try { await acceptAssets(assets, imported); if (failures.length) fail(failures.join('\n')) } finally { busy.value = '' }
+  try { await acceptAssets(assets, imported); if (failures.length) fail(failures.join('\n')); return failures.length === 0 && assets.length > 0 } finally { busy.value = '' }
 }
-async function captured(blob: Blob, name: string) { await importFiles([new File([blob], name, { type: blob.type })]); if (!error.value) announce('录制已加入素材库，可前往视频剪辑继续编辑。') }
+function waitForIdle(): Promise<void> {
+  if (!busy.value && !switching.value) return Promise.resolve()
+  return new Promise(resolve => { const stop = watch([busy, switching], ([working, changing]) => { if (!working && !changing) { stop(); resolve() } }) })
+}
+function captured(blob: Blob, name: string): Promise<void> {
+  const targetId = project.value.id
+  pendingMedia.value++
+  announce('录制完成，正在加入素材库。')
+  const task = captureQueue.catch(() => {}).then(async () => {
+    await waitForIdle()
+    if (project.value.id !== targetId) throw new Error('录制所属项目已切换，请先保存录制文件。')
+    if (!await importFiles([new File([blob], name, { type: blob.type })])) throw new Error(error.value || '录制暂未加入素材库，请先保存录制文件。')
+    announce('录制已加入素材库，可前往视频剪辑继续编辑。')
+  }).catch(cause => { recoveryRecordings.value.push({ id: `${Date.now()}-${recoveryRecordings.value.length}`, name, blob }); fail(cause) }).finally(() => { pendingMedia.value-- })
+  captureQueue = task
+  return task
+}
+function convertedBusy(value: boolean, mode: 'image' | 'video') { if (mode === 'image') imageConverting.value = value; else videoConverting.value = value }
+async function saveRecoveredRecording(id: string) {
+  const item = recoveryRecordings.value.find(value => value.id === id)
+  if (!item) return
+  try {
+    if (native) { if (!await saveBytes(item.name, new Uint8Array(await item.blob.arrayBuffer()))) return }
+    else downloadBlob(item.blob, item.name)
+    recoveryRecordings.value = recoveryRecordings.value.filter(value => value.id !== id); announce('录制文件已保存，可重新导入。')
+  } catch (cause) { fail(cause) }
+}
 async function acceptConverted(asset: MediaAsset) {
+  pendingMedia.value++
   try {
     const blob = await (await fetch(asset.url)).blob()
     if (native) { const imported = await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), asset.name); await acceptAsset(imported) }
     else await acceptAssets([asset], new Map([[asset.id, blob]]))
-  } catch (cause) { fail(cause) }
+  } catch (cause) { fail(cause) } finally { pendingMedia.value-- }
 }
 function addToTimeline(assetId: string) {
   const asset = project.value.assets.find(item => item.id === assetId)
@@ -134,19 +165,45 @@ const question = ref<Question>(), questionResolve = ref<((answer: string) => voi
 function ask(value: Question): Promise<string> { if (question.value) return Promise.resolve('cancel'); question.value = value; return new Promise(resolve => { questionResolve.value = resolve }) }
 function answer(value: string) { const resolve = questionResolve.value; question.value = undefined; questionResolve.value = undefined; resolve?.(value) }
 async function protectProject(): Promise<boolean> {
-  if (!dirty.value) return true
-  if (autoSave.value && await persist()) return true
-  const choice = await ask({ title: '保留当前项目', text: '当前项目有尚未保留的修改。可以先保存本地草稿，稍后继续编辑。', choices: [{ id: 'cancel', label: '取消' }, { id: 'discard', label: '不保留修改' }, { id: 'save', label: '保存草稿', primary: true }] })
-  if (choice === 'cancel') return false
-  if (choice === 'save') { const success = await persist(); if (!success) fail(draftError.value); return success }
+  while (dirty.value) {
+    const id = project.value.id, key = contentKey(project.value)
+    if (autoSave.value && await persist()) {
+      if (project.value.id === id && contentKey(project.value) === key) return true
+      continue
+    }
+    const choice = await ask({ title: '保留当前项目', text: '当前项目有尚未保留的修改。可以先保存本地草稿，稍后继续编辑。', choices: [{ id: 'cancel', label: '取消' }, { id: 'discard', label: '不保留修改' }, { id: 'save', label: '保存草稿', primary: true }] })
+    if (choice === 'cancel') return false
+    if (project.value.id !== id || contentKey(project.value) !== key) continue
+    if (choice === 'discard') return true
+    if (!await persist()) { fail(draftError.value); return false }
+    if (project.value.id === id && contentKey(project.value) === key) return true
+  }
   return true
+}
+function releaseUnusedMedia(next: Project) {
+  const retainedIds = new Set(next.assets.map(asset => asset.id))
+  const retainedUrls = new Set(next.assets.map(asset => asset.url))
+  for (const id of blobs.keys()) if (!retainedIds.has(id)) blobs.delete(id)
+  for (const url of ownedUrls) if (!retainedUrls.has(url)) { URL.revokeObjectURL(url); ownedUrls.delete(url) }
+  for (let index = hydratedReleases.length - 1; index >= 0; index--) {
+    const entry = hydratedReleases[index]!
+    if (![...entry.urls].some(url => retainedUrls.has(url))) { entry.release(); hydratedReleases.splice(index, 1) }
+  }
 }
 function adoptProject(next: Project, restored = false) {
   draftGeneration++; clearTimeout(draftTimer)
+  releaseUnusedMedia(next)
   project.value = next; history.value = createHistory(next); cleanKey.value = contentKey(next); draftState.value = restored ? 'saved' : 'idle'; lastSaved.value = ''; remember()
   view.value = 'edit'; error.value = ''; if (!restored) scheduleDraft()
 }
-async function newProject() { if (busy.value || !await protectProject()) return; adoptProject(createProject()); announce('已新建项目。') }
+function mediaIsWorking(): boolean { return recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value }
+async function changeProject(action: () => Promise<void>): Promise<void> {
+  if (busy.value || switching.value || booting.value) return
+  if (mediaIsWorking()) { fail('请先完成录制、转换或导出，再切换项目。'); return }
+  switching.value = true
+  try { if (await protectProject()) await action() } catch (cause) { fail(cause) } finally { switching.value = false }
+}
+async function newProject() { await changeProject(async () => { adoptProject(createProject()); announce('已新建项目。') }) }
 async function hydrate(imported: ImportedProject) {
   const next = cloneProject(imported.project)
   if (native) {
@@ -159,32 +216,35 @@ async function hydrate(imported: ImportedProject) {
     }
   }
   for (const [id, blob] of imported.blobs) blobs.set(id, blob)
-  hydratedReleases.push(imported.revoke); next.assets.forEach(rememberAsset)
+  hydratedReleases.push({ release: imported.revoke, urls: new Set(imported.project.assets.map(asset => asset.url)) }); next.assets.forEach(rememberAsset)
   return validateProject(next, { trusted: true })
 }
 async function openProject(file?: File) {
-  if (busy.value || !await protectProject()) return
+  if (busy.value || switching.value || booting.value) return
   if (!file && !native) { projectInput.value?.click(); return }
-  busy.value = '正在打开项目…'; error.value = ''
-  try {
-    const selected = file || await openProjectFile()
-    if (!selected) return
-    const imported = await importProjectFile(selected instanceof File ? selected : new Uint8Array(selected.bytes))
-    adoptProject(await hydrate(imported)); cleanKey.value = contentKey(project.value); announce('项目与素材已打开。')
-  } catch (cause) { fail(cause) } finally { busy.value = '' }
+  await changeProject(async () => {
+    busy.value = '正在打开项目…'; error.value = ''
+    try {
+      const selected = file || await openProjectFile()
+      if (!selected) return
+      const imported = await importProjectFile(selected instanceof File ? selected : new Uint8Array(selected.bytes))
+      try { adoptProject(await hydrate(imported)); cleanKey.value = contentKey(project.value); announce('项目与素材已打开。') } catch (cause) { imported.revoke(); throw cause }
+    } finally { busy.value = '' }
+  })
 }
 async function openRecent(id: string) {
-  if (busy.value || !await protectProject()) return
-  busy.value = '正在恢复本地草稿…'
-  try { adoptProject(await hydrate(await loadProject(id)), true); announce('已恢复本地项目。') } catch (cause) { fail(cause) } finally { busy.value = '' }
+  await changeProject(async () => {
+    busy.value = '正在恢复本地草稿…'
+    try { const imported = await loadProject(id); try { adoptProject(await hydrate(imported), true); announce('已恢复本地项目。') } catch (cause) { imported.revoke(); throw cause } } finally { busy.value = '' }
+  })
 }
 async function removeRecent(item: ProjectSummary) {
   const choice = await ask({ title: '移除本地草稿', text: `移除“${item.title}”的本地草稿？已经导出的项目文件仍可打开。`, choices: [{ id: 'cancel', label: '取消' }, { id: 'remove', label: '移除草稿', primary: true }] })
   if (choice !== 'remove') return
-  try { await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) draftState.value = 'idle' } catch (cause) { fail(cause) }
+  try { if (item.id === project.value.id) { draftGeneration++; clearTimeout(draftTimer) }; await saveQueue; await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) draftState.value = 'idle' } catch (cause) { fail(cause) }
 }
 async function save() {
-  if (busy.value) return
+  if (busy.value || switching.value || booting.value) return
   busy.value = '正在打包项目与素材…'; error.value = ''
   const snapshot = cloneProject(project.value), key = contentKey(snapshot)
   try {
@@ -203,11 +263,9 @@ async function chooseRuntime() { try { runtime.value = await selectRuntime() } c
 async function pollJobs() { if (!native) return; try { jobs.value = await getMediaJobs() } catch {} ; jobsTimer = setTimeout(() => void pollJobs(), 1000) }
 async function cancelJob(id: string) { try { await cancelMediaJob(id); jobs.value = await getMediaJobs() } catch (cause) { fail(cause) } }
 async function nativeClose() {
-  if (recording.value) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
+  if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
   if (browserExporting.value || runningJobs.value) { jobsOpen.value = native; fail('请等待导出完成，或先取消正在处理的任务。'); return }
-  if (!await protectProject()) return
-  allowClose = true
-  await closeNativeWindow()
+  await changeProject(async () => { allowClose = true; await closeNativeWindow() })
 }
 const hasDialog = computed(() => Boolean(question.value || exportOpen.value || settingsOpen.value || jobsOpen.value))
 let previousFocus: HTMLElement | null = null
@@ -223,6 +281,7 @@ function keyboard(event: KeyboardEvent) {
     }
     return
   }
+  if (switching.value || booting.value) { if (event.ctrlKey || event.metaKey) event.preventDefault(); return }
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return
   const key = event.key.toLowerCase()
   if (key === 's') { event.preventDefault(); void save() }
@@ -231,7 +290,7 @@ function keyboard(event: KeyboardEvent) {
   if (key === 'z') { event.preventDefault(); moveHistory(event.shiftKey ? 'redo' : 'undo') }
   if (key === 'y') { event.preventDefault(); moveHistory('redo') }
 }
-function unload(event: BeforeUnloadEvent) { if (!allowClose && (recording.value || browserExporting.value || dirty.value && (draftState.value !== 'saved' || !autoSave.value))) { event.preventDefault(); event.returnValue = '' } }
+function unload(event: BeforeUnloadEvent) { if (!allowClose && (mediaIsWorking() || recoveryRecordings.value.length || busy.value || switching.value || dirty.value && (draftState.value !== 'saved' || !autoSave.value))) { event.preventDefault(); event.returnValue = '' } }
 function mediaChanged(event: MediaQueryListEvent) { systemDark.value = event.matches }
 function dropped(event: DragEvent) { event.preventDefault(); const files = [...(event.dataTransfer?.files || [])]; if (files.length === 1 && files[0]!.name.toLowerCase().endsWith('.omedia')) void openProject(files[0]); else if (files.length) void importFiles(files) }
 onMounted(async () => {
@@ -245,7 +304,7 @@ onMounted(async () => {
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { draftGeneration++; clearTimeout(draftTimer); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const release of hydratedReleases) release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { draftGeneration++; clearTimeout(draftTimer); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>
@@ -253,24 +312,25 @@ onBeforeUnmount(() => { draftGeneration++; clearTimeout(draftTimer); clearTimeou
     <header class="topbar">
       <button class="brand" title="开始" @click="view='home'"><img src="/favicon.svg" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="file-actions">
-        <button title="新建项目" :disabled="!!busy" @click="newProject"><Icon name="plus"/><span>新建</span></button>
-        <button title="打开项目 (Ctrl+O)" :disabled="!!busy" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
+        <button title="新建项目" :disabled="!!busy || switching || booting" @click="newProject"><Icon name="plus"/><span>新建</span></button>
+        <button title="打开项目 (Ctrl+O)" :disabled="!!busy || switching || booting" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
         <span class="divider"/>
-        <button title="保存项目 (Ctrl+S)" :disabled="!!busy || booting" data-testid="save-project" @click="save"><Icon name="save"/><span>保存</span></button>
-        <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting" data-testid="autosave-toggle" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
-        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length" @click="moveHistory('redo')"><Icon name="redo"/></button>
+        <button title="保存项目 (Ctrl+S)" :disabled="!!busy || switching || booting" data-testid="save-project" @click="save"><Icon name="save"/><span>保存</span></button>
+        <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
+        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting" @click="moveHistory('redo')"><Icon name="redo"/></button>
       </div>
-      <div class="topbar-end"><button v-if="native" class="icon-button job-button" title="导出任务" aria-label="导出任务" @click="jobsOpen=true"><Icon name="layers"/><b v-if="runningJobs">{{ runningJobs }}</b></button><button class="icon-button" title="设置" aria-label="设置" @click="settingsOpen=true"><Icon name="settings"/></button><button class="primary top-export" :disabled="!duration || !!busy" data-testid="export-project" @click="exportOpen=true"><Icon name="export" :size="16"/><span>导出视频</span></button></div>
+      <div class="topbar-end"><button v-if="native" class="icon-button job-button" title="导出任务" aria-label="导出任务" @click="jobsOpen=true"><Icon name="layers"/><b v-if="runningJobs">{{ runningJobs }}</b></button><button class="icon-button" title="设置" aria-label="设置" @click="settingsOpen=true"><Icon name="settings"/></button><button class="primary top-export" :disabled="!duration || !!busy || switching || booting" data-testid="export-project" @click="exportOpen=true"><Icon name="export" :size="16"/><span>导出视频</span></button></div>
     </header>
-    <div class="workbench-body">
+    <div class="workbench-body" :inert="switching || booting">
       <aside class="sidebar" :class="{collapsed}">
         <div class="sidebar-heading"><span v-if="!collapsed">工作台</span><button class="icon-button" :title="collapsed?'展开侧栏':'折叠侧栏'" :aria-label="collapsed?'展开侧栏':'折叠侧栏'" @click="collapsed=!collapsed"><Icon name="panel" :size="17"/></button></div>
         <nav aria-label="工作区"><button :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
         <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · 0.1.0</small></div>
       </aside>
       <main class="main-area">
-        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><button class="import-action" :disabled="!!busy" data-testid="import-media" @click="importFiles()"><Icon name="import" :size="16"/><span>导入素材</span></button></div>
+        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><button class="import-action" :disabled="!!busy || switching || booting" data-testid="import-media" @click="importFiles()"><Icon name="import" :size="16"/><span>导入素材</span></button></div>
         <div v-if="error" class="app-error" role="alert"><Icon name="alert" :size="16"/><span>{{ error }}</span><button class="icon-button" aria-label="关闭提示" @click="error=''"><Icon name="close" :size="15"/></button></div>
+        <div v-for="item in recoveryRecordings" :key="item.id" class="app-error recording-recovery" role="alert"><Icon name="video" :size="16"/><span>录制尚未加入项目：{{ item.name }}</span><button @click="saveRecoveredRecording(item.id)">保存录制文件</button></div>
         <div v-if="booting" class="boot-loading"><span class="spinner"/>正在恢复工作台…</div>
         <section v-else-if="view==='home'" class="home-workspace" data-testid="home-workspace">
           <div class="home-intro"><div class="eyebrow"><span/>YOUR LOCAL CREATIVE STUDIO</div><h1>把灵感，剪成作品。</h1><p>录下屏幕，整理片段，转换媒体。<br/>让每一次创作，都从这里开始。</p><div class="home-actions"><button class="primary" data-testid="create-project" @click="newProject"><Icon name="plus"/>新建剪辑项目</button><button @click="openProject()"><Icon name="folder"/>打开项目</button></div><div class="hero-art" aria-hidden="true"><div class="art-window"><div class="art-dots"><i/><i/><i/></div><svg viewBox="0 0 260 120"><path d="M0 85 40 65 75 80 130 32 180 60 220 25 260 45v75H0Z" fill="#dce8ff"/><path d="M0 105 60 80 105 95 155 65 210 88 260 64v56H0Z" fill="#b9d0ff"/><circle cx="130" cy="60" r="25" fill="white"/><path d="m124 48 19 12-19 12z" fill="#4b7deb"/></svg></div><div class="art-timeline"><i/><i/><i/><i/><b/></div><div class="art-note"><Icon name="audio" :size="20"/><span><i/><i/><i/><i/><i/><i/><i/></span></div></div></div>
@@ -279,9 +339,9 @@ onBeforeUnmount(() => { draftGeneration++; clearTimeout(draftTimer); clearTimeou
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
         <VideoEditor v-if="!booting && view==='edit'" :project="project" @change="commit" @import="importFiles" @export="exportOpen=true" @status="announce"/>
-        <KeepAlive><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
-        <KeepAlive><GifWorkspace v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
-        <KeepAlive><ConvertWorkspace v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
+        <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
+        <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
+        <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
       </main>
     </div>
     <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/>{{ busy || status }}</span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>

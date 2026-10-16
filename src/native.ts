@@ -1,4 +1,5 @@
 import type { MediaAsset, Project } from './core/types'
+import { ensureMediaPreview } from './core/media-import'
 
 export interface RuntimeStatus { ready: boolean; version?: string; source?: string; error?: string }
 export interface ExportConfig { format: 'mp4' | 'webm' | 'mov' | 'gif'; width: number; height: number; fps: number; quality: 'draft' | 'balanced' | 'high' }
@@ -20,20 +21,30 @@ async function call<T>(command: string, args?: Record<string, unknown>): Promise
 async function assetUrl(asset: MediaAsset): Promise<MediaAsset> {
   if (!asset.nativePath) return asset
   const { convertFileSrc } = await import('@tauri-apps/api/core')
-  return { ...asset, url: convertFileSrc(asset.nativePath) }
+  return ensureMediaPreview({ ...asset, url: convertFileSrc(asset.nativePath) }, createMediaPreview)
 }
 export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   if (!isDesktop()) return { ready: false, error: '完整媒体编码由桌面端提供。' }
   return call('get_runtime_status')
 }
 export async function selectRuntime(): Promise<RuntimeStatus> { return call('select_runtime') }
-export async function pickMediaAssets(): Promise<MediaAsset[]> { return Promise.all((await call<MediaAsset[]>('pick_media_assets')).map(assetUrl)) }
+export async function pickMediaAssets(): Promise<MediaAsset[]> {
+  const assets = await call<MediaAsset[]>('pick_media_assets')
+  const ready: MediaAsset[] = []
+  for (const asset of assets) ready.push(await assetUrl(asset))
+  return ready
+}
 export async function importBlobAsset(bytes: Uint8Array, name: string): Promise<MediaAsset> {
   return assetUrl(await call('import_blob_asset', { name, bytes: Array.from(bytes) }))
 }
+export async function createMediaPreview(asset: MediaAsset): Promise<string> {
+  const result = await call<{ path: string }>('create_media_preview', { asset })
+  const { convertFileSrc } = await import('@tauri-apps/api/core')
+  return convertFileSrc(result.path)
+}
 async function localAsset(asset: MediaAsset): Promise<MediaAsset> {
   if (asset.nativePath) return asset
-  const response = await fetch(asset.url)
+  const response = await fetch(asset.sourceUrl || asset.url)
   if (!response.ok) throw new Error(`无法读取素材：${asset.name}`)
   const imported = await importBlobAsset(new Uint8Array(await response.arrayBuffer()), asset.name)
   return { ...imported, id: asset.id }

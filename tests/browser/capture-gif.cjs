@@ -92,12 +92,12 @@ async function run() {
 
     const ended = await page.evaluate(async () => {
       window.createSource()
-      let finished
-      const promise = new Promise(resolve => { finished = resolve })
-      const capture = await window.capture.startBrowserCapture({ fps: 15, microphone: false, systemAudio: false, onFinished: finished })
-      await new Promise(resolve => setTimeout(resolve, 250))
+      let finished, failed
+      const promise = new Promise((resolve, reject) => { finished = resolve; failed = reject })
+      const capture = await window.capture.startBrowserCapture({ fps: 15, microphone: false, systemAudio: false, onFinished: finished, onError: failed })
+      await new Promise(resolve => setTimeout(resolve, 1000))
       window.screenStream.getVideoTracks()[0].dispatchEvent(new Event('ended'))
-      const output = await promise
+      const output = await Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('Source stop did not finalize within 10 seconds')), 10000))])
       const stopped = window.screenStream.getTracks().every(track => track.readyState === 'ended')
       window.cleanupSource()
       return { phase: capture.phase, stopped, size: output.blob.size }

@@ -6,7 +6,7 @@ import { createVideoGif, gifFrameCount, validateGifSegments, type GifQuality, ty
 import { beginMediaJob, cancelMediaJob, getMediaJobs } from '../native'
 
 const props = defineProps<{ assets: MediaAsset[]; native: boolean }>()
-const emit = defineEmits<{ imported: [file: File]; status: [message: string] }>()
+const emit = defineEmits<{ imported: [file: File]; status: [message: string]; 'busy-change': [busy: boolean] }>()
 const selectedId = ref('')
 const video = ref<HTMLVideoElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -19,6 +19,7 @@ const playhead = ref(0)
 let previewEnd: number | undefined
 const error = ref('')
 const exporting = ref(false)
+watch(exporting, value => emit('busy-change', value), { flush: 'sync' })
 const progress = ref(0)
 const jobId = ref('')
 const resultUrl = ref('')
@@ -34,6 +35,7 @@ const selected = computed(() => videos.value.find(asset => asset.id === selected
 const duration = computed(() => selected.value?.duration ?? 0)
 const invalid = computed(() => validateGifSegments(segments.value, duration.value))
 const outputDuration = computed(() => segments.value.reduce((sum, segment) => sum + Math.max(0, segment.end - segment.start), 0))
+function errorMessage(cause: unknown, fallback: string): string { return cause instanceof Error ? cause.message : typeof cause === 'string' && cause.trim() ? cause : fallback }
 const outputHeight = computed(() => {
   if (!selected.value?.width) return 0
   const raw = Math.min(width.value, selected.value.width) * selected.value.height / selected.value.width
@@ -91,7 +93,7 @@ function download(blob: Blob, name: string): void {
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
-function finishJob(): void { clearInterval(pollTimer); pollTimer = undefined; jobId.value = ''; exporting.value = false }
+function finishJob(): void { clearInterval(pollTimer); pollTimer = undefined; jobId.value = ''; exporting.value = false; abort = undefined }
 async function pollJob(): Promise<void> {
   if (!jobId.value || polling) return
   const currentId = jobId.value
@@ -103,7 +105,7 @@ async function pollJob(): Promise<void> {
     if (job.state === 'completed') { progress.value = 1; finishJob(); emit('status', `GIF 已导出${job.outputPath ? `：${job.outputPath}` : '。'}`) }
     else if (job.state === 'failed') { error.value = job.error || 'GIF 导出失败。'; finishJob() }
     else if (job.state === 'cancelled') { finishJob(); emit('status', '已取消 GIF 导出。') }
-  } catch (cause) { error.value = cause instanceof Error ? cause.message : '无法读取导出进度。' }
+  } catch (cause) { error.value = errorMessage(cause, '无法读取导出进度。') }
   finally { polling = false }
 }
 async function exportGif(): Promise<void> {
@@ -114,19 +116,20 @@ async function exportGif(): Promise<void> {
   error.value = ''
   progress.value = 0
   exporting.value = true
+  abort = new AbortController()
+  const signal = abort.signal
   video.value?.pause()
   clearResult()
   try {
     if (props.native) {
       const job = await beginMediaJob({ kind: 'gif', asset: source, segments: clips, width: Math.min(width.value, source.width || width.value), fps: fps.value, loop: loop.value })
-      if (!job) { exporting.value = false; return }
+      if (!job) { finishJob(); return }
       jobId.value = job.id
-      if (destroyed) { await cancelMediaJob(job.id); finishJob(); return }
+      if (destroyed || signal.aborted) { await cancelMediaJob(job.id); finishJob(); if (!destroyed) emit('status', '已取消 GIF 导出。'); return }
       pollTimer = setInterval(() => { void pollJob() }, 400)
       await pollJob()
     } else {
-      abort = new AbortController()
-      const blob = await createVideoGif(source.url, source.duration, clips, { width: width.value, fps: fps.value, loop: loop.value, quality: quality.value, signal: abort.signal, onProgress: value => { progress.value = value } })
+      const blob = await createVideoGif(source.url, source.duration, clips, { width: width.value, fps: fps.value, loop: loop.value, quality: quality.value, signal, onProgress: value => { progress.value = value } })
       if (destroyed) return
       resultUrl.value = URL.createObjectURL(blob)
       resultSize.value = `${(blob.size / 1024 / 1024).toFixed(2)} MB`
@@ -136,7 +139,7 @@ async function exportGif(): Promise<void> {
     }
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') emit('status', '已取消 GIF 导出。')
-    else error.value = cause instanceof Error ? cause.message : 'GIF 导出失败。'
+    else error.value = errorMessage(cause, 'GIF 导出失败。')
     finishJob()
   }
 }
@@ -144,10 +147,10 @@ async function cancel(): Promise<void> {
   abort?.abort()
   if (jobId.value) {
     try { await cancelMediaJob(jobId.value); finishJob(); emit('status', '已取消 GIF 导出。') }
-    catch (cause) { error.value = cause instanceof Error ? cause.message : '取消失败，请重试。' }
+    catch (cause) { error.value = errorMessage(cause, '取消失败，请重试。') }
   }
 }
-onBeforeUnmount(() => { destroyed = true; abort?.abort(); if (jobId.value) void cancelMediaJob(jobId.value).catch(() => {}); finishJob(); clearResult() })
+onBeforeUnmount(() => { destroyed = true; abort?.abort(); if (jobId.value) void cancelMediaJob(jobId.value).catch(() => {}); finishJob(); clearResult(); emit('busy-change', false) })
 </script>
 
 <template>

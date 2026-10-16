@@ -100,6 +100,12 @@ async function verify() {
   }
   const directory = join(cache, 'verification');
   await mkdir(directory, { recursive: true });
+  const pixels = spawnSync(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=yellow:s=64x64', '-vf', 'format=rgba,format=yuv420p', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], { maxBuffer: 1024 * 1024 });
+  if (pixels.error || pixels.status !== 0 || pixels.stdout.length !== 64 * 64 * 3) throw new Error('Bundled runtime failed its RGBA conversion check.');
+  for (const offset of [0, 32 * 64 * 3, (64 * 64 - 1) * 3]) {
+    const [red, green, blue] = pixels.stdout.subarray(offset, offset + 3);
+    if (red < 220 || green < 220 || blue > 40) throw new Error(`Bundled runtime changed yellow pixels during RGBA conversion: ${red}, ${green}, ${blue}.`);
+  }
   const movie = join(directory, 'sample.mp4');
   run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x456be8:s=64x64:r=10:d=0.3', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', movie]);
   const info = JSON.parse(run(ffprobe, ['-v', 'error', '-show_streams', '-of', 'json', movie]));
