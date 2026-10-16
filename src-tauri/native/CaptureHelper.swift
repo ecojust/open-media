@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import CoreMedia
+import CoreImage
 import CoreVideo
 import Darwin
 import ScreenCaptureKit
@@ -103,6 +104,41 @@ func aspectFit(source: CGSize, output: OutputSize) -> CGRect {
     let width = source.width * scale, height = source.height * scale
     return CGRect(x: (Double(output.width) - width) / 2,
                   y: (Double(output.height) - height) / 2, width: width, height: height)
+}
+
+func streamSize(source: CGSize, output: OutputSize) -> OutputSize {
+    let rect = aspectFit(source: source, output: output)
+    return OutputSize(width: max(2, Int(rect.width / 2) * 2), height: max(2, Int(rect.height / 2) * 2))
+}
+
+func makeRenderPool(size: OutputSize) throws -> CVPixelBufferPool {
+    var pool: CVPixelBufferPool?
+    let attributes: [String: Any] = [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferWidthKey as String: size.width, kCVPixelBufferHeightKey as String: size.height,
+        kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+        kCVPixelBufferCGImageCompatibilityKey as String: true,
+        kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
+    ]
+    guard CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attributes as CFDictionary, &pool) == kCVReturnSuccess,
+          let pool = pool else { throw CaptureFailure("无法创建录制画面缓冲区。") }
+    return pool
+}
+
+func letterboxedFrame(_ source: CVPixelBuffer, contentSize: CGSize? = nil, pool: CVPixelBufferPool, context: CIContext) throws -> CVPixelBuffer {
+    var output: CVPixelBuffer?
+    guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &output) == kCVReturnSuccess,
+          let output = output else { throw CaptureFailure("无法分配录制画面缓冲区。") }
+    let outputSize = OutputSize(width: CVPixelBufferGetWidth(output), height: CVPixelBufferGetHeight(output))
+    let sourceSize = CGSize(width: CVPixelBufferGetWidth(source), height: CVPixelBufferGetHeight(source))
+    let placement = aspectFit(source: contentSize ?? sourceSize, output: outputSize)
+    let surface = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
+    let image = CIImage(cvPixelBuffer: source)
+        .transformed(by: CGAffineTransform(scaleX: placement.width / sourceSize.width, y: placement.height / sourceSize.height))
+        .transformed(by: CGAffineTransform(translationX: placement.minX, y: placement.minY))
+    let background = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1)).cropped(to: surface)
+    context.render(image.composited(over: background), to: output, bounds: surface, colorSpace: CGColorSpaceCreateDeviceRGB())
+    return output
 }
 
 func writeJSON<T: Encodable>(_ value: T) throws {
@@ -217,6 +253,9 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
     private var video: AVAssetWriterInput?
     private var audio: AVAssetWriterInput?
     private var pixels: AVAssetWriterInputPixelBufferAdaptor?
+    private var renderPool: CVPixelBufferPool?
+    private var captureContentSize: CGSize?
+    private let renderContext = CIContext(options: [.cacheIntermediates: false])
     private var latestFrame: CVPixelBuffer?
     private var frameTimer: DispatchSourceTimer?
     private var monitor: Timer?
@@ -293,6 +332,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             kCVPixelBufferWidthKey as String: options.outputSize.width,
             kCVPixelBufferHeightKey as String: options.outputSize.height
         ])
+        renderPool = try makeRenderPool(size: options.outputSize)
         if options.microphone {
             let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -328,8 +368,6 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         } else { throw CaptureFailure("录制来源不可用。") }
 
         let configuration = SCStreamConfiguration()
-        configuration.width = options.outputSize.width
-        configuration.height = options.outputSize.height
         configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(options.fps))
         configuration.queueDepth = 5
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
@@ -337,13 +375,19 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         configuration.scalesToFit = true
         configuration.backgroundColor = CGColor(gray: 0, alpha: 1)
         configuration.capturesAudio = false
+        if #available(macOS 14.0, *) { configuration.ignoreShadowsSingleWindow = true }
         let captureSize: CGSize
         if let region = options.region {
             configuration.sourceRect = CGRect(x: Double(region.x) / sourceScale, y: Double(region.y) / sourceScale,
                                               width: Double(region.width) / sourceScale, height: Double(region.height) / sourceScale)
             captureSize = CGSize(width: region.width, height: region.height)
         } else { captureSize = sourceBounds.size }
-        configuration.destinationRect = aspectFit(source: captureSize, output: options.outputSize)
+        // An independent window ignores destinationRect. Request a stream surface
+        // with the source aspect ratio, then add padding exactly once ourselves.
+        let contentSize = streamSize(source: captureSize, output: options.outputSize)
+        captureContentSize = captureSize
+        configuration.width = contentSize.width
+        configuration.height = contentSize.height
         let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         self.stream = stream
@@ -398,8 +442,9 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let rawStatus = attachments.first?[.status] as? Int,
               SCFrameStatus(rawValue: rawStatus) == .complete,
-              let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        latestFrame = buffer
+              let buffer = CMSampleBufferGetImageBuffer(sampleBuffer), let renderPool = renderPool else { return }
+        do { latestFrame = try letterboxedFrame(buffer, contentSize: captureContentSize, pool: renderPool, context: renderContext) }
+        catch { reportFailure(error); return }
         if !started { appendVideoFrame() }
     }
 
@@ -545,7 +590,8 @@ func runSelfTests() throws {
         throw CaptureFailure("录制参数验证失败。")
     }
     try verifyAudioTiming()
-    try verifyVideoEncoding()
+    try verifyVideoEncoding(sourceSize: OutputSize(width: 120, height: 240), outputSize: OutputSize(width: 320, height: 180))
+    try verifyVideoEncoding(sourceSize: OutputSize(width: 240, height: 120), outputSize: OutputSize(width: 180, height: 320))
     print("Capture geometry, validation, audio timing, video encoding and decoded pixel checks passed.")
 }
 
@@ -582,18 +628,18 @@ func verifyAudioTiming() throws {
     }
 }
 
-func verifyVideoEncoding() throws {
+func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize) throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("open-media-capture-check-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let file = directory.appendingPathComponent("capture.mp4")
     let writer = try AVAssetWriter(outputURL: file, fileType: .mp4)
     let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-        AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 180
+        AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: outputSize.width, AVVideoHeightKey: outputSize.height
     ])
     let attributes: [String: Any] = [
         kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-        kCVPixelBufferWidthKey as String: 320, kCVPixelBufferHeightKey as String: 180,
+        kCVPixelBufferWidthKey as String: outputSize.width, kCVPixelBufferHeightKey as String: outputSize.height,
         kCVPixelBufferCGImageCompatibilityKey as String: true,
         kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
     ]
@@ -603,23 +649,25 @@ func verifyVideoEncoding() throws {
     guard writer.startWriting() else { throw writer.error ?? CaptureFailure("视频编码验证无法启动。") }
     writer.startSession(atSourceTime: .zero)
     var optionalBuffer: CVPixelBuffer?
-    guard CVPixelBufferCreate(kCFAllocatorDefault, 320, 180, kCVPixelFormatType_32BGRA, attributes as CFDictionary, &optionalBuffer) == kCVReturnSuccess,
+    guard CVPixelBufferCreate(kCFAllocatorDefault, sourceSize.width, sourceSize.height, kCVPixelFormatType_32BGRA, nil, &optionalBuffer) == kCVReturnSuccess,
           let buffer = optionalBuffer else { throw CaptureFailure("视频编码验证无法创建画面。") }
     CVPixelBufferLockBaseAddress(buffer, [])
     let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
     let stride = CVPixelBufferGetBytesPerRow(buffer)
-    for y in 0..<180 {
-        for x in 0..<320 {
+    for y in 0..<sourceSize.height {
+        for x in 0..<sourceSize.width {
             let offset = y * stride + x * 4
             base[offset] = 0; base[offset + 1] = 0; base[offset + 2] = 255; base[offset + 3] = 255
         }
     }
     CVPixelBufferUnlockBaseAddress(buffer, [])
-    for frame in 0..<6 {
+    let pool = try makeRenderPool(size: outputSize)
+    let frame = try letterboxedFrame(buffer, pool: pool, context: CIContext(options: [.useSoftwareRenderer: true]))
+    for frameIndex in 0..<6 {
         let deadline = Date().addingTimeInterval(5)
         while !input.isReadyForMoreMediaData, writer.status == .writing, Date() < deadline { usleep(1000) }
         guard input.isReadyForMoreMediaData,
-              adapter.append(buffer, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)) else {
+              adapter.append(frame, withPresentationTime: CMTime(value: Int64(frameIndex), timescale: 30)) else {
             throw writer.error ?? CaptureFailure("视频编码验证无法写入画面。")
         }
     }
@@ -632,19 +680,32 @@ func verifyVideoEncoding() throws {
     }
     let asset = AVURLAsset(url: file)
     guard let track = asset.tracks(withMediaType: .video).first,
-          track.naturalSize == CGSize(width: 320, height: 180), CMTimeGetSeconds(asset.duration) >= 0.19 else {
+          track.naturalSize == CGSize(width: outputSize.width, height: outputSize.height), CMTimeGetSeconds(asset.duration) >= 0.19 else {
         throw CaptureFailure("视频编码验证得到错误的尺寸或时长。")
     }
     let generator = AVAssetImageGenerator(asset: asset)
     let image = try generator.copyCGImage(at: .zero, actualTime: nil)
-    var rgba = [UInt8](repeating: 0, count: 4)
+    var rgba = [UInt8](repeating: 0, count: outputSize.width * outputSize.height * 4)
     let colorIsCorrect = rgba.withUnsafeMutableBytes { bytes -> Bool in
-        guard let context = CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+        guard let context = CGContext(data: bytes.baseAddress, width: outputSize.width, height: outputSize.height, bitsPerComponent: 8, bytesPerRow: outputSize.width * 4,
                                       space: CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height))
         let pixel = bytes.bindMemory(to: UInt8.self)
-        return pixel[0] > 180 && pixel[1] < 80 && pixel[2] < 80 && pixel[3] > 240
+        func isRed(_ x: Int, _ y: Int) -> Bool {
+            let at = (y * outputSize.width + x) * 4
+            return pixel[at] > 180 && pixel[at + 1] < 80 && pixel[at + 2] < 80 && pixel[at + 3] > 240
+        }
+        func isBlack(_ x: Int, _ y: Int) -> Bool {
+            let at = (y * outputSize.width + x) * 4
+            return pixel[at] < 35 && pixel[at + 1] < 35 && pixel[at + 2] < 35 && pixel[at + 3] > 240
+        }
+        if sourceSize.width < sourceSize.height {
+            return isRed(160, 90) && isRed(120, 90) && isRed(160, 10) && isRed(160, 170)
+                && isBlack(10, 90) && isBlack(110, 90) && isBlack(210, 90) && isBlack(310, 90)
+        }
+        return isRed(90, 160) && isRed(90, 120) && isRed(10, 160) && isRed(170, 160)
+            && isBlack(90, 10) && isBlack(90, 110) && isBlack(90, 210) && isBlack(90, 310)
     }
     guard colorIsCorrect else { throw CaptureFailure("视频编码验证的实际解码颜色不正确。") }
 }

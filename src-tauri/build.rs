@@ -35,6 +35,8 @@ fn build_capture_helper() {
             "AVFoundation",
             "-framework",
             "ScreenCaptureKit",
+            "-framework",
+            "CoreImage",
         ])
         .args([
             "-Xlinker",
