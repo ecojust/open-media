@@ -308,10 +308,12 @@ jobs:
           set -o pipefail
           application="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app"
           executable="$application/Contents/MacOS/open-media"
-          library="$application/Contents/Frameworks/libopen_media_capture.dylib"
           test -x "$executable"
-          test -f "$library"
-          codesign --verify --strict "$library"
+          test ! -e "$application/Contents/Frameworks/libopen_media_capture.dylib"
+          if otool -L "$executable" | grep -F 'libopen_media_capture'; then
+            echo 'Recording must be linked into the main executable.' >&2
+            exit 1
+          fi
           codesign --verify --deep --strict "$application"
           "$executable" --open-media-capture --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
           node --input-type=module - <<'NODE' 2>&1 | tee -a .media-runtime/logs/capture-helper.log

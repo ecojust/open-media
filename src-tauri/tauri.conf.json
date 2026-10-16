@@ -73,7 +73,6 @@
       "signingIdentity": "-",
       "infoPlist": "Info.plist",
       "files": {
-        "Frameworks/libopen_media_capture.dylib": "resources/capture/libopen_media_capture.dylib",
         "Helpers/speech/runtime": "resources/speech/runtime"
       }
     }

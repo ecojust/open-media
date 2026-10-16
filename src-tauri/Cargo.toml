@@ -20,6 +20,7 @@ default = ["desktop"]
 desktop = ["dep:tauri", "dep:tauri-plugin-dialog", "dep:tauri-build"]
 
 [build-dependencies]
+serde_json = "1"
 tauri-build = { version = "=2.7.2", features = [], optional = true }
 
 [dependencies]

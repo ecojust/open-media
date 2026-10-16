@@ -488,8 +488,74 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
     private var sourceScale = 1.0
     private var options: Options?
     private let parentPID = getppid()
+    private var smokeTestOutput: URL?
+    private var smokeTestExpectedBorder = false
+    private var smokeTestBorderWasVisible = false
+    private var smokeTestBorderClosed = false
+    private var smokeTestDeadline: DispatchWorkItem?
+    private var smokeTestHardDeadline: DispatchWorkItem?
+    private var receivedScreenFrames = 0
+    private var encodedFrames = 0
 
-    @MainActor func start(options: Options, output: URL) async throws {
+    // This path is available only through an explicit command-line request. It
+    // uses the normal recorder and real screen samples, never generated frames.
+    @MainActor func startSmokeTest(output: URL, showsBorder: Bool) async throws {
+        guard output.pathExtension.lowercased() == "mp4",
+              !FileManager.default.fileExists(atPath: output.path) else {
+            throw CaptureFailure("真实录屏检查需要一个尚不存在的 MP4 输出文件。")
+        }
+        smokeTestOutput = output
+        smokeTestExpectedBorder = showsBorder
+        let deadline = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                self?.stop(error: CaptureFailure("真实录屏检查在 25 秒内未完成；当前桌面会话可能未授权屏幕采集。未将此检查视为成功。"))
+            }
+        }
+        smokeTestDeadline = deadline
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25, execute: deadline)
+        let hardDeadline = DispatchWorkItem {
+            writeError(CaptureFailure("真实录屏检查超过 30 秒，采集进程已退出。"))
+            exit(1)
+        }
+        smokeTestHardDeadline = hardDeadline
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 30, execute: hardDeadline)
+        try verifyApplicationIdentity()
+        #if arch(arm64)
+        let architecture = "arm64"
+        #elseif arch(x86_64)
+        let architecture = "x86_64"
+        #else
+        let architecture = "unknown"
+        #endif
+        try writeJSON([
+            "captureSmokeTest": "starting",
+            "operatingSystem": ProcessInfo.processInfo.operatingSystemVersionString,
+            "architecture": architecture,
+            "processID": String(getpid()),
+            "parentProcessID": String(getppid()),
+            "screenCapturePreflight": String(CGPreflightScreenCaptureAccess()),
+            "recordingBorder": String(showsBorder),
+            "microphone": "false",
+            "outputPath": output.path
+        ])
+        reportStage("sources")
+        let content = try await shareableContent()
+        try requireActive()
+        guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first else {
+            throw CaptureFailure("当前会话没有可采集的屏幕，真实录屏检查未通过。")
+        }
+        try writeJSON([
+            "captureSmokeTest": "source-selected",
+            "sourceID": "screen:\(display.displayID)",
+            "availableDisplays": String(content.displays.count),
+            "availableWindows": String(content.windows.count)
+        ])
+        let options = Options(sourceId: "screen:\(display.displayID)", fps: 15, microphone: false,
+                              audioDevice: nil, region: nil, outputSize: OutputSize(width: 1280, height: 720))
+        try await start(options: options, output: output, showsBorder: showsBorder)
+    }
+
+    @MainActor func start(options: Options, output: URL, showsBorder: Bool = true) async throws {
         self.options = options
         reportStage("sources")
         let content = try await shareableContent()
@@ -562,16 +628,22 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             throw captureError(writer.error ?? CaptureFailure("无法创建录制文件。"), during: "初始化视频编码")
         }
 
-        reportStage("indicator")
-        let border = RecordingBorder()
-        border.update(borderRect(source: sourceBounds, region: options.region, scale: sourceScale))
-        self.border = border
+        if showsBorder {
+            reportStage("indicator")
+            let border = RecordingBorder()
+            border.update(borderRect(source: sourceBounds, region: options.region, scale: sourceScale))
+            self.border = border
+        }
         let filter: SCContentFilter
         if let window = selectedWindow {
             filter = SCContentFilter(desktopIndependentWindow: window)
         } else if let display = selectedDisplay {
             // Build the exclusion after the indicator exists so it never appears in recorded pixels.
-            filter = try await displayFilter(display, excluding: border)
+            if let border = self.border {
+                filter = try await displayFilter(display, excluding: border)
+            } else {
+                filter = SCContentFilter(display: display, excludingWindows: [])
+            }
         } else { throw CaptureFailure("录制来源不可用。") }
 
         let configuration = SCStreamConfiguration()
@@ -674,6 +746,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
               let rawStatus = attachments.first?[.status] as? Int,
               SCFrameStatus(rawValue: rawStatus) == .complete,
               let buffer = CMSampleBufferGetImageBuffer(sampleBuffer), let renderPool = renderPool else { return }
+        receivedScreenFrames += 1
         do { latestFrame = try letterboxedFrame(buffer, contentSize: captureContentSize, pool: renderPool, context: renderContext) }
         catch { reportFailure(error); return }
         if !started { appendVideoFrame() }
@@ -689,9 +762,27 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
                                   at: now, sessionStart: &firstPTS) else { return }
         } catch { reportFailure(captureError(error, during: "写入录制画面")); return }
         lastVideoPTS = now
+        encodedFrames += 1
         if !started {
             started = true
             FileHandle.standardOutput.write(Data("READY\n".utf8))
+            if smokeTestOutput != nil {
+                // Count from an encoded screen sample, not from permission or
+                // stream startup, so an empty capture cannot pass this check.
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, !self.stopping else { return }
+                    self.smokeTestBorderWasVisible = self.border?.panel.isVisible == true
+                    try? writeJSON([
+                        "captureSmokeTest": "first-frame",
+                        "recordingBorderVisible": String(self.smokeTestBorderWasVisible)
+                    ])
+                    guard self.smokeTestBorderWasVisible == self.smokeTestExpectedBorder else {
+                        self.stop(error: CaptureFailure("真实录屏检查中观察到的边框可见状态与请求不一致。"))
+                        return
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.stop() }
+                }
+            }
         }
     }
 
@@ -757,7 +848,9 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         stopFlag = true
         stopLock.unlock()
         terminalError = error
-        border?.close(); border = nil
+        border?.close()
+        if smokeTestOutput != nil { smokeTestBorderClosed = border?.panel.isVisible != true }
+        border = nil
         monitor?.invalidate(); monitor = nil
         frameTimer?.cancel(); frameTimer = nil
         Task { @MainActor in
@@ -786,8 +879,54 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
     }
 
     private func complete(error: Error?) {
-        if let error = error { writeError(error) }
-        exit(error == nil ? 0 : 1)
+        var failure = error
+        if let output = smokeTestOutput, failure == nil {
+            do { try verifySmokeTestOutput(output) }
+            catch { failure = error }
+        }
+        smokeTestDeadline?.cancel()
+        smokeTestHardDeadline?.cancel()
+        if let failure = failure {
+            if smokeTestOutput != nil {
+                try? writeJSON(["captureSmokeTest": "failed", "reason": failure.localizedDescription])
+            }
+            writeError(failure)
+        }
+        exit(failure == nil ? 0 : 1)
+    }
+
+    private func verifySmokeTestOutput(_ output: URL) throws {
+        guard receivedScreenFrames > 0, encodedFrames > 1,
+              smokeTestBorderWasVisible == smokeTestExpectedBorder, smokeTestBorderClosed else {
+            throw CaptureFailure("真实录屏检查未取得足够的采集帧，或录制边框显示与关闭检查失败。")
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: output.path)
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        let asset = AVURLAsset(url: output)
+        let duration = CMTimeGetSeconds(asset.duration)
+        guard size > 0, duration.isFinite, duration >= 2.8, duration <= 10,
+              let track = asset.tracks(withMediaType: .video).first,
+              track.naturalSize == CGSize(width: 1280, height: 720),
+              asset.tracks(withMediaType: .audio).isEmpty else {
+            throw CaptureFailure("真实录屏输出的大小、时长、画面尺寸或音轨检查失败。")
+        }
+        let generator = AVAssetImageGenerator(asset: asset)
+        for second in [0.0, 2.0] {
+            let image = try generator.copyCGImage(at: CMTime(seconds: second, preferredTimescale: 600), actualTime: nil)
+            guard image.width == 1280, image.height == 720 else {
+                throw CaptureFailure("真实录屏输出无法解码为预期画面。")
+            }
+        }
+        try writeJSON([
+            "captureSmokeTest": "passed",
+            "durationSeconds": String(duration),
+            "screenFrames": String(receivedScreenFrames),
+            "encodedFrames": String(encodedFrames),
+            "recordingBorderWasVisible": String(smokeTestBorderWasVisible),
+            "recordingBorderClosed": String(smokeTestBorderClosed),
+            "outputBytes": String(size),
+            "outputPath": output.path
+        ])
     }
 }
 
@@ -1020,6 +1159,11 @@ public func openMediaCaptureMain() -> Int32 {
 
     Task { @MainActor in
         do {
+            if arguments.count == 3, arguments[1] == "--capture-smoke-test" || arguments[1] == "--capture-smoke-test-no-border" {
+                try await recorder.startSmokeTest(output: URL(fileURLWithPath: arguments[2]),
+                                                  showsBorder: arguments[1] == "--capture-smoke-test")
+                return
+            }
             if (arguments.count == 2 || (arguments.count == 3 && arguments[2] == "--request-permission")), arguments[1] == "sources" {
                 try writeJSON(await listSources(requestPermission: arguments.count == 3)); exit(0)
             }
