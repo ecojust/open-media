@@ -3,7 +3,7 @@ name: Build Open Media desktop
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: [main, master, 'verify/**']
   pull_request:
 
 permissions:
