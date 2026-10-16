@@ -58,12 +58,20 @@ async function main() {
   await expect(page.getByTestId('home-workspace')).toBeVisible()
 
   await check('首页、新建入口、保存旁自动草稿开关与SVG工具栏', async () => {
+    await expect(page.locator('.topbar [data-testid="export-project"]')).toHaveCount(0)
+    await expect(page.getByTestId('export-project')).toHaveCount(0)
+    await page.getByTestId('nav-record').click()
+    await expect(page.getByTestId('record-start')).toBeVisible()
+    await expect(page.getByTestId('export-project')).toHaveCount(0)
+    await page.locator('.brand').click()
     await expect(page.getByTestId('autosave-toggle')).toHaveAttribute('aria-checked', 'true')
     assert.equal(await page.getByTestId('autosave-toggle').evaluate(element => element.previousElementSibling?.getAttribute('data-testid')), 'save-project')
     assert.equal(await page.locator('.topbar button').evaluateAll(elements => elements.every(element => element.querySelector('svg, img'))), true)
     await page.screenshot({ path: path.join(root, 'docs/screenshots/workbench-light.png') })
     await page.getByTestId('create-project').click()
     await expect(page.getByTestId('video-editor')).toBeVisible()
+    await expect(page.getByTestId('video-editor').getByTestId('export-project')).toBeVisible()
+    await expect(page.locator('.topbar [data-testid="export-project"]')).toHaveCount(0)
     await rename('工作台验收')
   })
 
@@ -116,6 +124,16 @@ async function main() {
     await page.getByRole('button', { name: '重做', exact: true }).click()
     await expect(page.getByLabel('片段开始时间', { exact: true })).toHaveValue('0.25')
     await page.getByRole('button', { name: '撤销', exact: true }).click()
+    const ruler = await page.locator('.timeline-ruler').boundingBox()
+    await page.mouse.click(ruler.x + 0.5 * 44, ruler.y + 10)
+    await page.getByTitle('裁掉播放头右侧（W）', { exact: true }).click()
+    await expect(page.getByLabel('片段时长', { exact: true })).toHaveValue('0.5')
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect(page.getByLabel('片段时长', { exact: true })).toHaveValue('1')
+    await page.getByRole('button', { name: '重做', exact: true }).click()
+    await expect(page.getByLabel('片段时长', { exact: true })).toHaveValue('0.5')
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await page.getByTitle('回到开头', { exact: true }).click()
   })
 
   let projectBytes
@@ -280,6 +298,8 @@ async function main() {
     await page.setViewportSize({ width: 320, height: 850 })
     for (const id of ['edit', 'record', 'gif', 'image', 'video']) {
       await page.getByTestId(`nav-${id}`).click()
+      await expect(page.locator('.topbar [data-testid="export-project"]')).toHaveCount(0)
+      await expect(page.getByTestId('export-project')).toHaveCount(id === 'edit' ? 1 : 0)
       const geometry = await page.evaluate(() => ({ width: window.innerWidth, scroll: document.documentElement.scrollWidth, right: document.querySelector('.topbar-end').getBoundingClientRect().right, content: document.querySelector('.main-area').getBoundingClientRect().right }))
       assert(geometry.scroll <= 321 && geometry.right <= 321 && geometry.content <= 321, `${id} 工作区超出320像素：${JSON.stringify(geometry)}`)
       assert.equal(await page.locator('button').evaluateAll(elements => elements.some(element => /\p{Extended_Pictographic}/u.test(element.textContent))), false)

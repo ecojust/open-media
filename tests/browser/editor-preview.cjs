@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { spawn } = require('node:child_process')
-const { chromium } = require('playwright')
+const { chromium, expect } = require('@playwright/test')
 const path = require('node:path')
 const fs = require('node:fs/promises')
 const { existsSync } = require('node:fs')
@@ -13,6 +13,37 @@ async function waitForServer() {
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   throw new Error('编辑器测试服务未就绪')
+}
+
+async function installTimeline(page, rows) {
+  await page.evaluate(async rows => {
+    const { createProject, createTextClip, createTrack, validateProject } = await import('/src/core/project.ts')
+    const project = createProject('剪辑交互验证', { width: 320, height: 180, fps: 20 })
+    project.tracks = rows.map((row, index) => ({
+      ...createTrack('text', row.name || `字幕 ${index + 1}`),
+      id: `editing-track-${index}`, locked: Boolean(row.locked),
+      clips: row.clips.map(clip => createTextClip(project, { text: clip.id, name: clip.id, fontSize: 24, ...clip })),
+    }))
+    window.editorState.value = validateProject(project, { trusted: true })
+    window.editorStatus = ''
+    await new Promise(requestAnimationFrame)
+    document.querySelector('.timeline-scroll').scrollTo(0, 0)
+  }, rows)
+}
+async function clipState(page, id) {
+  return page.evaluate(id => window.editorState.value.tracks.flatMap(track => track.clips).find(clip => clip.id === id), id)
+}
+async function seekEditor(page, seconds) {
+  const ruler = await page.locator('.timeline-ruler').boundingBox()
+  await page.mouse.click(ruler.x + seconds * 44, ruler.y + 10)
+}
+async function dragClip(page, id, seconds, beforeRelease) {
+  const bounds = await page.locator(`[data-clip-id="${id}"]`).boundingBox()
+  const x = bounds.x + bounds.width / 2, y = bounds.y + 18
+  await page.mouse.move(x, y); await page.mouse.down()
+  await page.mouse.move(x + seconds * 44, y, { steps: 6 })
+  if (beforeRelease) await beforeRelease()
+  await page.mouse.up()
 }
 
 async function main() {
@@ -125,6 +156,108 @@ async function main() {
     await page.waitForFunction(id => window.editorState.value.tracks[1].clips.find(clip => clip.id === id).width < 120, firstVideoId)
     console.log('PASS 时间线拖动、源边缘裁剪、分离音轨、画中画属性回写')
 
+    for (const kind of ['video', 'audio']) {
+      await page.locator(`.timeline-clip.${kind}`).first().click({ button: 'right' })
+      const menu = page.getByRole('menu', { name: '片段操作', exact: true })
+      await expect(menu).toBeVisible()
+      await expect(menu.getByRole('menuitem', { name: /^删除并接拢空隙/ })).toBeEnabled()
+      await expect(menu.getByRole('menuitem', { name: '文字转语音', exact: true })).toHaveCount(0)
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+    }
+
+    await installTimeline(page, [{ clips: [{ id: 'trim-target', start: 1, trimIn: 2, trimOut: 10, speed: 2 }] }])
+    await page.locator('[data-clip-id="trim-target"]').click()
+    await seekEditor(page, 2)
+    await page.keyboard.press('q')
+    await expect.poll(() => clipState(page, 'trim-target')).toMatchObject({ start: 2, trimIn: 4, trimOut: 10, speed: 2 })
+    await seekEditor(page, 4)
+    await page.keyboard.press('w')
+    await expect.poll(() => clipState(page, 'trim-target')).toMatchObject({ start: 2, trimIn: 4, trimOut: 8, speed: 2 })
+    await page.getByLabel('字幕内容').fill('qw 是文字输入')
+    await page.getByLabel('字幕内容').press('q')
+    await page.getByLabel('字幕内容').press('w')
+    await page.getByLabel('字幕内容').press('Tab')
+    assert.equal((await clipState(page, 'trim-target')).trimIn, 4)
+    assert.equal((await clipState(page, 'trim-target')).trimOut, 8)
+    console.log('PASS 视频/音频片段右键菜单、Q/W变速裁剪及文字输入快捷键隔离')
+
+    const gapRows = [{ clips: [{ id: 'remove-target', start: 0, trimOut: 2 }, { id: 'later', start: 4, trimOut: 2 }] }, { clips: [{ id: 'overlap', start: 1, trimOut: 2 }] }]
+    await installTimeline(page, gapRows)
+    await page.locator('[data-clip-id="remove-target"]').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: /^删除并接拢空隙/ }).click()
+    await expect(page.locator('[data-clip-id="remove-target"]')).toHaveCount(0)
+    assert.equal((await clipState(page, 'overlap')).start, 0, '只接拢全轨共同空白，不裁掉跨轨内容')
+    assert.equal((await clipState(page, 'later')).start, 3, '删除区间之外的原有空隙应保留')
+    await installTimeline(page, gapRows)
+    await page.locator('[data-clip-id="remove-target"]').click()
+    await page.keyboard.press('Shift+Delete')
+    await expect(page.locator('[data-clip-id="remove-target"]')).toHaveCount(0)
+    assert.equal((await clipState(page, 'later')).start, 3)
+    await installTimeline(page, gapRows)
+    await page.getByTestId('timeline-close-gaps').click()
+    await expect.poll(async () => (await clipState(page, 'later')).start).toBe(3)
+    assert.equal((await clipState(page, 'overlap')).start, 1)
+    await installTimeline(page, [{ ...gapRows[0], locked: true }, gapRows[1]])
+    const lockedState = await page.evaluate(() => JSON.stringify(window.editorState.value))
+    await page.getByTestId('timeline-close-gaps').click()
+    await expect.poll(() => page.evaluate(() => window.editorStatus)).toMatch(/锁/)
+    assert.equal(await page.evaluate(() => JSON.stringify(window.editorState.value)), lockedState)
+    await page.locator('[data-clip-id="remove-target"]').click({ button: 'right' })
+    await expect(page.getByRole('menuitem', { name: /^删除片段/ })).toBeDisabled()
+    await expect(page.getByRole('menuitem', { name: /^删除并接拢空隙/ })).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Shift+Delete')
+    assert.equal(await page.evaluate(() => JSON.stringify(window.editorState.value)), lockedState)
+    console.log('PASS 删除接拢与Shift+Delete保留跨轨内容，全轨空隙整理遇锁轨原子拒绝')
+
+    await installTimeline(page, [{ clips: [{ id: 'near-a', start: 0, trimOut: 2 }, { id: 'near-b', start: 2.1, trimOut: 1 }] }, { clips: [{ id: 'snap-target', start: 5, trimOut: 1 }] }])
+    await expect(page.getByTestId('timeline-snap')).toHaveAttribute('aria-pressed', 'true')
+    await dragClip(page, 'snap-target', -2.92)
+    await expect.poll(async () => (await clipState(page, 'snap-target')).start).toBe(2.1)
+    await installTimeline(page, [{ clips: [{ id: 'edge-anchor', start: 8, trimOut: 2 }] }, { clips: [{ id: 'snap-target', start: 3, trimOut: 2 }] }])
+    await dragClip(page, 'snap-target', 2.9, async () => { await expect(page.locator('.snap-guide').first()).toBeVisible() })
+    await expect.poll(async () => (await clipState(page, 'snap-target')).start).toBe(6)
+    await page.getByTestId('timeline-snap').click()
+    await expect(page.getByTestId('timeline-snap')).toHaveAttribute('aria-pressed', 'false')
+    await dragClip(page, 'snap-target', -0.1)
+    await expect.poll(async () => (await clipState(page, 'snap-target')).start).toBe(5.9)
+    await page.getByTestId('timeline-snap').click()
+    await installTimeline(page, [{ clips: [{ id: 'trim-snap', start: 0, trimOut: 2 }, { id: 'edge-anchor', start: 5, trimOut: 1 }] }])
+    const trimHandle = await page.locator('[data-clip-id="trim-snap"] .trim-handle.end').boundingBox()
+    await page.mouse.move(trimHandle.x + 3, trimHandle.y + 18); await page.mouse.down()
+    await page.mouse.move(trimHandle.x + 3 + 2.9 * 44, trimHandle.y + 18, { steps: 6 })
+    await expect(page.locator('.snap-guide').first()).toBeVisible()
+    await page.mouse.up()
+    await expect.poll(async () => (await clipState(page, 'trim-snap')).trimOut).toBe(5)
+    console.log('PASS 吸附选择最近边缘、移动右边缘与裁切边缘吸附、参考线及关闭吸附')
+
+    await installTimeline(page, [{ name: '字幕主轨', clips: [{ id: 'track-content', start: 0, trimOut: 2 }] }, { name: '字幕次轨', clips: [] }])
+    const firstTrack = page.locator('[data-track-label-id="editing-track-0"]')
+    await firstTrack.locator('.track-name').dblclick()
+    await page.getByLabel('轨道名称', { exact: true }).fill('旁白字幕')
+    await page.getByLabel('轨道名称', { exact: true }).press('Enter')
+    await expect(firstTrack.locator('.track-name')).toHaveText('旁白字幕')
+    assert.equal(await page.evaluate(() => window.editorState.value.tracks[0].name), '旁白字幕')
+    await firstTrack.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '轨道下移一层', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.editorState.value.tracks.map(track => track.id))).toEqual(['editing-track-1', 'editing-track-0'])
+    await firstTrack.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '删除轨道', exact: true }).click()
+    const trackDialog = page.getByRole('dialog', { name: '删除轨道', exact: true })
+    await expect(trackDialog).toBeVisible()
+    await trackDialog.getByRole('button', { name: '取消', exact: true }).click()
+    await expect(page.locator('[data-clip-id="track-content"]')).toHaveCount(1)
+    await firstTrack.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '删除轨道', exact: true }).click()
+    await trackDialog.getByRole('button', { name: '删除轨道', exact: true }).click()
+    await expect(firstTrack).toHaveCount(0)
+    assert.equal(await page.evaluate(() => window.editorState.value.tracks.length), 1)
+    console.log('PASS 轨道重命名、层级下移、删除含内容轨道可取消并确认')
+
+    await installTimeline(page, [{ name: '开场字幕', clips: [{ id: 'responsive-menu', name: '开场介绍', text: '欢迎开始制作视频', start: 0, trimOut: 2 }] }])
+    await fs.mkdir('/tmp/open-media-editor-efficiency', { recursive: true })
+
     for (const width of [1280, 768, 320]) {
       await page.setViewportSize({ width, height: 850 })
       await page.evaluate(width => { document.querySelector('#app').style.width = width === 320 ? 'calc(100% - 48px)' : '100%'; document.querySelector('#app').style.marginLeft = width === 320 ? '48px' : '0' }, width)
@@ -134,6 +267,16 @@ async function main() {
       assert(sizes.editor <= sizes.width + 1)
       const toolbarBounds = await page.locator('.video-editor').evaluate(element => ({ editor: element.getBoundingClientRect().right, button: element.querySelector('.editor-export').getBoundingClientRect().right }))
       assert(toolbarBounds.button <= toolbarBounds.editor + 1, `${width}px 导出按钮被裁切`)
+      await page.locator('[data-clip-id="responsive-menu"]').click({ button: 'right' })
+      const menu = page.getByRole('menu', { name: '文字片段操作', exact: true })
+      const menuBounds = await menu.boundingBox()
+      assert(menuBounds.x >= 0 && menuBounds.x + menuBounds.width <= width + 1 && menuBounds.y >= 0 && menuBounds.y + menuBounds.height <= 851, `${width}px 片段菜单超出视口：${JSON.stringify(menuBounds)}`)
+      if (width === 1280 || width === 320) await page.screenshot({ path: `/tmp/open-media-editor-efficiency/${width === 1280 ? 'desktop' : 'compact'}.png` })
+      await page.keyboard.press('Escape')
+      await page.locator('[data-track-label-id="editing-track-0"]').click({ button: 'right' })
+      const trackMenuBounds = await page.getByRole('menu', { name: '轨道操作', exact: true }).boundingBox()
+      assert(trackMenuBounds.x >= 0 && trackMenuBounds.x + trackMenuBounds.width <= width + 1 && trackMenuBounds.y >= 0 && trackMenuBounds.y + trackMenuBounds.height <= 851, `${width}px 轨道菜单超出视口：${JSON.stringify(trackMenuBounds)}`)
+      await page.keyboard.press('Escape')
     }
     await page.evaluate(async () => {
       const { createProject, createTextClip } = await import('/src/core/project.ts')

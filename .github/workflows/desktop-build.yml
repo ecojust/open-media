@@ -248,6 +248,15 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+      - name: Select native linker for Windows application builds
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not $env:VCToolsInstallDir) { throw 'The native compiler environment is missing.' }
+          $linker = Join-Path $env:VCToolsInstallDir 'bin/Hostx64/x64/link.exe'
+          if (-not (Test-Path -LiteralPath $linker -PathType Leaf)) { throw "Native linker was not found: $linker" }
+          "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=$linker" >> $env:GITHUB_ENV
+          Write-Host "Rust host and target linker: $linker"
       - name: Prepare and verify offline speech runtime
         id: speech-verify
         run: |

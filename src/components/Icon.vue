@@ -72,6 +72,9 @@ const paths: Record<string, string> = {
   'mark-out': 'M16 3h4v18h-4M3 12h12m-5-5 5 5-5 5',
   'chevron-up': 'm6 15 6-6 6 6',
   repeat: 'M3 10V7h17m-4-4 4 4-4 4M21 14v3H4m4-4-4 4 4 4',
+  magnet: 'M5 3h5v9a2 2 0 0 0 4 0V3h5v9a7 7 0 0 1-14 0zM5 7h5M14 7h5',
+  'close-gap': 'M3 4h5v16H3zM16 4h5v16h-5zM10 9l3 3-3 3M14 9l-3 3 3 3',
+  more: 'M5 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2M12 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2M19 11a1 1 0 1 0 0 2 1 1 0 0 0 0-2',
 }
 </script>
 <template><svg :width="size" :height="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name] || paths.sliders"/></svg></template>

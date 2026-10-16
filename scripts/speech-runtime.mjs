@@ -142,6 +142,14 @@ async function prepare() {
       '-o', join(output, executable)], { cwd: build });
     await chmod(join(output, executable), 0o755);
   }
+  if (process.platform === 'darwin') {
+    // Compiler defaults differ between architectures. Sign every nested code
+    // object explicitly before the application bundler seals the outer bundle.
+    for (const path of [...libraries.map(name => join(output, 'runtime/lib', name)), join(output, executable)]) {
+      run('codesign', ['--force', '--sign', '-', '--timestamp=none', path]);
+      run('codesign', ['--verify', '--strict', path]);
+    }
+  }
   await writeFile(join(output, 'manifest.json'), JSON.stringify({
     schema: 1, version: lock.engine.version, executable, input: 'utf8-file',
     model: { file: 'model/model.int8.onnx', voices: 'model/voices.bin', tokens: 'model/tokens.txt',
@@ -215,7 +223,10 @@ async function verify() {
     const location = safePath(item.kind === 'binary' ? executableRoot : output, item.path);
     if (!await exists(location)) throw new Error(`Missing speech resource: ${item.path}`);
     if (!(packaged && process.platform === 'darwin' && item.kind === 'binary') && await sha256(location) !== item.sha256) throw new Error(`Speech resource checksum mismatch: ${item.path}`);
-    if (process.platform === 'darwin' && item.kind === 'binary') verifyMacBinary(await readFile(location), item.path);
+    if (process.platform === 'darwin' && item.kind === 'binary') {
+      verifyMacBinary(await readFile(location), item.path);
+      run('codesign', ['--verify', '--strict', location]);
+    }
   }
   const manifest = JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'));
   if (manifest.voices.length !== lock.voices.length || JSON.stringify(manifest.voices) !== JSON.stringify(lock.voices)) throw new Error('Bundled voice mapping changed.');
