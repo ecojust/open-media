@@ -1,11 +1,18 @@
 pub mod capture;
+#[cfg(any(target_os = "macos", test))]
+pub mod capture_service;
 #[cfg(any(feature = "desktop", test))]
 pub mod capture_picker;
 #[cfg(any(target_os = "windows", test))]
 mod capture_windows;
 pub mod engine;
+pub mod clip_filters;
 pub mod preview;
 pub mod speech;
+#[cfg(any(feature = "desktop", test))]
+pub mod screenshot;
+#[cfg(feature = "desktop")]
+pub mod screenshot_shortcut;
 #[cfg(test)]
 mod tests;
 
@@ -316,6 +323,39 @@ mod desktop {
         picker.complete(&app, &request_id, window.label(), selection)
     }
     #[tauri::command]
+    pub async fn configure_screenshot_shortcut(
+        shortcut: Option<String>,
+        window: tauri::WebviewWindow,
+        state: State<'_, crate::screenshot_shortcut::ShortcutManager>,
+    ) -> engine::Result<Option<String>> {
+        capture_picker::require_main(&window)?;
+        state.inner().clone().configure(shortcut).await
+    }
+    #[tauri::command]
+    pub fn show_main_window(window: tauri::WebviewWindow) -> engine::Result<()> {
+        capture_picker::require_main(&window)?;
+        window.unminimize().map_err(|error| error.to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())
+    }
+    #[tauri::command]
+    pub async fn capture_screenshot(
+        selection: PickerSelection,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<Asset> {
+        capture_picker::require_main(&window)?;
+        let state = state.inner().clone();
+        blocking(move || {
+            let mut capture = state.capture.try_lock()
+                .map_err(|_| "录制正在处理，请稍后再截屏。")?;
+            if capture.status().state != "idle" {
+                return Err("请先停止当前录制，再截屏。".into());
+            }
+            crate::screenshot::capture(&state.runtime()?, &state.store, &selection)
+        }).await
+    }
+    #[tauri::command]
     pub async fn get_capture_status(state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
         let state = state.inner().clone();
         blocking(move || Ok(state.capture.lock().unwrap().status())).await
@@ -441,6 +481,7 @@ mod desktop {
             .manage(Closing::default())
             .manage(CapturePicker::default())
             .setup(|app| {
+                app.manage(crate::screenshot_shortcut::ShortcutManager::new(app.handle().clone()));
                 let data = app.path().app_data_dir()?;
                 fs::create_dir_all(&data)?;
                 let resource = app.path().resource_dir()?;
@@ -453,7 +494,7 @@ mod desktop {
                     store,
                     jobs: JobManager::default(),
                     speech: SpeechManager::new(&data, &resource).map_err(std::io::Error::other)?,
-                    capture: Arc::new(Mutex::new(CaptureManager::with_resource(&resource))),
+                    capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
                     resource,
                     settings,
@@ -495,6 +536,9 @@ mod desktop {
                 cancel_speech_job,
                 discard_speech_job,
                 accept_speech_jobs,
+                configure_screenshot_shortcut,
+                capture_screenshot,
+                show_main_window,
                 list_capture_devices,
                 pick_capture_source,
                 cancel_capture_picker,
@@ -525,6 +569,7 @@ mod desktop {
             }
             if matches!(event, tauri::RunEvent::Exit) {
                 let state = handle.state::<MediaState>();
+                handle.state::<crate::screenshot_shortcut::ShortcutManager>().shutdown();
                 state.capture_starts.cancel_all();
                 state.speech.shutdown();
                 state.jobs.shutdown();

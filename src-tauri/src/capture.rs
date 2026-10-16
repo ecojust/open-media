@@ -130,7 +130,6 @@ struct ActiveSegment {
 }
 pub struct CaptureManager {
     runtime: Option<Runtime>,
-    helper: Option<PathBuf>,
     options: Option<CaptureOptions>,
     source: Option<CaptureDevice>,
     workspace: Option<tempfile::TempDir>,
@@ -144,7 +143,6 @@ impl Default for CaptureManager {
     fn default() -> Self {
         Self {
             runtime: None,
-            helper: None,
             options: None,
             source: None,
             workspace: None,
@@ -162,11 +160,6 @@ impl Drop for CaptureManager {
     }
 }
 impl CaptureManager {
-    pub fn with_resource(resource: &Path) -> Self {
-        let mut manager = Self::default();
-        manager.helper = find_helper(Some(resource));
-        manager
-    }
     pub fn status(&mut self) -> CaptureStatus {
         #[cfg(target_os = "windows")]
         if let Some(error) = self
@@ -262,10 +255,7 @@ impl CaptureManager {
         if !(1..=60).contains(&options.fps) {
             return Err("录制帧率应为 1 至 60。".into());
         }
-        if self.helper.is_none() {
-            self.helper = find_helper(None);
-        }
-        let devices = list_devices_with_helper(runtime, self.helper.as_deref(), true, cancelled)?;
+        let devices = list_devices_with_permission(runtime, true, cancelled)?;
         let source = select_source(&devices, &options)?;
         options.output_size = Some(resolve_output(&source, &options)?);
         options.source_id = Some(source.id.clone());
@@ -310,7 +300,7 @@ impl CaptureManager {
             .source_id
             .as_deref()
             .ok_or("请选择录制屏幕或窗口。")?;
-        let source = resolve_source(runtime, self.helper.as_deref(), id, cancelled)?;
+        let source = resolve_source(runtime, id, cancelled)?;
         resolve_output(&source, options)?;
         let root = self.workspace.as_ref().ok_or("录制目录不可用。")?.path();
         let id = new_id();
@@ -399,17 +389,13 @@ impl CaptureManager {
         };
         #[cfg(target_os = "macos")]
         let mut command = {
-            let helper = self
-                .helper
-                .as_deref()
-                .ok_or("录屏组件缺失，请重新安装应用。")?;
             let config = root.join(format!("{id}.json"));
             fs::write(
                 &config,
                 serde_json::to_vec(options).map_err(|e| e.to_string())?,
             )
             .map_err(|e| e.to_string())?;
-            let mut command = process(helper);
+            let mut command = crate::capture_service::command()?;
             command
                 .arg("record")
                 .arg(config)
@@ -758,24 +744,6 @@ fn output_filter(size: OutputSize, fps: u32) -> String {
 fn unsupported_capture() -> Result<std::process::Command> {
     Err("当前平台请使用网页录屏入口。桌面录屏支持 Windows 和 macOS。".into())
 }
-fn find_helper(resource: Option<&Path>) -> Option<PathBuf> {
-    resource
-        .and_then(|r| {
-            r.parent()
-                .map(|contents| contents.join("Helpers/open-media-capture"))
-        })
-        .filter(|p| p.is_file())
-        .or_else(|| {
-            resource
-                .map(|r| r.join("capture/open-media-capture"))
-                .filter(|p| p.is_file())
-        })
-        .or_else(|| {
-            option_env!("OPEN_MEDIA_CAPTURE_HELPER_PATH")
-                .map(PathBuf::from)
-                .filter(|p| p.is_file())
-        })
-}
 #[cfg(target_os = "windows")]
 fn windows_region(region: Option<&Region>) -> Option<crate::capture_windows::CaptureBounds> {
     region.map(|r| crate::capture_windows::CaptureBounds {
@@ -804,31 +772,25 @@ fn from_windows(target: crate::capture_windows::VisualTarget) -> CaptureDevice {
 }
 fn resolve_source(
     runtime: &Runtime,
-    helper: Option<&Path>,
     id: &str,
     cancelled: &AtomicBool,
 ) -> Result<CaptureDevice> {
     check_cancelled(cancelled)?;
     #[cfg(target_os = "windows")]
     {
-        let _ = (runtime, helper);
+        let _ = runtime;
         return crate::capture_windows::resolve_target(id).map(from_windows);
     }
     #[cfg(not(target_os = "windows"))]
     {
-        list_devices_with_helper(runtime, helper, true, cancelled)?
+        list_devices_with_permission(runtime, true, cancelled)?
             .into_iter()
             .find(|d| d.id == id && (d.kind == "window" || d.kind == "screen"))
             .ok_or_else(|| "所选窗口或屏幕已不可用，请恢复窗口后继续录制。".into())
     }
 }
 pub fn list_devices(runtime: &Runtime) -> Result<Vec<CaptureDevice>> {
-    list_devices_with_helper(
-        runtime,
-        find_helper(None).as_deref(),
-        false,
-        &AtomicBool::new(false),
-    )
+    list_devices_with_permission(runtime, false, &AtomicBool::new(false))
 }
 pub fn list_devices_with_resource(
     runtime: &Runtime,
@@ -844,20 +806,14 @@ pub fn list_devices_with_resource(
 }
 pub fn list_devices_with_resource_cancellable(
     runtime: &Runtime,
-    resource: &Path,
+    _resource: &Path,
     request_permission: bool,
     cancelled: &AtomicBool,
 ) -> Result<Vec<CaptureDevice>> {
-    list_devices_with_helper(
-        runtime,
-        find_helper(Some(resource)).as_deref(),
-        request_permission,
-        cancelled,
-    )
+    list_devices_with_permission(runtime, request_permission, cancelled)
 }
-fn list_devices_with_helper(
+fn list_devices_with_permission(
     runtime: &Runtime,
-    helper: Option<&Path>,
     request_permission: bool,
     cancelled: &AtomicBool,
 ) -> Result<Vec<CaptureDevice>> {
@@ -865,15 +821,11 @@ fn list_devices_with_helper(
     #[cfg(target_os = "macos")]
     {
         let _ = runtime;
-        return list_helper_sources(
-            helper.ok_or("录屏组件缺失，请重新安装应用。")?,
-            request_permission,
-            cancelled,
-        );
+        return list_native_sources(request_permission, cancelled);
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = (helper, request_permission);
+        let _ = request_permission;
         let mut devices = crate::capture_windows::list_targets()?
             .into_iter()
             .map(from_windows)
@@ -894,17 +846,16 @@ fn list_devices_with_helper(
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = (runtime, helper, request_permission);
+        let _ = (runtime, request_permission);
         Ok(vec![])
     }
 }
 #[cfg(target_os = "macos")]
-fn list_helper_sources(
-    helper: &Path,
+fn list_native_sources(
     request_permission: bool,
     cancelled: &AtomicBool,
 ) -> Result<Vec<CaptureDevice>> {
-    let mut command = process(helper);
+    let mut command = crate::capture_service::command()?;
     command.arg("sources");
     if request_permission {
         command.arg("--request-permission");
@@ -1036,19 +987,6 @@ mod capture_tests {
         assert_eq!(helper_stage_timeout("sources"), Duration::from_secs(120));
         assert_eq!(helper_stage_timeout("microphone"), Duration::from_secs(120));
         assert_eq!(helper_stage_timeout("frame"), Duration::from_secs(20));
-    }
-    #[test]
-    fn packaged_helper_prefers_signed_code_location_and_supports_old_resources() {
-        let directory = tempfile::tempdir().unwrap();
-        let resources = directory.path().join("Contents/Resources");
-        let legacy = resources.join("capture/open-media-capture");
-        let helper = directory.path().join("Contents/Helpers/open-media-capture");
-        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
-        fs::write(&legacy, "legacy").unwrap();
-        assert_eq!(find_helper(Some(&resources)), Some(legacy));
-        fs::create_dir_all(helper.parent().unwrap()).unwrap();
-        fs::write(&helper, "helper").unwrap();
-        assert_eq!(find_helper(Some(&resources)), Some(helper));
     }
     fn source(kind: &str, width: u32, height: u32) -> CaptureDevice {
         CaptureDevice {

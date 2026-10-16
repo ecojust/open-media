@@ -14,7 +14,9 @@ export async function mountConversionTest(): Promise<void> {
     importMediaFile(new File([blob], '示例图.png', { type: 'image/png' })),
     importMediaFile(new File([blob], '示例图.png', { type: 'image/png' })),
   ]))
+  const focusAssetId = ref('')
+  Object.assign(window, { conversionHarness: { assets, focusAssetId } })
   document.head.insertAdjacentHTML('beforeend', '<style>html,body,#test-root{margin:0;height:100%;font-family:sans-serif}*{box-sizing:border-box}button,input,select{font:inherit}</style>')
   document.body.innerHTML = '<div id="test-root"></div>'
-  createApp({ render: () => h(ConvertWorkspace, { assets: assets.value, mode: 'image', native: false, onResult: asset => assets.value.push(asset) }) }).mount('#test-root')
+  createApp({ render: () => h(ConvertWorkspace, { assets: assets.value, focusAssetId: focusAssetId.value, mode: 'image', native: false, onResult: asset => assets.value.push(asset) }) }).mount('#test-root')
 }

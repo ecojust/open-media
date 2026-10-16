@@ -1,4 +1,5 @@
 import type { Clip, MediaAsset, Project, Track, TrackKind } from './types.ts'
+import { validateClipFilters } from './clip-filters.ts'
 
 export const MAX_PROJECT_DURATION = 24 * 60 * 60
 export const MAX_ASSETS = 1000
@@ -151,6 +152,10 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
         const speech = record(c.speech, '文字配音信息')
         clip.speech = { text: text(speech.text, '配音文字', 20000), voiceId: text(speech.voiceId, '配音声音', 1000), rate: number(speech.rate, '配音语速', 0.25, 4) }
         if (speech.textClipId !== undefined) clip.speech.textClipId = text(speech.textClipId, '配音字幕标识', 160)
+      }
+      if (c.filters !== undefined) {
+        if (kind !== 'video' || !['video', 'image'].includes(assetMap.get(clip.assetId!)?.kind ?? '')) throw new Error('滤镜只能用于视频轨道中的视频或图片片段。')
+        clip.filters = validateClipFilters(c.filters)
       }
       return clip
     })

@@ -93,7 +93,7 @@ export function updateClip(project: Project, clipId: string, patch: Partial<Omit
   })
 }
 export function moveClip(project: Project, clipId: string, targetTrackId: string, start: number): Project {
-  return edit(project, (copy) => { const { track, clip, index } = requireClip(copy, clipId); const target = trackById(copy, targetTrackId); editable(target); if ((track.kind === 'text') !== (target.kind === 'text')) throw new Error('字幕和媒体片段不能相互移动到对方轨道。'); track.clips.splice(index, 1); clip.start = start; target.clips.push(clip) })
+  return edit(project, (copy) => { const { track, clip, index } = requireClip(copy, clipId); const target = trackById(copy, targetTrackId); editable(target); if ((track.kind === 'text') !== (target.kind === 'text')) throw new Error('字幕和媒体片段不能相互移动到对方轨道。'); track.clips.splice(index, 1); clip.start = start; if (target.kind === 'audio') delete clip.filters; target.clips.push(clip) })
 }
 export function splitClip(project: Project, clipId: string, time: number): Project {
   return edit(project, (copy) => {

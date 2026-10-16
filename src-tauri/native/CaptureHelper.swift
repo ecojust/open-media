@@ -6,8 +6,9 @@ import CoreVideo
 import Darwin
 import ScreenCaptureKit
 
-// This process owns both the recording devices and the visible recording border.
-// Closing its input, terminating its parent, or receiving a stop signal releases all three.
+// The app's main executable loads this module only in its recording mode.
+// That process owns the recording devices and the visible recording border.
+// Closing its input, terminating its parent, or receiving a stop signal releases them.
 struct CaptureFailure: LocalizedError {
     let message: String
     var errorDescription: String? { message }
@@ -67,6 +68,36 @@ struct Options: Decodable {
                   region.y <= sourceHeight - region.height else {
                 throw CaptureFailure("录制区域超出了所选屏幕。")
             }
+        }
+    }
+}
+
+struct ScreenshotOptions: Decodable {
+    let sourceId: String
+    let region: Region?
+    let sourceWidth: Int?
+    let sourceHeight: Int?
+
+    func validate(sourceWidth width: Int, sourceHeight height: Int, isWindow: Bool) throws {
+        if let expected = sourceWidth, expected != width {
+            throw CaptureFailure("截屏来源的尺寸已改变，请重新选择。")
+        }
+        if let expected = sourceHeight, expected != height {
+            throw CaptureFailure("截屏来源的尺寸已改变，请重新选择。")
+        }
+        if let region = region {
+            guard !isWindow, region.x >= 0, region.y >= 0,
+                  region.width >= 16, region.height >= 16,
+                  region.width <= width, region.height <= height,
+                  region.x <= width - region.width, region.y <= height - region.height else {
+                throw CaptureFailure("截屏区域超出了所选屏幕，请重新选择。")
+            }
+        }
+        let outputWidth = region?.width ?? width, outputHeight = region?.height ?? height
+        guard outputWidth > 0, outputHeight > 0,
+              outputWidth <= 32768, outputHeight <= 32768,
+              outputWidth * outputHeight <= 100_000_000 else {
+            throw CaptureFailure("截屏范围过大，请选择较小的区域。")
         }
     }
 }
@@ -183,7 +214,7 @@ func captureError(_ error: Error, during stage: String) -> CaptureFailure {
     }
     let action: String
     if original.domain.contains("ScreenCaptureKit"), original.code == -3801 {
-        action = "系统未允许屏幕录制访问。请在系统设置的屏幕录制权限中允许 Open Media；若已经开启，请完全退出应用后从应用程序目录重新打开，再次选择录制范围。"
+        action = "系统拒绝了当前 Open Media 安装副本的屏幕录制请求。请检查系统设置中的屏幕录制权限；若已授权但在升级或替换应用后仍失败，请完全退出应用，在权限列表中移除旧项目并重新添加“应用程序”里的当前 Open Media，再重新打开应用。"
     } else {
         action = "\(stage)失败。"
     }
@@ -296,6 +327,132 @@ final class BorderView: NSView {
         panel.orderFrontRegardless()
     }
     func close() { panel.orderOut(nil); panel.close() }
+}
+
+final class ScreenshotCapture: NSObject, SCStreamDelegate, SCStreamOutput {
+    private let queue = DispatchQueue(label: "open-media.screenshot")
+    private var stream: SCStream?
+    private var monitor: Timer?
+    private var output: URL?
+    private var firstFrame: CVPixelBuffer?
+    private var started = false
+    private var finishing = false
+    private let parentPID = getppid()
+
+    @MainActor func start(options: ScreenshotOptions, output: URL) async throws {
+        self.output = output
+        let deadline = Date().addingTimeInterval(20)
+        monitor = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self else { return }
+                if getppid() != self.parentPID {
+                    self.finish(error: CaptureFailure("截屏已取消。"))
+                } else if Date() >= deadline {
+                    self.finish(error: CaptureFailure("未能及时获取截屏画面，请检查来源和屏幕录制权限。"))
+                }
+            }
+        }
+        let content = try await shareableContent()
+        guard !finishing else { throw CaptureFailure("截屏已取消。") }
+        let parts = options.sourceId.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, let identifier = UInt32(parts[1]) else {
+            throw CaptureFailure("请选择有效的截屏来源。")
+        }
+        let filter: SCContentFilter
+        let bounds: CGRect
+        let isWindow: Bool
+        if parts[0] == "window" {
+            guard let window = content.windows.first(where: {
+                $0.windowID == identifier && $0.isOnScreen && $0.windowLayer == 0
+            }) else { throw CaptureFailure("所选窗口已关闭或隐藏，请重新选择。") }
+            filter = SCContentFilter(desktopIndependentWindow: window)
+            bounds = window.frame
+            isWindow = true
+        } else if parts[0] == "screen" {
+            guard let display = content.displays.first(where: { $0.displayID == identifier }) else {
+                throw CaptureFailure("所选屏幕已断开，请重新选择。")
+            }
+            // Picker windows are closed before this request. The screenshot
+            // intentionally includes all remaining windows in the selected area.
+            filter = SCContentFilter(display: display, excludingWindows: [])
+            bounds = display.frame
+            isWindow = false
+        } else { throw CaptureFailure("请选择有效的屏幕或窗口。") }
+        let scale = screenScale(for: bounds)
+        let size = pixelSize(bounds, scale: scale)
+        try options.validate(sourceWidth: size.0, sourceHeight: size.1, isWindow: isWindow)
+        let configuration = SCStreamConfiguration()
+        configuration.width = options.region?.width ?? size.0
+        configuration.height = options.region?.height ?? size.1
+        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        configuration.queueDepth = 3
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+        configuration.scalesToFit = true
+        if #available(macOS 14.0, *) { configuration.ignoreShadowsSingleWindow = true }
+        if let region = options.region {
+            // The selector reports physical pixels; sourceRect uses display points.
+            configuration.sourceRect = CGRect(x: Double(region.x) / scale, y: Double(region.y) / scale,
+                                              width: Double(region.width) / scale, height: Double(region.height) / scale)
+        }
+        let stream = SCStream(filter: filter, configuration: configuration, delegate: self)
+        try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        self.stream = stream
+        do { try await stream.startCapture() }
+        catch { throw captureError(error, during: "截屏") }
+        guard !finishing else { return }
+        started = true
+        if firstFrame != nil { finish(error: nil) }
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, CMSampleBufferIsValid(sampleBuffer),
+              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+              let status = attachments.first?[.status] as? Int,
+              status == SCFrameStatus.complete.rawValue,
+              let frame = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        Task { @MainActor in
+            guard !self.finishing, self.firstFrame == nil else { return }
+            self.firstFrame = frame
+            if self.started { self.finish(error: nil) }
+        }
+    }
+
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        Task { @MainActor in self.finish(error: captureError(error, during: "截屏")) }
+    }
+
+    @MainActor func cancel() { finish(error: CaptureFailure("截屏已取消。")) }
+
+    @MainActor func finish(error: Error?) {
+        guard !finishing else { return }
+        finishing = true
+        monitor?.invalidate(); monitor = nil
+        Task { @MainActor in
+            if let stream = self.stream { try? await stream.stopCapture() }
+            self.stream = nil
+            do {
+                if let error = error { throw error }
+                guard let frame = self.firstFrame, let output = self.output else {
+                    throw CaptureFailure("截屏尚未获取到有效画面。")
+                }
+                let context = CIContext(options: [.cacheIntermediates: false])
+                let image = CIImage(cvPixelBuffer: frame)
+                guard let cgImage = context.createCGImage(image, from: image.extent),
+                      let png = NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:]) else {
+                    throw CaptureFailure("无法生成截屏图片。")
+                }
+                try png.write(to: output, options: .atomic)
+                self.firstFrame = nil
+                exit(0)
+            } catch {
+                self.firstFrame = nil
+                writeError(captureError(error, during: "截屏"))
+                exit(1)
+            }
+        }
+    }
 }
 
 final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudioDataOutputSampleBufferDelegate {
@@ -634,7 +791,44 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
     }
 }
 
+func verifyApplicationIdentity() throws {
+    let bundle = Bundle.main
+    let bundleURL = bundle.bundleURL.standardizedFileURL.resolvingSymlinksInPath()
+    let executableURL = bundle.executableURL?.standardizedFileURL.resolvingSymlinksInPath()
+    var executableApplication: URL?
+    if let executableURL = executableURL {
+        var directory = executableURL.deletingLastPathComponent()
+        while directory.path != "/" {
+            if directory.pathExtension.lowercased() == "app" {
+                executableApplication = directory
+                break
+            }
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path { break }
+            directory = parent
+        }
+    }
+    let isApplicationBundle = bundleURL.pathExtension.lowercased() == "app"
+    let isPackaged = isApplicationBundle || executableApplication != nil
+    try writeJSON([
+        "captureApplicationIdentifier": bundle.bundleIdentifier ?? "",
+        "captureBundlePath": bundleURL.path,
+        "captureExecutablePath": executableURL?.path ?? "",
+        "captureIdentityMode": isPackaged ? "packaged" : "development"
+    ])
+    if isPackaged {
+        guard bundle.bundleIdentifier == "com.ecojust.openmedia" else {
+            throw CaptureFailure("录制模式身份验证失败：主应用标识应为 com.ecojust.openmedia，实际为 \(bundle.bundleIdentifier ?? "空")。")
+        }
+        guard isApplicationBundle, let executableApplication = executableApplication,
+              bundleURL.path == executableApplication.path else {
+            throw CaptureFailure("录制模式身份验证失败：主应用包与可执行程序所在的应用包不一致。")
+        }
+    }
+}
+
 func runSelfTests() throws {
+    try verifyApplicationIdentity()
     let source = CGRect(x: -1920, y: -200, width: 1920, height: 1080)
     let region = Region(x: 200, y: 100, width: 800, height: 600)
     let result = borderRect(source: source, region: region, scale: 2)
@@ -790,41 +984,68 @@ func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize) throws 
     guard colorIsCorrect else { throw CaptureFailure("视频编码验证的实际解码颜色不正确。") }
 }
 
-let arguments = CommandLine.arguments
-if arguments.count == 2, arguments[1] == "--self-test" {
-    do { try runSelfTests(); exit(0) }
-    catch { writeError(error); exit(1) }
-}
-
-let application = NSApplication.shared
-application.setActivationPolicy(.accessory)
-let recorder = Recorder()
-var signals: [DispatchSourceSignal] = []
-for number in [SIGINT, SIGTERM, SIGHUP] {
-    signal(number, SIG_IGN)
-    let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
-    source.setEventHandler { Task { @MainActor in recorder.stop() } }
-    source.resume(); signals.append(source)
-}
-
-Task { @MainActor in
-    do {
-        if (arguments.count == 2 || (arguments.count == 3 && arguments[2] == "--request-permission")), arguments[1] == "sources" {
-            try writeJSON(await listSources(requestPermission: arguments.count == 3)); exit(0)
-        }
-        guard arguments.count == 4, arguments[1] == "record" else {
-            throw CaptureFailure("用法：sources 或 record <配置文件> <输出文件>。")
-        }
-        let config = try JSONDecoder().decode(Options.self, from: Data(contentsOf: URL(fileURLWithPath: arguments[2])))
-        DispatchQueue.global(qos: .utility).async {
-            while let line = readLine() {
-                if line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "q" { break }
-            }
-            DispatchQueue.main.async { recorder.stop() }
-        }
-        try await recorder.start(options: config, output: URL(fileURLWithPath: arguments[3]))
-    } catch {
-        recorder.stop(error: error)
+@_cdecl("open_media_capture_main")
+@MainActor
+public func openMediaCaptureMain() -> Int32 {
+    var modeArguments = CommandLine.arguments
+    guard modeArguments.count > 1, modeArguments[1] == "--open-media-capture" else {
+        writeError(CaptureFailure("录制模块只能通过应用的录制模式启动。"))
+        return 1
     }
+    guard Thread.isMainThread else {
+        writeError(CaptureFailure("录制模式必须从进程主线程启动。"))
+        return 1
+    }
+    modeArguments.remove(at: 1)
+    let arguments = modeArguments
+    if arguments.count == 2, arguments[1] == "--self-test" {
+        do { try runSelfTests(); return 0 }
+        catch { writeError(error); return 1 }
+    }
+
+    let application = NSApplication.shared
+    application.setActivationPolicy(.accessory)
+    let recorder = Recorder()
+    let screenshot = ScreenshotCapture()
+    let screenshotMode = arguments.count > 1 && arguments[1] == "screenshot"
+    var signals: [DispatchSourceSignal] = []
+    for number in [SIGINT, SIGTERM, SIGHUP] {
+        signal(number, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+        source.setEventHandler { Task { @MainActor in
+            if screenshotMode { screenshot.cancel() } else { recorder.stop() }
+        } }
+        source.resume(); signals.append(source)
+    }
+
+    Task { @MainActor in
+        do {
+            if (arguments.count == 2 || (arguments.count == 3 && arguments[2] == "--request-permission")), arguments[1] == "sources" {
+                try writeJSON(await listSources(requestPermission: arguments.count == 3)); exit(0)
+            }
+            guard arguments.count == 4, arguments[1] == "record" || screenshotMode else {
+                throw CaptureFailure("用法：sources、record <配置文件> <输出文件> 或 screenshot <配置文件> <输出文件>。")
+            }
+            DispatchQueue.global(qos: .utility).async {
+                while let line = readLine() {
+                    if line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "q" { break }
+                }
+                DispatchQueue.main.async {
+                    if screenshotMode { screenshot.cancel() } else { recorder.stop() }
+                }
+            }
+            let data = try Data(contentsOf: URL(fileURLWithPath: arguments[2]))
+            if screenshotMode {
+                let config = try JSONDecoder().decode(ScreenshotOptions.self, from: data)
+                try await screenshot.start(options: config, output: URL(fileURLWithPath: arguments[3]))
+            } else {
+                let config = try JSONDecoder().decode(Options.self, from: data)
+                try await recorder.start(options: config, output: URL(fileURLWithPath: arguments[3]))
+            }
+        } catch {
+            if screenshotMode { screenshot.finish(error: error) } else { recorder.stop(error: error) }
+        }
+    }
+    withExtendedLifetime((recorder, screenshot, signals)) { application.run() }
+    return 0
 }
-application.run()

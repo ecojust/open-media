@@ -45,6 +45,22 @@ async function dragClip(page, id, seconds, beforeRelease) {
   if (beforeRelease) await beforeRelease()
   await page.mouse.up()
 }
+async function editorLayout(page) {
+  return page.evaluate(() => {
+    const rect = selector => {
+      const bounds = document.querySelector(selector).getBoundingClientRect()
+      return { top: bounds.top, bottom: bounds.bottom, left: bounds.left, right: bounds.right, height: bounds.height }
+    }
+    return { editor: rect('.video-editor'), preview: rect('.editor-main'), divider: rect('.timeline-divider'), timeline: rect('.timeline-panel') }
+  })
+}
+async function dragTimelineDivider(page, deltaY) {
+  const bounds = await page.getByTestId('timeline-divider').boundingBox()
+  const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2
+  await page.mouse.move(x, y); await page.mouse.down()
+  await page.mouse.move(x, y + deltaY, { steps: 8 })
+  await page.mouse.up()
+}
 
 async function main() {
   if (!process.env.EDITOR_TEST_URL) {
@@ -255,6 +271,80 @@ async function main() {
     assert.equal(await page.evaluate(() => window.editorState.value.tracks.length), 1)
     console.log('PASS 轨道重命名、层级下移、删除含内容轨道可取消并确认')
 
+    await installTimeline(page, [{ name: '工具栏字幕轨道', clips: [] }])
+    const clipTools = page.locator('.timeline-clip-tools')
+    await expect(clipTools.getByRole('button')).toHaveCount(6)
+    await expect(page.locator('.editor-tools').getByRole('button')).toHaveCount(4)
+    await expect(page.locator('.editor-tools').getByRole('button', { name: '字幕', exact: true })).toHaveCount(0)
+    await clipTools.getByRole('button', { name: '字幕', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.editorState.value.tracks[0].clips.length)).toBe(1)
+    const addedTextId = await page.evaluate(() => window.editorState.value.tracks[0].clips[0].id)
+    await seekEditor(page, 1)
+    await clipTools.getByTitle('裁掉播放头左侧（Q）', { exact: true }).click()
+    await expect.poll(() => clipState(page, addedTextId)).toMatchObject({ start: 1, trimIn: 1, trimOut: 5 })
+    await seekEditor(page, 3)
+    await clipTools.getByTitle('裁掉播放头右侧（W）', { exact: true }).click()
+    await expect.poll(() => clipState(page, addedTextId)).toMatchObject({ start: 1, trimIn: 1, trimOut: 3 })
+    await seekEditor(page, 2)
+    await clipTools.getByTitle('在播放头处分割（S）', { exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.editorState.value.tracks[0].clips.length)).toBe(2)
+    await clipTools.getByRole('button', { name: '复制片段', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.editorState.value.tracks[0].clips.length)).toBe(3)
+    await clipTools.getByRole('button', { name: '删除片段', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => window.editorState.value.tracks[0].clips.length)).toBe(2)
+    await expect(clipTools.getByRole('button', { name: '复制片段', exact: true })).toBeDisabled()
+    await expect(clipTools.getByRole('button', { name: '删除片段', exact: true })).toBeDisabled()
+    console.log('PASS 字幕、分割、两侧裁剪、复制与删除集中在时间线工具栏并实际修改片段')
+
+    await installTimeline(page, Array.from({ length: 12 }, (_, index) => ({ name: `轨道 ${index + 1}`, clips: [{ id: `resize-track-${index}`, start: 0, trimOut: 2 }] })))
+    const divider = page.getByTestId('timeline-divider')
+    await expect(divider).toHaveAttribute('role', 'separator')
+    await expect(divider).toHaveAttribute('aria-controls', 'editor-timeline')
+    const defaultTimelineHeight = (await editorLayout(page)).timeline.height
+    await dragTimelineDivider(page, -120)
+    await expect.poll(async () => Math.round((await editorLayout(page)).timeline.height - defaultTimelineHeight)).toBe(120)
+    await dragTimelineDivider(page, 80)
+    await expect.poll(async () => Math.round((await editorLayout(page)).timeline.height - defaultTimelineHeight)).toBe(40)
+    await divider.press('ArrowUp')
+    await expect.poll(async () => Math.round((await editorLayout(page)).timeline.height - defaultTimelineHeight)).toBe(52)
+    await divider.press('ArrowDown')
+    await expect.poll(async () => Math.round((await editorLayout(page)).timeline.height - defaultTimelineHeight)).toBe(40)
+    await divider.press('Home')
+    await expect.poll(async () => Math.round((await editorLayout(page)).timeline.height)).toBe(150)
+    await divider.press('End')
+    await expect.poll(async () => Math.round((await editorLayout(page)).preview.height)).toBe(180)
+    await divider.dblclick()
+    await expect.poll(async () => Math.round((await editorLayout(page)).timeline.height - defaultTimelineHeight)).toBe(0)
+    assert(await page.locator('.timeline-scroll').evaluate(element => element.scrollHeight > element.clientHeight), '多轨内容必须在时间线内滚动')
+    await page.locator('.timeline-scroll').evaluate(element => { element.scrollTop = element.scrollHeight })
+    await expect(page.locator('[data-clip-id="resize-track-11"]')).toBeInViewport()
+    assert(Math.abs((await editorLayout(page)).timeline.height - defaultTimelineHeight) < 1, '多轨滚动不应改变面板分配高度')
+    await page.locator('.timeline-scroll').evaluate(element => { element.scrollTop = 0 })
+    console.log('PASS 预览与时间线拖动分配高度、键盘边界与微调、双击复位及多轨内部滚动')
+
+    const projectSettingsButton = page.getByRole('button', { name: '项目设置', exact: true })
+    const settingsBounds = await projectSettingsButton.boundingBox(), exportBounds = await page.getByTestId('export-project').boundingBox()
+    assert(settingsBounds.x + settingsBounds.width <= exportBounds.x, '项目设置按钮应位于导出视频左侧')
+    assert.equal((await projectSettingsButton.textContent()).trim(), '', '项目设置使用独立图标')
+    await expect(projectSettingsButton.locator('svg')).toHaveCount(1)
+    for (const title of ['项目设置', '文字转语音']) {
+      await page.locator('.editor-tools').getByRole('button', { name: title, exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: title, exact: true })
+      await expect(dialog).toBeVisible()
+      await expect(divider).toHaveAttribute('aria-disabled', 'true')
+      const heightBefore = (await editorLayout(page)).timeline.height
+      const handle = await divider.boundingBox(), dialogBounds = await dialog.boundingBox()
+      await page.mouse.move(handle.x + 20, handle.y + handle.height / 2); await page.mouse.down()
+      await page.mouse.move(handle.x + 20, handle.y - 70, { steps: 5 })
+      assert(Math.abs((await editorLayout(page)).timeline.height - heightBefore) < 1, `${title}打开时不能拖动底层时间线`)
+      await page.mouse.move(dialogBounds.x + dialogBounds.width / 2, dialogBounds.y + 20); await page.mouse.up()
+      await expect(dialog).toBeVisible()
+      await dialog.getByRole('button', { name: `关闭${title}`, exact: true }).click()
+      await expect(dialog).not.toBeVisible()
+      await expect(divider).not.toHaveAttribute('aria-disabled', 'true')
+    }
+    console.log('PASS 项目设置图标位置以及项目设置、配音弹窗隔离底层时间线拖动')
+
     await installTimeline(page, [{ name: '开场字幕', clips: [{ id: 'responsive-menu', name: '开场介绍', text: '欢迎开始制作视频', start: 0, trimOut: 2 }] }])
     await fs.mkdir('/tmp/open-media-editor-efficiency', { recursive: true })
 
@@ -267,6 +357,19 @@ async function main() {
       assert(sizes.editor <= sizes.width + 1)
       const toolbarBounds = await page.locator('.video-editor').evaluate(element => ({ editor: element.getBoundingClientRect().right, button: element.querySelector('.editor-export').getBoundingClientRect().right }))
       assert(toolbarBounds.button <= toolbarBounds.editor + 1, `${width}px 导出按钮被裁切`)
+      const timelineToolbar = page.locator('.timeline-toolbar')
+      await expect(timelineToolbar.getByRole('button')).toHaveCount(14)
+      if (width === 320) {
+        assert(await timelineToolbar.evaluate(element => element.scrollWidth > element.clientWidth), '窄屏应允许横向滚动时间线工具栏')
+        const controls = timelineToolbar.locator('button,input')
+        for (const control of await controls.all()) {
+          await control.scrollIntoViewIfNeeded()
+          await expect(control).toBeVisible()
+          const bounds = await control.boundingBox(), toolbar = await timelineToolbar.boundingBox()
+          assert(bounds.x >= toolbar.x - 1 && bounds.x + bounds.width <= toolbar.x + toolbar.width + 1, `窄屏无法滚动访问时间线工具：${await control.getAttribute('title') || await control.getAttribute('aria-label')}`)
+        }
+        await timelineToolbar.evaluate(element => { element.scrollLeft = 0 })
+      }
       await page.locator('[data-clip-id="responsive-menu"]').click({ button: 'right' })
       const menu = page.getByRole('menu', { name: '文字片段操作', exact: true })
       const menuBounds = await menu.boundingBox()
@@ -278,6 +381,22 @@ async function main() {
       assert(trackMenuBounds.x >= 0 && trackMenuBounds.x + trackMenuBounds.width <= width + 1 && trackMenuBounds.y >= 0 && trackMenuBounds.y + trackMenuBounds.height <= 851, `${width}px 轨道菜单超出视口：${JSON.stringify(trackMenuBounds)}`)
       await page.keyboard.press('Escape')
     }
+    for (const viewport of [{ width: 1280, height: 480 }, { width: 768, height: 430 }, { width: 320, height: 430 }, { width: 1280, height: 300 }]) {
+      await page.setViewportSize(viewport)
+      await page.evaluate(width => { document.querySelector('#app').style.width = width === 320 ? 'calc(100% - 48px)' : '100%'; document.querySelector('#app').style.marginLeft = width === 320 ? '48px' : '0' }, viewport.width)
+      await divider.press('Enter')
+      await dragTimelineDivider(page, -400)
+      const layout = await editorLayout(page), availableHeight = layout.preview.height + layout.timeline.height
+      assert(layout.preview.height >= Math.min(180, availableHeight * 180 / 330) - 1, `缩小窗口后预览失去可用空间：${JSON.stringify({ viewport, layout })}`)
+      assert(layout.timeline.height >= Math.min(150, availableHeight * 150 / 330) - 1, `缩小窗口后时间线失去可用空间：${JSON.stringify({ viewport, layout })}`)
+      assert(layout.timeline.bottom <= viewport.height + 1 && layout.preview.bottom <= layout.divider.top + 1, `缩小窗口后面板溢出可视区：${JSON.stringify({ viewport, layout })}`)
+      const button = await page.getByTestId('export-project').boundingBox()
+      assert(button.x >= layout.editor.left && button.x + button.width <= layout.editor.right + 1, '缩小窗口后导出按钮必须完整可见')
+    }
+    await page.setViewportSize({ width: 320, height: 850 })
+    await page.evaluate(() => { document.querySelector('#app').style.width = 'calc(100% - 48px)'; document.querySelector('#app').style.marginLeft = '48px' })
+    await divider.press('Enter')
+    console.log('PASS 宽窄与矮窗口下拖动限制、面板不越出视区以及导出按钮保持可见')
     await page.evaluate(async () => {
       const { createProject, createTextClip } = await import('/src/core/project.ts')
       const { addClip } = await import('/src/core/timeline.ts')

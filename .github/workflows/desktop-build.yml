@@ -292,16 +292,33 @@ jobs:
       - name: Package application
         id: native-package
         run: npx tauri build --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked 2>&1 | tee .media-runtime/logs/package.log
-      - name: Verify native recording helper
+      - name: Verify native recording mode
         id: capture-helper
         if: runner.os == 'macOS'
         run: |
           set -o pipefail
-          helper="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app/Contents/Helpers/open-media-capture"
-          test -x "$helper"
-          codesign --verify "$helper"
-          codesign --verify --deep --strict "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app"
-          "$helper" --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
+          application="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app"
+          executable="$application/Contents/MacOS/open-media"
+          library="$application/Contents/Frameworks/libopen_media_capture.dylib"
+          test -x "$executable"
+          test -f "$library"
+          codesign --verify --strict "$library"
+          codesign --verify --deep --strict "$application"
+          "$executable" --open-media-capture --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
+          node --input-type=module - <<'NODE' 2>&1 | tee -a .media-runtime/logs/capture-helper.log
+          import assert from 'node:assert/strict'
+          import { readFileSync } from 'node:fs'
+          const records = readFileSync('.media-runtime/logs/capture-helper.log', 'utf8').split(/\r?\n/).flatMap(line => {
+            try {
+              const entry = JSON.parse(line)
+              return entry && typeof entry === 'object' && 'captureIdentityMode' in entry ? [entry] : []
+            } catch { return [] }
+          })
+          assert.equal(records.length, 1, 'The recording mode must report exactly one application identity.')
+          assert.equal(records[0].captureIdentityMode, 'packaged', 'The installed recording mode must recognize its application bundle.')
+          assert.equal(records[0].captureApplicationIdentifier, 'com.ecojust.openmedia', 'The recording mode must use the main application identity.')
+          console.log('Verified packaged recording mode and main application identity.')
+          NODE
       - name: Verify offline speech from the packaged application
         id: speech-package-macos
         if: runner.os == 'macOS'

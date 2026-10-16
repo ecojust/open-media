@@ -23,7 +23,7 @@ function workspace(name, overrides = {}) {
   const injected = {
     ref: vue.ref, shallowRef: vue.shallowRef, computed: vue.computed, nextTick: vue.nextTick, watch: vue.watch,
     onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback),
-    defineProps: () => ({ assets: [asset], native: true }), defineEmits: () => (...args) => events.push(args), defineExpose: () => {},
+    defineProps: () => ({ assets: [asset], native: true }), withDefaults: (props, defaults) => ({ ...defaults, ...props }), defineEmits: () => (...args) => events.push(args), defineExpose: () => {},
     window: { addEventListener() {}, removeEventListener() {} },
     setInterval: callback => { const id = nextTimer++; timers.set(id, callback); return id }, clearInterval: id => timers.delete(id),
     listCaptureDevices: async () => captureDevices, pickCaptureSource: async () => ({ sourceId: 'screen:1', sourceName: '屏幕一', sourceWidth: 2560, sourceHeight: 1440 }), cancelCapturePicker: async () => {}, startCapture: async () => ({ state: 'recording', elapsed: 0, segments: 0 }),

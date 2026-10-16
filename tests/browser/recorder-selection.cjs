@@ -17,6 +17,7 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
       window.__TAURI_INTERNALS__ = {
         invoke: async (command, args) => {
           state.calls.push({ command, args })
+          if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
           if (command === 'pick_capture_source') {
             if (state.permissionFailure) { state.permissionFailure = false; throw new Error('未获得屏幕录制权限，请在系统设置中允许后重试。') }
             return new Promise(resolve => { state.resolvePicker = resolve })
@@ -68,7 +69,7 @@ async function main() {
     page.on('pageerror', error => errors.push(error.message))
     await mountRecorder(page, baseURL, true)
     await page.getByTestId('record-start').waitFor()
-    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls), [], '打开录制页不能枚举来源或申请采集权限')
+    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command !== 'get_runtime_status')), [], '打开录制页不能枚举来源或申请采集权限')
     assert.equal(await page.getByTestId('capture-source').count(), 0)
     assert.equal(await page.getByTestId('capture-region-x').count(), 0)
     assert.equal(await page.getByTestId('capture-output').count(), 0)

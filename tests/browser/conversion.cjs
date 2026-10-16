@@ -159,6 +159,54 @@ async function main() {
     await page.setViewportSize({ width: 390, height: 844 })
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'conversion workspace fits a narrow viewport')
     console.log('PASS conversion workspace batch controls, real JPEG downloads, unique ZIP entries and narrow layout')
+
+    await page.evaluate(async () => {
+      const { importMediaFile } = await import('/src/core/media-import.ts')
+      const canvas = document.createElement('canvas')
+      canvas.width = 96; canvas.height = 48
+      const context = canvas.getContext('2d')
+      context.fillStyle = '#206ad8'; context.fillRect(0, 0, 96, 48)
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      const screenshot = await importMediaFile(new File([blob], '截屏.png', { type: 'image/png' }))
+      window.conversionHarness.screenshot = screenshot
+      window.conversionHarness.focusAssetId.value = screenshot.id
+    })
+    assert.equal(await page.locator('.source-selection').innerText(), '已选 2 项', 'a pending screenshot focus must wait for its image to arrive')
+    await page.evaluate(() => window.conversionHarness.assets.value.push(window.conversionHarness.screenshot))
+    await page.waitForFunction(() => document.querySelector('.source-selection').textContent === '已选 1 项')
+    await page.getByTestId('convert-image-preview').evaluate(image => image.decode())
+    const focused = await page.getByTestId('convert-image-preview').evaluate(image => ({ name: image.alt, width: image.naturalWidth, height: image.naturalHeight }))
+    assert.deepEqual(focused, { name: '截屏.png', width: 96, height: 48 }, 'screenshot focus opens the original image instead of the previous conversion result')
+    assert.equal(await page.getByLabel('选择 截屏.png', { exact: true }).isChecked(), true)
+    assert.equal(await page.locator('.convert-source input:checked').count(), 1, 'only the screenshot is selected for conversion')
+    await page.getByLabel('选择 示例图.png', { exact: true }).first().check()
+    await page.evaluate(() => { window.conversionHarness.assets.value = [...window.conversionHarness.assets.value] })
+    assert.equal(await page.locator('.source-selection').innerText(), '已选 2 项', 'later asset updates must preserve manual selection instead of reapplying a consumed focus request')
+    console.log('PASS screenshot focus waits for import, selects only the screenshot, opens original pixels and preserves subsequent manual selection')
+
+    await page.evaluate(() => {
+      const original = HTMLCanvasElement.prototype.toBlob
+      HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
+        HTMLCanvasElement.prototype.toBlob = original
+        original.call(this, blob => { window.conversionHarness.finishEncoding = () => callback(blob) }, ...args)
+      }
+    })
+    await page.getByTestId('convert-start').click()
+    await page.waitForFunction(() => typeof window.conversionHarness.finishEncoding === 'function')
+    await page.evaluate(() => {
+      const nextScreenshot = { ...window.conversionHarness.screenshot, id: 'next-screenshot', name: '下一张截屏.png' }
+      window.conversionHarness.focusAssetId.value = nextScreenshot.id
+      window.conversionHarness.assets.value.push(nextScreenshot)
+    })
+    assert.equal(await page.locator('.source-selection').innerText(), '已选 2 项', 'a screenshot arriving during conversion must not alter the active batch selection')
+    assert.equal(await page.getByLabel('选择 下一张截屏.png', { exact: true }).isChecked(), false)
+    await page.evaluate(() => window.conversionHarness.finishEncoding())
+    await page.waitForFunction(() => document.querySelector('.source-selection').textContent === '已选 1 项')
+    assert.equal(await page.getByLabel('选择 下一张截屏.png', { exact: true }).isChecked(), true)
+    await page.getByTestId('convert-image-preview').evaluate(image => image.decode())
+    assert.equal(await page.getByTestId('convert-image-preview').getAttribute('alt'), '下一张截屏.png')
+    assert.equal(await page.locator('[data-testid="convert-result"].done').count(), 4, 'the in-progress batch completes before applying the deferred screenshot focus')
+    console.log('PASS screenshot focus is deferred during a real conversion batch and applied after completion')
   } finally {
     await browser.close()
     await server.close()

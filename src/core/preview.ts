@@ -1,4 +1,6 @@
 import type { Clip, MediaAsset, Project, Track } from './types.ts'
+import { isClipFilterIdentity } from './clip-filters.ts'
+import { ClipFilterRenderer } from './filter-renderer.ts'
 
 export { clipOpacityAt } from './timeline.ts'
 import { clipDuration as previewClipDuration, projectDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
@@ -36,29 +38,48 @@ export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
 
 }
 
-type MediaEntry = { key: string; assetId: string; media: HTMLMediaElement | HTMLImageElement; source?: MediaElementAudioSourceNode; gain?: GainNode }
+type MediaEntry = {
+  key: string
+  assetId: string
+  media: HTMLMediaElement | HTMLImageElement
+  source?: MediaElementAudioSourceNode
+  gain?: GainNode
+  active?: boolean
+  timing?: string
+  needsSeek?: boolean
+  lastSync?: number
+  wantsPlayback?: boolean
+  playRequest?: Promise<void>
+  playError?: unknown
+  playbackGeneration?: number
+  volume?: number
+}
 
 function waitForMedia(media: HTMLMediaElement | HTMLImageElement, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.reject(new DOMException('已取消导出', 'AbortError'))
   if (media instanceof HTMLImageElement && media.complete && media.naturalWidth) return Promise.resolve()
   if (media instanceof HTMLMediaElement && media.readyState >= 2) return Promise.resolve()
   return new Promise((resolve, reject) => {
-    const successEvent = media instanceof HTMLImageElement ? 'load' : 'loadeddata'
+    // A seek may drop readyState without firing loadeddata again when it completes.
+    const successEvents = media instanceof HTMLImageElement ? ['load'] : ['loadeddata', 'canplay', 'seeked']
     const timeout = window.setTimeout(() => done(new Error('素材加载超时，请检查文件是否仍然可用')), 15000)
-    const success = () => done()
+    const success = () => {
+      if (media instanceof HTMLImageElement ? media.complete && media.naturalWidth > 0 : media.readyState >= 2) done()
+    }
     const failure = () => done(new Error('无法读取素材，请重新导入该文件'))
     const abort = () => done(new DOMException('已取消导出', 'AbortError'))
     const done = (error?: Error) => {
       window.clearTimeout(timeout)
-      media.removeEventListener(successEvent, success)
+      for (const event of successEvents) media.removeEventListener(event, success)
       media.removeEventListener('error', failure)
       signal?.removeEventListener('abort', abort)
       error ? reject(error) : resolve()
     }
-    media.addEventListener(successEvent, success, { once: true })
+    for (const event of successEvents) media.addEventListener(event, success)
     media.addEventListener('error', failure, { once: true })
     signal?.addEventListener('abort', abort, { once: true })
     if (media instanceof HTMLMediaElement && media.error) failure()
+    else success()
   })
 }
 
@@ -66,6 +87,7 @@ function waitForMedia(media: HTMLMediaElement | HTMLImageElement, signal?: Abort
 export class TimelinePreview {
   private project: Project
   private entries = new Map<string, MediaEntry>()
+  private filterRenderer?: ClipFilterRenderer
   private context: CanvasRenderingContext2D
   private audioContext?: AudioContext
   private destination?: MediaStreamAudioDestinationNode
@@ -73,6 +95,7 @@ export class TimelinePreview {
   private disposed = false
   private lastTime = 0
   private playing = false
+  private playbackGeneration = 0
   private reported = new Set<string>()
   private canvas: HTMLCanvasElement
   private onError?: (message: string) => void
@@ -88,6 +111,7 @@ export class TimelinePreview {
   }
 
   setProject(project: Project): void {
+    this.playbackGeneration++
     this.project = project
     const valid = new Set<string>()
     for (const track of project.tracks) {
@@ -162,8 +186,45 @@ export class TimelinePreview {
     if (this.monitorAudio) entry.gain.connect(this.audioContext.destination)
   }
 
-  render(time: number, playing = false): void {
+  private startEntry(entry: MediaEntry, clipId: string): void {
+    const media = entry.media as HTMLMediaElement
+    entry.wantsPlayback = true
+    if (!media.paused || media.ended || entry.playRequest || entry.playError) return
+    const generation = (entry.playbackGeneration || 0) + 1
+    entry.playbackGeneration = generation
+    const request = media.play().catch(error => {
+      // A pause, seek or removed clip can legitimately cancel an outstanding start.
+      if (this.disposed || !entry.wantsPlayback || entry.playbackGeneration !== generation || error?.name === 'AbortError') return
+      entry.playError = error
+      this.report(`play:${clipId}`, '素材播放受到浏览器限制，请点击播放重试')
+      throw error
+    }).finally(() => {
+      if (entry.playRequest === request) entry.playRequest = undefined
+    })
+    entry.playRequest = request
+    // render is synchronous; playReady also awaits the same request for export/startup.
+    void request.catch(() => {})
+  }
+
+  private stopEntry(entry: MediaEntry): void {
+    const hadPlayback = entry.wantsPlayback || Boolean(entry.playRequest)
+    entry.wantsPlayback = false
+    entry.playbackGeneration = (entry.playbackGeneration || 0) + 1
+    entry.playError = undefined
+    entry.playRequest = undefined
+    if (entry.media instanceof HTMLMediaElement && (!entry.media.paused || hadPlayback)) entry.media.pause()
+  }
+
+  /** Explicit user seeks are independent of the continuous playback drift guard. */
+  seek(time: number, playing = this.playing): void {
+    this.playbackGeneration++
+    this.render(time, playing, true)
+  }
+
+  render(time: number, playing = false, forceSeek = false): void {
     if (this.disposed) return
+    const wasPlaying = this.playing
+    const now = performance.now()
     this.lastTime = Math.max(0, time)
     this.playing = playing
     const active = new Set<string>()
@@ -174,36 +235,84 @@ export class TimelinePreview {
         const media = entry.media
         if (time < clip.start || time >= clip.start + previewClipDuration(clip)) continue
         active.add(clip.id)
-        const sourceTime = mediaSourceTime(clip, time)
-        if (media.readyState >= 1 && Math.abs(media.currentTime - sourceTime) > (playing ? 0.18 : 0.015)) {
-          try { media.currentTime = Math.min(sourceTime, Number.isFinite(media.duration) ? Math.max(0, media.duration - 0.001) : sourceTime) } catch { /* Metadata can arrive while a source is being replaced. */ }
+        const timing = `${clip.start}:${clip.trimIn}:${clip.trimOut}:${clip.speed}`
+        if (forceSeek || !entry.active || (playing && !wasPlaying) || entry.timing !== timing) {
+          entry.needsSeek = true
+          entry.lastSync = now
+          entry.playError = undefined
         }
-        try { media.playbackRate = clip.speed } catch { this.report(`speed:${clip.id}`, '当前浏览器无法预览此播放速度，请调整速度或使用导出结果') }
+        entry.active = true
+        entry.timing = timing
+        const sourceTime = mediaSourceTime(clip, time)
+        // Reassigning rate/volume on every paint can restart native audio processing.
+        if (media.playbackRate !== clip.speed) {
+          try { media.playbackRate = clip.speed } catch { this.report(`speed:${clip.id}`, '当前浏览器无法预览此播放速度，请调整速度或使用导出结果') }
+        }
+        const canCorrectDrift = playing && !media.paused && !media.seeking && media.readyState >= 3 && !entry.playRequest && now - (entry.lastSync || 0) >= 1000
+        const drifted = Math.abs(media.currentTime - sourceTime) > Math.max(0.25 * clip.speed, 0.08)
+        if (media.readyState >= 1 && (!media.seeking || forceSeek) && (entry.needsSeek || !playing || (canCorrectDrift && drifted))) {
+          const target = Math.min(sourceTime, Number.isFinite(media.duration) ? Math.max(0, media.duration - 0.001) : sourceTime)
+          try {
+            if (Math.abs(media.currentTime - target) > 0.015) media.currentTime = target
+            entry.needsSeek = false
+            entry.lastSync = now
+          } catch { /* Metadata can arrive while a source is being replaced. */ }
+        }
         const fade = clipOpacityAt({ ...clip, opacity: 1 }, time)
         const volume = track.muted ? 0 : clip.volume * fade
-        if (entry.gain) { entry.gain.gain.value = volume; media.volume = 1; media.muted = false }
-        else { media.volume = Math.min(1, volume); media.muted = volume <= 0 }
-        if (playing && media.paused) media.play().catch(() => this.report(`play:${clip.id}`, '素材播放受到浏览器限制，请点击播放重试'))
-        if (!playing && !media.paused) media.pause()
+        if (entry.gain) {
+          if (entry.volume !== volume) { entry.gain.gain.value = volume; entry.volume = volume }
+          if (media.volume !== 1) media.volume = 1
+          if (media.muted) media.muted = false
+        } else {
+          if (media.volume !== Math.min(1, volume)) media.volume = Math.min(1, volume)
+          if (media.muted !== (volume <= 0)) media.muted = volume <= 0
+        }
+        if (playing) this.startEntry(entry, clip.id)
+        else if (entry.wantsPlayback || !media.paused) this.stopEntry(entry)
       }
     }
     for (const [id, entry] of this.entries) {
       if (entry.media instanceof HTMLMediaElement && !active.has(id)) {
-        entry.media.pause()
-        if (entry.gain) entry.gain.gain.value = 0
+        entry.active = false
+        if (entry.wantsPlayback || !entry.media.paused) this.stopEntry(entry)
+        if (entry.gain && entry.volume !== 0) { entry.gain.gain.value = 0; entry.volume = 0 }
       }
     }
     this.draw()
   }
 
-  async playReady(time: number): Promise<void> {
+  async playReady(time: number, signal?: AbortSignal): Promise<void> {
+    const generation = ++this.playbackGeneration
+    const entries = this.project.tracks.flatMap(track => track.clips
+      .filter(clip => time >= clip.start && time < clip.start + previewClipDuration(clip))
+      .map(clip => this.entries.get(clip.id))).filter((entry): entry is MediaEntry => Boolean(entry))
+    await Promise.all(entries.map(entry => waitForMedia(entry.media, signal)))
+    if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
+    await this.waitForSeek(time, signal)
+    if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
+    if (signal?.aborted) throw new DOMException('已取消播放', 'AbortError')
     this.render(time, true)
-    await Promise.all(this.project.tracks.flatMap(track => track.clips.filter(clip => time >= clip.start && time < clip.start + previewClipDuration(clip)).map(clip => this.entries.get(clip.id)?.media).filter((media): media is HTMLMediaElement => media instanceof HTMLMediaElement).map(media => media.play())))
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => {
+        if (generation === this.playbackGeneration) this.pause()
+        reject(new DOMException('已取消播放', 'AbortError'))
+      }
+      signal?.addEventListener('abort', abort, { once: true })
+      void Promise.all(entries.map(entry => entry.playRequest)).then(() => resolve(), reject).finally(() => signal?.removeEventListener('abort', abort))
+      if (signal?.aborted) abort()
+    })
+    if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
   }
 
   async seekReady(time: number, signal?: AbortSignal): Promise<void> {
+    this.playbackGeneration++
+    await this.waitForSeek(time, signal)
+  }
+
+  private async waitForSeek(time: number, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) throw new DOMException('已取消导出', 'AbortError')
-    this.render(time, false)
+    this.render(time, false, true)
     await Promise.all([...this.entries.values()].filter(entry => entry.media instanceof HTMLMediaElement && entry.media.seeking).map(entry => new Promise<void>((resolve, reject) => {
       const media = entry.media as HTMLMediaElement
       const timeout = window.setTimeout(() => { cleanup(); reject(new Error('素材定位超时')) }, 10000)
@@ -251,15 +360,34 @@ export class TimelinePreview {
       if (media && (imageReady || videoReady)) {
         const sourceWidth = media instanceof HTMLImageElement ? media.naturalWidth : (media as HTMLVideoElement).videoWidth
         const sourceHeight = media instanceof HTMLImageElement ? media.naturalHeight : (media as HTMLVideoElement).videoHeight
-        ctx.drawImage(media as CanvasImageSource, ...fitRect(sourceWidth, sourceHeight, clip.width, clip.height, clip.fit))
+        let source: CanvasImageSource = media as CanvasImageSource
+        let width = sourceWidth, height = sourceHeight
+        if (!isClipFilterIdentity(clip.filters)) {
+          this.filterRenderer ??= new ClipFilterRenderer()
+          const rect = fitRect(sourceWidth, sourceHeight, clip.width, clip.height, clip.fit)
+          const canvasScale = Math.max(this.canvas.width / this.project.width, this.canvas.height / this.project.height)
+          const scale = Math.min(1, Math.max(rect[6] / rect[2], rect[7] / rect[3]) * canvasScale)
+          try {
+            const filtered = this.filterRenderer.render(source, sourceWidth, sourceHeight, Math.max(1, Math.ceil(sourceWidth * scale)), Math.max(1, Math.ceil(sourceHeight * scale)), clip.filters)
+            source = filtered
+            width = filtered.width
+            height = filtered.height
+          } catch (cause) {
+            this.report(`filter:${clip.id}`, `无法绘制片段滤镜：${cause instanceof Error ? cause.message : String(cause)}`)
+            ctx.restore()
+            return
+          }
+        }
+        ctx.drawImage(source, ...fitRect(width, height, clip.width, clip.height, clip.fit))
       }
     }
     ctx.restore()
   }
 
-  pause(): void { this.render(this.lastTime, false) }
+  pause(): void { this.playbackGeneration++; this.render(this.lastTime, false) }
 
   private removeEntry(entry: MediaEntry): void {
+    this.stopEntry(entry)
     entry.source?.disconnect()
     entry.gain?.disconnect()
     if (entry.media instanceof HTMLMediaElement) { entry.media.pause(); entry.media.removeAttribute('src'); entry.media.load() }
@@ -270,6 +398,8 @@ export class TimelinePreview {
     this.disposed = true
     for (const entry of this.entries.values()) this.removeEntry(entry)
     this.entries.clear()
+    this.filterRenderer?.dispose()
+    this.filterRenderer = undefined
     void this.audioContext?.close()
   }
 }

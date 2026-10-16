@@ -25,6 +25,18 @@ export interface SpeechBinding {
   rate: number
 }
 
+/** RGB adjustments are applied before clip opacity and timeline compositing. */
+export interface ClipFilters {
+  enabled: boolean
+  intensity: number
+  brightness: number
+  contrast: number
+  saturation: number
+  temperature: number
+  tint: number
+  sepia: number
+}
+
 /** Source trims are measured in source seconds; start and fades use timeline seconds. */
 export interface Clip {
   id: string
@@ -52,6 +64,7 @@ export interface Clip {
   background?: string
   textAlign?: 'left' | 'center' | 'right'
   speech?: SpeechBinding
+  filters?: ClipFilters
 }
 
 export interface Track {

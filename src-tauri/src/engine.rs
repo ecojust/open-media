@@ -101,7 +101,7 @@ impl Runtime {
                 }
             }
         }
-        Err("媒体引擎不可用。请重新安装完整安装包，或在设置中选择媒体引擎。".into())
+        Err("媒体引擎不可用。请重新安装完整安装包，或在当前功能的「媒体处理检查」中选择本机编码工具。".into())
     }
     pub fn status(result: &Result<Self>) -> RuntimeStatus {
         match result {
@@ -988,6 +988,10 @@ fn timeline_plan(
         };
         let path = store.authorized_path(asset)?;
         let image = text || asset["kind"] == "image";
+        let color_filter = crate::clip_filters::filter_chain(
+            clip,
+            track["kind"] == "video" && (asset["kind"] == "video" || asset["kind"] == "image"),
+        )?;
         if image && asset["mime"] == "image/gif" {
             arg(
                 &mut args,
@@ -1023,7 +1027,15 @@ fn timeline_plan(
             let opacity = number(clip, "opacity", 1.0, 0.0, 1.0)? * fade_peak;
             let fit = clip["fit"].as_str().unwrap_or("contain");
             let scale=match fit{"cover"=>format!("scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}"),"fill"=>format!("scale={cw}:{ch}"),_=>format!("scale={cw}:{ch}:force_original_aspect_ratio=decrease,pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")};
-            let mut chain=format!("[{index}:v]trim=start={trim_in}:end={trim_out},setpts=(PTS-STARTPTS)/{speed},format=rgba,{scale},setsar=1,colorchannelmixer=aa={opacity}");
+            let mut chain=format!("[{index}:v]trim=start={trim_in}:end={trim_out},setpts=(PTS-STARTPTS)/{speed},format=rgba,{scale},setsar=1");
+            if let Some(filter) = &color_filter {
+                chain += &format!(",format=rgba,split[filter_input{index}][filter_alpha{index}]");
+                filters.push(chain);
+                filters.push(format!("[filter_alpha{index}]alphaextract[filter_mask{index}]"));
+                filters.push(format!("[filter_input{index}]{filter}[filter_color{index}]"));
+                chain = format!("[filter_color{index}][filter_mask{index}]alphamerge");
+            }
+            chain += &format!(",colorchannelmixer=aa={opacity}");
             if fade_in > 0.0 {
                 chain += &format!(",fade=t=in:st=0:d={fade_in}:alpha=1");
             }

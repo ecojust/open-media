@@ -196,6 +196,66 @@ fn audio_extraction_and_image_conversion() {
 fn clip(asset: &Asset) -> Value {
     json!({"id":"clip","assetId":asset.id,"name":"sample","start":0.2,"trimIn":0.0,"trimOut":2.0,"speed":2.0,"volume":0.8,"opacity":0.8,"x":20.0,"y":10.0,"width":100.0,"height":80.0,"rotation":15.0,"fit":"contain","fadeIn":0.1,"fadeOut":0.1})
 }
+
+#[test]
+fn clip_filter_graph_preserves_each_alpha_byte_and_luma_grayscale() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let pixels: Vec<u8> = [
+        [255, 0, 0, 255],
+        [64, 160, 240, 128],
+        [0, 255, 0, 0],
+        [0, 0, 255, 64],
+    ]
+    .into_iter()
+    .cycle()
+    .take(8)
+    .flatten()
+    .collect();
+    let source = temp.path().join("rgba.raw");
+    fs::write(&source, &pixels).unwrap();
+    let filter = crate::clip_filters::filter_chain(
+        &json!({"filters":{"enabled":true,"intensity":1,"brightness":0,"contrast":1,"saturation":0,"temperature":0,"tint":0,"sepia":0}}),
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    let graph = format!("[0:v]split[input][alpha];[alpha]alphaextract[mask];[input]{filter}[color];[color][mask]alphamerge[out]");
+    let output = process(&rt.encoder)
+        .args(["-v", "error", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "4x2", "-i"])
+        .arg(source)
+        .args(["-filter_complex", &graph, "-map", "[out]", "-frames:v", "1", "-filter_complex_threads", "1", "-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout.len(), pixels.len());
+    for (input, actual) in pixels.chunks_exact(4).zip(output.stdout.chunks_exact(4)) {
+        let expected = (0.2126 * input[0] as f64 + 0.7152 * input[1] as f64 + 0.0722 * input[2] as f64).floor() as i16;
+        assert!(actual[..3].iter().all(|&channel| (channel as i16 - expected).abs() <= 1));
+        assert_eq!(actual[3], input[3], "filter must retain the original alpha byte");
+    }
+}
+
+#[test]
+fn timeline_export_renders_clip_filter_in_final_video() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let filtered = json!({"id":"filtered","assetId":asset.id,"start":0,"trimIn":0,"trimOut":1,"speed":1,"volume":0,"opacity":1,"x":0,"y":0,"width":160,"height":120,"rotation":0,"fit":"fill","fadeIn":0,"fadeOut":0,"filters":{"enabled":true,"intensity":1,"brightness":0,"contrast":1,"saturation":0,"temperature":0,"tint":0,"sepia":0}});
+    let spec = json!({"kind":"timeline","project":{"title":"filtered","width":160,"height":120,"background":"#000000","assets":[asset],"tracks":[{"kind":"video","muted":true,"clips":[filtered]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"balanced"}});
+    run(temp.path(), &rt, spec, "filtered.mp4");
+    let output = process(&rt.encoder)
+        .args(["-v", "error", "-ss", "0.4", "-i"])
+        .arg(temp.path().join("filtered.mp4"))
+        .args(["-vf", "crop=2:2:80:60,scale=1:1", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(output.stdout.len(), 3);
+    let rgb = output.stdout;
+    assert!(rgb.iter().all(|&channel| (channel as i16 - 54).abs() <= 8), "red video should export as luma gray, got {rgb:?}");
+}
+
 #[test]
 fn timeline_composites_audio_transform_and_text_image() {
     let temp = tempfile::tempdir().unwrap();

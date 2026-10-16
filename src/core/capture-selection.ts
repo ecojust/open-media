@@ -22,7 +22,7 @@ export interface CaptureSelectionContext {
   displayId: string
   display: SelectionDisplay
   targets: SelectionTarget[]
-  preferences?: { mode?: CaptureSelectionMode; sourceId?: string; outputSize?: SelectionSize }
+  preferences?: { purpose?: 'record' | 'screenshot'; mode?: CaptureSelectionMode; sourceId?: string; outputSize?: SelectionSize }
   availableModes?: CaptureSelectionMode[]
 }
 export interface CaptureSelection {

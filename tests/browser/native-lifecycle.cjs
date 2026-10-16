@@ -28,6 +28,7 @@ async function mountNativeExport(page, baseURL, scenario) {
       convertFileSrc: () => url,
       invoke: async (command, args) => {
         state.calls.push({ command, args })
+        if (command === 'get_runtime_status') return { ready: true, version: 'test', source: '测试工具' }
         if (command === 'import_blob_asset') {
           return new Promise(resolve => {
             state.releaseImport = () => resolve({ ...asset, id: 'imported-native-image', nativePath: '/native-fixture/imported.png' })
@@ -78,7 +79,7 @@ async function main() {
     const prepared = await page.evaluate(() => ({ calls: window.nativeHarness.calls, statuses: window.nativeHarness.statuses, busy: window.nativeHarness.busy }))
     assert.equal(prepared.calls.filter(call => call.command === 'begin_media_job').length, 0, '素材准备期间取消仍启动了编码')
     assert.equal(prepared.calls.filter(call => call.command === 'import_blob_asset').length, 1, '取消后仍继续导入后续素材')
-    assert.deepEqual(prepared.calls[0].args.bytes.slice(0, 8), [137, 80, 78, 71, 13, 10, 26, 10], '准备阶段没有经过真实PNG读取')
+    assert.deepEqual(prepared.calls.find(call => call.command === 'import_blob_asset').args.bytes.slice(0, 8), [137, 80, 78, 71, 13, 10, 26, 10], '准备阶段没有经过真实PNG读取')
     assert.deepEqual(prepared.busy, [true, false])
     assert.equal(prepared.statuses.some(message => /导出完成/.test(message)), false)
     assert.equal(await page.locator('.success-message').count(), 0)

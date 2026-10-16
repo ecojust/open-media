@@ -13,9 +13,9 @@ export interface CaptureRegion extends CaptureSize { x: number; y: number }
 export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
 export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize }
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
-export interface CapturePickerPreferences { mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize }
+export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize }
 export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize }
-export interface SpeechVoice { id: string; name: string; language: string }
+export interface SpeechVoice { id: string; name: string; language: string; gender?: string }
 export interface SpeechStatus { ready: boolean; voices: SpeechVoice[]; error?: string }
 export interface SpeechRequest { requestId: string; text: string; voiceId: string; speed: number }
 export interface SpeechJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress?: number; stage: string; message?: string; asset?: MediaAsset; error?: string }
@@ -95,3 +95,11 @@ export async function onNativeCloseRequest(handler: () => void): Promise<() => v
   return listen('native-close-requested', handler)
 }
 export async function closeNativeWindow(): Promise<void> { return call('close_native_window') }
+
+export async function configureScreenshotShortcut(shortcut: string | null): Promise<string | null> { return call('configure_screenshot_shortcut', { shortcut }) }
+export async function captureScreenshot(selection: CaptureSelection): Promise<MediaAsset> { return assetUrl(await call('capture_screenshot', { selection })) }
+export async function onScreenshotRequested(handler: () => void): Promise<() => void> {
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen('screenshot-requested', handler)
+}
+export async function showMainWindow(): Promise<void> { return call('show_main_window') }

@@ -8,7 +8,7 @@ const { chromium, expect } = require('@playwright/test')
 const { unzipSync, strFromU8 } = require('fflate')
 
 const root = path.resolve(__dirname, '../..')
-const baseURL = process.env.BASE_URL || 'http://127.0.0.1:5200'
+const baseURL = process.env.BASE_URL || 'http://127.0.0.1:5203'
 const artifacts = process.env.BROWSER_ARTIFACTS ? path.resolve(process.env.BROWSER_ARTIFACTS) : '/tmp/open-media-workbench'
 const results = [], pageErrors = []
 let server, browser, page, directory
@@ -18,14 +18,29 @@ async function check(name, action) {
   catch (error) { results.push({ name, passed: false, error: error.stack, milliseconds: Date.now() - start }); throw error }
 }
 async function ensureServer() {
-  try { if ((await fetch(baseURL)).ok) return } catch {}
+  try {
+    const response = await fetch(baseURL)
+    if (response.ok && (await response.text()).includes('/@vite/client')) return
+    if (response.ok) throw new Error('工作台验证需要开发服务，不使用已有构建。')
+  } catch (error) { if (error.message.includes('需要开发服务')) throw error }
   if (process.env.BASE_URL) throw new Error(`工作台服务不可访问：${baseURL}`)
-  server = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', '5200', '--strictPort'], { cwd: root, stdio: 'ignore' })
+  server = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', '5203', '--strictPort'], { cwd: root, stdio: 'ignore' })
   for (let attempt = 0; attempt < 100; attempt++) {
     try { if ((await fetch(baseURL)).ok) return } catch {}
     await new Promise(resolve => setTimeout(resolve, 100))
   }
   throw new Error('工作台服务启动超时。')
+}
+async function requestNewProject() {
+  await page.locator('.brand').click()
+  await page.getByTestId('create-project').click()
+}
+async function setTheme(theme) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await page.evaluate(() => localStorage.getItem('open-media:theme') || 'system') === theme) return
+    await page.getByRole('button', { name: /^主题：/ }).click()
+  }
+  assert.equal(await page.evaluate(() => localStorage.getItem('open-media:theme')), theme)
 }
 async function rename(title) {
   await page.locator('.project-title').click()
@@ -47,7 +62,6 @@ async function main() {
   await ensureServer()
   directory = await fs.mkdtemp(path.join(os.tmpdir(), 'open-media-workbench-'))
   await fs.mkdir(artifacts, { recursive: true })
-  await fs.mkdir(path.join(root, 'docs/screenshots'), { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox', '--no-proxy-server', '--autoplay-policy=no-user-gesture-required'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, acceptDownloads: true })
   page = await context.newPage()
@@ -57,22 +71,63 @@ async function main() {
   await page.goto(baseURL)
   await expect(page.getByTestId('home-workspace')).toBeVisible()
 
-  await check('首页、新建入口、保存旁自动草稿开关与SVG工具栏', async () => {
+  await check('顶部仅保留品牌、主题和信息，保存与自动草稿移入剪辑工作区', async () => {
     await expect(page.locator('.topbar [data-testid="export-project"]')).toHaveCount(0)
     await expect(page.getByTestId('export-project')).toHaveCount(0)
     await page.getByTestId('nav-record').click()
     await expect(page.getByTestId('record-start')).toBeVisible()
     await expect(page.getByTestId('export-project')).toHaveCount(0)
     await page.locator('.brand').click()
-    await expect(page.getByTestId('autosave-toggle')).toHaveAttribute('aria-checked', 'true')
-    assert.equal(await page.getByTestId('autosave-toggle').evaluate(element => element.previousElementSibling?.getAttribute('data-testid')), 'save-project')
+    await expect(page.getByTestId('autosave-toggle')).toHaveCount(0)
+    await expect(page.locator('.topbar .file-actions')).toHaveCount(0)
+    await expect(page.locator('.topbar button:visible')).toHaveCount(3)
+    await expect(page.getByRole('button', { name: '设置', exact: true })).toHaveCount(0)
     assert.equal(await page.locator('.topbar button').evaluateAll(elements => elements.every(element => element.querySelector('svg, img'))), true)
-    await page.screenshot({ path: path.join(root, 'docs/screenshots/workbench-light.png') })
+    await page.screenshot({ path: path.join(artifacts, 'workbench-light.png') })
     await page.getByTestId('create-project').click()
     await expect(page.getByTestId('video-editor')).toBeVisible()
+    await expect(page.locator('.project-bar').getByTestId('autosave-toggle')).toHaveAttribute('aria-checked', 'true')
+    assert.equal(await page.getByTestId('autosave-toggle').evaluate(element => element.previousElementSibling?.getAttribute('data-testid')), 'save-project')
     await expect(page.getByTestId('video-editor').getByTestId('export-project')).toBeVisible()
     await expect(page.locator('.topbar [data-testid="export-project"]')).toHaveCount(0)
     await rename('工作台验收')
+  })
+
+  await check('主题直接切换与跟随系统，信息显示版本和时间并正确恢复焦点', async () => {
+    await setTheme('dark')
+    await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'dark')
+    await setTheme('light')
+    await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'light')
+    await setTheme('system')
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'dark')
+    await page.emulateMedia({ colorScheme: 'light' })
+    await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'light')
+    const opener = page.getByRole('button', { name: '关于 Open Media', exact: true })
+    await opener.click()
+    const info = page.getByRole('dialog', { name: '关于 Open Media', exact: true })
+    await expect(info).toBeVisible()
+    const packageInfo = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'))
+    await expect(info.locator('dl')).toContainText(packageInfo.version)
+    await expect(info.locator('dl')).toContainText('构建时间')
+    await expect(info.locator('dl')).toContainText('开发模式，尚未构建')
+    const timestamp = await info.locator('time').getAttribute('datetime')
+    assert(Number.isFinite(Date.parse(timestamp)), `信息弹窗时间无效：${timestamp}`)
+    assert.equal(await info.getByText('媒体处理', { exact: true }).count(), 0)
+    await expect.poll(() => info.locator('.app-identity img').evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
+    await page.keyboard.press('Escape')
+    await expect(info).not.toBeVisible()
+    await expect(opener).toBeFocused()
+  })
+
+  await check('侧栏展开与折叠保持菜单项目高度', async () => {
+    const heights = await page.locator('.sidebar nav>button').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height))
+    await page.getByRole('button', { name: '折叠侧栏', exact: true }).click()
+    await expect(page.locator('.sidebar')).toHaveClass(/collapsed/)
+    assert.deepEqual(await page.locator('.sidebar nav>button').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height)), heights)
+    await page.getByRole('button', { name: '展开侧栏', exact: true }).click()
+    await expect(page.locator('.sidebar')).not.toHaveClass(/collapsed/)
+    assert.deepEqual(await page.locator('.sidebar nav>button').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height)), heights)
   })
 
   const source = await page.evaluate(async () => {
@@ -148,7 +203,8 @@ async function main() {
     for (const asset of manifest.project.assets) assert.equal(files[`media/${asset.id}`].length, asset.size)
     assert.equal(manifest.project.tracks.flatMap(track => track.clips).length, 3)
     await expect(page.getByTestId('save-project')).toBeEnabled()
-    await page.getByTitle('新建项目', { exact: true }).click()
+    await requestNewProject()
+    await expect(page.getByTestId('video-editor')).toBeVisible()
     await expect(page.locator('.asset-card')).toHaveCount(0)
     const revoked = await page.evaluate(async urls => Promise.all(urls.map(async url => { try { await fetch(url); return false } catch { return true } })), previousUrls)
     assert(revoked.every(Boolean), '切换项目后仍保留旧素材对象URL')
@@ -180,14 +236,16 @@ async function main() {
     await page.waitForTimeout(850)
     assert((await storedProjects()).some(project => project.title === '自动草稿恢复'))
     assert(!(await storedProjects()).some(project => project.title === '尚未自动保存'))
-    await page.getByTitle('新建项目', { exact: true }).click()
+    await requestNewProject()
     await expect(page.getByRole('dialog')).toContainText('保留当前项目')
-    await expect(page.getByTitle('新建项目', { exact: true })).toBeDisabled()
+    await expect(page.getByTestId('create-project')).toBeDisabled()
     assert.equal(await page.locator('.workbench-body').getAttribute('inert'), '')
     await page.getByRole('button', { name: '取消', exact: true }).click()
+    await page.getByTestId('nav-edit').click()
     await expect(page.locator('.project-title')).toHaveText('尚未自动保存')
-    await page.getByTitle('新建项目', { exact: true }).click()
+    await requestNewProject()
     await page.getByRole('button', { name: '保存草稿', exact: true }).click()
+    await expect(page.getByTestId('video-editor')).toBeVisible()
     await expect(page.locator('.asset-card')).toHaveCount(0)
     assert((await storedProjects()).some(project => project.title === '尚未自动保存'))
     await page.locator('.brand').click()
@@ -236,18 +294,19 @@ async function main() {
     await page.waitForTimeout(400)
     await page.getByTestId('nav-edit').click()
     await expect(page.locator('.recording-dot')).toBeVisible()
-    await page.getByTitle('新建项目', { exact: true }).click()
+    await requestNewProject()
     await expect(page.locator('.app-error')).toContainText('请先完成或取消录制、配音、转换及导出，再切换项目。')
+    await page.getByTestId('nav-edit').click()
     await expect(page.locator('.project-title')).toHaveText('尚未自动保存')
     await page.getByRole('button', { name: '关闭提示', exact: true }).click()
     await page.getByTestId('nav-record').click()
     await page.evaluate(() => { window.holdBufferReads = true })
     const download = page.waitForEvent('download', { timeout: 30000 })
-    await page.getByTestId('save-project').click()
+    await page.keyboard.press('Control+s')
     await page.waitForFunction(() => window.bufferWaiters.length > 0)
     await page.getByTestId('record-stop').click()
     await expect(page.getByTestId('record-start')).toBeVisible()
-    await expect(page.getByTestId('save-project')).toBeDisabled()
+    await expect(page.locator('.status-main')).toContainText('打包')
     await page.evaluate(() => window.releaseBufferReads())
     await download
     await expect(page.locator('.project-summary')).toContainText('3 个素材', { timeout: 20000 })
@@ -273,13 +332,14 @@ async function main() {
         return value
       }
     })
-    await page.getByTitle('新建项目', { exact: true }).click()
+    await requestNewProject()
     await page.waitForFunction(() => window.heldTransactions > 0)
-    await expect(page.getByTitle('新建项目', { exact: true })).toBeDisabled()
-    await expect(page.getByTestId('autosave-toggle')).toBeDisabled()
+    await expect(page.getByTestId('create-project')).toBeDisabled()
+    await expect(page.getByTestId('autosave-toggle')).toHaveCount(0)
     assert.equal(await page.locator('.workbench-body').getAttribute('inert'), '')
-    await page.getByTitle('新建项目', { exact: true }).evaluate(element => element.click())
+    await page.getByTestId('create-project').evaluate(element => element.click())
     await page.evaluate(() => { window.holdTransactions = false })
+    await expect(page.getByTestId('video-editor')).toBeVisible()
     await expect(page.locator('.asset-card')).toHaveCount(0)
     const projects = await storedProjects()
     assert(projects.some(project => project.title === '切换前最终编辑' && project.assets.length === 3))
@@ -290,11 +350,9 @@ async function main() {
 
   await check('深浅色与全部工作区320像素布局，图标采用SVG', async () => {
     await rename('我的第一部作品')
-    await page.getByRole('button', { name: '设置', exact: true }).click()
-    await page.getByRole('button', { name: '深色', exact: true }).click()
-    await page.getByRole('button', { name: '完成', exact: true }).click()
+    await setTheme('dark')
     await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'dark')
-    await page.screenshot({ path: path.join(root, 'docs/screenshots/workbench-dark.png') })
+    await page.screenshot({ path: path.join(artifacts, 'workbench-dark.png') })
     await page.setViewportSize({ width: 320, height: 850 })
     for (const id of ['edit', 'record', 'gif', 'image', 'video']) {
       await page.getByTestId(`nav-${id}`).click()
@@ -305,13 +363,11 @@ async function main() {
       assert.equal(await page.locator('button').evaluateAll(elements => elements.some(element => /\p{Extended_Pictographic}/u.test(element.textContent))), false)
     }
     await page.getByTestId('nav-edit').click()
-    await page.screenshot({ path: path.join(root, 'docs/screenshots/workbench-mobile.png') })
+    await page.screenshot({ path: path.join(artifacts, 'workbench-mobile.png') })
     await page.setViewportSize({ width: 1440, height: 960 })
-    await page.getByRole('button', { name: '设置', exact: true }).click()
-    await page.getByRole('button', { name: '浅色', exact: true }).click()
-    await page.getByRole('button', { name: '完成', exact: true }).click()
+    await setTheme('light')
     await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'light')
-    await page.screenshot({ path: path.join(root, 'docs/screenshots/editor-light.png') })
+    await page.screenshot({ path: path.join(artifacts, 'editor-light.png') })
     assert.deepEqual(pageErrors, [])
   })
 }
@@ -321,7 +377,6 @@ main().catch(async error => { console.error(error); process.exitCode = 1; if (pa
   await fs.mkdir(artifacts, { recursive: true })
   await fs.writeFile('/tmp/open-media-workbench-results.json', report)
   await fs.writeFile(path.join(artifacts, 'workbench-results.json'), report)
-  for (const name of ['workbench-light.png', 'workbench-dark.png', 'workbench-mobile.png', 'editor-light.png']) await fs.copyFile(path.join(root, 'docs/screenshots', name), path.join(artifacts, name)).catch(() => {})
   if (process.exitCode) await fs.copyFile('/tmp/open-media-workbench-failure.png', path.join(artifacts, 'workbench-failure.png')).catch(() => {})
   await browser?.close()
   server?.kill()

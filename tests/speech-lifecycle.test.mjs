@@ -20,7 +20,7 @@ function complete(request, duration = 2.5) {
 }
 function panel(overrides = {}, options = {}) {
   const source = readFileSync(new URL('../src/components/SpeechPanel.vue', import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
-  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, run, cancel, align, busy, error, notice, completed, total, voiceId, speed, alignText, previewUrl, previewText }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
+  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, run, cancel, align, busy, error, notice, completed, total, voiceId, speed, alignText, previewUrl, previewText, previewVoice, previewVoiceId, previewState }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   const props = vue.shallowReactive({ project: fixture(), selectedClipId: '', active: true, ...options })
   const events = [], calls = [], unmount = []
   const injections = {
@@ -180,6 +180,56 @@ test('disabling alignment preserves text duration and forwards the chosen voice 
     const changed = harness.events.find(event => event[0] === 'change')[1]
     assert.equal(clipDuration(changed.tracks.find(track => track.kind === 'text').clips[0]), 1)
     assert.equal(changed.assets.length, 1)
+  } finally { harness.dispose() }
+})
+
+test('card audition uses the requested voice and language without selecting it or changing the timeline', async () => {
+  const harness = panel({ getSpeechStatus: async () => ({ ready: true, voices: [
+    { id: 'chinese-selected', name: '中文女声', language: 'zh-CN', gender: 'female' },
+    { id: 'english-audition', name: '英文女声', language: 'en-US', gender: 'female' },
+  ] }) })
+  try {
+    await settle()
+    harness.state.speed.value = 1.25
+    await settle()
+    await harness.state.previewVoice('english-audition')
+    const request = harness.calls.find(call => call[0] === 'begin')[1]
+    assert.equal(request.voiceId, 'english-audition')
+    assert.equal(request.speed, 1.25)
+    assert.match(request.text, /^Hello/)
+    assert.doesNotMatch(request.text, /[\u4e00-\u9fff]/)
+    assert.equal(harness.state.voiceId.value, 'chinese-selected')
+    assert.equal(harness.state.previewVoiceId.value, 'english-audition')
+    assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)
+    harness.props.active = false
+    await settle()
+    assert.equal(harness.state.previewUrl.value, '')
+    assert.equal(harness.state.previewVoiceId.value, '')
+    assert.equal(harness.state.notice.value, '')
+    assert(harness.calls.some(call => call[0] === 'discard' && call[1] === request.requestId))
+  } finally { harness.dispose() }
+})
+
+test('cancelling a card audition cleans the late result and restores the picker without changing its selection', async () => {
+  const pending = deferred(), started = deferred()
+  let request
+  const harness = panel({ beginSpeechJob: value => { request = value; started.resolve(); return pending.promise } })
+  try {
+    await settle()
+    const audition = harness.state.previewVoice('voice-2')
+    await started.promise
+    assert.equal(harness.state.previewVoiceId.value, 'voice-2')
+    assert.equal(harness.state.previewState.value, 'loading')
+    await harness.state.cancel()
+    pending.resolve(complete(request))
+    await audition
+    assert.equal(harness.state.busy.value, false)
+    assert.equal(harness.state.previewState.value, 'idle')
+    assert.equal(harness.state.previewVoiceId.value, '')
+    assert.equal(harness.state.previewUrl.value, '')
+    assert.equal(harness.state.voiceId.value, 'voice-1')
+    assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)
+    assert(harness.calls.some(call => call[0] === 'discard' && call[1] === request.requestId))
   } finally { harness.dispose() }
 })
 

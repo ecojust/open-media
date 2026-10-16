@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import Icon from './components/Icon.vue'
+import HeaderControls from './components/HeaderControls.vue'
+import ScreenshotPicker from './components/ScreenshotPicker.vue'
+import { DEFAULT_SCREENSHOT_SHORTCUT, matchesScreenshotShortcut, screenshotErrorMessage, screenshotShortcutValidationError } from './core/screenshot'
+import { buildInfo } from './core/build-info'
 import VideoEditor from './components/VideoEditor.vue'
 import RecorderWorkspace from './components/RecorderWorkspace.vue'
 import GifWorkspace from './components/GifWorkspace.vue'
@@ -12,7 +16,7 @@ import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDura
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
 import { exportProjectFile, importProjectFile } from './core/project-file.ts'
 import { downloadBlob, importMediaFile } from './core/media-import.ts'
-import { cancelMediaJob, closeNativeWindow, getMediaJobs, getRuntimeStatus, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, selectRuntime, type MediaJob, type RuntimeStatus } from './native.ts'
+import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, type MediaJob } from './native.ts'
 
 type Workspace = 'home' | 'edit' | 'record' | 'gif' | 'image' | 'video'
 const workspaces: { id: Workspace; title: string; icon: string; description: string; color: string }[] = [
@@ -26,11 +30,15 @@ const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
 const autoSave = ref(true), draftState = ref<'idle' | 'pending' | 'saved' | 'error'>('idle'), draftError = ref(''), lastSaved = ref('')
 const recent = ref<ProjectSummary[]>([]), status = ref('本地创作，自由表达'), busy = ref(''), error = ref(''), recording = ref(false), browserExporting = ref(false)
-const exportOpen = ref(false), settingsOpen = ref(false), jobsOpen = ref(false), runtime = ref<RuntimeStatus>({ ready: false }), jobs = ref<MediaJob[]>([])
+const exportOpen = ref(false), jobsOpen = ref(false), jobs = ref<MediaJob[]>([])
 const mediaInput = ref<HTMLInputElement>(), projectInput = ref<HTMLInputElement>(), renameInput = ref<HTMLInputElement>(), renaming = ref(false), renameValue = ref(''), search = ref('')
 const blobs = new Map<string, Blob>(), ownedUrls = new Set<string>(), hydratedReleases: { release: () => void; urls: Set<string> }[] = []
 const recoveryRecordings = ref<{ id: string; name: string; blob: Blob }[]>([])
 const switching = ref(false), pendingMedia = ref(0), imageConverting = ref(false), videoConverting = ref(false), gifConverting = ref(false), speechWorking = ref(false)
+const screenshotPicker = ref<InstanceType<typeof ScreenshotPicker>>()
+const screenshotShortcut = ref<string | null>(null), screenshotBusy = ref(false), screenshotConfiguring = ref(false), screenshotError = ref(''), screenshotAssetId = ref('')
+const screenshotDisabled = computed(() => Boolean(busy.value || switching.value || booting.value || recording.value || pendingMedia.value || browserExporting.value || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value))
+let screenshotAbort: AbortController | undefined, screenshotRequestId: string | undefined, unlistenScreenshot: (() => void) | undefined, destroyed = false
 let captureQueue = Promise.resolve()
 let draftTimer: ReturnType<typeof setTimeout> | undefined, draftGeneration = 0, saveQueue = Promise.resolve(), jobsTimer: ReturnType<typeof setTimeout> | undefined, mediaQuery: MediaQueryList | undefined, unlistenClose: (() => void) | undefined, allowClose = false
 const effectiveTheme = computed(() => theme.value === 'system' ? systemDark.value ? 'dark' : 'light' : theme.value)
@@ -130,6 +138,85 @@ function captured(blob: Blob, name: string): Promise<void> {
   captureQueue = task
   return task
 }
+async function setScreenshotShortcut(value: string | null, rememberChoice = true): Promise<void> {
+  if (screenshotConfiguring.value || screenshotBusy.value) return
+  const conflict = screenshotShortcutValidationError(value)
+  if (conflict) { screenshotError.value = conflict; return }
+  screenshotConfiguring.value = true
+  screenshotError.value = ''
+  try {
+    const registered = native ? await configureScreenshotShortcut(value) : value
+    if (destroyed) { if (native) await configureScreenshotShortcut(null); return }
+    screenshotShortcut.value = registered
+    if (rememberChoice) {
+      try { localStorage.setItem('open-media:screenshot-shortcut', registered ?? 'disabled') }
+      catch { screenshotError.value = '快捷键已生效，但无法保存设置；下次启动需要重新设置。' }
+    }
+  } catch (cause) { screenshotError.value = screenshotErrorMessage(cause) }
+  finally { screenshotConfiguring.value = false }
+}
+async function initializeScreenshot(): Promise<void> {
+  let preference: string | null = DEFAULT_SCREENSHOT_SHORTCUT
+  try { const saved = localStorage.getItem('open-media:screenshot-shortcut'); if (saved) preference = saved === 'disabled' ? null : saved } catch {}
+  try {
+    if (native) {
+      const unlisten = await onScreenshotRequested(() => { if (!screenshotConfiguring.value) void takeScreenshot() })
+      if (destroyed) { unlisten(); return }
+      unlistenScreenshot = unlisten
+    }
+    await setScreenshotShortcut(preference, false)
+  } catch (cause) { screenshotError.value = screenshotErrorMessage(cause) }
+}
+async function takeScreenshot(): Promise<void> {
+  if (destroyed || screenshotBusy.value || screenshotConfiguring.value) return
+  if (screenshotDisabled.value || hasDialog.value || document.querySelector('[role="dialog"][aria-modal="true"]') || document.querySelector('[data-shortcut-editor][aria-pressed="true"]')) {
+    announce('请先完成当前操作或关闭弹窗，再截屏。')
+    return
+  }
+  screenshotBusy.value = true
+  screenshotError.value = ''
+  const targetProjectId = project.value.id
+  const abort = new AbortController()
+  screenshotAbort = abort
+  announce('请选择截屏范围，按 Esc 取消。')
+  try {
+    let asset: MediaAsset
+    let blob: Blob | undefined
+    if (native) {
+      const requestId = crypto.randomUUID()
+      screenshotRequestId = requestId
+      const cancel = () => { void cancelCapturePicker(requestId).catch(() => {}) }
+      abort.signal.addEventListener('abort', cancel, { once: true })
+      let selection
+      try { selection = await pickCaptureSource(requestId, { mode: 'region', purpose: 'screenshot' }) }
+      finally { abort.signal.removeEventListener('abort', cancel); screenshotRequestId = undefined }
+      if (!selection || destroyed || abort.signal.aborted) {
+        if (!destroyed) { await showMainWindow(); announce('已取消截屏。') }
+        return
+      }
+      asset = await captureScreenshot(selection)
+    } else {
+      if (!screenshotPicker.value) throw new Error('截屏界面尚未就绪，请重试。')
+      const result = await screenshotPicker.value.capture(abort.signal)
+      blob = result.blob
+      asset = await importMediaFile(new File([blob], result.name, { type: 'image/png' }))
+    }
+    if (destroyed) { if (asset.url.startsWith('blob:')) URL.revokeObjectURL(asset.url); return }
+    if (targetProjectId !== project.value.id) throw new Error('截屏所属项目已改变，请重新截屏。')
+    await acceptAssets([asset], blob ? new Map([[asset.id, blob]]) : undefined)
+    if (!project.value.assets.some(item => item.id === asset.id)) throw new Error(error.value || '截屏未能加入项目，请重试。')
+    screenshotAssetId.value = asset.id
+    view.value = 'image'
+    await nextTick()
+    if (native) await showMainWindow()
+    announce('截屏已载入图片转换，可以调整格式和尺寸。')
+  } catch (cause) {
+    const message = screenshotErrorMessage(cause)
+    if (message) { screenshotError.value = message; fail(message) }
+    else announce('已取消截屏。')
+    if (native && !destroyed) await showMainWindow().catch(() => {})
+  } finally { if (screenshotAbort === abort) screenshotAbort = undefined; screenshotRequestId = undefined; screenshotBusy.value = false }
+}
 function convertedBusy(value: boolean, mode: 'image' | 'video') { if (mode === 'image') imageConverting.value = value; else videoConverting.value = value }
 async function saveRecoveredRecording(id: string) {
   const item = recoveryRecordings.value.find(value => value.id === id)
@@ -195,9 +282,9 @@ function adoptProject(next: Project, restored = false) {
   draftGeneration++; clearTimeout(draftTimer)
   releaseUnusedMedia(next)
   project.value = next; history.value = createHistory(next); cleanKey.value = contentKey(next); draftState.value = restored ? 'saved' : 'idle'; lastSaved.value = ''; remember()
-  view.value = 'edit'; error.value = ''; if (!restored) scheduleDraft()
+  view.value = 'edit'; screenshotAssetId.value = ''; error.value = ''; if (!restored) scheduleDraft()
 }
-function mediaIsWorking(): boolean { return recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value }
+function mediaIsWorking(): boolean { return screenshotBusy.value || recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value }
 async function changeProject(action: () => Promise<void>): Promise<void> {
   if (busy.value || switching.value || booting.value) return
   if (mediaIsWorking()) { fail('请先完成或取消录制、配音、转换及导出，再切换项目。'); return }
@@ -259,25 +346,24 @@ async function save() {
 }
 async function rename() { renameValue.value = project.value.title; renaming.value = true; await nextTick(); renameInput.value?.focus(); renameInput.value?.select() }
 function finishRename() { if (!renaming.value) return; renaming.value = false; const title = renameValue.value.trim().slice(0, 300); if (title) commit({ ...project.value, title }, '项目已重命名') }
-async function updateRuntime() { try { runtime.value = await getRuntimeStatus() } catch (cause) { runtime.value = { ready: false, error: String(cause) } } }
-async function chooseRuntime() { try { runtime.value = await selectRuntime() } catch (cause) { fail(cause) } }
 async function pollJobs() { if (!native) return; try { jobs.value = await getMediaJobs() } catch {} ; jobsTimer = setTimeout(() => void pollJobs(), 1000) }
 async function cancelJob(id: string) { try { await cancelMediaJob(id); jobs.value = await getMediaJobs() } catch (cause) { fail(cause) } }
 async function nativeClose() {
+  if (screenshotBusy.value) { fail('请先完成或取消截屏，再关闭应用。'); return }
   if (speechWorking.value) { view.value = 'edit'; fail('请先完成或取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
   if (browserExporting.value || runningJobs.value) { jobsOpen.value = native; fail('请等待导出完成，或先取消正在处理的任务。'); return }
   await changeProject(async () => { allowClose = true; await closeNativeWindow() })
 }
-const hasDialog = computed(() => Boolean(question.value || exportOpen.value || settingsOpen.value || jobsOpen.value))
+const hasDialog = computed(() => Boolean(question.value || exportOpen.value || jobsOpen.value))
 let previousFocus: HTMLElement | null = null
-watch(hasDialog, async open => { if (open) { previousFocus = document.activeElement as HTMLElement; await nextTick(); (document.querySelector('[role="dialog"] button, [role="dialog"] input') as HTMLElement | null)?.focus() } else previousFocus?.focus() })
+watch(hasDialog, async open => { if (open) { previousFocus = document.activeElement as HTMLElement; await nextTick(); (document.querySelector('[role="dialog"][aria-modal="true"] button, [role="dialog"][aria-modal="true"] input') as HTMLElement | null)?.focus() } else previousFocus?.focus() })
 function keyboard(event: KeyboardEvent) {
   if (event.defaultPrevented || !hasDialog.value && document.querySelector('[role="dialog"][aria-modal="true"]')) return
   if (hasDialog.value) {
-    if (event.key === 'Escape') { event.preventDefault(); if (question.value) answer('cancel'); else if (settingsOpen.value) settingsOpen.value = false; else if (jobsOpen.value) jobsOpen.value = false; else if (!browserExporting.value) exportOpen.value = false }
+    if (event.key === 'Escape') { event.preventDefault(); if (question.value) answer('cancel'); else if (jobsOpen.value) jobsOpen.value = false; else if (!browserExporting.value) exportOpen.value = false }
     if (event.key === 'Tab') {
-      const dialog = document.querySelector('[role="dialog"]'), items = dialog ? [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]')].filter(item => item.offsetParent !== null) : []
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"]'), items = dialog ? [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]')].filter(item => item.offsetParent !== null) : []
       const first = items[0], last = items.at(-1)
       if (first && event.shiftKey && (document.activeElement === first || !dialog?.contains(document.activeElement))) { event.preventDefault(); last?.focus() }
       else if (last && !event.shiftKey && (document.activeElement === last || !dialog?.contains(document.activeElement))) { event.preventDefault(); first?.focus() }
@@ -285,6 +371,7 @@ function keyboard(event: KeyboardEvent) {
     return
   }
   if (switching.value || booting.value || speechWorking.value) { if (event.ctrlKey || event.metaKey) event.preventDefault(); return }
+  if (!native && matchesScreenshotShortcut(event, screenshotShortcut.value)) { event.preventDefault(); void takeScreenshot(); return }
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return
   const key = event.key.toLowerCase()
   if (key === 's') { event.preventDefault(); void save() }
@@ -302,57 +389,54 @@ onMounted(async () => {
   try { autoSave.value = localStorage.getItem('open-media:autosave') !== 'false'; const value = localStorage.getItem('open-media:theme'); if (value === 'light' || value === 'dark' || value === 'system') theme.value = value } catch {}
   try { await refreshRecent(); const last = localStorage.getItem('open-media:last-project'); if (last && recent.value.some(item => item.id === last)) { const restored = await hydrate(await loadProject(last)); adoptProject(restored, true); view.value = 'home' } } catch (cause) { fail(cause) }
   booting.value = false
+  void initializeScreenshot()
   if (native) {
-    void updateRuntime(); void pollJobs()
+    void pollJobs()
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { draftGeneration++; clearTimeout(draftTimer); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; clearTimeout(draftTimer); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>
   <div class="app-shell" :data-theme="effectiveTheme" @dragover.prevent @drop="dropped">
     <header class="topbar">
       <button class="brand" :disabled="speechWorking" title="开始" @click="view='home'"><img src="/favicon.svg" width="29" height="29" alt=""/><strong>Open Media</strong></button>
-      <div class="file-actions">
-        <button title="新建项目" :disabled="!!busy || switching || booting || speechWorking" @click="newProject"><Icon name="plus"/><span>新建</span></button>
-        <button title="打开项目 (Ctrl+O)" :disabled="!!busy || switching || booting || speechWorking" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
-        <span class="divider"/>
-        <button title="保存项目 (Ctrl+S)" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-project" @click="save"><Icon name="save"/><span>保存</span></button>
-        <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
-        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting || speechWorking" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting || speechWorking" @click="moveHistory('redo')"><Icon name="redo"/></button>
-      </div>
-      <div class="topbar-end"><button class="icon-button" title="设置" aria-label="设置" @click="settingsOpen=true"><Icon name="settings"/></button></div>
+      <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
     </header>
     <div class="workbench-body" :inert="switching || booting">
       <aside class="sidebar" :class="{collapsed}">
         <div class="sidebar-heading"><span v-if="!collapsed">工作台</span><button class="icon-button" :title="collapsed?'展开侧栏':'折叠侧栏'" :aria-label="collapsed?'展开侧栏':'折叠侧栏'" @click="collapsed=!collapsed"><Icon name="panel" :size="17"/></button></div>
         <nav aria-label="工作区"><button :disabled="speechWorking" :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :disabled="speechWorking" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
-        <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · 0.1.2</small></div>
+        <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · {{ buildInfo.version }}</small></div>
       </aside>
       <main class="main-area">
-        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span></div>
+        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
+        <button title="保存项目 (Ctrl+S)" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-project" @click="save"><Icon name="save"/><span>保存</span></button>
+        <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
+        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting || speechWorking" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting || speechWorking" @click="moveHistory('redo')"><Icon name="redo"/></button>
+      </div></div>
         <div v-if="error" class="app-error" role="alert"><Icon name="alert" :size="16"/><span>{{ error }}</span><button class="icon-button" aria-label="关闭提示" @click="error=''"><Icon name="close" :size="15"/></button></div>
         <div v-for="item in recoveryRecordings" :key="item.id" class="app-error recording-recovery" role="alert"><Icon name="video" :size="16"/><span>录制尚未加入项目：{{ item.name }}</span><button @click="saveRecoveredRecording(item.id)">保存录制文件</button></div>
         <div v-if="booting" class="boot-loading"><span class="spinner"/>正在恢复工作台…</div>
         <section v-else-if="view==='home'" class="home-workspace" data-testid="home-workspace">
-          <div class="home-intro"><div class="eyebrow"><span/>YOUR LOCAL CREATIVE STUDIO</div><h1>把灵感，剪成作品。</h1><p>录下屏幕，整理片段，转换媒体。<br/>让每一次创作，都从这里开始。</p><div class="home-actions"><button class="primary" data-testid="create-project" @click="newProject"><Icon name="plus"/>新建剪辑项目</button><button @click="openProject()"><Icon name="folder"/>打开项目</button></div><div class="hero-art" aria-hidden="true"><div class="art-window"><div class="art-dots"><i/><i/><i/></div><svg viewBox="0 0 260 120"><path d="M0 85 40 65 75 80 130 32 180 60 220 25 260 45v75H0Z" fill="#dce8ff"/><path d="M0 105 60 80 105 95 155 65 210 88 260 64v56H0Z" fill="#b9d0ff"/><circle cx="130" cy="60" r="25" fill="white"/><path d="m124 48 19 12-19 12z" fill="#4b7deb"/></svg></div><div class="art-timeline"><i/><i/><i/><i/><b/></div><div class="art-note"><Icon name="audio" :size="20"/><span><i/><i/><i/><i/><i/><i/><i/></span></div></div></div>
+          <div class="home-intro"><div class="eyebrow"><span/>YOUR LOCAL CREATIVE STUDIO</div><h1>把灵感，剪成作品。</h1><p>录下屏幕，整理片段，转换媒体。<br/>让每一次创作，都从这里开始。</p><div class="home-actions"><button class="primary" data-testid="create-project" :disabled="switching || booting || speechWorking || screenshotBusy" @click="newProject"><Icon name="plus"/>新建剪辑项目</button><button :disabled="switching || booting || speechWorking || screenshotBusy" @click="openProject()"><Icon name="folder"/>打开项目</button></div><div class="hero-art" aria-hidden="true"><div class="art-window"><div class="art-dots"><i/><i/><i/></div><svg viewBox="0 0 260 120"><path d="M0 85 40 65 75 80 130 32 180 60 220 25 260 45v75H0Z" fill="#dce8ff"/><path d="M0 105 60 80 105 95 155 65 210 88 260 64v56H0Z" fill="#b9d0ff"/><circle cx="130" cy="60" r="25" fill="white"/><path d="m124 48 19 12-19 12z" fill="#4b7deb"/></svg></div><div class="art-timeline"><i/><i/><i/><i/><b/></div><div class="art-note"><Icon name="audio" :size="20"/><span><i/><i/><i/><i/><i/><i/><i/></span></div></div></div>
           <div class="workspace-cards"><button v-for="item in workspaces" :key="item.id" :data-testid="`create-${item.id}`" @click="view=item.id"><span class="card-icon" :style="{'--card-color':item.color}"><Icon :name="item.icon" :size="23"/></span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><Icon name="chevron-right" :size="15"/></button></div>
           <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
         <VideoEditor v-if="!booting && view==='edit'" :project="project" :export-disabled="!!busy || switching || booting" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
-        <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
+        <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
         <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
-        <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
+        <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
       </main>
     </div>
     <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/>{{ busy || status }}</span><span v-if="native" class="status-tasks"><button class="job-status" aria-label="处理任务" title="查看视频导出与媒体转换任务" @click="jobsOpen=true"><Icon name="layers" :size="13"/><span>处理任务</span><b v-if="runningJobs">{{ runningJobs }}</b></button></span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>
     <input ref="mediaInput" class="sr-only" type="file" accept="video/*,audio/*,image/*,.mkv,.mov,.avi,.flac,.ogg" multiple data-testid="media-input" @change="importFiles([...(($event.target as HTMLInputElement).files || [])]); ($event.target as HTMLInputElement).value=''"/>
     <input ref="projectInput" class="sr-only" type="file" accept=".omedia" data-testid="project-input" @change="openProject(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value=''"/>
+    <ScreenshotPicker ref="screenshotPicker"/>
     <ExportPanel :open="exportOpen" :project="project" :native="native" @close="exportOpen=false" @status="announce" @busy="browserExporting=$event"/>
     <div v-if="question" class="modal-shade" @click.self="answer('cancel')"><section class="dialog confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><header><strong id="confirm-title">{{ question.title }}</strong></header><div class="dialog-content"><p>{{ question.text }}</p></div><footer><button v-for="choice in question.choices" :key="choice.id" :class="{primary:choice.primary}" @click="answer(choice.id)">{{ choice.label }}</button></footer></section></div>
-    <div v-if="settingsOpen" class="modal-shade" @click.self="settingsOpen=false"><section class="dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><span><Icon name="settings"/><strong id="settings-title">设置</strong></span><button class="icon-button" aria-label="关闭设置" @click="settingsOpen=false"><Icon name="close"/></button></header><div class="dialog-content"><h3>外观</h3><div class="segmented"><button v-for="item in [{id:'light',title:'浅色',icon:'sun'},{id:'dark',title:'深色',icon:'moon'},{id:'system',title:'跟随系统',icon:'screen'}]" :key="item.id" :class="{selected:theme===item.id}" @click="setTheme(item.id as 'light'|'dark'|'system')"><Icon :name="item.icon" :size="16"/>{{ item.title }}</button></div><h3>本地保存</h3><p class="muted">自动保存仅保留当前设备的草稿。点击“保存”生成含素材的项目文件，换一台设备也可继续编辑。</p><h3>媒体处理</h3><template v-if="native"><div class="runtime-state" :class="{ready:runtime.ready}"><Icon :name="runtime.ready?'check':'alert'" :size="16"/>{{ runtime.ready?'编码工具已就绪':'编码工具尚未就绪' }}</div><p class="muted">{{ runtime.version || runtime.error }}</p><div class="runtime-actions"><button @click="updateRuntime"><Icon name="refresh" :size="15"/>重新检查</button><button @click="chooseRuntime"><Icon name="folder" :size="15"/>选择本机编码工具</button></div></template><p v-else class="muted">网页支持录屏、剪辑、GIF 和常用图片转换，以及 WebM 实时导出。桌面端提供更多视频格式与本机录屏能力。</p><p class="version-label">Open Media 0.1.2</p></div><footer><button class="primary" @click="settingsOpen=false">完成</button></footer></section></div>
     <div v-if="jobsOpen" class="modal-shade" @click.self="jobsOpen=false"><section class="dialog jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="jobs-title"><header><span><Icon name="layers"/><strong id="jobs-title">处理任务</strong></span><button class="icon-button" aria-label="关闭任务" @click="jobsOpen=false"><Icon name="close"/></button></header><div class="dialog-content"><p v-if="!jobs.length" class="muted">还没有处理任务。</p><article v-for="job in [...jobs].reverse()" :key="job.id" class="job-item"><div><strong>{{ job.name }}</strong><span>{{ ({running:'正在处理',completed:'已完成',failed:'失败',cancelled:'已取消'})[job.state] }}</span></div><div v-if="job.state==='running'" class="progress-track"><i :style="{width:`${job.progress*100}%`}"/></div><p v-if="job.outputPath">{{ job.outputPath }}</p><p v-if="job.error" class="error-message">{{ job.error }}</p><button v-if="job.state==='running'" @click="cancelJob(job.id)">取消任务</button></article></div><footer><button @click="jobsOpen=false">关闭</button></footer></section></div>
   </div>
 </template>

@@ -17,6 +17,8 @@ pub enum PickerMode {
 #[serde(rename_all = "camelCase")]
 pub struct PickerPreferences {
     #[serde(default)]
+    pub purpose: Option<String>,
+    #[serde(default)]
     pub mode: PickerMode,
     pub source_id: Option<String>,
     pub output_size: Option<OutputSize>,
@@ -639,6 +641,7 @@ mod desktop {
             let Some(session) = session else { return };
             session.cancelled.store(true, Ordering::SeqCst);
             let restore_focus = !matches!(result, Ok(Some(_)));
+            let keep_hidden = !restore_focus && session.preferences.purpose.as_deref() == Some("screenshot");
             let dispatch = app.clone();
             let app = app.clone();
             let sender = session.sender.clone();
@@ -653,13 +656,16 @@ mod desktop {
                     }
                 }
                 if let Some(main) = app.get_webview_window("main") {
-                    if restore_focus {
-                        let _ = main.show();
-                        let _ = main.set_focus();
-                    } else if let Err(error) = restore_behind_other_windows(&main) {
-                        cleanup_error = Some(error);
-                        let _ = main.show();
-                        let _ = main.set_focus();
+                    // Keep the application out of the image until the PNG has been captured.
+                    if !keep_hidden || cleanup_error.is_some() {
+                        if restore_focus || keep_hidden {
+                            let _ = main.show();
+                            let _ = main.set_focus();
+                        } else if let Err(error) = restore_behind_other_windows(&main) {
+                            cleanup_error = Some(error);
+                            let _ = main.show();
+                            let _ = main.set_focus();
+                        }
                     }
                 }
                 // Resolve only after every overlay is gone, before capture can start.

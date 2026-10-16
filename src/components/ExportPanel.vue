@@ -7,6 +7,7 @@ import { downloadBlob } from '../core/media-import.ts'
 import { prepareNativeProject } from '../core/native-project.ts'
 import { beginMediaJob, cancelMediaJob, getMediaJobs, type ExportConfig, type MediaJob } from '../native.ts'
 import Icon from './Icon.vue'
+import RuntimeCheck from './RuntimeCheck.vue'
 
 const props = defineProps<{ project: Project; native: boolean; open: boolean }>()
 const emit = defineEmits<{ close: []; status: [message: string]; busy: [value: boolean]; job: [job: MediaJob] }>()
@@ -83,6 +84,7 @@ onBeforeUnmount(() => { destroyed = true; controller?.abort(); clearTimeout(time
       <header><span><Icon name="export"/><strong id="export-title">导出视频</strong></span><button class="icon-button" aria-label="关闭导出" :disabled="exporting" @click="emit('close')"><Icon name="close"/></button></header>
       <div class="dialog-content">
         <p class="dialog-intro">{{ project.title }} · {{ duration.toFixed(2) }} 秒 · {{ project.width }} × {{ project.height }}</p>
+        <RuntimeCheck v-if="native" :disabled="exporting" />
         <div class="form-grid">
           <label>文件格式<select v-model="config.format" :disabled="exporting" data-testid="export-format"><option v-if="native" value="mp4">MP4</option><option value="webm">WebM</option><option v-if="native" value="mov">MOV</option><option v-if="native" value="gif">GIF 动图</option></select></label>
           <label>清晰度<select :disabled="exporting" @change="preset(($event.target as HTMLSelectElement).value)"><option value="source">与项目相同</option><option value="1080">1080p</option><option value="720">720p</option><option value="480">480p</option></select></label>
