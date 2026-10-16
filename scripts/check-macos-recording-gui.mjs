@@ -45,7 +45,8 @@ function sampleProcesses() {
     if (observed.has(entry.pid)) continue;
     observed.add(entry.pid);
     report.processes.push(entry);
-    command(`process-${entry.pid}-responsibility`, '/usr/bin/sudo', ['-n', '/bin/launchctl', 'procinfo', String(entry.pid)], { required: false, timeout: 5000 });
+    const responsibility = command(`process-${entry.pid}-responsibility`, '/usr/bin/sudo', ['-n', '/bin/launchctl', 'procinfo', String(entry.pid)], { required: false, timeout: 5000 });
+    entry.responsibility = responsibility.output.slice(0, 12000);
   }
 }
 function screenshot(stage) {
@@ -155,8 +156,13 @@ try {
     sourceCount: Array.isArray(sources) ? sources.length : undefined,
     permissionScope: 'This direct invocation can inherit the hosted execution agent grant.',
   };
-  command('permission-system-log', '/usr/bin/sudo', ['-n', '/usr/bin/log', 'show', '--last', '10m', '--style', 'json', '--info', '--debug', '--predicate', 'process == "tccd" OR process == "open-media" OR eventMessage CONTAINS[c] "com.ecojust.openmedia"'], { required: false, timeout: 30000 });
+  const permissionLog = command('permission-system-log', '/usr/bin/sudo', ['-n', '/usr/bin/log', 'show', '--last', '10m', '--style', 'json', '--info', '--debug', '--predicate', 'process == "tccd" OR process == "open-media" OR eventMessage CONTAINS[c] "com.ecojust.openmedia"'], { required: false, timeout: 30000 });
+  try {
+    const events = JSON.parse(permissionLog.stdout);
+    report.permissionEvents = events.filter(event => /ScreenCapture|com\.ecojust\.openmedia|open-media|AUTHREQ_RESULT/i.test(event.eventMessage ?? ''))
+      .slice(-100).map(event => ({ timestamp: event.timestamp, processID: event.processID, message: String(event.eventMessage).slice(0, 4000) }));
+  } catch { report.permissionLogSummary = 'Structured permission events unavailable; inspect the original log artifact.'; }
   report.finishedAt = new Date().toISOString();
   writeFileSync(join(directory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
-  console.log(JSON.stringify({ outcome: report.outcome, directRunnerControl: report.directRunnerControl.outcome, report: join(directory, 'report.json') }));
+  console.log(JSON.stringify(report, null, 2));
 }
