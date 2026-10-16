@@ -29,6 +29,8 @@ The installation's `media/licenses` directory includes upstream license, copyrig
 | tempfile | MIT OR Apache-2.0 | Copyright (c) 2015 Steven Allen |
 | getrandom | MIT OR Apache-2.0 | Copyright (c) 2018-2026 The rust-random Project Developers; Copyright (c) 2014 The Rust Project Developers |
 
-The exact dependency graph and versions are retained in `package-lock.json` and `src-tauri/Cargo.lock`. Build-only dependencies are not the media execution toolchain. All applicable upstream notices and licenses remain available in their source distributions. The MIT and Apache license texts for directly bundled application dependencies are retained under `licenses/application/`.
+The exact dependency graph and versions are retained in `package-lock.json` and `src-tauri/Cargo.lock`. The installation's `licenses/application/cargo/manifest.json` inventories every locked registry package, including indirect, build-only and platform-specific dependencies. Original license, copyright and notice texts are retained alongside it, with exact source archive checksums and upstream provenance for notices omitted from published packages. Each package entry provides a source URL for the listed version.
+
+The `licenses/application/frontend/manifest.json` inventory records the dependencies actually emitted into the production browser bundle and its direct entry point. It retains or references identical original notices, including the original 0BSD copyright and permission notice for the embedded helper code. Duplicate license texts are shared without changing their contents. Required copyright notices and the full license texts are included in the installation's `licenses/application/` directory.
 
 Required dependency names, file-format names, copyright statements, and licensing references are preserved for accurate attribution.

@@ -1,0 +1,307 @@
+{
+  "schemaVersion": 1,
+  "scope": "Production browser bundle and its direct Vue entry point. Development tools and non-emitted compiler, server-rendering and type-only dependencies are excluded. Native application and media runtime dependencies are documented separately.",
+  "auditMethod": "Vite production build with build.write=false; collect node_modules IDs from every emitted JavaScript chunk.modules. Match package versions and archive URLs against package-lock.json. Original license bytes are copied or reused without rewriting. Vendored code inside emitted modules is audited separately.",
+  "inputs": [
+    {
+      "path": "package.json",
+      "sha256": "f8df6c1057478905492b78087e726cc97968fb05c841c743044b81a3d6c6598d"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "c6d592b10a5c5ef1c6ac838bcb12cb697117b82b443314319f13878dce8e49e9"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "66fc65e26d68c2d3396dd9b787a7182028a3cf81b65d3baab190d722a3af551f"
+    }
+  ],
+  "packages": [
+    {
+      "name": "@tauri-apps/api",
+      "version": "2.12.3",
+      "license": "Apache-2.0 OR MIT",
+      "sourceUrl": "https://registry.npmjs.org/@tauri-apps/api/-/api-2.12.3.tgz",
+      "sourceIntegrity": "sha512-9s0PKw0p4r3kFq92jhpivYSp+cSht15o0gXpZxuQd0+dV9KCexEVkNaLELVoLdJWyoH4KlfQo5h3W2LIM8siJg==",
+      "role": "Included in the production browser bundle.",
+      "bundledModules": [
+        "node_modules/@tauri-apps/api/core.js",
+        "node_modules/@tauri-apps/api/event.js",
+        "node_modules/@tauri-apps/api/external/tslib/tslib.es6.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/@tauri-apps/api/LICENSE-MIT",
+          "sourceArchivePath": "package/LICENSE-MIT",
+          "sourceUrl": "https://registry.npmjs.org/@tauri-apps/api/-/api-2.12.3.tgz",
+          "bundledPath": "licenses/application/tauri-MIT.txt",
+          "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d",
+          "bytes": 1090,
+          "reused": true
+        },
+        {
+          "sourcePath": "node_modules/@tauri-apps/api/LICENSE-APACHE-2.0",
+          "sourceArchivePath": "package/LICENSE-APACHE-2.0",
+          "sourceUrl": "https://registry.npmjs.org/@tauri-apps/api/-/api-2.12.3.tgz",
+          "bundledPath": "licenses/application/Apache-2.0.txt",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "bytes": 10174,
+          "reused": true
+        },
+        {
+          "sourcePath": "node_modules/@tauri-apps/api/LICENSE.spdx",
+          "sourceArchivePath": "package/LICENSE.spdx",
+          "sourceUrl": "https://registry.npmjs.org/@tauri-apps/api/-/api-2.12.3.tgz",
+          "bundledPath": "licenses/application/frontend/tauri-api-LICENSE.spdx",
+          "sha256": "5e834fe9788c524210deda859c46a550ffa5aa0cba9ea0572f0d81120e97c008",
+          "bytes": 889,
+          "reused": false
+        }
+      ]
+    },
+    {
+      "name": "@vue/reactivity",
+      "version": "3.5.44",
+      "license": "MIT",
+      "sourceUrl": "https://registry.npmjs.org/@vue/reactivity/-/reactivity-3.5.44.tgz",
+      "sourceIntegrity": "sha512-u+QJdKeBBEADkPdevsL+6E12QlYVfBD8Zcw5qjDQKtamI6l14KyqazJMobhCKelhWN5zpyKUiEDoTyHE93cqWw==",
+      "role": "Included in the production browser bundle.",
+      "bundledModules": [
+        "node_modules/@vue/reactivity/dist/reactivity.esm-bundler.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/@vue/reactivity/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/@vue/reactivity/-/reactivity-3.5.44.tgz",
+          "bundledPath": "licenses/application/vue-MIT.txt",
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175",
+          "bytes": 1091,
+          "reused": true
+        }
+      ]
+    },
+    {
+      "name": "@vue/runtime-core",
+      "version": "3.5.44",
+      "license": "MIT",
+      "sourceUrl": "https://registry.npmjs.org/@vue/runtime-core/-/runtime-core-3.5.44.tgz",
+      "sourceIntegrity": "sha512-uEa/ndwjhrrhnOfb2p+sZy6zeoamJOISqaLSJGk/8R6nABT1ZldpzcJoPzKj+zHVomVBPcmQYyC2r4LtvDV6CQ==",
+      "role": "Included in the production browser bundle.",
+      "bundledModules": [
+        "node_modules/@vue/runtime-core/dist/runtime-core.esm-bundler.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/@vue/runtime-core/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/@vue/runtime-core/-/runtime-core-3.5.44.tgz",
+          "bundledPath": "licenses/application/vue-MIT.txt",
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175",
+          "bytes": 1091,
+          "reused": true
+        }
+      ]
+    },
+    {
+      "name": "@vue/runtime-dom",
+      "version": "3.5.44",
+      "license": "MIT",
+      "sourceUrl": "https://registry.npmjs.org/@vue/runtime-dom/-/runtime-dom-3.5.44.tgz",
+      "sourceIntegrity": "sha512-3fc4ARcXVhVBaJ3ujWiNZJARD6pkyRcwG+ZYhMzjKtKUp7MAY0HLwr7r3Smep3Li6ZaWT6ewdmx8XqdaD5oNZg==",
+      "role": "Included in the production browser bundle.",
+      "bundledModules": [
+        "node_modules/@vue/runtime-dom/dist/runtime-dom.esm-bundler.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/@vue/runtime-dom/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/@vue/runtime-dom/-/runtime-dom-3.5.44.tgz",
+          "bundledPath": "licenses/application/vue-MIT.txt",
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175",
+          "bytes": 1091,
+          "reused": true
+        }
+      ]
+    },
+    {
+      "name": "@vue/shared",
+      "version": "3.5.44",
+      "license": "MIT",
+      "sourceUrl": "https://registry.npmjs.org/@vue/shared/-/shared-3.5.44.tgz",
+      "sourceIntegrity": "sha512-H82XLH0DjmSOdbEwO15x3QTo1f5PWEtv237eLpYKc0mqLu+B8hnq16lFWmuBmNurkeiG3wr+oM1FhOll/YVFRg==",
+      "role": "Included in the production browser bundle.",
+      "bundledModules": [
+        "node_modules/@vue/shared/dist/shared.esm-bundler.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/@vue/shared/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/@vue/shared/-/shared-3.5.44.tgz",
+          "bundledPath": "licenses/application/vue-MIT.txt",
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175",
+          "bytes": 1091,
+          "reused": true
+        }
+      ]
+    },
+    {
+      "name": "fflate",
+      "version": "0.8.3",
+      "license": "MIT",
+      "sourceUrl": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz",
+      "sourceIntegrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==",
+      "role": "Included in the production browser bundle.",
+      "bundledModules": [
+        "node_modules/fflate/esm/browser.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/fflate/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/fflate/-/fflate-0.8.3.tgz",
+          "bundledPath": "licenses/application/fflate-MIT.txt",
+          "sha256": "0a1df3a083d0c010560aa342e87959c8c1070e6fd54545741f083f22d0c8b551",
+          "bytes": 1069,
+          "reused": true
+        }
+      ]
+    },
+    {
+      "name": "vue",
+      "version": "3.5.44",
+      "license": "MIT",
+      "sourceUrl": "https://registry.npmjs.org/vue/-/vue-3.5.44.tgz",
+      "sourceIntegrity": "sha512-dvvmaOCG7lAMkJTPqPwWeGMsPS6DIsFsfZDUgBp9V6mHf9b3+/wyVwYR4Es+WV6uJC0FKRxp81Obcq0ZwUcGFQ==",
+      "role": "Direct application import; runtime reexports are emitted from the four @vue runtime packages.",
+      "bundledModules": [],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/vue/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/vue/-/vue-3.5.44.tgz",
+          "bundledPath": "licenses/application/vue-MIT.txt",
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175",
+          "bytes": 1091,
+          "reused": true
+        }
+      ]
+    }
+  ],
+  "vendoredComponents": [
+    {
+      "name": "tslib",
+      "version": null,
+      "versionNote": "The distributed API package does not identify an exact independent version for its vendored helper subset. Its enclosing package version and the complete source-file SHA-256 identify the exact distributed code.",
+      "container": "@tauri-apps/api@2.12.3",
+      "license": "0BSD",
+      "sourcePath": "node_modules/@tauri-apps/api/external/tslib/tslib.es6.js",
+      "sourceArchivePath": "package/external/tslib/tslib.es6.js",
+      "sourceUrl": "https://registry.npmjs.org/@tauri-apps/api/-/api-2.12.3.tgz",
+      "sourceFileSha256": "88571c39817ebe327cfb45cf2d5ff9e68c544523d526f09ac2cc99acfc8fcf1b",
+      "licenseSource": "Original leading license and copyright comment, copied byte-for-byte including delimiters and CRLF line endings.",
+      "bundledLicensePath": "licenses/application/frontend/tslib-license-header.txt",
+      "licenseSha256": "7130b2f41c55bc4cf10d1000a4b74242135c8e8def9c9afe40009a9c79934483",
+      "licenseBytes": 818
+    }
+  ],
+  "excludedNonDevelopmentLockEntries": [
+    {
+      "name": "@babel/helper-string-parser",
+      "version": "7.29.7",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@babel/helper-validator-identifier",
+      "version": "7.29.7",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@babel/parser",
+      "version": "7.29.9",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@babel/types",
+      "version": "7.29.8",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@jridgewell/sourcemap-codec",
+      "version": "1.6.0",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@vue/compiler-core",
+      "version": "3.5.44",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@vue/compiler-dom",
+      "version": "3.5.44",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@vue/compiler-sfc",
+      "version": "3.5.44",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@vue/compiler-ssr",
+      "version": "3.5.44",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "@vue/server-renderer",
+      "version": "3.5.44",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "csstype",
+      "version": "3.2.3",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "entities",
+      "version": "7.0.1",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "estree-walker",
+      "version": "2.0.2",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "magic-string",
+      "version": "0.30.21",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "nanoid",
+      "version": "3.3.20",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "picocolors",
+      "version": "1.1.1",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "postcss",
+      "version": "8.5.30",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "source-map-js",
+      "version": "1.2.2",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "typescript",
+      "version": "5.9.3",
+      "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    }
+  ]
+}
