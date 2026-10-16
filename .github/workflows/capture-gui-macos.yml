@@ -1,0 +1,94 @@
+name: Verify released recording through the application interface
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release to inspect without rebuilding it
+        required: true
+        default: v0.1.5
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-gui-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  released-gui-capture:
+    name: Released application GUI on macOS ARM64
+    runs-on: macos-26
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Record the actual host
+        run: |
+          mkdir -p test-results/macos-capture-gui
+          {
+            sw_vers
+            uname -a
+            xcrun swiftc --version
+            git rev-parse HEAD
+            echo "Runner image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
+          } 2>&1 | tee test-results/macos-capture-gui/environment.log
+          test "$(uname -m)" = arm64
+      - name: Install the existing release without modifying its signature
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          asset="Open-Media_${RELEASE_TAG#v}_macos-arm64.dmg"
+          release_root="$RUNNER_TEMP/open-media-gui-release"
+          mkdir -p "$release_root/download" "$release_root/mount"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --pattern SHA256SUMS --dir "$release_root/download"
+          (
+            cd "$release_root/download"
+            awk -v asset="$asset" '$2 == asset { print }' SHA256SUMS > release.sha256
+            test "$(wc -l < release.sha256 | tr -d ' ')" = 1
+            shasum -a 256 -c release.sha256
+          )
+          cp "$release_root/download/release.sha256" test-results/macos-capture-gui/release.sha256
+          hdiutil attach "$release_root/download/$asset" -readonly -nobrowse -mountpoint "$release_root/mount"
+          trap 'hdiutil detach "$release_root/mount" || true' EXIT
+          test -d "$release_root/mount/Open Media.app"
+          test ! -e '/Applications/Open Media.app'
+          sudo ditto "$release_root/mount/Open Media.app" '/Applications/Open Media.app'
+          codesign --verify --deep --strict '/Applications/Open Media.app'
+          codesign --display --verbose=4 --requirements - '/Applications/Open Media.app' 2>&1 | tee test-results/macos-capture-gui/signature.log
+      - name: Compile only the external interface test driver
+        run: xcrun swiftc -swift-version 5 scripts/drive-macos-recording-ui.swift -o "$RUNNER_TEMP/drive-open-media-recording-ui"
+      - name: Open the released app and operate its recording interface
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: node scripts/check-macos-recording-gui.mjs "$RUNNER_TEMP/drive-open-media-recording-ui"
+      - name: Summarize observed results
+        if: always()
+        run: |
+          {
+            echo '## Released application recording through its interface'
+            echo
+            echo 'The original release is launched by the application launcher. The test presses the real recording controls; no application rebuild, re-signing, permission reset or permission database changes are performed.'
+            echo
+            echo 'Hosted runners preconfigure capture permission for their execution agent. Inspect the recorded responsibility and permission logs before attributing a successful capture to application-specific authorization. This is not a test of the user’s own machine or upgrade history.'
+            echo
+            echo '```json'
+            if test -f test-results/macos-capture-gui/report.json; then cat test-results/macos-capture-gui/report.json; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: open-media-released-gui-capture-${{ github.run_id }}
+          path: test-results/macos-capture-gui/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

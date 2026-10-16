@@ -132,7 +132,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked -
 
 媒体验证会真正编码和读取视频、音频及图片；录屏设备授权仍需在目标桌面系统上实际确认。流水线构建 Windows x64、macOS ARM64 和 macOS x64 安装包，发布要求同一提交的全部必要任务通过。
 
-录屏专项检查通过 `capture-macos.yml` 在 macOS ARM64 构建机上安装完整应用，分别验证带红框和不带红框的真实屏幕采集，并保留系统版本、签名、测试日志和录制文件。设备授权被拒绝时测试失败；编解码自测通过不等于屏幕采集通过。命令说明见[录屏组件说明](src-tauri/resources/capture/README.txt)。
+录屏专项检查通过 `capture-macos.yml` 在 macOS ARM64 构建机上安装完整应用，分别验证带红框和不带红框的真实屏幕采集，并保留系统版本、签名、测试日志和录制文件。该流程直接启动录制模式，可能继承构建机执行代理的授权，不能证明应用升级后的旧授权仍然有效。`capture-gui-macos.yml` 则原样安装已有正式包，通过应用启动器和真实界面发起录制，分别报告成功录制、系统拒绝授权和自动化操作受限；不会重新签名或修改权限数据库。设备授权被拒绝时测试失败；编解码自测通过不等于屏幕采集通过。命令说明见[录屏组件说明](src-tauri/resources/capture/README.txt)。
 
 已完成的环境、结果和覆盖范围见[录屏专项验证记录](docs/RECORDING_CHECK.md)。
 
