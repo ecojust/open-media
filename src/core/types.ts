@@ -18,6 +18,13 @@ export interface MediaAsset {
 
 export type Asset = MediaAsset
 
+export interface SpeechBinding {
+  textClipId?: string
+  text: string
+  voiceId: string
+  rate: number
+}
+
 /** Source trims are measured in source seconds; start and fades use timeline seconds. */
 export interface Clip {
   id: string
@@ -44,6 +51,7 @@ export interface Clip {
   color?: string
   background?: string
   textAlign?: 'left' | 'center' | 'right'
+  speech?: SpeechBinding
 }
 
 export interface Track {

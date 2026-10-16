@@ -15,6 +15,10 @@ export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopp
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
 export interface CapturePickerPreferences { mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize }
 export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize }
+export interface SpeechVoice { id: string; name: string; language: string }
+export interface SpeechStatus { ready: boolean; voices: SpeechVoice[]; error?: string }
+export interface SpeechRequest { requestId: string; text: string; voiceId: string; speed: number }
+export interface SpeechJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress?: number; stage: string; message?: string; asset?: MediaAsset; error?: string }
 
 export function isDesktop(): boolean { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window }
 async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -64,6 +68,15 @@ export async function beginMediaJob(spec: MediaJobSpec): Promise<MediaJob | null
 }
 export async function getMediaJobs(): Promise<MediaJob[]> { return isDesktop() ? call('get_media_jobs') : [] }
 export async function cancelMediaJob(id: string): Promise<void> { return call('cancel_media_job', { id }) }
+export async function getSpeechStatus(): Promise<SpeechStatus> {
+  return isDesktop() ? call('get_speech_status') : { ready: false, voices: [], error: '离线文字转语音由桌面端提供，安装包内含语音模型和音色。' }
+}
+async function speechJobAsset(job: SpeechJob): Promise<SpeechJob> { return job.asset ? { ...job, asset: await assetUrl(job.asset) } : job }
+export async function beginSpeechJob(request: SpeechRequest): Promise<SpeechJob> { return speechJobAsset(await call('begin_speech_job', { request })) }
+export async function getSpeechJob(id: string): Promise<SpeechJob> { return speechJobAsset(await call('get_speech_job', { id })) }
+export async function cancelSpeechJob(id: string): Promise<void> { return call('cancel_speech_job', { id }) }
+export async function discardSpeechJob(id: string): Promise<void> { return call('discard_speech_job', { id }) }
+export async function acceptSpeechJobs(ids: string[]): Promise<void> { return call('accept_speech_jobs', { ids }) }
 export async function listCaptureDevices(requestPermission = false): Promise<CaptureDevice[]> { return call('list_capture_devices', { requestPermission }) }
 export async function pickCaptureSource(requestId: string, preferences: CapturePickerPreferences): Promise<CaptureSelection | null> { return call('pick_capture_source', { requestId, preferences }) }
 export async function cancelCapturePicker(requestId: string): Promise<void> { return call('cancel_capture_picker', { requestId }) }

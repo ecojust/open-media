@@ -33,6 +33,13 @@ function trackById(project: Project, id: string): Track {
 
 function editable(track: Track): void { if (track.locked) throw new Error('请先解锁此轨道。') }
 
+/** Detached speech keeps its voice and original words for later inspection. */
+function detachSpeechSources(project: Project, textClipIds: Set<string>): void {
+  for (const track of project.tracks) for (const clip of track.clips) {
+    if (clip.speech?.textClipId && textClipIds.has(clip.speech.textClipId)) { editable(track); delete clip.speech.textClipId }
+  }
+}
+
 export function findClip(project: Project, id: string): { track: Track; clip: Clip; index: number } | undefined {
   for (const track of project.tracks) {
     const index = track.clips.findIndex((clip) => clip.id === id)
@@ -61,7 +68,7 @@ export function setTrack(project: Project, trackId: string, patch: Partial<Pick<
   return edit(project, (copy) => { Object.assign(trackById(copy, trackId), patch) })
 }
 export function removeTrack(project: Project, trackId: string): Project {
-  return edit(project, (copy) => { editable(trackById(copy, trackId)); copy.tracks = copy.tracks.filter((track) => track.id !== trackId) })
+  return edit(project, (copy) => { const track = trackById(copy, trackId); editable(track); if (track.kind === 'text') detachSpeechSources(copy, new Set(track.clips.map((clip) => clip.id))); copy.tracks = copy.tracks.filter((track) => track.id !== trackId) })
 }
 export function reorderTrack(project: Project, trackId: string, index: number): Project {
   return edit(project, (copy) => { const track = trackById(copy, trackId); editable(track); copy.tracks = copy.tracks.filter((item) => item.id !== trackId); copy.tracks.splice(Math.max(0, Math.min(copy.tracks.length, Math.round(index))), 0, track) })
@@ -93,7 +100,9 @@ export function splitClip(project: Project, clipId: string, time: number): Proje
     const { track, clip, index } = requireClip(copy, clipId)
     if (!Number.isFinite(time) || time <= clip.start + 1e-6 || time >= clipEnd(clip) - 1e-6) throw new Error('请将播放头移到片段内部再分割。')
     const source = sourceTimeAt(clip, time)
-    const right = { ...clip, id: newId('clip'), start: time, trimIn: source, fadeIn: 0 }
+    if (track.kind === 'text') detachSpeechSources(copy, new Set([clip.id]))
+    if (clip.speech) delete clip.speech.textClipId
+    const right = { ...clip, ...(clip.speech ? { speech: { ...clip.speech } } : {}), id: newId('clip'), start: time, trimIn: source, fadeIn: 0 }
     clip.trimOut = source
     clip.fadeOut = 0
     clip.fadeIn = Math.min(clip.fadeIn, clipDuration(clip))
@@ -102,10 +111,10 @@ export function splitClip(project: Project, clipId: string, time: number): Proje
   })
 }
 export function duplicateClip(project: Project, clipId: string, start?: number): Project {
-  return edit(project, (copy) => { const { track, clip } = requireClip(copy, clipId); track.clips.push({ ...clip, id: newId('clip'), start: start ?? clipEnd(clip) }) })
+  return edit(project, (copy) => { const { track, clip } = requireClip(copy, clipId); const duplicate = { ...clip, ...(clip.speech ? { speech: { ...clip.speech } } : {}), id: newId('clip'), start: start ?? clipEnd(clip) }; if (duplicate.speech) delete duplicate.speech.textClipId; track.clips.push(duplicate) })
 }
 export function deleteClip(project: Project, clipId: string): Project {
-  return edit(project, (copy) => { const { track, index } = requireClip(copy, clipId); track.clips.splice(index, 1) })
+  return edit(project, (copy) => { const { track, index } = requireClip(copy, clipId); if (track.kind === 'text') detachSpeechSources(copy, new Set([clipId])); track.clips.splice(index, 1) })
 }
 export function trimClip(project: Project, clipId: string, trimIn: number, trimOut: number): Project { return updateClip(project, clipId, { trimIn, trimOut }) }
 export function setClipSpeed(project: Project, clipId: string, speed: number): Project { return updateClip(project, clipId, { speed }) }

@@ -11,3 +11,7 @@ release-output/
 src-tauri/resources/media/*
 !src-tauri/resources/media/README.txt
 src-tauri/resources/capture/open-media-capture
+.speech-runtime/
+src-tauri/resources/speech/*
+!src-tauri/resources/speech/README.txt
+!src-tauri/resources/speech/README.md

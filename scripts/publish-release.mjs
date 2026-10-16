@@ -1,7 +1,8 @@
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
+import { verifySourceContents } from './release-source.mjs'
 import { join, resolve } from 'node:path'
-import { digest, validateBuild, verifyDigest, verifyMetadata, validateAssetMetadata } from './release-validation.mjs'
+import { digest, validateBuild, verifyDigest, verifyMetadata, validateAssetMetadata, verifySpeechMetadata, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
 
 const repository = process.env.RELEASE_REPOSITORY
 const runId = process.env.RELEASE_BUILD_RUN
@@ -31,6 +32,12 @@ const [run, jobs, artifacts] = await Promise.all([
 ])
 const selected = validateBuild(run, jobs, artifacts, commit)
 const sourceFile = path => execFileSync('git', ['show', `${commit}:${path}`], { maxBuffer: 5 * 1024 * 1024 })
+const speechLockBytes = sourceFile('scripts/speech-runtime.lock.json')
+const speechLock = JSON.parse(speechLockBytes)
+const expectedSpeech = { sourceLockSha256: digest(speechLockBytes), prepareScriptSha256: digest(sourceFile('scripts/speech-runtime.mjs')), runnerSourceSha256: digest(sourceFile('scripts/speech-runtime-runner.c')), runnerManifestSha256: digest(sourceFile('scripts/speech-runtime-runner.manifest')), model: speechLock.model }
+const speechLicenseFiles = execFileSync('git', ['ls-tree', '-rz', '--name-only', commit, '--', 'licenses/speech-runtime/'], { encoding: 'utf8' }).split('\0').filter(Boolean)
+if (!speechLicenseFiles.includes('licenses/speech-runtime/manifest.json') || speechLicenseFiles.length < 2) throw new Error('Original speech dependency and model license texts are required.')
+
 const version = JSON.parse(sourceFile('package.json')).version
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Only a stable semantic version can be published by this workflow.')
 const tag = `v${version}`
@@ -54,7 +61,7 @@ for (const { platform, artifact } of selected) {
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     const location = new URL(response.headers.get('location'))
     if (location.protocol !== 'https:') throw new Error('Artifact storage must use HTTPS.')
-    downloaded = await fetch(location, { signal: AbortSignal.timeout(120000) })
+    downloaded = await fetch(location, { signal: AbortSignal.timeout(300000) })
   }
   if (!downloaded.ok) throw new Error(`Artifact download for ${platform} returned ${downloaded.status}.`)
   const bytes = Buffer.from(await downloaded.arrayBuffer())
@@ -63,10 +70,10 @@ for (const { platform, artifact } of selected) {
   await writeFile(archive, bytes); await mkdir(directory, { recursive: true })
   execFileSync('python3', ['-c', `
 import pathlib,stat,sys,zipfile
-archive,target=sys.argv[1:]
+archive,target,limit=sys.argv[1:]
 with zipfile.ZipFile(archive) as z:
     files=z.infolist()
-    if len(files)>30 or sum(f.file_size for f in files)>512*1024*1024: raise ValueError('Artifact extraction limit exceeded')
+    if len(files)>30 or sum(f.file_size for f in files)>int(limit): raise ValueError('Artifact extraction limit exceeded')
     names=set()
     for f in files:
         p=pathlib.PurePosixPath(f.filename)
@@ -74,13 +81,14 @@ with zipfile.ZipFile(archive) as z:
         if len(p.parts)!=1 or p.name in ('','.','..') or '\\\\' in f.filename or f.filename in names or stat.S_ISLNK(f.external_attr>>16): raise ValueError('Unsafe artifact entry')
         names.add(f.filename)
     z.extractall(target)
-`, archive, directory], { stdio: 'pipe' })
+`, archive, directory, String((platform === 'runtime-source' ? 2048 : 512) * 1024 * 1024)], { stdio: 'pipe' })
   const meta = JSON.parse(await readFile(join(directory, 'build.json'), 'utf8'))
   if (platform === 'runtime-source') {
     if (meta.commit !== commit || meta.kind !== 'corresponding-source') throw new Error('Corresponding source commit mismatch.')
   } else {
     verifyMetadata(meta, platform, commit, version)
     if (meta.runtime?.sourceLockSha256 !== digest(sourceFile('scripts/media-runtime.lock.json')) || meta.runtime?.buildScriptSha256 !== digest(sourceFile('scripts/build-media-runtime.sh'))) throw new Error(`Installer contains a stale media runtime: ${platform}`)
+    verifySpeechMetadata(meta.speechRuntime, platform, expectedSpeech)
   }
   for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     const content = await readFile(join(directory, file))
@@ -88,19 +96,29 @@ with zipfile.ZipFile(archive) as z:
     payloads.set(file, content)
   }
   if (platform === 'runtime-source') {
-    const entry = (await readFile(join(directory, 'SHA256SUMS'), 'utf8')).trim().match(/^([a-f0-9]{64})  (open-media-runtime-source\.tar\.gz)$/)
-    if (!entry) throw new Error('Invalid corresponding source checksum entry.')
-    const source = await readFile(join(directory, entry[2]))
-    verifyDigest(source, `sha256:${entry[1]}`)
+    const entries = sourceChecksums(await readFile(join(directory, 'SHA256SUMS'), 'utf8'))
+    const mediaFile = 'open-media-runtime-source.tar.gz'
+    const source = await readFile(join(directory, mediaFile))
+    verifyDigest(source, `sha256:${entries.get(mediaFile)}`)
     if (!source.length) throw new Error('Empty corresponding source archive.')
     const mediaLock = JSON.parse(sourceFile('scripts/media-runtime.lock.json'))
-    const archivedFile = path => execFileSync('tar', ['-xOf', join(directory, entry[2]), `media-runtime-source/${path}`], { maxBuffer: 64 * 1024 * 1024 })
+    const archivedFile = path => execFileSync('tar', ['-xOf', join(directory, mediaFile), `media-runtime-source/${path}`], { maxBuffer: 64 * 1024 * 1024 })
     for (const component of mediaLock.sources) verifyDigest(archivedFile(`.media-runtime/downloads/${component.archive}`), `sha256:${component.sha256}`)
     for (const file of ['scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh', 'docs/MEDIA_RUNTIME.md', 'THIRD_PARTY_NOTICES.md']) verifyDigest(archivedFile(file), `sha256:${digest(sourceFile(file))}`)
     const sourceName = `Open-Media_${version}_media-runtime-source.tar.gz`
     payloads.set(sourceName, source)
     verification.mediaSource = { artifactId: artifact.id, artifactDigest: artifact.digest, file: sourceName, sha256: digest(source), size: source.length }
-    console.log('Verified complete corresponding media source artifact.')
+    const speechFile = 'open-media-speech-source.tar.gz'
+    const speechSource = await readFile(join(directory, speechFile))
+    verifyDigest(speechSource, `sha256:${entries.get(speechFile)}`)
+    if (!speechSource.length || speechSource.length >= 2 * 1024 * 1024 * 1024) throw new Error('Speech corresponding source archive is empty or exceeds the asset size limit.')
+    const speechFiles = speechSourceRequirements(speechLock)
+    for (const file of ['scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'docs/SPEECH_RUNTIME.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE', ...speechLicenseFiles]) speechFiles.set(file, digest(sourceFile(file)))
+    verifySourceContents(join(directory, speechFile), 'speech-runtime-source', speechFiles)
+    const speechSourceName = `Open-Media_${version}_speech-runtime-source.tar.gz`
+    payloads.set(speechSourceName, speechSource)
+    verification.speechSource = { artifactId: artifact.id, artifactDigest: artifact.digest, file: speechSourceName, sha256: digest(speechSource), size: speechSource.length, model: speechLock.model, archives: speechLock.sources.map(({ id, version, archive, sha256, kind }) => ({ id, version, archive, sha256, kind })) }
+    console.log('Verified complete corresponding media and speech source artifacts.')
     continue
   }
   const checksums = (await readFile(join(directory, 'SHA256SUMS'), 'utf8')).trim().split('\n')
@@ -112,7 +130,7 @@ with zipfile.ZipFile(archive) as z:
   if (!installer.length) throw new Error('Empty installer.')
   const name = `Open-Media_${version}_${platform}${platform === 'windows-x64' ? '-setup.exe' : '.dmg'}`
   payloads.set(name, installer)
-  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length })
+  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, speechRuntime: meta.speechRuntime })
   console.log(`Verified ${platform}: source, artifact archive, installer and notices.`)
 }
 
@@ -136,7 +154,7 @@ for (const [name, bytes] of payloads) {
   const url = new URL(uploadUrl)
   if (url.protocol !== 'https:' || url.hostname !== 'uploads.github.com') throw new Error('Unexpected release upload endpoint.')
   url.searchParams.set('name', name)
-  const response = await fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/octet-stream' }, body: bytes, signal: AbortSignal.timeout(120000) })
+  const response = await fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/octet-stream' }, body: bytes, signal: AbortSignal.timeout(300000) })
   if (!response.ok) throw new Error(`Asset upload returned ${response.status}: ${name}`)
   validateAssetMetadata(await response.json(), name, bytes)
 }
@@ -157,6 +175,6 @@ let tagged = reference.object
 while (tagged.type === 'tag') tagged = (await api(`/git/tags/${tagged.sha}`)).object
 if (tagged.type !== 'commit' || tagged.sha !== commit) throw new Error('Release tag does not match the verified source commit.')
 await writeFile(join(output, 'verification.json'), `${JSON.stringify({ release: release.html_url, version, commit, assets: uploaded.map(asset => ({ name: asset.name, size: asset.size, digest: asset.digest })) }, null, 2)}\n`)
-if (process.env.GITHUB_STEP_SUMMARY) await writeFile(process.env.GITHUB_STEP_SUMMARY, `Published [Open Media ${tag}](${release.html_url}) after verifying all three installers, application source, and corresponding media source.\n`)
+if (process.env.GITHUB_STEP_SUMMARY) await writeFile(process.env.GITHUB_STEP_SUMMARY, `Published [Open Media ${tag}](${release.html_url}) after verifying all three installers, application source, and complete corresponding media and speech sources.\n`)
 await rm(temporary, { recursive: true, force: true })
 console.log(`Published ${release.html_url}`)

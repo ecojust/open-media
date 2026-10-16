@@ -9,12 +9,14 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5200 --strictPort",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
-    "test:browser": "npm run build && node tests/browser/workbench.cjs && node tests/browser/editor-preview.cjs && node tests/browser/capture-gif.cjs && node tests/browser/recorder-selection.cjs && node tests/browser/capture-picker.cjs && node tests/browser/conversion.cjs && node tests/browser/native-lifecycle.cjs && node tests/browser/native-preview.cjs",
+    "test:browser": "npm run build && node tests/browser/workbench.cjs && node tests/browser/editor-preview.cjs && node tests/browser/speech-editor.cjs && node tests/browser/capture-gif.cjs && node tests/browser/recorder-selection.cjs && node tests/browser/capture-picker.cjs && node tests/browser/conversion.cjs && node tests/browser/native-lifecycle.cjs && node tests/browser/native-preview.cjs",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
     "runtime:prepare": "node scripts/media-runtime.mjs prepare",
-    "runtime:verify": "node scripts/media-runtime.mjs verify"
+    "runtime:verify": "node scripts/media-runtime.mjs verify",
+    "speech:prepare": "node scripts/speech-runtime.mjs prepare",
+    "speech:verify": "node scripts/speech-runtime.mjs verify"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.3",

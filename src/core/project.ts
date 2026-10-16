@@ -146,9 +146,24 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
         if (kind === 'audio' && asset.kind === 'image') throw new Error('音频轨道不能放置图片素材。')
         if (asset.kind !== 'image' && clip.trimOut > asset.duration + 1e-6) throw new Error('片段裁剪范围超出素材时长。')
       }
+      if (c.speech !== undefined) {
+        if (kind !== 'audio' || assetMap.get(clip.assetId!)?.kind !== 'audio') throw new Error('文字配音信息只能用于音频轨道中的音频素材。')
+        const speech = record(c.speech, '文字配音信息')
+        clip.speech = { text: text(speech.text, '配音文字', 20000), voiceId: text(speech.voiceId, '配音声音', 1000), rate: number(speech.rate, '配音语速', 0.25, 4) }
+        if (speech.textClipId !== undefined) clip.speech.textClipId = text(speech.textClipId, '配音字幕标识', 160)
+      }
       return clip
     })
     return { id: trackId, name: text(t.name, '轨道名称', 300), kind, muted: boolean(t.muted), locked: boolean(t.locked), clips }
   })
+  const textIds = new Set(tracks.filter((track) => track.kind === 'text').flatMap((track) => track.clips.map((clip) => clip.id)))
+  const speechTextIds = new Set<string>()
+  for (const clip of tracks.flatMap((track) => track.clips)) {
+    const textClipId = clip.speech?.textClipId
+    if (textClipId === undefined) continue
+    if (!textIds.has(textClipId)) throw new Error('配音关联的字幕不存在。')
+    if (speechTextIds.has(textClipId)) throw new Error('同一字幕不能关联多个配音片段。')
+    speechTextIds.add(textClipId)
+  }
   return { version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks }
 }

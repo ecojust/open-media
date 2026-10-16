@@ -30,7 +30,7 @@ const exportOpen = ref(false), settingsOpen = ref(false), jobsOpen = ref(false),
 const mediaInput = ref<HTMLInputElement>(), projectInput = ref<HTMLInputElement>(), renameInput = ref<HTMLInputElement>(), renaming = ref(false), renameValue = ref(''), search = ref('')
 const blobs = new Map<string, Blob>(), ownedUrls = new Set<string>(), hydratedReleases: { release: () => void; urls: Set<string> }[] = []
 const recoveryRecordings = ref<{ id: string; name: string; blob: Blob }[]>([])
-const switching = ref(false), pendingMedia = ref(0), imageConverting = ref(false), videoConverting = ref(false), gifConverting = ref(false)
+const switching = ref(false), pendingMedia = ref(0), imageConverting = ref(false), videoConverting = ref(false), gifConverting = ref(false), speechWorking = ref(false)
 let captureQueue = Promise.resolve()
 let draftTimer: ReturnType<typeof setTimeout> | undefined, draftGeneration = 0, saveQueue = Promise.resolve(), jobsTimer: ReturnType<typeof setTimeout> | undefined, mediaQuery: MediaQueryList | undefined, unlistenClose: (() => void) | undefined, allowClose = false
 const effectiveTheme = computed(() => theme.value === 'system' ? systemDark.value ? 'dark' : 'light' : theme.value)
@@ -78,7 +78,7 @@ function commit(next: Project, label = '已修改项目') {
   } catch (cause) { fail(cause) }
 }
 function moveHistory(direction: 'undo' | 'redo') {
-  if (switching.value || booting.value) return
+  if (switching.value || booting.value || speechWorking.value) return
   history.value = direction === 'undo' ? undoHistory(history.value) : redoHistory(history.value)
   project.value = cloneProject(history.value.present); announce(direction === 'undo' ? '已撤销' : '已重做'); scheduleDraft()
 }
@@ -92,7 +92,7 @@ async function acceptAssets(assets: MediaAsset[], assetBlobs?: Map<string, Blob>
 }
 async function acceptAsset(asset: MediaAsset) { try { await acceptAssets([asset]); announce('录制已加入素材库，可前往视频剪辑继续编辑。') } catch (cause) { fail(cause) } }
 async function importFiles(files?: File[]) {
-  if (busy.value || switching.value || booting.value) return false
+  if (busy.value || switching.value || booting.value || speechWorking.value) return false
   if (!files?.length) {
     if (!native) { mediaInput.value?.click(); return }
     busy.value = '正在导入素材…'
@@ -196,10 +196,10 @@ function adoptProject(next: Project, restored = false) {
   project.value = next; history.value = createHistory(next); cleanKey.value = contentKey(next); draftState.value = restored ? 'saved' : 'idle'; lastSaved.value = ''; remember()
   view.value = 'edit'; error.value = ''; if (!restored) scheduleDraft()
 }
-function mediaIsWorking(): boolean { return recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value }
+function mediaIsWorking(): boolean { return recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value }
 async function changeProject(action: () => Promise<void>): Promise<void> {
   if (busy.value || switching.value || booting.value) return
-  if (mediaIsWorking()) { fail('请先完成录制、转换或导出，再切换项目。'); return }
+  if (mediaIsWorking()) { fail('请先完成或取消录制、配音、转换及导出，再切换项目。'); return }
   switching.value = true
   try { if (await protectProject()) await action() } catch (cause) { fail(cause) } finally { switching.value = false }
 }
@@ -263,6 +263,7 @@ async function chooseRuntime() { try { runtime.value = await selectRuntime() } c
 async function pollJobs() { if (!native) return; try { jobs.value = await getMediaJobs() } catch {} ; jobsTimer = setTimeout(() => void pollJobs(), 1000) }
 async function cancelJob(id: string) { try { await cancelMediaJob(id); jobs.value = await getMediaJobs() } catch (cause) { fail(cause) } }
 async function nativeClose() {
+  if (speechWorking.value) { view.value = 'edit'; fail('请先完成或取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
   if (browserExporting.value || runningJobs.value) { jobsOpen.value = native; fail('请等待导出完成，或先取消正在处理的任务。'); return }
   await changeProject(async () => { allowClose = true; await closeNativeWindow() })
@@ -281,7 +282,7 @@ function keyboard(event: KeyboardEvent) {
     }
     return
   }
-  if (switching.value || booting.value) { if (event.ctrlKey || event.metaKey) event.preventDefault(); return }
+  if (switching.value || booting.value || speechWorking.value) { if (event.ctrlKey || event.metaKey) event.preventDefault(); return }
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return
   const key = event.key.toLowerCase()
   if (key === 's') { event.preventDefault(); void save() }
@@ -310,25 +311,25 @@ onBeforeUnmount(() => { draftGeneration++; clearTimeout(draftTimer); clearTimeou
 <template>
   <div class="app-shell" :data-theme="effectiveTheme" @dragover.prevent @drop="dropped">
     <header class="topbar">
-      <button class="brand" title="开始" @click="view='home'"><img src="/favicon.svg" width="29" height="29" alt=""/><strong>Open Media</strong></button>
+      <button class="brand" :disabled="speechWorking" title="开始" @click="view='home'"><img src="/favicon.svg" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="file-actions">
-        <button title="新建项目" :disabled="!!busy || switching || booting" @click="newProject"><Icon name="plus"/><span>新建</span></button>
-        <button title="打开项目 (Ctrl+O)" :disabled="!!busy || switching || booting" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
+        <button title="新建项目" :disabled="!!busy || switching || booting || speechWorking" @click="newProject"><Icon name="plus"/><span>新建</span></button>
+        <button title="打开项目 (Ctrl+O)" :disabled="!!busy || switching || booting || speechWorking" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
         <span class="divider"/>
-        <button title="保存项目 (Ctrl+S)" :disabled="!!busy || switching || booting" data-testid="save-project" @click="save"><Icon name="save"/><span>保存</span></button>
+        <button title="保存项目 (Ctrl+S)" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-project" @click="save"><Icon name="save"/><span>保存</span></button>
         <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
-        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting" @click="moveHistory('redo')"><Icon name="redo"/></button>
+        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting || speechWorking" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting || speechWorking" @click="moveHistory('redo')"><Icon name="redo"/></button>
       </div>
-      <div class="topbar-end"><button v-if="native" class="icon-button job-button" title="导出任务" aria-label="导出任务" @click="jobsOpen=true"><Icon name="layers"/><b v-if="runningJobs">{{ runningJobs }}</b></button><button class="icon-button" title="设置" aria-label="设置" @click="settingsOpen=true"><Icon name="settings"/></button><button class="primary top-export" :disabled="!duration || !!busy || switching || booting" data-testid="export-project" @click="exportOpen=true"><Icon name="export" :size="16"/><span>导出视频</span></button></div>
+      <div class="topbar-end"><button v-if="native" class="icon-button job-button" title="导出任务" aria-label="导出任务" @click="jobsOpen=true"><Icon name="layers"/><b v-if="runningJobs">{{ runningJobs }}</b></button><button class="icon-button" title="设置" aria-label="设置" @click="settingsOpen=true"><Icon name="settings"/></button><button class="primary top-export" :disabled="!duration || !!busy || switching || booting || speechWorking" data-testid="export-project" @click="exportOpen=true"><Icon name="export" :size="16"/><span>导出视频</span></button></div>
     </header>
     <div class="workbench-body" :inert="switching || booting">
       <aside class="sidebar" :class="{collapsed}">
         <div class="sidebar-heading"><span v-if="!collapsed">工作台</span><button class="icon-button" :title="collapsed?'展开侧栏':'折叠侧栏'" :aria-label="collapsed?'展开侧栏':'折叠侧栏'" @click="collapsed=!collapsed"><Icon name="panel" :size="17"/></button></div>
-        <nav aria-label="工作区"><button :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
+        <nav aria-label="工作区"><button :disabled="speechWorking" :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :disabled="speechWorking" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
         <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · 0.1.2</small></div>
       </aside>
       <main class="main-area">
-        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><button class="import-action" :disabled="!!busy || switching || booting" data-testid="import-media" @click="importFiles()"><Icon name="import" :size="16"/><span>导入素材</span></button></div>
+        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><button class="import-action" :disabled="!!busy || switching || booting || speechWorking" data-testid="import-media" @click="importFiles()"><Icon name="import" :size="16"/><span>导入素材</span></button></div>
         <div v-if="error" class="app-error" role="alert"><Icon name="alert" :size="16"/><span>{{ error }}</span><button class="icon-button" aria-label="关闭提示" @click="error=''"><Icon name="close" :size="15"/></button></div>
         <div v-for="item in recoveryRecordings" :key="item.id" class="app-error recording-recovery" role="alert"><Icon name="video" :size="16"/><span>录制尚未加入项目：{{ item.name }}</span><button @click="saveRecoveredRecording(item.id)">保存录制文件</button></div>
         <div v-if="booting" class="boot-loading"><span class="spinner"/>正在恢复工作台…</div>
@@ -338,7 +339,7 @@ onBeforeUnmount(() => { draftGeneration++; clearTimeout(draftTimer); clearTimeou
           <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
-        <VideoEditor v-if="!booting && view==='edit'" :project="project" @change="commit" @import="importFiles" @export="exportOpen=true" @status="announce"/>
+        <VideoEditor v-if="!booting && view==='edit'" :project="project" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="exportOpen=true" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
         <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>

@@ -5,6 +5,7 @@ pub mod capture_picker;
 mod capture_windows;
 pub mod engine;
 pub mod preview;
+pub mod speech;
 #[cfg(test)]
 mod tests;
 
@@ -18,6 +19,7 @@ mod desktop {
         capture_picker::{self, CapturePicker, PickerContext, PickerPreferences, PickerSelection},
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
         preview::{self, PreviewResult},
+        speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
     };
     use serde::Serialize;
     use serde_json::Value;
@@ -37,6 +39,7 @@ mod desktop {
         runtime: Arc<Mutex<engine::Result<Runtime>>>,
         store: MediaStore,
         jobs: JobManager,
+        speech: SpeechManager,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
         resource: PathBuf,
@@ -196,6 +199,36 @@ mod desktop {
     #[tauri::command]
     pub fn cancel_media_job(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
         state.jobs.cancel(&id)
+    }
+    #[tauri::command]
+    pub async fn get_speech_status(state: State<'_, MediaState>) -> engine::Result<SpeechStatus> {
+        let speech = state.speech.clone();
+        blocking(move || Ok(speech.status())).await
+    }
+    #[tauri::command]
+    pub async fn begin_speech_job(
+        request: SpeechRequest,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<SpeechJob> {
+        let state = state.inner().clone();
+        blocking(move || state.speech.begin(state.runtime()?, state.store.clone(), request)).await
+    }
+    #[tauri::command]
+    pub fn get_speech_job(id: String, state: State<'_, MediaState>) -> engine::Result<SpeechJob> {
+        state.speech.get(&id)
+    }
+    #[tauri::command]
+    pub fn cancel_speech_job(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
+        state.speech.cancel(&id)
+    }
+    #[tauri::command]
+    pub async fn discard_speech_job(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
+        let speech = state.speech.clone();
+        blocking(move || speech.discard(&id)).await
+    }
+    #[tauri::command]
+    pub fn accept_speech_jobs(ids: Vec<String>, state: State<'_, MediaState>) -> engine::Result<()> {
+        state.speech.accept(&ids)
     }
     #[tauri::command]
     pub async fn list_capture_devices(
@@ -419,6 +452,7 @@ mod desktop {
                     runtime: Arc::new(Mutex::new(runtime)),
                     store,
                     jobs: JobManager::default(),
+                    speech: SpeechManager::new(&data, &resource).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::with_resource(&resource))),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
                     resource,
@@ -455,6 +489,12 @@ mod desktop {
                 begin_media_job,
                 get_media_jobs,
                 cancel_media_job,
+                get_speech_status,
+                begin_speech_job,
+                get_speech_job,
+                cancel_speech_job,
+                discard_speech_job,
+                accept_speech_jobs,
                 list_capture_devices,
                 pick_capture_source,
                 cancel_capture_picker,
@@ -486,6 +526,7 @@ mod desktop {
             if matches!(event, tauri::RunEvent::Exit) {
                 let state = handle.state::<MediaState>();
                 state.capture_starts.cancel_all();
+                state.speech.shutdown();
                 state.jobs.shutdown();
                 state.capture.lock().unwrap().abort();
             }

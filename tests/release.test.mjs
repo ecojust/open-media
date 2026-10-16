@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { dirname, resolve, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateBuild, verifyDigest, verifyMetadata, digest } from '../scripts/release-validation.mjs';
+import { validateBuild, verifyDigest, verifyMetadata, digest, verifySpeechMetadata, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
+import { verifySourceContents } from '../scripts/release-source.mjs';
 
 const commit = 'a'.repeat(40);
 function fixture() {
@@ -33,9 +36,80 @@ test('installer digest and provenance must match before publishing', () => {
   verifyMetadata({ commit, version: '0.1.0', platform: 'windows-x64' }, 'windows-x64', commit, '0.1.0');
   assert.throws(() => verifyMetadata({ commit, version: '0.1.0', platform: 'macos-x64' }, 'windows-x64', commit, '0.1.0'));
 });
+function speechFixture() {
+  const expected = { sourceLockSha256: 'a'.repeat(64), prepareScriptSha256: 'b'.repeat(64), runnerSourceSha256: 'c'.repeat(64), runnerManifestSha256: 'd'.repeat(64), model: { id: 'offline-voices', version: '1.0', license: 'Apache-2.0' } };
+  const files = ['manifest.json', 'source-lock.json', 'runtime/bin/open-media-speech', 'model/voices.bin', 'licenses/NOTICE'].map(path => ({ path, sha256: 'a'.repeat(64) }));
+  const runtime = { schema: 1, platform: 'darwin', arch: 'arm64', ...expected, files, licenses: [files.at(-1)] };
+  return { expected, runtime };
+}
+test('offline speech release requires the exact platform, runner, model and original notices', () => {
+  const { expected, runtime } = speechFixture();
+  verifySpeechMetadata(runtime, 'macos-arm64', expected);
+  assert.throws(() => verifySpeechMetadata(undefined, 'macos-arm64', expected));
+  assert.throws(() => verifySpeechMetadata(runtime, 'macos-x64', expected));
+  assert.throws(() => verifySpeechMetadata({ ...runtime, runnerSourceSha256: 'e'.repeat(64) }, 'macos-arm64', expected));
+  assert.throws(() => verifySpeechMetadata({ ...runtime, model: { ...runtime.model, license: 'unknown' } }, 'macos-arm64', expected));
+  assert.throws(() => verifySpeechMetadata({ ...runtime, licenses: [] }, 'macos-arm64', expected));
+  assert.throws(() => verifySpeechMetadata({ ...runtime, files: runtime.files.filter(file => !file.path.startsWith('model/')) }, 'macos-arm64', expected));
+  assert.throws(() => verifySpeechMetadata({ ...runtime, files: [...runtime.files, { path: '../outside', sha256: 'a'.repeat(64) }] }, 'macos-arm64', expected));
+  assert.throws(() => verifySpeechMetadata({ ...runtime, licenses: [{ path: 'licenses/NOTICE', sha256: 'e'.repeat(64) }] }, 'macos-arm64', expected));
+});
+test('corresponding source checksums require both media and speech archives exactly once', () => {
+  const media = `${'a'.repeat(64)}  open-media-runtime-source.tar.gz`;
+  const speech = `${'b'.repeat(64)}  open-media-speech-source.tar.gz`;
+  assert.equal(sourceChecksums(`${media}\n${speech}\n`).size, 2);
+  assert.throws(() => sourceChecksums(media));
+  assert.throws(() => sourceChecksums(speech));
+  assert.throws(() => sourceChecksums(`${media}\n${speech}\n${speech}`));
+});
+test('streaming source verification rejects missing dependencies and modified model bytes', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'open-media-release-'));
+  try {
+    const archive = join(directory, 'source.tar.gz');
+    const sources = [
+      { id: 'engine', archive: 'engine.tar.gz', kind: 'source', bytes: 'complete engine source' },
+      { id: 'dependency', archive: 'dependency.tar.gz', kind: 'source', bytes: 'complete dependency source and license' },
+      { id: 'model', archive: 'model.tar.gz', kind: 'model', bytes: 'original model weights and license' },
+      { id: 'runtime', archive: 'runtime.tar.gz', kind: 'runtime', bytes: 'verified runtime release' },
+    ].map(source => ({ ...source, sha256: digest(Buffer.from(source.bytes)) }));
+    const expected = speechSourceRequirements({ sources });
+    const writeArchive = files => execFileSync('python3', ['-c', `
+import io,json,sys,tarfile
+with tarfile.open(sys.argv[1],'w:gz') as archive:
+    for file in json.load(sys.stdin):
+        data=file['bytes'].encode()
+        entry=tarfile.TarInfo('speech-runtime-source/.speech-runtime/downloads/'+file['archive'])
+        entry.size=len(data)
+        archive.addfile(entry,io.BytesIO(data))
+`, archive], { input: JSON.stringify(files) });
+    writeArchive(sources);
+    verifySourceContents(archive, 'speech-runtime-source', expected);
+    writeArchive(sources.filter(source => source.id !== 'dependency'));
+    assert.throws(() => verifySourceContents(archive, 'speech-runtime-source', expected), /Missing corresponding source files/);
+    writeArchive(sources.map(source => source.id === 'model' ? { ...source, bytes: 'modified weights' } : source));
+    assert.throws(() => verifySourceContents(archive, 'speech-runtime-source', expected), /checksum mismatch/);
+    assert.throws(() => speechSourceRequirements({ sources: sources.filter(source => source.kind !== 'source') }));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = path => readFileSync(resolve(repository, path));
+test('offline speech notices retain original model and dependency license bytes', () => {
+  const lock = JSON.parse(read('scripts/speech-runtime.lock.json'));
+  const inventory = JSON.parse(read('licenses/speech-runtime/manifest.json'));
+  const sources = new Map(lock.sources.map(source => [source.id, source]));
+  assert.equal(inventory.schema, 1);
+  assert.ok(inventory.files.length);
+  const paths = new Set();
+  for (const file of inventory.files) {
+    assert.ok(sources.has(file.sourceId), `Unknown speech license source: ${file.sourceId}`);
+    assert.ok(file.sourcePath, 'Preserve the original source path of each notice.');
+    assert.ok(!paths.has(file.path), `Duplicate speech notice: ${file.path}`);
+    paths.add(file.path);
+    assert.equal(digest(read(`licenses/speech-runtime/${file.path}`)), file.sha256, `Original speech notice was modified: ${file.path}`);
+  }
+  for (const source of lock.sources.filter(source => source.kind === 'model')) assert.ok(inventory.files.some(file => file.sourceId === source.id), `Missing model license: ${source.id}`);
+});
 test('native dependency notices cover locked archives and retain verified original texts', () => {
   const base = 'licenses/application/cargo';
   const inventory = JSON.parse(read(`${base}/manifest.json`));

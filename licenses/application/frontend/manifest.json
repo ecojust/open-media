@@ -5,7 +5,7 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "6557cfeb2b60a8f65c4f95b16790dab68a80f23b5d105ac8d5dd8d24cfd5f656"
+      "sha256": "b5726cc372ac181af7dbe84c9ce8150aacede4e6be7cb3752f35dbb170e05a67"
     },
     {
       "path": "package-lock.json",

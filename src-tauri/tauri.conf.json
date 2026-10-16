@@ -45,7 +45,12 @@
       "resources/media/": "media/",
       "../LICENSE": "LICENSE",
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
-      "../licenses/application/": "licenses/application/"
+      "../licenses/application/": "licenses/application/",
+      "resources/speech/manifest.json": "speech/manifest.json",
+      "resources/speech/runtime.json": "speech/runtime.json",
+      "resources/speech/source-lock.json": "speech/source-lock.json",
+      "resources/speech/model/": "speech/model/",
+      "resources/speech/licenses/": "speech/licenses/"
     },
     "icon": [
       "icons/32x32.png",
@@ -68,7 +73,8 @@
       "signingIdentity": "-",
       "infoPlist": "Info.plist",
       "files": {
-        "Helpers/open-media-capture": "resources/capture/open-media-capture"
+        "Helpers/open-media-capture": "resources/capture/open-media-capture",
+        "Helpers/speech/runtime": "resources/speech/runtime"
       }
     }
   }

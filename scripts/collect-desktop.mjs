@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, statSync, mkdirSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
+import { digest, verifySpeechMetadata, verifyDigest } from './release-validation.mjs';
 
 const directory = `src-tauri/target/${process.env.MEDIA_TARGET}/release/bundle`;
 const collect = (root) => readdirSync(root).flatMap(name => {
@@ -16,6 +17,17 @@ const checksums = files.map(file => {
   return `${createHash('sha256').update(readFileSync(file)).digest('hex')}  ${basename(file)}`;
 });
 writeFileSync('desktop-artifacts/SHA256SUMS', checksums.join('\n') + '\n');
-writeFileSync('desktop-artifacts/build.json', JSON.stringify({ commit: process.env.MEDIA_COMMIT, platform: process.env.MEDIA_PLATFORM, version: JSON.parse(readFileSync('package.json', 'utf8')).version, runtime: JSON.parse(readFileSync('src-tauri/resources/media/runtime.json', 'utf8')) }, null, 2) + '\n');
+const speechRoot = 'src-tauri/resources/speech';
+const speechLockBytes = readFileSync('scripts/speech-runtime.lock.json');
+const speechLock = JSON.parse(speechLockBytes);
+const speechRuntime = verifySpeechMetadata(JSON.parse(readFileSync(join(speechRoot, 'runtime.json'), 'utf8')), process.env.MEDIA_PLATFORM, {
+  sourceLockSha256: digest(speechLockBytes),
+  prepareScriptSha256: digest(readFileSync('scripts/speech-runtime.mjs')),
+  runnerSourceSha256: digest(readFileSync('scripts/speech-runtime-runner.c')),
+  runnerManifestSha256: digest(readFileSync('scripts/speech-runtime-runner.manifest')),
+  model: speechLock.model,
+});
+for (const file of speechRuntime.files) verifyDigest(readFileSync(join(speechRoot, file.path)), `sha256:${file.sha256}`);
+writeFileSync('desktop-artifacts/build.json', JSON.stringify({ commit: process.env.MEDIA_COMMIT, platform: process.env.MEDIA_PLATFORM, version: JSON.parse(readFileSync('package.json', 'utf8')).version, runtime: JSON.parse(readFileSync('src-tauri/resources/media/runtime.json', 'utf8')), speechRuntime }, null, 2) + '\n');
 copyFileSync('LICENSE', 'desktop-artifacts/LICENSE');
 copyFileSync('THIRD_PARTY_NOTICES.md', 'desktop-artifacts/THIRD_PARTY_NOTICES.md');

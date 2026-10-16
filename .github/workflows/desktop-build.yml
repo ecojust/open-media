@@ -17,7 +17,7 @@ jobs:
   checks:
     name: Application checks
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,10 +29,39 @@ jobs:
         with:
           workspaces: src-tauri -> target
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - uses: actions/cache/restore@v4
+        id: speech-cache
+        with:
+          path: |
+            src-tauri/resources/speech
+            .speech-runtime/downloads
+          key: speech-runtime-v1-linux-x64-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
+          restore-keys: speech-runtime-v1-linux-x64-
+      - name: Prepare and verify offline speech runtime
+        id: speech-verify
+        run: |
+          mkdir -p .speech-runtime/logs
+          set -o pipefail
+          node scripts/speech-runtime.mjs prepare 2>&1 | tee .speech-runtime/logs/prepare.log
+          node scripts/speech-runtime.mjs verify 2>&1 | tee .speech-runtime/logs/verify.log
+      - uses: actions/cache/save@v4
+        if: steps.speech-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            src-tauri/resources/speech
+            .speech-runtime/downloads
+          key: speech-runtime-v1-linux-x64-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
       - run: npm ci
       - run: npm test
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib
+      - name: Verify offline speech synthesis and import
+        id: speech-native
+        env:
+          OPEN_MEDIA_SPEECH_ROOT: ${{ github.workspace }}/src-tauri/resources/speech
+        run: |
+          set -o pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib speech::tests::real_offline_speech_round_trip -- --ignored 2>&1 | tee .speech-runtime/logs/native.log
       - run: npx playwright install --with-deps chromium
       - name: Browser interaction checks
         id: browser
@@ -45,17 +74,24 @@ jobs:
       - name: Summarize browser failures
         if: failure() && steps.browser.outcome == 'failure'
         run: node scripts/report-build-failure.mjs test-results/browser/browser.log
+      - name: Summarize speech failures
+        if: failure()
+        run: |
+          if [[ '${{ steps.speech-verify.outcome }}' == failure ]]; then node scripts/report-build-failure.mjs .speech-runtime/logs/prepare.log .speech-runtime/logs/verify.log; fi
+          if [[ '${{ steps.speech-native.outcome }}' == failure ]]; then node scripts/report-build-failure.mjs .speech-runtime/logs/native.log; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: open-media-checks-${{ github.run_id }}
-          path: test-results/browser/
+          path: |
+            test-results/browser/
+            .speech-runtime/logs/
           if-no-files-found: warn
           retention-days: 14
   runtime-source:
     name: Corresponding media source
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,20 +102,33 @@ jobs:
           path: .media-runtime/downloads
           key: media-source-${{ hashFiles('scripts/media-runtime.lock.json') }}
           enableCrossOsArchive: true
+      - uses: actions/cache@v4
+        with:
+          path: .speech-runtime/downloads
+          key: speech-source-${{ hashFiles('scripts/speech-runtime.lock.json') }}
+          enableCrossOsArchive: true
       - name: Package complete corresponding source
+        id: complete-source
         run: |
           mkdir -p source-artifacts
-          node scripts/media-runtime.mjs sources --output source-artifacts/open-media-runtime-source.tar.gz
-          sha256sum source-artifacts/open-media-runtime-source.tar.gz | sed 's|source-artifacts/||' > source-artifacts/SHA256SUMS
+          mkdir -p source-logs
+          set -o pipefail
+          node scripts/media-runtime.mjs sources --output source-artifacts/open-media-runtime-source.tar.gz 2>&1 | tee source-logs/media.log
+          node scripts/speech-runtime.mjs sources --output source-artifacts/open-media-speech-source.tar.gz 2>&1 | tee source-logs/speech.log
+          sha256sum source-artifacts/open-media-runtime-source.tar.gz source-artifacts/open-media-speech-source.tar.gz | sed 's|source-artifacts/||' > source-artifacts/SHA256SUMS
           cp THIRD_PARTY_NOTICES.md source-artifacts/
           cp LICENSE source-artifacts/
           printf '{"commit":"%s","kind":"corresponding-source"}\n' '${{ github.sha }}' > source-artifacts/build.json
+      - name: Summarize corresponding source failures
+        if: failure() && steps.complete-source.outcome == 'failure'
+        run: node scripts/report-build-failure.mjs source-logs/media.log source-logs/speech.log
       - uses: actions/upload-artifact@v4
         with:
           name: open-media-runtime-source-${{ github.run_id }}
           path: source-artifacts/
           if-no-files-found: error
           retention-days: 30
+          compression-level: 0
   desktop:
     name: ${{ matrix.platform }}
     strategy:
@@ -186,6 +235,33 @@ jobs:
             src-tauri/resources/media
             .media-runtime/downloads
           key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh') }}
+      - uses: actions/cache/restore@v4
+        id: speech-cache
+        with:
+          path: |
+            src-tauri/resources/speech
+            .speech-runtime/downloads
+          key: speech-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
+          restore-keys: speech-runtime-v1-${{ matrix.platform }}-
+      - name: Prepare native speech compiler on Windows
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Prepare and verify offline speech runtime
+        id: speech-verify
+        run: |
+          mkdir -p .speech-runtime/logs
+          set -o pipefail
+          node scripts/speech-runtime.mjs prepare 2>&1 | tee .speech-runtime/logs/prepare.log
+          node scripts/speech-runtime.mjs verify 2>&1 | tee .speech-runtime/logs/verify.log
+      - uses: actions/cache/save@v4
+        if: steps.speech-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            src-tauri/resources/speech
+            .speech-runtime/downloads
+          key: speech-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
       - name: Install application dependencies
         run: npm ci
       - name: Build application frontend
@@ -195,7 +271,15 @@ jobs:
         env:
           OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
           OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
+          OPEN_MEDIA_SPEECH_ROOT: ${{ github.workspace }}/src-tauri/resources/speech
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib 2>&1 | tee .media-runtime/logs/native.log
+      - name: Verify offline speech synthesis and import
+        id: speech-native
+        env:
+          OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
+          OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
+          OPEN_MEDIA_SPEECH_ROOT: ${{ github.workspace }}/src-tauri/resources/speech
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib speech::tests::real_offline_speech_round_trip -- --ignored 2>&1 | tee .speech-runtime/logs/native.log
       - name: Package application
         id: native-package
         run: npx tauri build --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked 2>&1 | tee .media-runtime/logs/package.log
@@ -209,6 +293,25 @@ jobs:
           codesign --verify "$helper"
           codesign --verify --deep --strict "src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app"
           "$helper" --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
+      - name: Verify offline speech from the packaged application
+        id: speech-package-macos
+        if: runner.os == 'macOS'
+        run: |
+          set -o pipefail
+          application="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Open Media.app"
+          node scripts/speech-runtime.mjs verify --directory "$application/Contents/Resources/speech" --executable-directory "$application/Contents/Helpers/speech" --packaged 2>&1 | tee .speech-runtime/logs/package.log
+      - name: Install and verify offline speech from the packaged application
+        id: speech-package-windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = @(Get-ChildItem 'src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe')
+          if ($installer.Count -ne 1) { throw 'Expected one desktop installer.' }
+          $destination = Join-Path $env:RUNNER_TEMP 'Open Media 语音验证'
+          $process = Start-Process -FilePath $installer[0].FullName -ArgumentList @('/S', "/D=$destination") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          node scripts/speech-runtime.mjs verify --directory "$destination/speech" --packaged 2>&1 | Tee-Object .speech-runtime/logs/package.log
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged speech verification failed.' }
       - name: Collect installers and provenance
         env:
           MEDIA_TARGET: ${{ matrix.target }}
@@ -225,6 +328,10 @@ jobs:
           NATIVE_TEST_OUTCOME: ${{ steps.native-tests.outcome }}
           NATIVE_PACKAGE_OUTCOME: ${{ steps.native-package.outcome }}
           CAPTURE_HELPER_OUTCOME: ${{ steps.capture-helper.outcome }}
+          SPEECH_VERIFY_OUTCOME: ${{ steps.speech-verify.outcome }}
+          SPEECH_NATIVE_OUTCOME: ${{ steps.speech-native.outcome }}
+          SPEECH_PACKAGE_MACOS_OUTCOME: ${{ steps.speech-package-macos.outcome }}
+          SPEECH_PACKAGE_WINDOWS_OUTCOME: ${{ steps.speech-package-windows.outcome }}
         run: |
           if [[ "$MEDIA_PREPARE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/prepare.log; fi
           if [[ "$MEDIA_WINDOWS_OUTCOME" == failure || "$MEDIA_MACOS_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/build.log; fi
@@ -232,11 +339,16 @@ jobs:
           if [[ "$NATIVE_TEST_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/native.log; fi
           if [[ "$NATIVE_PACKAGE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/package.log; fi
           if [[ "$CAPTURE_HELPER_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/capture-helper.log; fi
+          if [[ "$SPEECH_VERIFY_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .speech-runtime/logs/prepare.log .speech-runtime/logs/verify.log; fi
+          if [[ "$SPEECH_NATIVE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .speech-runtime/logs/native.log; fi
+          if [[ "$SPEECH_PACKAGE_MACOS_OUTCOME" == failure || "$SPEECH_PACKAGE_WINDOWS_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .speech-runtime/logs/package.log; fi
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: open-media-build-log-${{ matrix.platform }}-${{ github.run_id }}
-          path: .media-runtime/logs/
+          path: |
+            .media-runtime/logs/
+            .speech-runtime/logs/
           if-no-files-found: ignore
           retention-days: 14
       - uses: actions/upload-artifact@v4
@@ -245,3 +357,4 @@ jobs:
           path: desktop-artifacts/
           if-no-files-found: error
           retention-days: 30
+          compression-level: 0
