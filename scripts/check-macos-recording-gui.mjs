@@ -23,13 +23,57 @@ const report = {
   userMachineTested: false, permissionDatabaseModified: false, applicationRebuilt: false, applicationResigned: false,
 };
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
-function command(name, path, args, { required = true, timeout = 30000 } = {}) {
-  const result = spawnSync(path, args, { encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 24 * 1024 * 1024 });
+function command(name, path, args, { required = true, timeout = 30000, sanitize = value => value } = {}) {
+  const raw = spawnSync(path, args, { encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 24 * 1024 * 1024 });
+  const result = { ...raw, stdout: sanitize(raw.stdout ?? ''), stderr: sanitize(raw.stderr ?? '') };
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   writeFileSync(join(directory, `${name}.log`), `$ ${JSON.stringify([path, ...args])}\n${output}`);
   report.commands.push({ name, status: result.status, signal: result.signal, error: result.error?.message });
   if (required && (result.error || result.status !== 0)) throw new Error(`${name} failed: ${result.error?.message ?? output}`);
   return { ...result, output };
+}
+function summarizeResponsibility(value) {
+  // procinfo includes inherited environment variables. Remove those sections
+  // before writing anything, and allow only identity and signature fields.
+  let excludedIndent;
+  const lines = [];
+  for (const line of value.split('\n')) {
+    if (excludedIndent !== undefined) {
+      if (line === `${excludedIndent}}`) excludedIndent = undefined;
+      continue;
+    }
+    const environment = line.match(/^(\s*)(?:environment vector|inherited environment|default environment|environment)\s*=\s*\{/);
+    if (environment) { excludedIndent = environment[1]; continue; }
+    if (/^\s*(?:program path|pid|ppid|responsible pid|responsible unique pid|responsible path|entitlements|code signing info|sandboxed)\s*=/.test(line)) lines.push(line.trim());
+  }
+  return lines.join('\n');
+}
+function permissionEvidence(phase, from) {
+  const until = new Date().toISOString();
+  const log = command(`${phase}-permission-system-log`, '/usr/bin/sudo', ['-n', '/usr/bin/log', 'show', '--last', '10m', '--style', 'json', '--info', '--debug', '--predicate', 'process == "tccd" OR process == "replayd" OR process == "open-media" OR eventMessage CONTAINS[c] "com.ecojust.openmedia"'], { required: false, timeout: 30000 });
+  try {
+    const records = JSON.parse(log.stdout).filter(event => {
+      const time = Date.parse(String(event.timestamp).replace(' ', 'T'));
+      return time >= Date.parse(from) - 1000 && time <= Date.parse(until) + 1000;
+    });
+    const messageIDs = new Set(records.filter(event => /com\.ecojust\.openmedia|\/open-media\b/i.test(event.eventMessage ?? ''))
+      .flatMap(event => [...String(event.eventMessage).matchAll(/msgID[=:]\s*["']?([\d.]+)/g)].map(match => match[1])));
+    const events = records.filter(event => {
+      const message = String(event.eventMessage ?? '');
+      return /(?:com\.ecojust\.openmedia|\/open-media\b|ScreenCapture)/i.test(message)
+        && /AUTHREQ|AttributionChain|TCC|PROMPT|prompt|denied|deny|declined|signature|identity|request|auth/i.test(message)
+        || [...message.matchAll(/msgID[=:]\s*["']?([\d.]+)/g)].some(match => messageIDs.has(match[1]));
+    }).map(event => ({ timestamp: event.timestamp, processID: event.processID, message: String(event.eventMessage).slice(0, 8000) }));
+    const evidence = { from, until, matchedCount: events.length, events };
+    writeFileSync(join(directory, `${phase}-permission-events.json`), `${JSON.stringify(evidence, null, 2)}\n`);
+    // Keep the first decisions as well as later results if an unusual runner
+    // generates excessive traffic; never replace GUI evidence with control logs.
+    const visible = events.length > 600 ? [...events.slice(0, 300), ...events.slice(-300)] : events;
+    console.log(JSON.stringify({ event: `${phase}-permission-evidence`, from, until, matchedCount: events.length, omitted: events.length - visible.length, events: visible }, null, 2));
+    return { from, until, matchedCount: events.length, file: `${phase}-permission-events.json` };
+  } catch {
+    return { from, until, error: 'Structured permission events unavailable; inspect the original phase log.' };
+  }
 }
 function applicationProcesses() {
   const result = spawnSync('/bin/ps', ['-axo', 'pid=,ppid=,command='], { encoding: 'utf8', timeout: 5000 });
@@ -45,8 +89,8 @@ function sampleProcesses() {
     if (observed.has(entry.pid)) continue;
     observed.add(entry.pid);
     report.processes.push(entry);
-    const responsibility = command(`process-${entry.pid}-responsibility`, '/usr/bin/sudo', ['-n', '/bin/launchctl', 'procinfo', String(entry.pid)], { required: false, timeout: 5000 });
-    entry.responsibility = responsibility.output.slice(0, 12000);
+    const responsibility = command(`process-${entry.pid}-responsibility`, '/usr/bin/sudo', ['-n', '/bin/launchctl', 'procinfo', String(entry.pid)], { required: false, timeout: 5000, sanitize: summarizeResponsibility });
+    entry.responsibility = responsibility.output;
   }
 }
 function screenshot(stage) {
@@ -136,6 +180,7 @@ try {
 } finally {
   clearInterval(monitor);
   sampleProcesses();
+  report.guiPermissionEvidence = permissionEvidence('gui', startedAt);
   screenshot('diagnostic-end');
   // End only the application launched by this harness. Its capture children
   // detect the parent's exit and stop their devices and border normally.
@@ -148,6 +193,7 @@ try {
   }
   // Compare enumeration only after the real interface attempt. This control is
   // intentionally labelled as the runner's direct process, never app permission.
+  const controlStartedAt = new Date().toISOString();
   const control = command('direct-runner-source-control', executable, ['--open-media-capture', 'sources', '--request-permission'], { required: false, timeout: 25000 });
   let sources;
   try { sources = JSON.parse(control.stdout); } catch { /* Preserve the raw error. */ }
@@ -156,12 +202,7 @@ try {
     sourceCount: Array.isArray(sources) ? sources.length : undefined,
     permissionScope: 'This direct invocation can inherit the hosted execution agent grant.',
   };
-  const permissionLog = command('permission-system-log', '/usr/bin/sudo', ['-n', '/usr/bin/log', 'show', '--last', '10m', '--style', 'json', '--info', '--debug', '--predicate', 'process == "tccd" OR process == "open-media" OR eventMessage CONTAINS[c] "com.ecojust.openmedia"'], { required: false, timeout: 30000 });
-  try {
-    const events = JSON.parse(permissionLog.stdout);
-    report.permissionEvents = events.filter(event => /ScreenCapture|com\.ecojust\.openmedia|open-media|AUTHREQ_RESULT/i.test(event.eventMessage ?? ''))
-      .slice(-100).map(event => ({ timestamp: event.timestamp, processID: event.processID, message: String(event.eventMessage).slice(0, 4000) }));
-  } catch { report.permissionLogSummary = 'Structured permission events unavailable; inspect the original log artifact.'; }
+  report.controlPermissionEvidence = permissionEvidence('control', controlStartedAt);
   report.finishedAt = new Date().toISOString();
   writeFileSync(join(directory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify(report, null, 2));

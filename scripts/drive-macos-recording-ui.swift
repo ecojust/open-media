@@ -318,6 +318,99 @@ final class RecordingUIDriver {
         try checkpoint("recording-imported", tree: imported)
     }
 
+    func permissionPromptEvidence() -> [String: Any] {
+        let began = ProcessInfo.processInfo.systemUptime
+        let deadline = began + 5
+        let allowedBundles = [
+            "com.apple.UserNotificationCenter", "com.apple.SecurityAgent",
+            "com.apple.notificationcenterui", "com.apple.CoreServicesUIAgent",
+            "com.apple.systempreferences"
+        ]
+        let pattern = #"(?i)open[ -]?media|com\.ecojust\.openmedia"#
+        var prompts: [[String: Any]] = []
+        var visitedCount = 0
+        var readErrors = 0
+        var visited: [AXUIElement] = []
+        var limitReached = false
+
+        func hasTime() -> Bool {
+            let available = ProcessInfo.processInfo.systemUptime < deadline && visitedCount < 300
+            if !available { limitReached = true }
+            return available
+        }
+        func value(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
+            guard hasTime() else { return nil }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { limitReached = true; return nil }
+            AXUIElementSetMessagingTimeout(element, Float(min(0.1, remaining)))
+            var result: CFTypeRef?
+            let status = AXUIElementCopyAttributeValue(element, attribute as CFString, &result)
+            if status != .success {
+                if status != .attributeUnsupported && status != .noValue { readErrors += 1 }
+                return nil
+            }
+            return result
+        }
+        func matchingTexts(_ element: AXUIElement, depth: Int) -> [String] {
+            guard hasTime() else { return [] }
+            guard depth <= 24 else { limitReached = true; return [] }
+            if visited.contains(where: { CFEqual($0, element) }) { return [] }
+            visited.append(element)
+            visitedCount += 1
+            var matches: [String] = []
+            for attribute in ["AXTitle", "AXDescription", "AXValue"] {
+                if let text = value(element, attribute) as? String,
+                   text.range(of: pattern, options: .regularExpression) != nil {
+                    let relevant = text.split(separator: "\n").filter {
+                        String($0).range(of: pattern, options: .regularExpression) != nil
+                    }
+                    matches.append(String(relevant.joined(separator: "\n").prefix(3000)))
+                }
+            }
+            if let children = value(element, "AXChildren") as? [AXUIElement] {
+                for child in children {
+                    guard hasTime() else { break }
+                    matches.append(contentsOf: matchingTexts(child, depth: depth + 1))
+                }
+            }
+            return matches
+        }
+
+        // Read only named system processes. No actions or attribute mutations are
+        // performed, and unrelated window text is never retained in the report.
+        let applications = NSWorkspace.shared.runningApplications.filter {
+            allowedBundles.contains($0.bundleIdentifier ?? "")
+        }.sorted {
+            (allowedBundles.firstIndex(of: $0.bundleIdentifier ?? "") ?? allowedBundles.count)
+                < (allowedBundles.firstIndex(of: $1.bundleIdentifier ?? "") ?? allowedBundles.count)
+        }
+        for running in applications {
+            guard hasTime() else { break }
+            visitedCount += 1
+            let root = AXUIElementCreateApplication(running.processIdentifier)
+            var windows = value(root, "AXWindows") as? [AXUIElement] ?? []
+            if windows.isEmpty, let children = value(root, "AXChildren") as? [AXUIElement] {
+                for child in children {
+                    guard hasTime() else { break }
+                    visitedCount += 1
+                    if value(child, "AXRole") as? String == "AXWindow" { windows.append(child) }
+                }
+            }
+            for window in windows {
+                guard hasTime() else { break }
+                let texts = Array(Set(matchingTexts(window, depth: 0))).sorted()
+                if !texts.isEmpty {
+                    prompts.append(["bundleID": running.bundleIdentifier ?? "", "pid": running.processIdentifier,
+                                    "matchingTexts": texts])
+                }
+            }
+        }
+        return ["observed": !prompts.isEmpty, "permissionPrompts": prompts,
+                "visitedNodes": visitedCount, "AXReadErrors": readErrors, "limitReached": limitReached,
+                "durationSeconds": ProcessInfo.processInfo.systemUptime - began,
+                "scope": "Read-only matching window text in named system processes. No match does not prove that no permission prompt exists."]
+    }
+
     func finish(outcome: String, error: String? = nil) {
         var report: [String: Any] = [
             "outcome": outcome, "stage": stage, "pid": pid, "startedAt": beganAt,
@@ -349,6 +442,15 @@ final class RecordingUIDriver {
                 if cleanup == .success { break }
             }
         }
+        if outcome == "permission-denied" {
+            // Cleanup above takes priority over the bounded, read-only observation.
+            let evidence = permissionPromptEvidence()
+            report["permissionPrompts"] = evidence["permissionPrompts"]
+            report["permissionPromptEvidence"] = evidence
+            emit(["event": "permission-prompt-evidence", "stage": stage, "evidence": evidence])
+        }
+        report["finishedAt"] = timestamp()
+        report["durationSeconds"] = ProcessInfo.processInfo.systemUptime - beganUptime
         do { try write(report, file: "ui-report.json") }
         catch {
             emit(["event": "report-write-failed", "error": error.localizedDescription])
