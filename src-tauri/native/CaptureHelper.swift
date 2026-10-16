@@ -142,6 +142,20 @@ func streamSize(source: CGSize, output: OutputSize) -> OutputSize {
     return OutputSize(width: max(2, Int(rect.width / 2) * 2), height: max(2, Int(rect.height / 2) * 2))
 }
 
+func recordingStreamConfiguration(fps: Int) -> SCStreamConfiguration {
+    let configuration = SCStreamConfiguration()
+    configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+    configuration.queueDepth = 5
+    configuration.pixelFormat = kCVPixelFormatType_32BGRA
+    configuration.showsCursor = true
+    configuration.scalesToFit = true
+    configuration.capturesAudio = false
+    // Frame composition supplies the black padding. Leave the system's color
+    // untouched so copying this configuration never depends on a temporary CGColor.
+    if #available(macOS 14.0, *) { configuration.ignoreShadowsSingleWindow = true }
+    return configuration
+}
+
 func makeRenderPool(size: OutputSize) throws -> CVPixelBufferPool {
     var pool: CVPixelBufferPool?
     let attributes: [String: Any] = [
@@ -646,15 +660,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             }
         } else { throw CaptureFailure("录制来源不可用。") }
 
-        let configuration = SCStreamConfiguration()
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(options.fps))
-        configuration.queueDepth = 5
-        configuration.pixelFormat = kCVPixelFormatType_32BGRA
-        configuration.showsCursor = true
-        configuration.scalesToFit = true
-        configuration.backgroundColor = CGColor(gray: 0, alpha: 1)
-        configuration.capturesAudio = false
-        if #available(macOS 14.0, *) { configuration.ignoreShadowsSingleWindow = true }
+        let configuration = recordingStreamConfiguration(fps: options.fps)
         let captureSize: CGSize
         if let region = options.region {
             configuration.sourceRect = CGRect(x: Double(region.x) / sourceScale, y: Double(region.y) / sourceScale,
@@ -990,10 +996,31 @@ func runSelfTests() throws {
           pixelSize(source, scale: 2).0 == 3840 else {
         throw CaptureFailure("录制参数验证失败。")
     }
+    try verifyRecordingStreamConfiguration()
     try verifyAudioTiming()
     try verifyVideoEncoding(sourceSize: OutputSize(width: 120, height: 240), outputSize: OutputSize(width: 320, height: 180))
     try verifyVideoEncoding(sourceSize: OutputSize(width: 240, height: 120), outputSize: OutputSize(width: 180, height: 320))
-    print("Capture geometry, validation, audio timing, video encoding and decoded pixel checks passed.")
+    print("Capture geometry, validation, stream configuration copying, audio timing, video encoding and decoded pixel checks passed.")
+}
+
+func verifyRecordingStreamConfiguration() throws {
+    // SCStream copies its configuration when it starts. Exercise that same
+    // operation after the production factory's temporary objects have gone.
+    let configuration = autoreleasepool { recordingStreamConfiguration(fps: 30) }
+    configuration.width = 1280
+    configuration.height = 720
+    let copy: SCStreamConfiguration = try autoreleasepool {
+        guard let copy = configuration.copy() as? SCStreamConfiguration else {
+            throw CaptureFailure("录制流配置无法复制。")
+        }
+        return copy
+    }
+    guard let secondCopy = copy.copy() as? SCStreamConfiguration,
+          secondCopy.width == 1280, secondCopy.height == 720,
+          CMTimeCompare(secondCopy.minimumFrameInterval, CMTime(value: 1, timescale: 30)) == 0,
+          !secondCopy.capturesAudio else {
+        throw CaptureFailure("录制流配置复制后参数不正确。")
+    }
 }
 
 func verifyAudioTiming() throws {

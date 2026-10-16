@@ -65,6 +65,7 @@ jobs:
         with:
           workspaces: src-tauri -> target
           key: aarch64-apple-darwin
+          cache-on-failure: true
       - uses: actions/cache/restore@v4
         id: media-cache
         with:
