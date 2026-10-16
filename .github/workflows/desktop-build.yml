@@ -54,7 +54,12 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib
+      - name: Verify native operations
+        id: native-checks
+        run: |
+          mkdir -p .media-runtime/logs
+          set -o pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib 2>&1 | tee .media-runtime/logs/native-checks.log
       - name: Verify offline speech synthesis and import
         id: speech-native
         env:
@@ -74,6 +79,9 @@ jobs:
       - name: Summarize browser failures
         if: failure() && steps.browser.outcome == 'failure'
         run: node scripts/report-build-failure.mjs test-results/browser/browser.log
+      - name: Summarize native operation failures
+        if: failure() && steps.native-checks.outcome == 'failure'
+        run: node scripts/report-build-failure.mjs .media-runtime/logs/native-checks.log
       - name: Summarize speech failures
         if: failure()
         run: |
@@ -85,6 +93,7 @@ jobs:
           name: open-media-checks-${{ github.run_id }}
           path: |
             test-results/browser/
+            .media-runtime/logs/native-checks.log
             .speech-runtime/logs/
           if-no-files-found: warn
           retention-days: 14
