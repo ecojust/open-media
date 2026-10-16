@@ -11,7 +11,6 @@ const runtime = join(root, 'src-tauri/resources/media');
 const lockPath = join(root, 'scripts/media-runtime.lock.json');
 const lock = JSON.parse(await readFile(lockPath, 'utf8'));
 const binaryExtension = process.platform === 'win32' ? '.exe' : '';
-const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 const exists = async (path) => { try { await access(path); return true; } catch { return false; } };
 async function sha256(path) {
   const hash = createHash('sha256');
@@ -22,6 +21,27 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, ...options });
   if (result.error || result.status !== 0) throw new Error(`${command} failed: ${result.error?.message ?? result.stderr ?? result.stdout}`);
   return `${result.stdout ?? ''}${result.stderr ?? ''}`;
+}
+let archiveCommand;
+function runArchive(args) {
+  const options = { timeout: 180000 };
+  if (process.platform === 'win32') {
+    if (!archiveCommand) {
+      const candidates = ['tar', join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'usr', 'bin', 'tar.exe')];
+      archiveCommand = candidates.find(command => {
+        const result = spawnSync(command, ['--version'], { encoding: 'utf8', timeout: 10000 });
+        return result.status === 0 && result.stdout.includes('GNU tar');
+      });
+      if (!archiveCommand) throw new Error('Windows source extraction requires GNU tar with xz support. Run the source build commands in the build-tool shell.');
+    }
+    if (archiveCommand !== 'tar') {
+      options.env = { ...process.env };
+      const pathKey = Object.keys(options.env).find(key => key.toLowerCase() === 'path') ?? 'PATH';
+      options.env[pathKey] = `${dirname(archiveCommand)};${options.env[pathKey] ?? ''}`;
+    }
+    args = ['--force-local', ...args.map(value => value.replaceAll('\\', '/'))];
+  }
+  return run(archiveCommand ?? 'tar', args, options);
 }
 async function download(source) {
   const directory = join(cache, 'downloads');
@@ -48,7 +68,8 @@ async function prepare() {
     if (await exists(marker) && (await readFile(marker, 'utf8')).trim() === source.sha256) continue;
     await rm(directory, { recursive: true, force: true });
     await mkdir(directory, { recursive: true });
-    run(tar, ['-xf', archive, '-C', directory, '--strip-components=1']);
+    console.log(`Extracting ${source.id} ${source.version}`);
+    runArchive(['-xf', archive, '-C', directory, '--strip-components=1']);
     await writeFile(marker, `${source.sha256}\n`);
   }
   console.log('Verified media sources are ready.');
@@ -129,7 +150,7 @@ async function sources() {
   }
   await writeFile(join(bundle, 'README.txt'), 'Open Media bundled media tools: complete corresponding source\n\nAll original source archives are included in .media-runtime/downloads.\nNo media sources are patched. See docs/MEDIA_RUNTIME.md for prerequisites.\nRun: node scripts/media-runtime.mjs prepare\nThen: bash scripts/build-media-runtime.sh\n\nThe build scripts and source checksums are included. Each component retains\nits original copyright, license, patent notices, and build instructions.\n');
   await mkdir(dirname(output), { recursive: true });
-  run(tar, ['-czf', output, '-C', stage, 'media-runtime-source']);
+  runArchive(['-czf', output, '-C', stage, 'media-runtime-source']);
   console.log(`Corresponding source: ${output}\nSHA256 ${await sha256(output)}`);
 }
 const command = process.argv[2] ?? 'prepare';

@@ -6,7 +6,7 @@
 
 `scripts/media-runtime.lock.json` 记录每一个媒体组件的版本、下载地址、SHA-256 和许可证。下载后必须通过校验，缓存中的文件校验失败也会终止构建。构建禁用自动探测额外依赖，避免无意链接构建机器上的库。项目不修改这些组件的源码。
 
-工具链要求：Node.js 24、Bash、curl、tar、C/C++ 编译器、Make、Perl、pkg-config；x86 平台建议安装 NASM 以获得汇编优化。macOS 使用系统编译器，最低系统目标为 11.0。Windows 使用 MSYS2 的 MINGW64 环境，安装 `make diffutils perl nasm mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf`；媒体工具为独立静态程序，应用壳使用原生桌面工具链。Linux 可以使用 GCC 构建和测试媒体工具。
+工具链要求：Node.js 24、Bash、curl、tar、C/C++ 编译器、Make、Perl、pkg-config；x86 平台建议安装 NASM 以获得汇编优化。macOS 使用系统编译器，最低系统目标为 11.0。Windows 使用 MSYS2 的 MINGW64 环境，安装 `make diffutils perl nasm mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf`，并确保 GNU tar 和 xz 可用；源码命令应在该构建环境的终端运行。脚本也可查找已安装的 GNU tar，统一磁盘路径并限制解包时间。媒体工具为独立静态程序，应用壳使用原生桌面工具链。Linux 可以使用 GCC 构建和测试媒体工具。
 
 ```sh
 node scripts/media-runtime.mjs prepare
@@ -32,7 +32,7 @@ node scripts/media-runtime.mjs sources --output open-media-runtime-source.tar.gz
 
 源码附件包含锁定的全部原始源码归档、构建脚本、版本和哈希清单、构建说明、项目许可与第三方声明。解压附件后可以直接运行上述构建命令，准备阶段优先读取附件中已提供的源码，无需重新下载媒体组件。每个原始源码归档保留版权、许可、专利声明及各自的构建说明。系统库和编译器使用目标操作系统工具链；它们不作为额外媒体库打包。
 
-流水线分别上传 Windows x64、macOS ARM64、macOS x64 安装包及完整对应源码。发布流程核对相同提交、全部检查结果、附件 SHA-256 和构建信息，缺少对应源码时禁止发布。运行时缓存以平台、源码锁、下载脚本和构建脚本的内容哈希区分。
+流水线分别上传 Windows x64、macOS ARM64、macOS x64 安装包及完整对应源码。发布流程核对相同提交、全部检查结果、附件 SHA-256 和构建信息，缺少对应源码时禁止发布。运行时缓存以平台、源码锁、下载脚本和构建脚本的内容哈希区分。恢复同平台的旧缓存时，必须先通过当前验证程序，核对源码锁、实际编译脚本、二进制哈希和平台，并完成真实编解码及像素回归；未通过则重新构建。应用安装包始终从本次提交生成。
 
 ## 维护要求
 

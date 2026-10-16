@@ -123,15 +123,26 @@ jobs:
             src-tauri/resources/media
             .media-runtime/downloads
           key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh') }}
+          restore-keys: media-runtime-v1-${{ matrix.platform }}-
+      - name: Validate restored media runtime against current sources
+        id: media-restored
+        run: |
+          mkdir -p .media-runtime/logs
+          if [[ -f src-tauri/resources/media/runtime.json ]] && node scripts/media-runtime.mjs verify 2>&1 | tee .media-runtime/logs/restore.log; then
+            echo 'usable=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'usable=false' >> "$GITHUB_OUTPUT"
+            echo 'No valid restored runtime; building from the verified source archives.'
+          fi
       - name: Restore verified source downloads
-        if: steps.media-cache.outputs.cache-hit != 'true'
+        if: steps.media-restored.outputs.usable != 'true'
         uses: actions/cache/restore@v4
         with:
           path: .media-runtime/downloads
           key: media-source-${{ hashFiles('scripts/media-runtime.lock.json') }}
           enableCrossOsArchive: true
       - name: Install media build tools on Windows
-        if: runner.os == 'Windows' && steps.media-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && steps.media-restored.outputs.usable != 'true'
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -142,27 +153,28 @@ jobs:
             mingw-w64-x86_64-gcc
             mingw-w64-x86_64-pkgconf
       - name: Install media build tools on macOS
-        if: runner.os == 'macOS' && steps.media-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && steps.media-restored.outputs.usable != 'true'
         run: brew install nasm pkg-config
       - name: Prepare verified media sources
         id: media-prepare
-        if: steps.media-cache.outputs.cache-hit != 'true'
+        if: steps.media-restored.outputs.usable != 'true'
         run: |
           mkdir -p .media-runtime/logs
           node scripts/media-runtime.mjs prepare 2>&1 | tee .media-runtime/logs/prepare.log
       - name: Build media tools on Windows
         id: media-windows
-        if: runner.os == 'Windows' && steps.media-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'Windows' && steps.media-restored.outputs.usable != 'true'
         shell: msys2 {0}
         run: |
           set -o pipefail
           bash scripts/build-media-runtime.sh 2>&1 | tee .media-runtime/logs/build.log
       - name: Build media tools on macOS
         id: media-macos
-        if: runner.os == 'macOS' && steps.media-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && steps.media-restored.outputs.usable != 'true'
         run: bash scripts/build-media-runtime.sh 2>&1 | tee .media-runtime/logs/build.log
       - name: Verify the bundled executables
         id: media-verify
+        if: steps.media-restored.outputs.usable != 'true'
         run: |
           mkdir -p .media-runtime/logs
           node scripts/media-runtime.mjs verify 2>&1 | tee .media-runtime/logs/verify.log
