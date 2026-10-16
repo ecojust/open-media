@@ -26,9 +26,28 @@ function run(command, args, options = {}) {
   if (result.error || result.status !== 0) throw new Error(`${command} failed (${result.status}): ${result.error?.message ?? ''}\n${result.stderr ?? ''}\n${result.stdout ?? ''}`);
   return `${result.stdout ?? ''}${result.stderr ?? ''}`;
 }
+let archiveTool;
 function archive(args) {
-  // System archive tools handle both .tar.bz2 and .tar.gz on supported hosts.
-  return run('tar', args, { timeout: 600000 });
+  const options = { timeout: 600000 };
+  if (process.platform !== 'win32') return run('tar', args, options);
+  if (!archiveTool) {
+    const candidates = ['tar', join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'usr', 'bin', 'tar.exe')];
+    const command = candidates.find(candidate => {
+      const result = spawnSync(candidate, ['--version'], { encoding: 'utf8', timeout: 10000 });
+      return result.status === 0 && result.stdout.includes('GNU tar');
+    });
+    archiveTool = { command: command ?? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), gnu: !!command };
+  }
+  // A GNU archive tool treats D: as a remote host unless explicitly disabled.
+  if (archiveTool.gnu) {
+    args = ['--force-local', ...args.map(value => value.replaceAll('\\', '/'))];
+    if (archiveTool.command !== 'tar') {
+      options.env = { ...process.env };
+      const key = Object.keys(options.env).find(name => name.toLowerCase() === 'path') ?? 'PATH';
+      options.env[key] = `${dirname(archiveTool.command)};${options.env[key] ?? ''}`;
+    }
+  }
+  return run(archiveTool.command, args, options);
 }
 async function download(source) {
   const directory = join(cache, 'downloads');
@@ -117,7 +136,7 @@ async function prepare() {
       `/Fe:${join(output, executable)}`, `/Fo:${join(build, 'runner.obj')}`, join(source, 'lib/sherpa-onnx-c-api.lib'),
       '/link', '/MANIFEST:EMBED', `/MANIFESTINPUT:${join(root, 'scripts/speech-runtime-runner.manifest')}`], { cwd: build });
   } else {
-    run(process.env.CC ?? 'cc', ['-O2', '-std=c11', '-I', join(source, 'include'), runner,
+    run(process.env.CC ?? 'cc', ['-O2', '-std=c11', ...(process.platform === 'darwin' ? ['-mmacosx-version-min=13.0'] : []), '-I', join(source, 'include'), runner,
       '-L', join(source, 'lib'), '-lsherpa-onnx-c-api',
       `-Wl,-rpath,${process.platform === 'darwin' ? '@executable_path' : '$ORIGIN'}/../lib`,
       '-o', join(output, executable)], { cwd: build });
@@ -164,6 +183,23 @@ function inspectWave(bytes) {
   if (Math.sqrt(energy / (pcm.length / 2)) < 30 || peak < 500) throw new Error('Generated speech contains no audible samples.');
   return { duration: pcm.length / 48000, sha256: createHash('sha256').update(pcm).digest('hex') };
 }
+function verifyMacBinary(bytes, path) {
+  if (bytes.length < 32 || bytes.readUInt32LE(0) !== 0xfeedfacf) throw new Error(`Unexpected speech executable format: ${path}`);
+  const expectedCpu = process.arch === 'arm64' ? 0x0100000c : 0x01000007;
+  if (bytes.readUInt32LE(4) !== expectedCpu) throw new Error(`Speech executable architecture mismatch: ${path}`);
+  let offset = 32, minimum;
+  for (let index = 0; index < bytes.readUInt32LE(16); index++) {
+    if (offset + 8 > bytes.length) throw new Error(`Truncated executable load commands: ${path}`);
+    const command = bytes.readUInt32LE(offset), size = bytes.readUInt32LE(offset + 4);
+    if (size < 8 || offset + size > bytes.length) throw new Error(`Invalid executable load command: ${path}`);
+    if (command === 0x32 || command === 0x24) {
+      if (size < (command === 0x32 ? 24 : 16)) throw new Error(`Invalid executable minimum system version: ${path}`);
+      minimum = bytes.readUInt32LE(offset + (command === 0x32 ? 12 : 8));
+    }
+    offset += size;
+  }
+  if (!minimum || minimum > 0x000d0000) throw new Error(`Speech executable requires a system newer than macOS 13.0: ${path}`);
+}
 async function verify() {
   await verifyLicenses();
   const inventory = JSON.parse(await readFile(join(output, 'runtime.json'), 'utf8'));
@@ -179,6 +215,7 @@ async function verify() {
     const location = safePath(item.kind === 'binary' ? executableRoot : output, item.path);
     if (!await exists(location)) throw new Error(`Missing speech resource: ${item.path}`);
     if (!(packaged && process.platform === 'darwin' && item.kind === 'binary') && await sha256(location) !== item.sha256) throw new Error(`Speech resource checksum mismatch: ${item.path}`);
+    if (process.platform === 'darwin' && item.kind === 'binary') verifyMacBinary(await readFile(location), item.path);
   }
   const manifest = JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'));
   if (manifest.voices.length !== lock.voices.length || JSON.stringify(manifest.voices) !== JSON.stringify(lock.voices)) throw new Error('Bundled voice mapping changed.');

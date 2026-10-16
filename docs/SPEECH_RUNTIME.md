@@ -37,6 +37,8 @@ runtime/lib/           macOS、Linux 动态库
 
 macOS 安装包将 `runtime/` 放入 `Contents/Helpers/speech/runtime/`，其余公共资源保留在 `Contents/Resources/speech/`。可执行文件保留相对动态库搜索路径 `@executable_path/../lib`。Windows 动态库与可执行文件放在同一目录。Linux 使用 `$ORIGIN/../lib`。
 
+macOS 独立进程显式以 13.0 为最低系统版本编译，避免构建机器的系统版本意外提高安装要求。验证会读取独立进程及所有动态库的 Mach-O 架构和最低系统版本，拒绝与当前架构不符或要求高于 13.0 的组件。
+
 macOS 安装后验证：
 
 ```sh

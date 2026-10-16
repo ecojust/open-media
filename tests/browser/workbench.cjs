@@ -219,7 +219,7 @@ async function main() {
     await page.getByTestId('nav-edit').click()
     await expect(page.locator('.recording-dot')).toBeVisible()
     await page.getByTitle('新建项目', { exact: true }).click()
-    await expect(page.locator('.app-error')).toContainText('请先完成录制')
+    await expect(page.locator('.app-error')).toContainText('请先完成或取消录制、配音、转换及导出，再切换项目。')
     await expect(page.locator('.project-title')).toHaveText('尚未自动保存')
     await page.getByRole('button', { name: '关闭提示', exact: true }).click()
     await page.getByTestId('nav-record').click()
