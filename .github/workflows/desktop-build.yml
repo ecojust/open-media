@@ -3,7 +3,7 @@ name: Build Open Media desktop
 on:
   workflow_dispatch:
   push:
-    branches: [main, master, 'verify/**']
+    branches: [main, master]
   pull_request:
 
 permissions:
@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: desktop-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   checks:
