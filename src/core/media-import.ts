@@ -123,12 +123,32 @@ export function canPreviewMedia(asset: MediaAsset, timeoutMs = 12000): Promise<b
   })
 }
 
-export async function ensureMediaPreview(asset: MediaAsset, makePreview: (asset: MediaAsset) => Promise<string>): Promise<MediaAsset> {
+export type MediaPreviewFormat = 'mp4' | 'webm' | 'png' | 'wav'
+
+export function mediaPreviewFormats(kind: AssetKind): MediaPreviewFormat[] {
+  if (kind === 'image') return ['png']
+  if (kind === 'audio') return ['wav']
+  const player = document.createElement('video')
+  const mp4 = player.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')
+  const webm = player.canPlayType('video/webm; codecs="vp8, opus"')
+  return !mp4 && webm ? ['webm', 'mp4'] : ['mp4', 'webm']
+}
+
+export async function ensureMediaPreview(asset: MediaAsset, makePreview: (asset: MediaAsset, format: MediaPreviewFormat) => Promise<string>): Promise<MediaAsset> {
   if (await canPreviewMedia(asset)) return asset
-  const url = await makePreview(asset)
-  const prepared: MediaAsset = { ...asset, sourceUrl: asset.sourceUrl || asset.url, url }
-  if (!await canPreviewMedia(prepared)) throw new Error(`「${asset.name}」已生成兼容预览，但当前环境仍无法解码。原始素材未修改。`)
-  return prepared
+  let failure = ''
+  for (const format of mediaPreviewFormats(asset.kind)) {
+    try {
+      const url = await makePreview(asset, format)
+      const prepared: MediaAsset = { ...asset, sourceUrl: asset.sourceUrl || asset.url, url }
+      if (await canPreviewMedia(prepared)) return prepared
+      if (url.startsWith('blob:') && url !== asset.url && url !== asset.sourceUrl) URL.revokeObjectURL(url)
+      failure = `${format.toUpperCase()} 预览无法解码。`
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error)
+    }
+  }
+  throw new Error(`「${asset.name}」无法生成当前环境可播放的兼容预览。${failure}原始素材未修改。`)
 }
 
 export function revokeMediaAsset(asset: MediaAsset): void {

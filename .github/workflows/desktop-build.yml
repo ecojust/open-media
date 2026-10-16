@@ -34,9 +34,17 @@ jobs:
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
+      - name: Browser interaction checks
+        id: browser
+        run: |
+          mkdir -p test-results/browser
+          set -o pipefail
+          npm run test:browser 2>&1 | tee test-results/browser/browser.log
         env:
           BROWSER_ARTIFACTS: test-results/browser
+      - name: Summarize browser failures
+        if: failure() && steps.browser.outcome == 'failure'
+        run: node scripts/report-build-failure.mjs test-results/browser/browser.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -57,6 +65,7 @@ jobs:
         with:
           path: .media-runtime/downloads
           key: media-source-${{ hashFiles('scripts/media-runtime.lock.json') }}
+          enableCrossOsArchive: true
       - name: Package complete corresponding source
         run: |
           mkdir -p source-artifacts
@@ -114,6 +123,13 @@ jobs:
             src-tauri/resources/media
             .media-runtime/downloads
           key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh') }}
+      - name: Restore verified source downloads
+        if: steps.media-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .media-runtime/downloads
+          key: media-source-${{ hashFiles('scripts/media-runtime.lock.json') }}
+          enableCrossOsArchive: true
       - name: Install media build tools on Windows
         if: runner.os == 'Windows' && steps.media-cache.outputs.cache-hit != 'true'
         uses: msys2/setup-msys2@v2
@@ -129,17 +145,27 @@ jobs:
         if: runner.os == 'macOS' && steps.media-cache.outputs.cache-hit != 'true'
         run: brew install nasm pkg-config
       - name: Prepare verified media sources
+        id: media-prepare
         if: steps.media-cache.outputs.cache-hit != 'true'
-        run: node scripts/media-runtime.mjs prepare
+        run: |
+          mkdir -p .media-runtime/logs
+          node scripts/media-runtime.mjs prepare 2>&1 | tee .media-runtime/logs/prepare.log
       - name: Build media tools on Windows
+        id: media-windows
         if: runner.os == 'Windows' && steps.media-cache.outputs.cache-hit != 'true'
         shell: msys2 {0}
-        run: bash scripts/build-media-runtime.sh
+        run: |
+          set -o pipefail
+          bash scripts/build-media-runtime.sh 2>&1 | tee .media-runtime/logs/build.log
       - name: Build media tools on macOS
+        id: media-macos
         if: runner.os == 'macOS' && steps.media-cache.outputs.cache-hit != 'true'
-        run: bash scripts/build-media-runtime.sh
+        run: bash scripts/build-media-runtime.sh 2>&1 | tee .media-runtime/logs/build.log
       - name: Verify the bundled executables
-        run: node scripts/media-runtime.mjs verify
+        id: media-verify
+        run: |
+          mkdir -p .media-runtime/logs
+          node scripts/media-runtime.mjs verify 2>&1 | tee .media-runtime/logs/verify.log
       - name: Save verified media runtime independently of application packaging
         if: steps.media-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -153,18 +179,35 @@ jobs:
       - name: Build application frontend
         run: npm run build
       - name: Verify native operations with packaged runtime
+        id: native-tests
         env:
           OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
           OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib 2>&1 | tee .media-runtime/logs/native.log
       - name: Package application
-        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
+        id: native-package
+        run: npx tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked 2>&1 | tee .media-runtime/logs/package.log
       - name: Collect installers and provenance
         env:
           MEDIA_TARGET: ${{ matrix.target }}
           MEDIA_PLATFORM: ${{ matrix.platform }}
           MEDIA_COMMIT: ${{ github.sha }}
         run: node scripts/collect-desktop.mjs
+      - name: Summarize media build failures
+        if: failure()
+        env:
+          MEDIA_PREPARE_OUTCOME: ${{ steps.media-prepare.outcome }}
+          MEDIA_WINDOWS_OUTCOME: ${{ steps.media-windows.outcome }}
+          MEDIA_MACOS_OUTCOME: ${{ steps.media-macos.outcome }}
+          MEDIA_VERIFY_OUTCOME: ${{ steps.media-verify.outcome }}
+          NATIVE_TEST_OUTCOME: ${{ steps.native-tests.outcome }}
+          NATIVE_PACKAGE_OUTCOME: ${{ steps.native-package.outcome }}
+        run: |
+          if [[ "$MEDIA_PREPARE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/prepare.log; fi
+          if [[ "$MEDIA_WINDOWS_OUTCOME" == failure || "$MEDIA_MACOS_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/build.log; fi
+          if [[ "$MEDIA_VERIFY_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/verify.log; fi
+          if [[ "$NATIVE_TEST_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/native.log; fi
+          if [[ "$NATIVE_PACKAGE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/package.log; fi
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

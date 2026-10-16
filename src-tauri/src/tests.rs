@@ -545,3 +545,39 @@ fn portrait_rotation_reports_display_dimensions() {
         );
     }
 }
+
+#[test]
+fn shutdown_waits_for_encoder_cancellation_without_replacing_output() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let jobs = JobManager::default();
+    let target = temp.path().join("shutdown.mp4");
+    fs::write(&target, b"existing-output").unwrap();
+    let plan = RenderPlan {
+        args: vec![
+            "-f".into(),
+            "lavfi".into(),
+            "-i".into(),
+            "testsrc2=s=640x480:r=30:d=300".into(),
+            "-c:v".into(),
+            "libx264".into(),
+            "-preset".into(),
+            "slow".into(),
+        ],
+        duration: 300.0,
+        format: "mp4".into(),
+        workspace: tempfile::tempdir().unwrap(),
+    };
+    let job = jobs.begin(&rt, plan, target.clone()).unwrap();
+    jobs.shutdown();
+    let final_job = jobs
+        .list()
+        .into_iter()
+        .find(|entry| entry.id == job.id)
+        .unwrap();
+    assert_eq!(
+        final_job.state, "cancelled",
+        "shutdown must finish cancellation before returning"
+    );
+    assert_eq!(fs::read(target).unwrap(), b"existing-output");
+}

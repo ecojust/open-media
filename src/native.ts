@@ -1,5 +1,5 @@
 import type { MediaAsset, Project } from './core/types'
-import { ensureMediaPreview } from './core/media-import'
+import { ensureMediaPreview, type MediaPreviewFormat } from './core/media-import'
 
 export interface RuntimeStatus { ready: boolean; version?: string; source?: string; error?: string }
 export interface ExportConfig { format: 'mp4' | 'webm' | 'mov' | 'gif'; width: number; height: number; fps: number; quality: 'draft' | 'balanced' | 'high' }
@@ -37,8 +37,8 @@ export async function pickMediaAssets(): Promise<MediaAsset[]> {
 export async function importBlobAsset(bytes: Uint8Array, name: string): Promise<MediaAsset> {
   return assetUrl(await call('import_blob_asset', { name, bytes: Array.from(bytes) }))
 }
-export async function createMediaPreview(asset: MediaAsset): Promise<string> {
-  const result = await call<{ path: string }>('create_media_preview', { asset })
+export async function createMediaPreview(asset: MediaAsset, format?: MediaPreviewFormat): Promise<string> {
+  const result = await call<{ path: string }>('create_media_preview', { asset, format })
   const { convertFileSrc } = await import('@tauri-apps/api/core')
   return convertFileSrc(result.path)
 }

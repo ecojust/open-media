@@ -440,6 +440,15 @@ impl JobManager {
             entry.cancelled.store(true, Ordering::SeqCst);
         }
     }
+    pub fn shutdown(&self) {
+        self.cancel_all();
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while self.list().iter().any(|job| job.state == "running")
+            && std::time::Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(30));
+        }
+    }
     pub fn begin(&self, runtime: &Runtime, plan: RenderPlan, output: PathBuf) -> Result<MediaJob> {
         if self
             .jobs

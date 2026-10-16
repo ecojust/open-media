@@ -130,10 +130,14 @@ mod desktop {
     #[tauri::command]
     pub async fn create_media_preview(
         asset: Value,
+        format: Option<String>,
         state: State<'_, MediaState>,
     ) -> engine::Result<PreviewResult> {
         let state = state.inner().clone();
-        blocking(move || preview::create_preview(&state.store, &state.runtime()?, &asset)).await
+        blocking(move || {
+            preview::create_preview(&state.store, &state.runtime()?, &asset, format.as_deref())
+        })
+        .await
     }
     #[tauri::command]
     pub async fn begin_media_job(

@@ -13,14 +13,16 @@ pub fn create_preview(
     store: &MediaStore,
     runtime: &Runtime,
     asset: &Value,
+    format: Option<&str>,
 ) -> Result<PreviewResult> {
     let original = store.authorized_path(asset)?;
     let kind = asset["kind"].as_str().ok_or("素材类型无效。")?;
-    let extension = match kind {
-        "image" => "png",
-        "video" => "mp4",
-        "audio" => "wav",
-        _ => return Err("不支持这个素材类型的预览。".into()),
+    let extension = match (kind, format) {
+        ("image", None | Some("png")) => "png",
+        ("video", None | Some("mp4")) => "mp4",
+        ("video", Some("webm")) => "webm",
+        ("audio", None | Some("wav")) => "wav",
+        _ => return Err("不支持这个素材类型的预览格式。".into()),
     };
     let directory = store.root.join("preview");
     fs::create_dir_all(&directory).map_err(|e| format!("无法创建预览目录：{e}"))?;
@@ -73,9 +75,45 @@ pub fn create_preview(
             command.args([
                 "-map", "0:V:0", "-map", "0:a:0?", "-sn", "-dn",
                 "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "48000", "-movflags", "+faststart", "-f", "mp4",
+                "-pix_fmt", "yuv420p", "-ac", "2", "-ar", "48000",
             ]);
+            if extension == "webm" {
+                command.args([
+                    "-c:v",
+                    "libvpx",
+                    "-deadline",
+                    "realtime",
+                    "-cpu-used",
+                    "5",
+                    "-crf",
+                    "16",
+                    "-b:v",
+                    "2500k",
+                    "-c:a",
+                    "libopus",
+                    "-b:a",
+                    "128k",
+                    "-f",
+                    "webm",
+                ]);
+            } else {
+                command.args([
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "22",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "160k",
+                    "-movflags",
+                    "+faststart",
+                    "-f",
+                    "mp4",
+                ]);
+            }
         }
         "audio" => {
             command.args([
@@ -228,7 +266,7 @@ mod tests {
             let asset = store.import(&runtime, &path, None).unwrap();
             let original_bytes = fs::read(&asset.native_path).unwrap();
             let value = serde_json::to_value(&asset).unwrap();
-            let preview = create_preview(&store, &runtime, &value).unwrap();
+            let preview = create_preview(&store, &runtime, &value, None).unwrap();
             assert_ne!(preview.path, asset.native_path);
             assert_eq!(fs::read(&asset.native_path).unwrap(), original_bytes);
             assert!(PathBuf::from(&preview.path).starts_with(&store.root));
@@ -250,16 +288,27 @@ mod tests {
                     .parse::<f64>()
                     .unwrap();
                 assert!((duration - asset.duration).abs() < 0.15);
+                let webm = create_preview(&store, &runtime, &value, Some("webm")).unwrap();
+                assert_ne!(webm.path, preview.path);
+                let fallback = metadata(&runtime, Path::new(&webm.path));
+                assert_eq!(fallback["streams"][0]["codec_name"], "vp8");
+                assert!(fallback["streams"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|stream| stream["codec_name"] == "opus"));
+                assert_eq!(fs::read(&asset.native_path).unwrap(), original_bytes);
             }
             let modified = fs::metadata(&preview.path).unwrap().modified().unwrap();
             assert_eq!(
-                create_preview(&store, &runtime, &value).unwrap().path,
+                create_preview(&store, &runtime, &value, None).unwrap().path,
                 preview.path
             );
             assert_eq!(
                 fs::metadata(&preview.path).unwrap().modified().unwrap(),
                 modified
             );
+            assert!(create_preview(&store, &runtime, &value, Some("invalid")).is_err());
         }
     }
 }

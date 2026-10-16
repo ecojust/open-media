@@ -19,8 +19,13 @@ fn main() {
             Some("import") => store
                 .import(&runtime, Path::new(request["path"].as_str().unwrap()), None)
                 .and_then(|asset| serde_json::to_value(asset).map_err(|error| error.to_string())),
-            Some("preview") => preview::create_preview(&store, &runtime, &request["asset"])
-                .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
+            Some("preview") => preview::create_preview(
+                &store,
+                &runtime,
+                &request["asset"],
+                request["format"].as_str(),
+            )
+            .and_then(|value| serde_json::to_value(value).map_err(|error| error.to_string())),
             Some("quit") => break,
             _ => Err("unknown driver command".into()),
         };
