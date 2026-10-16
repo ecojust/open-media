@@ -489,9 +489,13 @@ mod desktop {
         app: tauri::AppHandle,
         state: State<'_, Closing>,
     ) -> engine::Result<()> {
-        state.0.store(true, Ordering::SeqCst);
-        if let Some(window) = app.get_webview_window("main") {
-            window.close().map_err(|e| e.to_string())?;
+        if state.0.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        let handle = app.clone();
+        if let Err(error) = app.run_on_main_thread(move || handle.exit(0)) {
+            state.0.store(false, Ordering::SeqCst);
+            return Err(error.to_string());
         }
         Ok(())
     }

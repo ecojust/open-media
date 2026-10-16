@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import Icon from './components/Icon.vue'
 import HeaderControls from './components/HeaderControls.vue'
+import EditorDialog from './components/EditorDialog.vue'
 import ScreenshotPicker from './components/ScreenshotPicker.vue'
 import { DEFAULT_SCREENSHOT_SHORTCUT, matchesScreenshotShortcut, screenshotErrorMessage, screenshotShortcutValidationError } from './core/screenshot'
 import { buildInfo } from './core/build-info'
@@ -350,19 +351,19 @@ async function removeRecent(item: ProjectSummary) {
   if (choice !== 'remove') return
   try { if (item.id === project.value.id) { draftGeneration++; clearTimeout(draftTimer) }; await saveQueue; await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) draftState.value = 'idle' } catch (cause) { fail(cause) }
 }
-async function save(saveAs = false) {
-  if (busy.value || switching.value || booting.value || speechWorking.value) return
+async function save(saveAs = false, closing = false): Promise<boolean> {
+  if (busy.value || switching.value && !closing || booting.value || speechWorking.value) return false
   busy.value = '正在打包项目与素材…'; error.value = ''
   const snapshot = cloneProject(project.value), key = contentKey(snapshot)
   try {
     const name = `${snapshot.title.replace(/[\\/:*?"<>|]/g, '-') || '媒体项目'}.omedia`
     const browserTarget = native ? undefined : await prepareBrowserProjectSave(name, saveAs ? undefined : browserProjectTarget)
-    if (browserTarget === null) return
+    if (browserTarget === null) return false
     const blob = await exportProjectFile(snapshot, { blobs, onProgress: (done, total) => { busy.value = `正在打包项目 ${Math.round(done / Math.max(1, total) * 100)}%` } })
     let downloaded = false
     if (native) {
       const target = await saveProjectFile(name, new Uint8Array(await blob.arrayBuffer()), saveAs ? undefined : nativeProjectTarget?.token)
-      if (!target) return
+      if (!target) return false
       nativeProjectTarget = target; lastSaved.value = target.path
     } else if (browserTarget) {
       await writeBrowserProjectFile(browserTarget, blob)
@@ -371,28 +372,62 @@ async function save(saveAs = false) {
     if (project.value.id === snapshot.id) cleanKey.value = key
     await persist()
     announce(downloaded ? '已下载项目副本；当前浏览器不支持直接覆盖文件。' : `${saveAs ? '项目已另存为' : '项目已保存'}：${lastSaved.value}`)
-  } catch (cause) { fail(cause) } finally { busy.value = '' }
+    return true
+  } catch (cause) { fail(cause); return false } finally { busy.value = '' }
 }
 async function rename() { renameValue.value = project.value.title; renaming.value = true; await nextTick(); renameInput.value?.focus(); renameInput.value?.select() }
 function finishRename() { if (!renaming.value) return; renaming.value = false; const title = renameValue.value.trim().slice(0, 300); if (title) commit({ ...project.value, title }, '项目已重命名') }
 async function pollJobs() { if (!native) return; try { jobs.value = await getMediaJobs() } catch {} ; jobsTimer = setTimeout(() => void pollJobs(), 1000) }
 async function cancelJob(id: string) { try { await cancelMediaJob(id); jobs.value = await getMediaJobs() } catch (cause) { fail(cause) } }
 async function nativeClose() {
+  if (allowClose || switching.value || question.value) return
+  if (busy.value || booting.value) { fail('请等待当前操作完成，再关闭应用。'); return }
   if (screenshotBusy.value) { fail('请先完成或取消截屏，再关闭应用。'); return }
   if (speechWorking.value) { view.value = 'edit'; fail('请先完成或取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
   if (browserExporting.value || runningJobs.value) { jobsOpen.value = native; fail('请等待导出完成，或先取消正在处理的任务。'); return }
-  await changeProject(async () => { allowClose = true; await closeNativeWindow() })
+  if (pendingMedia.value || imageConverting.value || videoConverting.value || gifConverting.value) { fail('请先完成或取消素材导入及媒体转换，再关闭应用。'); return }
+  switching.value = true
+  const suspendedDialogs = [...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].map(element => ({ element, inert: element.inert }))
+  try {
+    const focused = document.activeElement
+    if (focused instanceof HTMLElement && focused.matches('input,textarea,[contenteditable="true"]')) focused.blur()
+    finishRename()
+    for (const { element } of suspendedDialogs) element.inert = true
+    await nextTick()
+    draftGeneration++; clearTimeout(draftTimer)
+    await saveQueue
+    jobs.value = await getMediaJobs()
+    if (runningJobs.value) { jobsOpen.value = true; fail('请等待导出完成，或先取消正在处理的任务。'); return }
+    if (dirty.value) {
+      const choice = await ask({
+        title: '关闭应用',
+        text: `“${project.value.title}”有尚未保存到项目文件的修改。全部关闭将退出应用，不再保存当前修改；已经保存的本地草稿仍会保留。`,
+        choices: [{ id: 'cancel', label: '取消' }, { id: 'discard', label: '全部关闭' }, { id: 'save', label: '保存并全部关闭', primary: true }],
+      })
+      if (choice === 'cancel') return
+      if (choice === 'save' && (!await save(false, true) || dirty.value)) return
+    }
+    allowClose = true
+    try { await closeNativeWindow() } catch (cause) { allowClose = false; throw cause }
+  } catch (cause) { fail(cause) }
+  finally {
+    if (!allowClose) {
+      switching.value = false
+      for (const { element, inert } of suspendedDialogs) element.inert = inert
+      if (autoSave.value && draftState.value === 'pending') scheduleDraft()
+    }
+  }
 }
 const hasDialog = computed(() => Boolean(question.value || exportOpen.value || jobsOpen.value))
 let previousFocus: HTMLElement | null = null
-watch(hasDialog, async open => { if (open) { previousFocus = document.activeElement as HTMLElement; await nextTick(); (document.querySelector('[role="dialog"][aria-modal="true"] button, [role="dialog"][aria-modal="true"] input') as HTMLElement | null)?.focus() } else previousFocus?.focus() })
+watch(hasDialog, async open => { if (open) { previousFocus = document.activeElement as HTMLElement; await nextTick(); ((question.value ? document.querySelector('.app-confirm button') : document.querySelector('[role="dialog"][aria-modal="true"] button, [role="dialog"][aria-modal="true"] input')) as HTMLElement | null)?.focus() } else previousFocus?.focus() })
 function keyboard(event: KeyboardEvent) {
   if (event.defaultPrevented || !hasDialog.value && document.querySelector('[role="dialog"][aria-modal="true"]')) return
   if (hasDialog.value) {
     if (event.key === 'Escape') { event.preventDefault(); if (question.value) answer('cancel'); else if (jobsOpen.value) jobsOpen.value = false; else if (!browserExporting.value) exportOpen.value = false }
     if (event.key === 'Tab') {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"]'), items = dialog ? [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]')].filter(item => item.offsetParent !== null) : []
+      const dialog = question.value ? document.querySelector('.app-confirm') : document.querySelector('[role="dialog"][aria-modal="true"]'), items = dialog ? [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]')].filter(item => item.offsetParent !== null) : []
       const first = items[0], last = items.at(-1)
       if (first && event.shiftKey && (document.activeElement === first || !dialog?.contains(document.activeElement))) { event.preventDefault(); last?.focus() }
       else if (last && !event.shiftKey && (document.activeElement === last || !dialog?.contains(document.activeElement))) { event.preventDefault(); first?.focus() }
@@ -466,7 +501,13 @@ onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screensh
     <input ref="projectInput" class="sr-only" type="file" accept=".omedia" data-testid="project-input" @change="openProject(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value=''"/>
     <ScreenshotPicker ref="screenshotPicker"/>
     <ExportPanel :open="exportOpen" :project="project" :native="native" @close="exportOpen=false" @status="announce" @busy="browserExporting=$event"/>
-    <div v-if="question" class="modal-shade" @click.self="answer('cancel')"><section class="dialog confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><header><strong id="confirm-title">{{ question.title }}</strong></header><div class="dialog-content"><p>{{ question.text }}</p></div><footer><button v-for="choice in question.choices" :key="choice.id" :class="{primary:choice.primary}" @click="answer(choice.id)">{{ choice.label }}</button></footer></section></div>
+    <EditorDialog :open="!!question" :title="question?.title || '确认操作'" icon="alert" class="app-confirm" @close="answer('cancel')"><div class="dialog-content"><p>{{ question?.text }}</p></div><template #footer><div class="confirmation-actions"><button v-for="choice in question?.choices" :key="choice.id" :class="{primary:choice.primary}" @click="answer(choice.id)">{{ choice.label }}</button></div></template></EditorDialog>
     <div v-if="jobsOpen" class="modal-shade" @click.self="jobsOpen=false"><section class="dialog jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="jobs-title"><header><span><Icon name="layers"/><strong id="jobs-title">处理任务</strong></span><button class="icon-button" aria-label="关闭任务" @click="jobsOpen=false"><Icon name="close"/></button></header><div class="dialog-content"><p v-if="!jobs.length" class="muted">还没有处理任务。</p><article v-for="job in [...jobs].reverse()" :key="job.id" class="job-item"><div><strong>{{ job.name }}</strong><span>{{ ({running:'正在处理',completed:'已完成',failed:'失败',cancelled:'已取消'})[job.state] }}</span></div><div v-if="job.state==='running'" class="progress-track"><i :style="{width:`${job.progress*100}%`}"/></div><p v-if="job.outputPath">{{ job.outputPath }}</p><p v-if="job.error" class="error-message">{{ job.error }}</p><button v-if="job.state==='running'" @click="cancelJob(job.id)">取消任务</button></article></div><footer><button @click="jobsOpen=false">关闭</button></footer></section></div>
   </div>
 </template>
+
+<style scoped>
+.app-confirm{--ed-border:var(--ui-line);--ed-panel:var(--ui-surface);--ed-text:var(--ui-text);--ed-accent:var(--ui-accent);--ed-muted:var(--ui-muted);--ed-bg:var(--ui-hover)}
+.confirmation-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.confirmation-actions button{font-size:12px}
+</style>
