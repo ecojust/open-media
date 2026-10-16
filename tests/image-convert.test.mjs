@@ -36,4 +36,6 @@ test('aspect constraints and rotation preserve a bounded output size without uni
 test('download names preserve readable stems and remove file path separators', () => {
   assert.equal(convertedImageName('项目.示意图.png', 'jpeg'), '项目.示意图.jpg')
   assert.equal(convertedImageName('../素材\\图.svg', 'bmp'), '.._素材_图.bmp')
+  assert.equal(convertedImageName('透明图.png', 'ico'), '透明图.ico')
+  assert.equal(convertedImageName('透明图.png', 'tiff'), '透明图.tiff')
 })

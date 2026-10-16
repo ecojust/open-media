@@ -9,14 +9,26 @@ async function mountEditor(page, baseURL) {
   await page.goto(`${baseURL}/clip-audio-test`)
   await page.evaluate(async () => {
     const { createProject, createClip, createTrack, validateProject } = await import('/src/core/project.ts')
-    const outputs = [], media = new Set(), mediaEvents = new WeakMap()
+    const outputs = [], media = new Set(), mediaEvents = new WeakMap(), mediaWrites = new WeakMap()
+    for (const key of ['currentTime', 'playbackRate']) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, key)
+      Object.defineProperty(HTMLMediaElement.prototype, key, { ...descriptor, set(value) {
+        const writes = mediaWrites.get(this) || { currentTime: 0, playbackRate: 0 }
+        writes[key]++; mediaWrites.set(this, writes)
+        return descriptor.set.call(this, value)
+      } })
+    }
     const connect = AudioNode.prototype.connect
     AudioNode.prototype.connect = function (destination, ...args) {
       const result = connect.call(this, destination, ...args)
       if (destination instanceof AudioDestinationNode) {
         const analyser = this.context.createAnalyser(); analyser.fftSize = 4096
-        connect.call(this, analyser)
-        outputs.push({ context: this.context, analyser })
+        const recording = this.context.createMediaStreamDestination()
+        // Keep recording silence after the media decoder has stopped.
+        const clock = this.context.createConstantSource(); clock.offset.value = 0
+        connect.call(clock, recording); clock.start()
+        connect.call(this, analyser); connect.call(this, recording)
+        outputs.push({ context: this.context, analyser, recording })
       }
       return result
     }
@@ -89,8 +101,8 @@ async function mountEditor(page, baseURL) {
     const app = createApp({ render: () => h(VideoEditor, { project: state.value, ref: editor, onChange: next => { state.value = next }, onStatus: value => { window.audioStatus = value } }) })
     app.mount('#app')
     window.audioChecks = {
-      state, editor, app, wav, delay, sample,
-      media: () => [...media].map(item => ({ source: item.currentSrc || item.src, paused: item.paused, time: item.currentTime, rate: item.playbackRate, ready: item.readyState, seeking: item.seeking, events: mediaEvents.get(item) })),
+      state, editor, app, wav, delay, sample, outputs,
+      media: () => [...media].map(item => ({ source: item.currentSrc || item.src, paused: item.paused, time: item.currentTime, rate: item.playbackRate, ready: item.readyState, seeking: item.seeking, events: [...(mediaEvents.get(item) || [])], writes: { ...mediaWrites.get(item) } })),
       mutate: action => { const next = structuredClone(state.value); action(next); state.value = validateProject(next, { trusted: true }) },
     }
   })
@@ -143,7 +155,10 @@ async function main() {
     await page.screenshot({ path: '/tmp/open-media-clip-audio-narrow.png' })
     await page.setViewportSize({ width: 1280, height: 850 })
     await expect(page.getByRole('slider', { name: '片段试听进度', exact: true })).toHaveAttribute('max', '4')
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await expect(page.getByTestId('audio-clip-player').locator('button')).toHaveCount(1)
+    await expect(page.getByRole('button', { name: '播放片段试听', exact: true })).toHaveText('')
+    assert(!(await page.getByTestId('audio-clip-player').innerText()).includes('单独播放'))
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await expect(page.getByRole('button', { name: '暂停片段试听', exact: true })).toBeVisible()
     await page.waitForTimeout(1050)
     const playing = await sample(page, 200)
@@ -161,7 +176,7 @@ async function main() {
     const pausedAt = Number(await page.getByRole('slider', { name: '片段试听进度', exact: true }).inputValue())
     await quiet(page, '暂停片段试听')
     assert.equal(Number(await page.getByRole('slider', { name: '片段试听进度', exact: true }).inputValue()), pausedAt)
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await page.waitForTimeout(180)
     const resumedAt = Number(await page.getByRole('slider', { name: '片段试听进度', exact: true }).inputValue())
     assert(resumedAt > pausedAt && resumedAt < pausedAt + 0.6, `恢复应保留试听位置：${pausedAt} -> ${resumedAt}`)
@@ -170,14 +185,15 @@ async function main() {
     await page.getByRole('slider', { name: '片段试听进度', exact: true }).dispatchEvent('pointerup')
     await expect(page.getByRole('button', { name: '暂停片段试听', exact: true })).toBeVisible()
     await setProgress(page, 3.65)
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).waitFor({ state: 'visible' })
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).waitFor({ state: 'visible' })
     await quiet(page, '片段终点')
     assert.equal(Number(await page.getByRole('slider', { name: '片段试听进度', exact: true }).inputValue()), 4)
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await page.waitForTimeout(100)
     const replay = Number(await page.getByRole('slider', { name: '片段试听进度', exact: true }).inputValue())
     assert(replay < 0.5, `播放结束后重播应从片段头部开始：${replay}`)
-    await page.getByRole('button', { name: '停止片段试听', exact: true }).click()
+    await page.getByRole('button', { name: '暂停片段试听', exact: true }).click()
+    await setProgress(page, 0)
     await quiet(page, '停止')
     assert.equal(Number(await page.getByRole('slider', { name: '片段试听进度', exact: true }).inputValue()), 0)
     console.log('PASS 暂停与恢复、进度跳转与原位点击、裁剪终点停止、重播和停止归零；768 / 320 像素控件可达')
@@ -186,18 +202,19 @@ async function main() {
       const clip = project.tracks.find(track => track.id === 'narration-track').clips[0]
       clip.speed = 1; clip.trimIn = 1; clip.trimOut = 7; clip.fadeIn = 2; clip.fadeOut = 2
     }))
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await page.waitForTimeout(350)
     const fadeStart = await sample(page, 120)
     await setProgress(page, 2.7)
     await page.waitForTimeout(120)
     const fadeMiddle = await sample(page, 160)
     await setProgress(page, 5.5)
-    await page.waitForTimeout(80)
+    await page.waitForTimeout(160)
     const fadeEnd = await sample(page, 120)
     assert(fadeStart.rms > 0.005 && fadeStart.rms < fadeMiddle.rms * 0.5, `淡入未应用：${JSON.stringify({ fadeStart, fadeMiddle })}`)
     assert(fadeEnd.rms > 0.003 && fadeEnd.rms < fadeMiddle.rms * 0.4, `淡出未应用：${JSON.stringify({ fadeEnd, fadeMiddle })}`)
-    await page.getByRole('button', { name: '停止片段试听', exact: true }).click()
+    await page.getByRole('button', { name: '暂停片段试听', exact: true }).click()
+    await setProgress(page, 0)
     console.log(`PASS 试听真实音频包含片段淡入和淡出：${JSON.stringify({ start: fadeStart.rms, middle: fadeMiddle.rms, end: fadeEnd.rms })}`)
 
     await page.getByTestId('preview-play').click()
@@ -205,13 +222,13 @@ async function main() {
     await page.waitForTimeout(180)
     const mainAudio = await sample(page, 160)
     assert(mainAudio.tones[660] > 0.15 && mainAudio.tones[440] < 0.005, `主时间线起点应播放背景音：${JSON.stringify(mainAudio)}`)
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '播放（空格）')
     await page.waitForTimeout(200)
     const soloAudio = await sample(page, 120)
     assert(soloAudio.tones[660] < 0.005, `片段试听应停止主时间线混音：${JSON.stringify(soloAudio)}`)
     await page.getByTestId('preview-play').click()
-    await expect(page.getByRole('button', { name: '单独播放片段', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '播放片段试听', exact: true })).toBeVisible()
     await page.waitForTimeout(180)
     const returnedAudio = await sample(page, 160)
     assert(returnedAudio.tones[660] > 0.15 && returnedAudio.tones[440] < 0.005, `主播放应停止独立试听：${JSON.stringify(returnedAudio)}`)
@@ -219,12 +236,12 @@ async function main() {
     await quiet(page, '主播放暂停')
     console.log('PASS 独立试听与主时间线播放双向互斥，实际波形无其他音轨漏音')
 
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await choose(page, 'music')
     await quiet(page, '切换所选片段')
     await page.evaluate(() => window.audioChecks.mutate(project => { const track = project.tracks.find(track => track.id === 'music-track'); track.locked = true; track.muted = true }))
-    await expect(page.getByRole('button', { name: '单独播放片段', exact: true })).toBeEnabled()
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await expect(page.getByRole('button', { name: '播放片段试听', exact: true })).toBeEnabled()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await page.waitForTimeout(160)
     const lockedAudio = await sample(page, 160)
     assert(lockedAudio.tones[660] > 0.15, `锁定或静音轨道应允许独立试听：${JSON.stringify(lockedAudio)}`)
@@ -249,17 +266,86 @@ async function main() {
       })
     })
     await choose(page, 'delayed-clip')
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await expect(page.getByRole('button', { name: '取消片段试听加载', exact: true })).toBeVisible()
     await page.getByRole('button', { name: '取消片段试听加载', exact: true }).click()
     await page.waitForTimeout(1300)
     await quiet(page, '取消加载并等待媒体到达')
-    await expect(page.getByRole('button', { name: '单独播放片段', exact: true })).toBeVisible()
-    await page.getByRole('button', { name: '单独播放片段', exact: true }).click()
+    await expect(page.getByRole('button', { name: '播放片段试听', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: '播放片段试听', exact: true }).click()
     await expect(page.getByRole('button', { name: '暂停片段试听', exact: true })).toBeVisible()
     await page.waitForTimeout(160)
     const retry = await sample(page, 160)
     assert(retry.tones[880] > 0.15, `取消后仍应能够重新试听：${JSON.stringify(retry)}`)
+    await page.getByRole('button', { name: '暂停片段试听', exact: true }).click()
+    const nativeBytes = Buffer.from(await page.evaluate(async () => [...new Uint8Array(await window.audioChecks.wav(440, 10, true).arrayBuffer())]))
+    await page.route('http://asset.localhost/**', route => {
+      const requested = /bytes=(\d+)-(\d*)/.exec(route.request().headers().range || '')
+      const start = requested ? Number(requested[1]) : 0
+      const end = requested?.[2] ? Math.min(nativeBytes.length - 1, Number(requested[2])) : nativeBytes.length - 1
+      return route.fulfill({ status: requested ? 206 : 200, contentType: 'audio/wav', body: nativeBytes.subarray(start, end + 1), headers: {
+        'Access-Control-Allow-Origin': '*', 'Accept-Ranges': 'bytes',
+        ...(requested ? { 'Content-Range': `bytes ${start}-${end}/${nativeBytes.length}` } : {}),
+      } })
+    })
+    for (const speed of [0.75, 1.5, 2]) {
+      const continuous = await page.evaluate(async speed => {
+        const { ClipAudioPlayer } = await import('/src/core/clip-audio-player.ts')
+        const { createClip, createProject } = await import('/src/core/project.ts')
+        const { wav, delay, outputs, media: mediaSnapshot } = window.audioChecks
+        const project = createProject('连续试听验证')
+        const blob = wav(440, 10, true)
+        const url = speed === 1.5 ? 'http://asset.localhost/Voice%20preview.wav' : URL.createObjectURL(blob)
+        const asset = { id: 'continuous-asset', kind: 'audio', url, name: '连续音频.wav', duration: 10, width: 0, height: 0, size: blob.size, mime: 'audio/wav' }
+        const clip = createClip(asset, project, { trimIn: 8 - 3.5 * speed, trimOut: 8, speed, volume: 0.6 })
+        const notices = []; let ended = 0
+        const player = new ClipAudioPlayer(asset, clip, { ended: () => ended++, error: message => notices.push(message) })
+        try {
+          await player.play(0)
+          const initial = mediaSnapshot().find(row => row.source === url)
+          const output = outputs.at(-1), chunks = []
+          const recorder = new MediaRecorder(output.recording.stream, { mimeType: 'audio/webm;codecs=opus' })
+          recorder.ondataavailable = event => chunks.push(event.data)
+          const started = new Promise(resolve => recorder.addEventListener('start', resolve, { once: true }))
+          recorder.start(100); await started
+          const block = milliseconds => { const end = performance.now() + milliseconds; while (performance.now() < end) {} }
+          await delay(400); block(350)
+          await delay(300); block(650)
+          await delay(300); block(1150)
+          // Cross the trimmed endpoint while the interface is busy, then retain
+          // enough decoded silence to verify the entire trailing interval.
+          await delay(100); block(700)
+          await delay(800)
+          const final = mediaSnapshot().find(row => row.source === url)
+          const elapsed = player.elapsed
+          const stopped = new Promise(resolve => recorder.addEventListener('stop', resolve, { once: true }))
+          recorder.stop(); await stopped
+          const decoded = await output.context.decodeAudioData(await new Blob(chunks, { type: recorder.mimeType }).arrayBuffer())
+          const values = decoded.getChannelData(0), rate = decoded.sampleRate
+          const rms = (from, to) => {
+            const first = Math.round(from * rate), last = Math.min(values.length, Math.round(to * rate))
+            let sum = 0; for (let i = first; i < last; i++) sum += values[i] ** 2
+            return Math.sqrt(sum / Math.max(1, last - first))
+          }
+          const windows = []
+          for (let time = 0.2; time + 0.025 <= 3.1; time += 0.025) windows.push(rms(time, time + 0.025))
+          return { speed, initial, final, elapsed, ended, notices, duration: decoded.duration,
+            silence: windows.filter(value => value < 0.01).length, minimumRms: Math.min(...windows),
+            afterEndRms: rms(3.65, 4.0), }
+        } finally { player.dispose(); if (url.startsWith('blob:')) URL.revokeObjectURL(url) }
+      }, speed)
+      assert(continuous.duration >= 4, `末端静音验证需要完整录音：${JSON.stringify(continuous)}`)
+      assert.equal(continuous.silence, 0, `主线程短暂繁忙时音频断续：${JSON.stringify(continuous)}`)
+      assert(continuous.minimumRms > 0.06, `持续音量异常：${JSON.stringify(continuous)}`)
+      assert(continuous.afterEndRms < 0.002, `主线程繁忙时裁剪终点漏音：${JSON.stringify(continuous)}`)
+      assert.equal(continuous.ended, 1)
+      assert.equal(continuous.elapsed, 3.5)
+      assert(continuous.final.paused)
+      assert.equal(continuous.final.writes.currentTime, continuous.initial.writes.currentTime, '连续播放不得纠偏定位')
+      assert.equal(continuous.final.writes.playbackRate, continuous.initial.writes.playbackRate, '连续播放不得重写速度')
+      assert.deepEqual(continuous.notices, [])
+      console.log(`PASS ${speed} 倍速真实录音覆盖 350 / 650 / 1150 毫秒界面阻塞、连续波形、裁剪末端静音${speed === 1.5 ? '、原生样式跨域 Range URL' : ''}：${JSON.stringify(continuous)}`)
+    }
     await page.evaluate(() => window.audioChecks.app.unmount())
     await quiet(page, '编辑器卸载')
     assert.deepEqual(errors, [])

@@ -36,10 +36,9 @@ async function requestNewProject() {
   await page.getByTestId('create-project').click()
 }
 async function setTheme(theme) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (await page.evaluate(() => localStorage.getItem('open-media:theme') || 'system') === theme) return
-    await page.getByRole('button', { name: /^主题：/ }).click()
-  }
+  await page.getByTestId(`theme-${theme}`).click()
+  await expect(page.getByTestId(`theme-${theme}`)).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('.theme-switch [aria-pressed="true"]')).toHaveCount(1)
   assert.equal(await page.evaluate(() => localStorage.getItem('open-media:theme')), theme)
 }
 async function rename(title) {
@@ -64,6 +63,8 @@ async function main() {
   await fs.mkdir(artifacts, { recursive: true })
   browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox', '--no-proxy-server', '--autoplay-policy=no-user-gesture-required'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, acceptDownloads: true })
+  // This workbench scenario verifies the download fallback; handle-based saves have separate coverage.
+  await context.addInitScript(() => { window.showSaveFilePicker = undefined; window.showOpenFilePicker = undefined })
   page = await context.newPage()
   page.setDefaultTimeout(15000)
   page.on('pageerror', error => pageErrors.push(error.message))
@@ -80,7 +81,7 @@ async function main() {
     await page.locator('.brand').click()
     await expect(page.getByTestId('autosave-toggle')).toHaveCount(0)
     await expect(page.locator('.topbar .file-actions')).toHaveCount(0)
-    await expect(page.locator('.topbar button:visible')).toHaveCount(3)
+    await expect(page.locator('.topbar button:visible')).toHaveCount(5)
     await expect(page.getByRole('button', { name: '设置', exact: true })).toHaveCount(0)
     assert.equal(await page.locator('.topbar button').evaluateAll(elements => elements.every(element => element.querySelector('svg, img'))), true)
     await page.screenshot({ path: path.join(artifacts, 'workbench-light.png') })
@@ -93,7 +94,12 @@ async function main() {
     await rename('工作台验收')
   })
 
-  await check('主题直接切换与跟随系统，信息显示版本和时间并正确恢复焦点', async () => {
+  await check('三个主题图标平铺并直接切换，信息显示版本和时间并正确恢复焦点', async () => {
+    const themeButtons = page.getByRole('group', { name: '界面主题', exact: true }).getByRole('button')
+    await expect(themeButtons).toHaveCount(3)
+    const positions = await themeButtons.evaluateAll(buttons => buttons.map(button => ({ top: button.getBoundingClientRect().top, left: button.getBoundingClientRect().left, width: button.getBoundingClientRect().width, height: button.getBoundingClientRect().height, svg: Boolean(button.querySelector('svg')) })))
+    assert(positions.every(position => position.top === positions[0].top && position.width === 28 && position.height === 26 && position.svg), `主题按钮布局异常：${JSON.stringify(positions)}`)
+    assert(positions[0].left < positions[1].left && positions[1].left < positions[2].left)
     await setTheme('dark')
     await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'dark')
     await setTheme('light')
@@ -101,10 +107,17 @@ async function main() {
     await setTheme('system')
     await page.emulateMedia({ colorScheme: 'dark' })
     await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'dark')
+    await expect(page.getByTestId('theme-system')).toHaveAttribute('title', '跟随系统（当前为深色）')
     await page.emulateMedia({ colorScheme: 'light' })
     await expect(page.locator('.app-shell')).toHaveAttribute('data-theme', 'light')
+    await expect(page.getByTestId('theme-system')).toHaveAttribute('title', '跟随系统（当前为浅色）')
+    await page.getByTestId('theme-light').focus()
+    await page.keyboard.press('Space')
+    await expect(page.getByTestId('theme-light')).toHaveAttribute('aria-pressed', 'true')
+    await setTheme('system')
     const opener = page.getByRole('button', { name: '关于 Open Media', exact: true })
-    await opener.click()
+    await opener.focus()
+    await page.keyboard.press('Space')
     const info = page.getByRole('dialog', { name: '关于 Open Media', exact: true })
     await expect(info).toBeVisible()
     const packageInfo = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'))

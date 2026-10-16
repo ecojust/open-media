@@ -25,7 +25,7 @@ test('shortcut editing accepts supported primary modifiers and excludes composit
 test('screenshot shortcuts preserve existing save, open, undo and redo combinations', () => {
   for (const primary of ['Ctrl', 'Control', 'Cmd', 'Command', 'Meta', 'Super', 'CommandOrControl', 'CmdOrCtrl']) {
     for (const shift of ['', 'Shift+']) {
-      for (const [key, action] of [['S', '保存'], ['O', '打开'], ['Z', shift ? '重做' : '撤销'], ['Y', '重做']]) {
+      for (const [key, action] of [['S', shift ? '另存为' : '保存'], ['O', '打开'], ['Z', shift ? '重做' : '撤销'], ['Y', '重做']]) {
         assert.match(screenshotShortcutValidationError(`${primary}+${shift}${key}`), new RegExp(action))
       }
     }

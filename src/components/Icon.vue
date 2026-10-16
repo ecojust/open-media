@@ -7,6 +7,7 @@ const paths: Record<string, string> = {
   plus: 'M12 5v14M5 12h14',
   folder: 'M3 7V5h6l2 2h10v13H3z',
   save: 'M4 3h13l3 3v15H4zM8 3v6h8V3M8 21v-8h8v8',
+  'save-as': 'M10 21H4V3h13l3 3v5M8 3v6h8V3M8 21v-8h5m0 6 7-7 3 3-7 7h-3zM18 14l3 3',
   import: 'M12 3v12m-5-5 5 5 5-5M4 15v6h16v-6',
   upload: 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',

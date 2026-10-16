@@ -1,4 +1,5 @@
 import type { SpeechVoice } from '../native'
+import { VOICE_PROFILES } from './voice-profiles.ts'
 
 export type VoiceCategoryId = 'zh-male' | 'zh-female' | 'en-female' | 'other'
 
@@ -33,8 +34,38 @@ export function voiceTypeLabel(voice: SpeechVoice): string {
   return `${label} · ${kind}`
 }
 
-export function voiceArtworkVariant(id: string): number {
-  let hash = 0
-  for (const char of id) hash = (hash * 31 + char.codePointAt(0)!) >>> 0
-  return hash % 2
+export type VoiceStyleId = 'natural' | 'deep' | 'bright' | 'relaxed' | 'mature'
+
+export interface VoiceStyle {
+  id: VoiceStyleId
+  label: string
+  portrait: number
+}
+
+export function voiceStyle(voice: SpeechVoice): VoiceStyle {
+  const category = voiceCategory(voice)
+  const profile = VOICE_PROFILES[voice.id]
+  const id = profile && profile.category === category ? profile.style : 'natural'
+  if (category === 'zh-male') {
+    if (id === 'deep') return { id, label: '低沉', portrait: 1 }
+    if (id === 'bright') return { id, label: '明亮', portrait: 2 }
+    if (id === 'relaxed') return { id, label: '舒缓', portrait: 3 }
+    return { id: 'natural', label: '自然', portrait: 0 }
+  }
+  if (category === 'zh-female') {
+    if (id === 'bright') return { id, label: '清亮', portrait: 5 }
+    if (id === 'deep') return { id, label: '低沉', portrait: 6 }
+    if (id === 'relaxed') return { id, label: '舒缓', portrait: 7 }
+    return { id: 'natural', label: '自然', portrait: 4 }
+  }
+  if (category === 'en-female') {
+    if (id === 'bright') return { id, label: '明亮', portrait: 9 }
+    if (id === 'mature') return { id, label: '成熟', portrait: 10 }
+    return { id: 'natural', label: '自然', portrait: 8 }
+  }
+  return { id: 'natural', label: '通用', portrait: 11 }
+}
+
+export function voiceSearchText(voice: SpeechVoice): string {
+  return `${voice.name} ${voiceTypeLabel(voice)} ${voiceStyle(voice).label} ${voice.id}`.toLocaleLowerCase()
 }

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Clip, Project } from '../core/types'
 import { clipDuration } from '../core/timeline'
-import { TimelinePreview } from '../core/preview'
+import { ClipAudioPlayer } from '../core/clip-audio-player'
 import Icon from './Icon.vue'
 
 const props = withDefaults(defineProps<{ project: Project; clip: Clip; disabled?: boolean }>(), { disabled: false })
@@ -15,14 +15,11 @@ const elapsed = ref(0)
 const playing = ref(false)
 const preparing = ref(false)
 const error = ref('')
-const playLabel = computed(() => preparing.value ? '取消片段试听加载' : playing.value ? '暂停片段试听' : '单独播放片段')
-let preview: TimelinePreview | undefined
+const playLabel = computed(() => preparing.value ? '取消片段试听加载' : playing.value ? '暂停片段试听' : '播放片段试听')
+let player: ClipAudioPlayer | undefined
 let playbackAbort: AbortController | undefined
 let playbackRequest = 0
-let resourceVersion = 0
 let frame = 0
-let clockStarted = 0
-let clockOffset = 0
 let scrubbing = false
 let resumeAfterScrub = false
 
@@ -32,20 +29,19 @@ function formatTime(value: number): string {
 }
 
 function pause(): void {
-  if (playing.value) elapsed.value = Math.min(duration.value, clockOffset + (performance.now() - clockStarted) / 1000)
+  if (playing.value && player) elapsed.value = player.elapsed
   playbackRequest++
   playbackAbort?.abort()
   playbackAbort = undefined
   cancelAnimationFrame(frame)
   preparing.value = false
   playing.value = false
-  preview?.pause()
+  player?.pause()
 }
 
 function release(): void {
-  resourceVersion++
-  const previous = preview
-  preview = undefined
+  const previous = player
+  player = undefined
   previous?.dispose()
 }
 
@@ -64,35 +60,14 @@ function fail(message: string): void {
   emit('status', message)
 }
 
-function createPreview(): TimelinePreview {
-  if (preview) return preview
+function createPlayer(): ClipAudioPlayer {
+  if (player) return player
   if (!asset.value || !track.value) throw new Error('当前片段的音频素材不可用')
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = 1
-  const clip = { ...props.clip, start: 0 }
-  delete clip.filters
-  const isolated: Project = {
-    ...props.project,
-    width: 1,
-    height: 1,
-    assets: [{ ...asset.value }],
-    tracks: [{ ...track.value, muted: false, clips: [clip] }],
-  }
-  const version = ++resourceVersion
-  let constructing = true
-  let constructionError = ''
-  const renderer = new TimelinePreview(canvas, isolated, message => {
-    if (constructing) constructionError = message
-    else if (version === resourceVersion) fail(message)
+  player = new ClipAudioPlayer(asset.value, props.clip, {
+    ended: () => { pause(); elapsed.value = duration.value },
+    error: message => fail(`无法试听片段：${message}`),
   })
-  constructing = false
-  if (constructionError) {
-    resourceVersion++
-    renderer.dispose()
-    throw new Error(constructionError)
-  }
-  preview = renderer
-  return renderer
+  return player
 }
 
 async function start(): Promise<void> {
@@ -107,25 +82,19 @@ async function start(): Promise<void> {
   playbackAbort = abort
   preparing.value = true
   try {
-    const renderer = createPreview()
+    const activePlayer = createPlayer()
     if (request !== playbackRequest || abort.signal.aborted) { release(); return }
-    await renderer.enableAudio()
-    if (request !== playbackRequest || abort.signal.aborted) return
-    await renderer.playReady(elapsed.value, abort.signal)
+    await activePlayer.play(elapsed.value, abort.signal)
     if (request !== playbackRequest || abort.signal.aborted) return
     preparing.value = false
     playing.value = true
-    clockOffset = elapsed.value
-    clockStarted = performance.now()
     const tick = () => {
       if (!playing.value || request !== playbackRequest) return
-      elapsed.value = Math.min(duration.value, clockOffset + (performance.now() - clockStarted) / 1000)
+      elapsed.value = activePlayer.elapsed
       if (elapsed.value >= duration.value) {
         pause()
-        release()
         return
       }
-      renderer.render(elapsed.value, true)
       frame = requestAnimationFrame(tick)
     }
     tick()
@@ -185,14 +154,11 @@ defineExpose({ stop })
     <div class="audio-clip-controls">
       <button type="button" class="audio-clip-play" :disabled="disabled || !available" :aria-label="playLabel" :title="playLabel" :aria-busy="preparing" @click="toggle">
         <Icon :name="preparing ? 'clock' : playing ? 'pause' : 'play'" :size="15" />
-        <span>{{ preparing ? '加载中' : playing ? '暂停' : '单独播放' }}</span>
       </button>
-      <button type="button" class="audio-clip-stop" :disabled="disabled || (!playing && !preparing && elapsed === 0)" aria-label="停止片段试听" title="停止并回到片段开头" @click="stop"><Icon name="stop" :size="14" /></button>
       <span class="audio-clip-time">{{ formatTime(elapsed) }}<span> / {{ formatTime(duration) }}</span></span>
     </div>
     <input type="range" min="0" :max="duration || 1" step="0.01" :value="elapsed" :disabled="disabled || !available" aria-label="片段试听进度" :aria-valuetext="`${formatTime(elapsed)}，共 ${formatTime(duration)}`" @pointerdown="beginScrub" @pointerup="finishScrub" @pointercancel="cancelScrub" @input="scrub" @change="finishScrub" @blur="finishScrub" />
     <p v-if="error" class="audio-clip-error" role="alert">{{ error }}</p>
-    <p v-else class="audio-clip-hint">仅试听当前片段，按裁剪、速度、音量和淡入淡出播放；轨道静音不影响试听。</p>
   </section>
 </template>
 
@@ -204,10 +170,10 @@ defineExpose({ stop })
 .audio-clip-controls>button:disabled{opacity:.4;cursor:not-allowed}
 .audio-clip-controls>button:focus-visible,.audio-clip-player>input:focus-visible{outline:2px solid var(--ed-accent,#3267f6);outline-offset:2px}
 .audio-clip-controls>.audio-clip-play{color:var(--ed-accent,#3267f6);border-color:color-mix(in srgb,var(--ed-accent,#3267f6) 15%,transparent);background:color-mix(in srgb,var(--ed-accent,#3267f6) 10%,transparent)}
-.audio-clip-controls>.audio-clip-stop{width:29px;padding:5px}
+.audio-clip-controls>.audio-clip-play{width:29px;padding:5px}
 .audio-clip-time{margin-left:auto;font-size:10px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .audio-clip-time>span{color:var(--ed-muted,#858b9a)}
 .audio-clip-player>input[type=range]{width:100%;min-width:0;height:16px;padding:0;margin:0;border:0;accent-color:var(--ed-accent,#3267f6)}
-.audio-clip-hint,.audio-clip-error{margin:0;font-size:10px;line-height:1.6;overflow-wrap:anywhere;color:var(--ed-muted,#858b9a)}
+.audio-clip-error{margin:0;font-size:10px;line-height:1.6;overflow-wrap:anywhere;color:var(--ed-muted,#858b9a)}
 .audio-clip-error{color:var(--ui-danger,#bd4039)}
 </style>

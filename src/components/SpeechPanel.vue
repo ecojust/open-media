@@ -12,15 +12,14 @@ const desktop = isDesktop()
 const status = ref<SpeechStatus>({ ready: false, voices: [] })
 const loading = ref(false), busy = ref(false), cancelling = ref(false), finalizing = ref(false), error = ref(''), notice = ref('')
 const voiceId = ref(''), speed = ref(1), alignText = ref(true)
-const previewText = ref('你好，这是一段语音试听。让文字拥有清晰自然的声音。')
-const previewUrl = ref(''), previewDuration = ref(0), player = ref<HTMLAudioElement | null>(null)
+const previewUrl = ref(''), player = ref<HTMLAudioElement | null>(null)
 const previewVoiceId = ref(''), previewPlaying = ref(false), previewLoading = ref(false)
 const previewState = computed(() => previewLoading.value ? 'loading' : previewPlaying.value ? 'playing' : 'idle')
-const completed = ref(0), total = ref(0), stage = ref(''), currentName = ref(''), currentProgress = ref(0)
+const operationKind = ref<'all' | 'selected' | 'preview'>('all')
+const generationLabel = computed(() => cancelling.value ? '正在取消…' : finalizing.value ? '正在加入时间线…' : '正在生成…')
 const allPlan = computed(() => planSpeech(props.project))
 const selectedPlan = computed(() => planSpeech(props.project, props.selectedClipId ? [props.selectedClipId] : []))
 const selectedLinked = computed(() => props.project.tracks.some(track => track.clips.some(clip => clip.speech?.textClipId === props.selectedClipId)))
-const progress = computed(() => total.value ? Math.min(1, (completed.value + currentProgress.value) / total.value) : 0)
 let statusPromise: Promise<void> | undefined
 let disposed = false, previewJobId = ''
 interface Operation { project: Project; controller: AbortController; jobs: Set<string>; current: string; applying: boolean; reason: string }
@@ -61,7 +60,7 @@ function clearPreview(): void {
   player.value?.pause()
   if (player.value) { player.value.removeAttribute('src'); player.value.load() }
   if (previewUrl.value) notice.value = ''
-  previewUrl.value = ''; previewDuration.value = 0
+  previewUrl.value = ''
   previewVoiceId.value = ''; previewPlaying.value = false
   if (previewJobId) { const id = previewJobId; previewJobId = ''; void discardJobs([id]) }
 }
@@ -85,19 +84,16 @@ async function synthesize(active: Operation, text: string, voice: string, rate: 
   checkOperation(active)
   const requestId = crypto.randomUUID()
   active.current = requestId; active.jobs.add(requestId)
-  currentProgress.value = 0; stage.value = '正在准备声音…'
   let job = await beginSpeechJob({ requestId, text, voiceId: voice, speed: rate })
   if (job.id !== requestId) { active.jobs.delete(requestId); active.jobs.add(job.id); active.current = job.id }
   if (active.controller.signal.aborted || disposed) { await cancelSpeechJob(job.id).catch(() => {}); checkOperation(active) }
   while (true) {
     checkOperation(active)
-    currentProgress.value = Math.max(0, Math.min(1, job.progress || 0))
-    stage.value = job.message || job.stage || '正在生成语音…'
     if (job.state === 'failed') throw new Error(job.error || '语音生成失败，请重试。')
     if (job.state === 'cancelled') throw new Error('语音生成已取消。')
     if (job.state === 'completed') {
       if (!job.asset || job.asset.kind !== 'audio' || !Number.isFinite(job.asset.duration) || job.asset.duration <= 0) throw new Error('生成结果没有可用的音频，请重试。')
-      active.current = ''; currentProgress.value = 0
+      active.current = ''
       return job.asset
     }
     await waitForPoll(active)
@@ -110,13 +106,13 @@ async function cancel(reason = '已取消语音生成，时间线保持原样。
   cancelling.value = true; active.reason = reason; active.controller.abort()
   if (active.current) await cancelSpeechJob(active.current).catch(() => {})
 }
-async function run(sources?: SpeechSource[], audition?: { voiceId: string; text: string }): Promise<void> {
+async function run(sources?: SpeechSource[], audition?: { voiceId: string; text: string }, target: 'all' | 'selected' = 'all'): Promise<void> {
   if (busy.value || disposed) return
   if (!desktop) { error.value = '内置离线语音由桌面端提供。'; return }
   error.value = ''; notice.value = ''
   const active: Operation = { project: props.project, controller: new AbortController(), jobs: new Set(), current: '', applying: false, reason: '' }
   operation = active; busy.value = true; emit('busy', true)
-  completed.value = 0; total.value = sources?.length || 1; currentName.value = ''; currentProgress.value = 0
+  operationKind.value = sources ? target : 'preview'
   try {
     clearPreview()
     if (!status.value.ready) await loadStatus()
@@ -124,14 +120,12 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
     const chosenVoice = audition?.voiceId || voiceId.value, rate = speed.value, shouldAlign = alignText.value
     if (!status.value.ready || !status.value.voices.some(voice => voice.id === chosenVoice)) throw new Error(status.value.error || '内置语音组件暂不可用，请检查安装文件。')
     if (!sources) {
-      const text = (audition?.text ?? previewText.value).trim()
-      if (!text) throw new Error('请输入试听文本。')
+      if (!audition) throw new Error('请从声音卡片开始试听。')
       previewVoiceId.value = chosenVoice; previewLoading.value = true
-      currentName.value = `试听 · ${status.value.voices.find(voice => voice.id === chosenVoice)!.name}`
-      const asset = await synthesize(active, text, chosenVoice, rate)
+      const asset = await synthesize(active, audition.text, chosenVoice, rate)
       checkOperation(active)
       previewJobId = [...active.jobs][0] || ''; active.jobs.clear()
-      previewUrl.value = asset.url; previewDuration.value = asset.duration; completed.value = 1
+      previewUrl.value = asset.url
       notice.value = '试听已就绪，未添加到时间线。'
       await nextTick()
       checkOperation(active)
@@ -139,9 +133,8 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
     } else {
       const results = []
       for (const source of sources) {
-        currentName.value = source.name
         const asset = await synthesize(active, source.text, chosenVoice, rate)
-        results.push({ source, asset, voiceId: chosenVoice, rate }); completed.value++
+        results.push({ source, asset, voiceId: chosenVoice, rate })
         validateSpeechPlanCapacity(active.project, { sources, skipped: [] }, new Map(results.map(item => [item.source.clipId, item.asset.duration])))
       }
       checkOperation(active)
@@ -173,7 +166,7 @@ async function generate(clipIds?: string[]): Promise<void> {
   const plan = planSpeech(props.project, clipIds)
   if (!plan.sources.length) { error.value = plan.skipped[0]?.reason || '请先在时间线中添加文字。'; return }
   try { validateSpeechPlanCapacity(props.project, plan) } catch (cause) { error.value = errorText(cause); return }
-  await run(plan.sources)
+  await run(plan.sources, undefined, clipIds ? 'selected' : 'all')
 }
 function align(clipIds?: string[]): void {
   if (busy.value) return
@@ -205,13 +198,15 @@ defineExpose({ generate, align, cancel })
       <fieldset :disabled="busy || !status.ready">
         <VoicePicker v-model="voiceId" :voices="status.voices" :disabled="busy || !status.ready" :preview-voice-id="previewVoiceId" :preview-state="previewState" @preview="previewVoice" />
         <label>语速 <output>{{ speed.toFixed(2).replace(/0$/, '') }}×</output><input v-model.number="speed" type="range" min="0.5" max="2" step="0.05" aria-label="配音语速" /></label>
-        <details class="voice-preview"><summary>试听声音</summary><textarea v-model="previewText" maxlength="200" rows="2" aria-label="试听文本" /><button :disabled="!previewText.trim()" @click="run()"><Icon name="play" :size="13" />生成试听</button></details>
         <label class="speech-check"><input v-model="alignText" type="checkbox" aria-label="文字时长对齐语音" /><span>文字时长对齐语音</span></label>
         <p class="speech-note">保留每段文字的开始位置，按语音长度调整时长。不会移动其他片段。</p>
-        <div class="speech-actions"><button class="speech-primary" :disabled="!allPlan.sources.length" data-testid="speech-generate-all" @click="generate()"><Icon name="audio" :size="14" />全部文字转语音 <span>{{ allPlan.sources.length }}</span></button><button :disabled="!selectedPlan.sources.length" data-testid="speech-generate-selected" @click="generate([selectedClipId])"><Icon name="text" :size="14" />选中文字转语音</button></div>
       </fieldset>
-      <audio v-if="previewUrl" ref="player" :src="previewUrl" controls preload="metadata" aria-label="生成的试听音频" @play="previewPlaying = true" @pause="previewPlaying = false" @ended="previewPlaying = false" /><p v-if="previewUrl" class="speech-note">{{ status.voices.find(voice => voice.id === previewVoiceId)?.name }} · 试听音频 {{ previewDuration.toFixed(1) }} 秒</p>
-      <div v-if="busy" class="speech-progress" role="status" aria-live="polite"><strong><span class="speech-spinner" />{{ cancelling ? '正在取消…' : `已完成 ${completed} / ${total}` }}</strong><progress :value="progress" max="1" aria-label="语音生成进度" /><span class="speech-current">{{ currentName }}</span><span>{{ cancelling ? '正在停止生成并清理临时音频' : finalizing ? '正在加入时间线…' : stage }}</span><button :disabled="cancelling || finalizing" @click="cancel()"><Icon name="close" :size="13" />取消生成</button></div>
+      <div class="speech-actions" aria-live="polite">
+        <button class="speech-primary" :disabled="busy || !status.ready || !allPlan.sources.length" :aria-busy="busy && operationKind === 'all'" data-testid="speech-generate-all" @click="generate()"><template v-if="busy && operationKind === 'all'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="audio" :size="14" />全部文字转语音 <span class="speech-count">{{ allPlan.sources.length }}</span></template></button>
+        <button :disabled="busy || !status.ready || !selectedPlan.sources.length" :aria-busy="busy && operationKind === 'selected'" data-testid="speech-generate-selected" @click="generate([selectedClipId])"><template v-if="busy && operationKind === 'selected'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="text" :size="14" />选中文字转语音</template></button>
+        <div v-if="busy" class="speech-cancel-row"><span v-if="operationKind === 'preview'" role="status"><span class="speech-spinner" />{{ cancelling ? '正在取消…' : '正在准备试听…' }}</span><button :disabled="cancelling || finalizing" @click="cancel()"><Icon name="close" :size="13" />取消生成</button></div>
+      </div>
+      <audio v-if="previewUrl" ref="player" :src="previewUrl" hidden preload="metadata" aria-label="生成的试听音频" @play="previewPlaying = true" @pause="previewPlaying = false" @ended="previewPlaying = false" />
     </template>
     <div class="speech-align"><button :disabled="busy || !selectedLinked" data-testid="speech-align-selected" @click="align([selectedClipId])"><Icon name="clock" :size="14" />选中文字对齐已有语音</button><button :disabled="busy || !project.tracks.some(track => track.clips.some(clip => clip.speech?.textClipId))" @click="align()">全部文字对齐已有语音</button></div>
     <details v-if="allPlan.skipped.length" class="speech-skipped"><summary>{{ allPlan.skipped.length }} 段文字不可生成，将跳过</summary><ul><li v-for="item in allPlan.skipped" :key="item.clipId">{{ item.name }}：{{ item.reason }}</li></ul></details>
@@ -220,5 +215,5 @@ defineExpose({ generate, align, cancel })
 </template>
 
 <style scoped>
-.speech-panel{font-size:11px;overflow:auto;padding:13px 14px;min-height:0;line-height:1.55}.speech-panel header{display:flex;align-items:center;gap:7px;margin-bottom:15px}.speech-panel header>span{font-size:9px;margin-left:auto;color:var(--ed-muted)}.speech-panel fieldset{border:0;padding:0;margin:0;min-width:0}.speech-panel label{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;position:relative;color:var(--ed-muted)}.speech-panel output{position:absolute;right:0;color:var(--ed-text)}.speech-panel select,.speech-panel textarea{font:inherit;box-sizing:border-box;width:100%;min-width:0;padding:7px;border:1px solid var(--ed-border);border-radius:6px;color:var(--ed-text);background:var(--ed-panel)}.speech-panel textarea{resize:vertical;margin:8px 0 5px}.speech-panel input[type=range]{width:100%;accent-color:var(--ed-accent)}.speech-panel button{font:inherit;display:flex;align-items:center;justify-content:center;gap:5px;width:100%;min-height:31px;border:1px solid var(--ed-border);border-radius:6px;padding:5px 7px;background:var(--ed-panel);color:var(--ed-text);cursor:pointer;white-space:normal;line-height:1.4}.speech-panel button:disabled,.speech-panel fieldset:disabled{opacity:.5;cursor:not-allowed}.speech-panel button:hover:not(:disabled){color:var(--ed-accent);border-color:var(--ed-accent)}.speech-panel select{padding-block:0}.speech-panel button:focus-visible,.speech-panel select:focus-visible,.speech-panel textarea:focus-visible,.speech-panel summary:focus-visible{outline:2px solid var(--ed-accent);outline-offset:2px}.speech-panel .speech-primary{background:var(--ed-accent);border-color:var(--ed-accent);color:#fff!important}.speech-actions{display:grid;gap:7px}.speech-primary>span{font-size:10px;border-radius:4px;background:#ffffff25;padding:0 5px}.voice-preview{margin-bottom:14px}.voice-preview summary{cursor:pointer;color:var(--ed-accent)}.speech-panel label.speech-check{flex-direction:row;align-items:flex-start;gap:7px;color:var(--ed-text);margin-bottom:5px}.speech-check input{margin:3px 0 0;accent-color:var(--ed-accent);flex-shrink:0}.speech-note{font-size:10px;color:var(--ed-muted);margin:7px 0 12px;overflow-wrap:anywhere}.speech-panel audio{width:100%;height:32px;margin-top:12px}.speech-align{border-top:1px solid var(--ed-border);margin-top:15px;padding-top:12px;display:grid;gap:7px}.speech-align>button:last-child{border-color:transparent;font-size:10px;color:var(--ed-muted)}.speech-progress{margin-top:12px;padding:10px;border:1px solid var(--ed-border);border-radius:7px;display:grid;gap:7px;font-size:10px}.speech-progress strong{display:flex;align-items:center;gap:6px;font-size:11px}.speech-progress>span{color:var(--ed-muted);overflow-wrap:anywhere}.speech-progress progress{width:100%;height:5px;accent-color:var(--ed-accent)}.speech-current{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.speech-spinner{display:inline-block;width:11px;height:11px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:speech-spin .8s linear infinite;vertical-align:-1px;flex-shrink:0}.speech-error,.speech-notice{font-size:10px;padding:9px;border-radius:6px;overflow-wrap:anywhere;white-space:pre-line}.speech-error{background:color-mix(in srgb,#e15b53 10%,var(--ed-panel));color:#bc423a}.speech-error p{margin:0 0 8px}.speech-notice{background:color-mix(in srgb,var(--ed-accent) 7%,var(--ed-panel));color:var(--ed-text)}.speech-skipped{font-size:10px;margin:12px 0;color:var(--ed-muted)}.speech-skipped summary{cursor:pointer}.speech-skipped ul{padding-left:16px;overflow-wrap:anywhere}.speech-skipped li{margin:5px 0}@keyframes speech-spin{to{transform:rotate(360deg)}}
+.speech-panel{font-size:11px;overflow:auto;padding:13px 14px;min-height:0;line-height:1.55}.speech-panel header{display:flex;align-items:center;gap:7px;margin-bottom:15px}.speech-panel header>span{font-size:9px;margin-left:auto;color:var(--ed-muted)}.speech-panel fieldset{border:0;padding:0;margin:0;min-width:0}.speech-panel label{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;position:relative;color:var(--ed-muted)}.speech-panel output{position:absolute;right:0;color:var(--ed-text)}.speech-panel input[type=range]{width:100%;accent-color:var(--ed-accent)}.speech-panel button{font:inherit;display:flex;align-items:center;justify-content:center;gap:5px;width:100%;min-height:31px;border:1px solid var(--ed-border);border-radius:6px;padding:5px 7px;background:var(--ed-panel);color:var(--ed-text);cursor:pointer;white-space:normal;line-height:1.4}.speech-panel button:disabled,.speech-panel fieldset:disabled{opacity:.5;cursor:not-allowed}.speech-panel button:hover:not(:disabled){color:var(--ed-accent);border-color:var(--ed-accent)}.speech-panel select{width:100%}.speech-panel button:focus-visible,.speech-panel select:focus-visible,.speech-panel summary:focus-visible{outline:2px solid var(--ed-accent);outline-offset:2px}.speech-panel .speech-primary{background:var(--ed-accent);border-color:var(--ed-accent);color:#fff!important}.speech-actions{display:grid;gap:7px}.speech-primary>.speech-count{font-size:10px;border-radius:4px;background:#ffffff25;padding:0 5px}.speech-panel label.speech-check{flex-direction:row;align-items:flex-start;gap:7px;color:var(--ed-text);margin-bottom:5px}.speech-check input{margin:3px 0 0;accent-color:var(--ed-accent);flex-shrink:0}.speech-note{font-size:10px;color:var(--ed-muted);margin:7px 0 12px;overflow-wrap:anywhere}.speech-align{border-top:1px solid var(--ed-border);margin-top:15px;padding-top:12px;display:grid;gap:7px}.speech-align>button:last-child{border-color:transparent;font-size:10px;color:var(--ed-muted)}.speech-cancel-row{display:flex;align-items:center;justify-content:flex-end;gap:8px;font-size:10px}.speech-cancel-row>span{display:flex;align-items:center;gap:5px;margin-right:auto;color:var(--ed-muted)}.speech-panel .speech-cancel-row>button{width:auto;min-height:26px;padding:3px 8px}.speech-spinner{display:inline-block;width:11px;height:11px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:speech-spin .8s linear infinite;vertical-align:-1px;flex-shrink:0}.speech-error,.speech-notice{font-size:10px;padding:9px;border-radius:6px;overflow-wrap:anywhere;white-space:pre-line}.speech-error{background:color-mix(in srgb,#e15b53 10%,var(--ed-panel));color:#bc423a}.speech-error p{margin:0 0 8px}.speech-notice{background:color-mix(in srgb,var(--ed-accent) 7%,var(--ed-panel));color:var(--ed-text)}.speech-skipped{font-size:10px;margin:12px 0;color:var(--ed-muted)}.speech-skipped summary{cursor:pointer}.speech-skipped ul{padding-left:16px;overflow-wrap:anywhere}.speech-skipped li{margin:5px 0}@keyframes speech-spin{to{transform:rotate(360deg)}}
 </style>

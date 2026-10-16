@@ -8,6 +8,7 @@ mod capture_windows;
 pub mod engine;
 pub mod clip_filters;
 pub mod preview;
+pub mod project_files;
 pub mod speech;
 #[cfg(any(feature = "desktop", test))]
 pub mod screenshot;
@@ -26,9 +27,9 @@ mod desktop {
         capture_picker::{self, CapturePicker, PickerContext, PickerPreferences, PickerSelection},
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
         preview::{self, PreviewResult},
+        project_files::{self, ProjectFile, ProjectFiles, ProjectTarget},
         speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
     };
-    use serde::Serialize;
     use serde_json::Value;
     use std::{
         fs,
@@ -431,13 +432,44 @@ mod desktop {
         })
         .await
     }
-    #[derive(Serialize)]
-    pub struct ProjectFile {
+    #[tauri::command]
+    pub async fn save_project_file(
         name: String,
         bytes: Vec<u8>,
+        token: Option<String>,
+        app: tauri::AppHandle,
+        window: tauri::WebviewWindow,
+        state: State<'_, ProjectFiles>,
+    ) -> engine::Result<Option<ProjectTarget>> {
+        project_files::require_main_window(window.label())?;
+        project_files::validate_project_size(bytes.len() as u64)?;
+        let state = state.inner().clone();
+        blocking(move || {
+            if let Some(token) = token {
+                return state.save_registered(&token, &bytes).map(Some);
+            }
+            let Some(selected) = app
+                .dialog()
+                .file()
+                .add_filter("媒体项目", &["omedia"])
+                .set_file_name(&name)
+                .blocking_save_file()
+            else {
+                return Ok(None);
+            };
+            let path = selected.into_path().map_err(|_| "请选择本机保存位置。")?;
+            state.save_selected(path, &bytes).map(Some)
+        })
+        .await
     }
     #[tauri::command]
-    pub async fn open_project_file(app: tauri::AppHandle) -> engine::Result<Option<ProjectFile>> {
+    pub async fn open_project_file(
+        app: tauri::AppHandle,
+        window: tauri::WebviewWindow,
+        state: State<'_, ProjectFiles>,
+    ) -> engine::Result<Option<ProjectFile>> {
+        project_files::require_main_window(window.label())?;
+        let state = state.inner().clone();
         blocking(move || {
             let Some(selected) = app
                 .dialog()
@@ -448,18 +480,7 @@ mod desktop {
                 return Ok(None);
             };
             let path = selected.into_path().map_err(|_| "请选择本机项目文件。")?;
-            let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
-            if meta.len() > 1024 * 1024 * 1024 {
-                return Err("项目文件超过 1 GB 导入上限。".into());
-            }
-            Ok(Some(ProjectFile {
-                name: path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into(),
-                bytes: fs::read(path).map_err(|e| e.to_string())?,
-            }))
+            state.open_selected(path).map(Some)
         })
         .await
     }
@@ -480,6 +501,7 @@ mod desktop {
             .plugin(tauri_plugin_dialog::init())
             .manage(Closing::default())
             .manage(CapturePicker::default())
+            .manage(ProjectFiles::default())
             .setup(|app| {
                 app.manage(crate::screenshot_shortcut::ShortcutManager::new(app.handle().clone()));
                 let data = app.path().app_data_dir()?;
@@ -552,6 +574,7 @@ mod desktop {
                 resume_capture,
                 stop_capture,
                 save_bytes,
+                save_project_file,
                 open_project_file,
                 close_native_window
             ])

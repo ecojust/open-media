@@ -44,7 +44,7 @@ export function screenshotShortcutValidationError(shortcut: string | null): stri
   const key = parts.pop()
   const primary = parts.some(part => ['control', 'ctrl', 'cmd', 'command', 'meta', 'super', 'commandorcontrol', 'cmdorctrl'].includes(part))
   if (!primary || parts.some(part => part === 'alt' || part === 'option')) return ''
-  const action = key === 's' ? '保存' : key === 'o' ? '打开' : key === 'z' ? parts.includes('shift') ? '重做' : '撤销' : key === 'y' ? '重做' : ''
+  const action = key === 's' ? parts.includes('shift') ? '另存为' : '保存' : key === 'o' ? '打开' : key === 'z' ? parts.includes('shift') ? '重做' : '撤销' : key === 'y' ? '重做' : ''
   return action ? `此快捷键用于${action}，请选择其他组合。` : ''
 }
 export function screenshotShortcutLabel(shortcut: string | null, apple = isAppleKeyboard()): string {

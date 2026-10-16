@@ -20,7 +20,7 @@ function complete(request, duration = 2.5) {
 }
 function panel(overrides = {}, options = {}) {
   const source = readFileSync(new URL('../src/components/SpeechPanel.vue', import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
-  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, run, cancel, align, busy, error, notice, completed, total, voiceId, speed, alignText, previewUrl, previewText, previewVoice, previewVoiceId, previewState }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
+  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, cancel, align, busy, error, notice, operationKind, generationLabel, voiceId, speed, alignText, previewUrl, previewVoice, previewVoiceId, previewState }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   const props = vue.shallowReactive({ project: fixture(), selectedClipId: '', active: true, ...options })
   const events = [], calls = [], unmount = []
   const injections = {
@@ -69,7 +69,7 @@ test('batch synthesis inserts real returned assets in one undoable project chang
     assert.equal(clipDuration(project.tracks.find(track => track.kind === 'text').clips[0]), 2.5)
     assert.deepEqual(harness.events.filter(event => event[0] === 'busy').map(event => event[1]), [true, false])
     assert.equal(harness.calls.filter(call => call[0] === 'discard').length, 0)
-    assert.equal(harness.state.completed.value, 2)
+    assert.match(harness.state.notice.value, /已添加 2 段语音/)
   } finally { harness.dispose() }
 })
 
@@ -115,7 +115,10 @@ test('cancellation before the native start returns prevents late results from en
   try {
     const generation = harness.state.generate()
     await started.promise
+    assert.equal(harness.state.operationKind.value, 'all')
+    assert.equal(harness.state.generationLabel.value, '正在生成…')
     await harness.state.cancel()
+    assert.equal(harness.state.generationLabel.value, '正在取消…')
     assert.equal(calls[0][1], request.requestId)
     pending.resolve(complete(request))
     await generation
@@ -155,10 +158,14 @@ test('unmount cancels a pending native request and cleans its late audio result'
   assert(harness.calls.some(call => call[0] === 'discard'))
 })
 
-test('preview uses the returned audio without adding timeline clips and disposes it when the voice changes', async () => {
+test('Chinese card preview uses fixed sample text without adding timeline clips and disposes audio when the voice changes', async () => {
   const harness = panel()
   try {
-    await harness.state.run()
+    await settle()
+    await harness.state.previewVoice('voice-1')
+    const request = harness.calls.find(call => call[0] === 'begin')[1]
+    assert.equal(request.text, '你好，这是一段语音试听。让文字拥有清晰自然的声音。')
+    assert.equal(harness.state.operationKind.value, 'preview')
     assert.match(harness.state.previewUrl.value, /^data:audio/)
     assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)
     assert.equal(harness.calls.filter(call => call[0] === 'discard').length, 0)
@@ -175,6 +182,7 @@ test('disabling alignment preserves text duration and forwards the chosen voice 
     await settle()
     harness.state.voiceId.value = 'voice-2'; harness.state.speed.value = 1.4; harness.state.alignText.value = false
     await harness.state.generate([harness.props.project.tracks.find(track => track.kind === 'text').clips[0].id])
+    assert.equal(harness.state.operationKind.value, 'selected')
     const begin = harness.calls.find(call => call[0] === 'begin')[1]
     assert.equal(begin.voiceId, 'voice-2'); assert.equal(begin.speed, 1.4)
     const changed = harness.events.find(event => event[0] === 'change')[1]
@@ -196,8 +204,7 @@ test('card audition uses the requested voice and language without selecting it o
     const request = harness.calls.find(call => call[0] === 'begin')[1]
     assert.equal(request.voiceId, 'english-audition')
     assert.equal(request.speed, 1.25)
-    assert.match(request.text, /^Hello/)
-    assert.doesNotMatch(request.text, /[\u4e00-\u9fff]/)
+    assert.equal(request.text, 'Hello, this is a voice preview. Let your story come to life with a clear and natural voice.')
     assert.equal(harness.state.voiceId.value, 'chinese-selected')
     assert.equal(harness.state.previewVoiceId.value, 'english-audition')
     assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)

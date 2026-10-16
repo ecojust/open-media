@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { SpeechVoice } from '../native'
-import { VOICE_CATEGORIES, voiceArtworkVariant, voiceCategory, voiceTypeLabel, type VoiceCategoryId } from '../core/voice-catalog'
+import { VOICE_CATEGORIES, voiceCategory, voiceSearchText, voiceStyle, voiceTypeLabel, type VoiceCategoryId } from '../core/voice-catalog'
 import Icon from './Icon.vue'
-import maleStudio from '../assets/voices/male-studio.svg'
-import maleDesk from '../assets/voices/male-desk.svg'
-import femaleStudio from '../assets/voices/female-studio.svg'
-import femaleDesk from '../assets/voices/female-desk.svg'
-import recordingStudio from '../assets/voices/recording-studio.svg'
+import voicePortraits from '../assets/voices/voice-portraits.png'
 
 const props = withDefaults(defineProps<{
   voices: SpeechVoice[]
@@ -23,7 +19,7 @@ const categories = computed(() => VOICE_CATEGORIES.map(category => ({ ...categor
 const selectedVoice = computed(() => props.voices.find(voice => voice.id === props.modelValue))
 const visibleVoices = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
-  return props.voices.filter(voice => voiceCategory(voice) === activeTab.value && (!query || `${voice.name} ${voiceTypeLabel(voice)} ${voice.id}`.toLocaleLowerCase().includes(query)))
+  return props.voices.filter(voice => voiceCategory(voice) === activeTab.value && (!query || voiceSearchText(voice).includes(query)))
 })
 const categoryLabel = computed(() => VOICE_CATEGORIES.find(category => category.id === activeTab.value)?.label || '声音')
 
@@ -35,9 +31,11 @@ watch(categories, groups => {
 }, { immediate: true })
 watch([activeTab, search], () => { if (scroller.value) scroller.value.scrollTop = 0 })
 
-function artwork(voice: SpeechVoice): string {
-  const category = voiceCategory(voice), variant = voiceArtworkVariant(voice.id)
-  return category === 'zh-male' ? [maleStudio, maleDesk][variant]! : category === 'zh-female' ? [femaleStudio, femaleDesk][variant]! : recordingStudio
+function artwork(voice: SpeechVoice): Record<string, string> {
+  const portrait = voiceStyle(voice).portrait
+  // Crop a square inside each portrait; the generated sheet has unequal row heights.
+  const left = [11, 373, 735][portrait % 3]!, top = [7, 358, 707, 1080][Math.floor(portrait / 3)]!
+  return { backgroundImage: `url(${voicePortraits})`, backgroundSize: `${1086 / 340 * 100}% ${1448 / 340 * 100}%`, backgroundPosition: `${left / (1086 - 340) * 100}% ${top / (1448 - 340) * 100}%` }
 }
 function playing(voice: SpeechVoice): boolean { return props.previewVoiceId === voice.id && props.previewState === 'playing' }
 function loading(voice: SpeechVoice): boolean { return props.previewVoiceId === voice.id && props.previewState === 'loading' }
@@ -60,16 +58,16 @@ function tabKeyboard(event: KeyboardEvent, id: VoiceCategoryId): void {
     <div ref="tabs" class="voice-categories" role="tablist" aria-label="声音分类">
       <button v-for="category in categories" :id="`${instanceId}-${category.id}`" :key="category.id" type="button" role="tab" :data-voice-category="category.id" :aria-selected="activeTab === category.id" :aria-controls="`${instanceId}-voices`" :tabindex="activeTab === category.id ? 0 : -1" :disabled="disabled" @click="chooseCategory(category.id)" @keydown="tabKeyboard($event, category.id)">{{ category.label }}<span>{{ category.voices.length }}</span></button>
     </div>
-    <div class="voice-search"><Icon name="search" :size="14" /><input v-model="search" type="search" :disabled="disabled" aria-label="搜索声音" :placeholder="`搜索${categoryLabel}`" autocomplete="off" spellcheck="false" /><span aria-live="polite">{{ visibleVoices.length }} 个</span></div>
+    <div class="voice-search"><Icon name="search" :size="14" /><input v-model="search" type="search" :disabled="disabled" aria-label="搜索声音" :placeholder="`搜索${categoryLabel}名称或类型`" autocomplete="off" spellcheck="false" /><span aria-live="polite">{{ visibleVoices.length }} 个</span></div>
     <div :id="`${instanceId}-voices`" ref="scroller" class="voice-grid-scroll" role="tabpanel" :aria-labelledby="`${instanceId}-${activeTab}`" tabindex="0">
       <div v-if="visibleVoices.length" class="voice-grid">
         <div v-for="voice in visibleVoices" :key="voice.id" class="voice-card" :class="{ selected: modelValue === voice.id, previewing: playing(voice) }" :data-voice-id="voice.id">
-          <button type="button" class="voice-choice" :disabled="disabled" :aria-label="`选择 ${voice.name}`" :aria-pressed="modelValue === voice.id" @click="emit('update:modelValue', voice.id)">
-            <img class="voice-artwork" :src="artwork(voice)" alt="" aria-hidden="true" draggable="false" />
+          <button type="button" class="voice-choice" :disabled="disabled" :aria-label="`选择 ${voice.name}`" :aria-description="`${voiceStyle(voice).label}，${voiceTypeLabel(voice)}`" :aria-pressed="modelValue === voice.id" @click="emit('update:modelValue', voice.id)">
+            <span class="voice-artwork" :style="artwork(voice)" aria-hidden="true"><span class="voice-style" :data-voice-style="voiceStyle(voice).id">{{ voiceStyle(voice).label }}</span></span>
             <span v-if="modelValue === voice.id" class="voice-check" aria-hidden="true"><Icon name="check" :size="12" /></span>
             <span class="voice-card-copy"><strong :title="voice.name">{{ voice.name }}</strong><span>{{ voiceTypeLabel(voice) }}</span></span>
           </button>
-          <button type="button" class="voice-preview-button" :disabled="disabled" :aria-label="`试听 ${voice.name}`" :aria-pressed="playing(voice)" :aria-busy="loading(voice) || undefined" :title="loading(voice) ? '正在生成试听' : playing(voice) ? '停止试听' : '试听声音'" @click="emit('preview', voice.id)"><Icon :name="loading(voice) ? 'refresh' : playing(voice) ? 'stop' : 'volume'" :class="{ 'voice-loading': loading(voice) }" :size="15" /></button>
+          <button type="button" class="voice-preview-button" :disabled="disabled" :aria-label="`试听 ${voice.name}`" :aria-pressed="playing(voice)" :aria-busy="loading(voice) || undefined" :title="loading(voice) ? '正在生成试听' : playing(voice) ? '暂停试听' : '试听声音'" @click="emit('preview', voice.id)"><Icon :name="loading(voice) ? 'refresh' : playing(voice) ? 'pause' : 'volume'" :class="{ 'voice-loading': loading(voice) }" :size="15" /></button>
         </div>
       </div>
       <p v-else class="voice-empty" role="status">{{ voices.length ? '没有找到匹配的声音，试试其他名称或分类。' : '暂时没有可用的声音。' }}</p>
@@ -92,13 +90,14 @@ function tabKeyboard(event: KeyboardEvent, id: VoiceCategoryId): void {
 .voice-picker .voice-search input{width:100%;min-width:0;box-sizing:border-box;padding:7px 46px 7px 29px;border:1px solid var(--ed-border);border-radius:7px;background:var(--ed-panel);color:var(--ed-text);font:inherit;font-size:11px;line-height:1.4}
 .voice-search>span{position:absolute;right:9px;font-size:10px;pointer-events:none}
 .voice-search input::-webkit-search-cancel-button{-webkit-appearance:none}
-.voice-grid-scroll{max-height:258px;overflow:auto;overscroll-behavior:contain;padding:2px 4px 3px 2px;scrollbar-width:thin;scrollbar-color:var(--ed-border) transparent;min-height:110px}
+.voice-grid-scroll{max-height:340px;overflow:auto;overscroll-behavior:contain;padding:2px 4px 3px 2px;scrollbar-width:thin;scrollbar-color:var(--ed-border) transparent;min-height:110px}
 .voice-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .voice-card{position:relative;min-width:0;border-radius:9px}
 .voice-picker .voice-card .voice-choice{position:relative;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:0;overflow:hidden;width:100%;min-height:0;padding:0;border:1px solid var(--ed-border);border-radius:9px;background:var(--ed-panel);color:var(--ed-text);font:inherit;text-align:left;line-height:1.4;cursor:pointer}
 .voice-picker .voice-card .voice-choice:hover:not(:disabled){border-color:var(--ed-accent);background:var(--ed-panel);color:var(--ed-text)}
 .voice-picker .voice-card.selected .voice-choice{border-color:var(--ed-accent);box-shadow:0 0 0 1px var(--ed-accent)}
-.voice-artwork{display:block;width:100%;height:auto;aspect-ratio:30/17;object-fit:cover;object-position:center;user-select:none;background:#e4edf0}
+.voice-artwork{position:relative;display:block;width:100%;aspect-ratio:1;user-select:none;background-color:#e4edf0;background-repeat:no-repeat}
+.voice-style{position:absolute;left:7px;bottom:7px;display:block;padding:3px 8px;border:1px solid #ffffff75;border-radius:5px;background:#172435d9;color:#fff;font-size:11px;font-weight:600;letter-spacing:.04em;line-height:1.4;box-shadow:0 1px 5px #142d3920}
 .voice-card-copy{display:flex;flex-direction:column;gap:3px;min-width:0;padding:8px 8px 9px}
 .voice-card-copy>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:600}
 .voice-card-copy>span{font-size:9px;color:var(--ed-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -111,6 +110,6 @@ function tabKeyboard(event: KeyboardEvent, id: VoiceCategoryId): void {
 .voice-loading{animation:voice-turn .9s linear infinite}
 @keyframes voice-turn{to{transform:rotate(360deg)}}
 @container(min-width:560px){.voice-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(max-width:420px){.voice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.voice-grid-scroll{max-height:266px}.voice-current{max-width:55%}}
+@media(max-width:420px){.voice-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.voice-grid-scroll{max-height:340px}.voice-current{max-width:55%}}
 @media(prefers-reduced-motion:reduce){.voice-loading{animation:none}}
 </style>

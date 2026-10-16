@@ -87,7 +87,9 @@ export async function pauseCapture(): Promise<CaptureStatus> { return call('paus
 export async function resumeCapture(): Promise<CaptureStatus> { return call('resume_capture') }
 export async function stopCapture(): Promise<MediaAsset | null> { const asset = await call<MediaAsset | null>('stop_capture'); return asset ? assetUrl(asset) : null }
 export async function saveBytes(name: string, bytes: Uint8Array): Promise<string | null> { return call('save_bytes', { name, bytes: Array.from(bytes) }) }
-export async function openProjectFile(): Promise<{ name: string; bytes: number[] } | null> { return call('open_project_file') }
+export interface ProjectFileTarget { name: string; path: string; token: string }
+export async function saveProjectFile(name: string, bytes: Uint8Array, token?: string): Promise<ProjectFileTarget | null> { return call('save_project_file', { name, bytes: Array.from(bytes), token: token ?? null }) }
+export async function openProjectFile(): Promise<(ProjectFileTarget & { bytes: number[] }) | null> { return call('open_project_file') }
 
 export async function onNativeCloseRequest(handler: () => void): Promise<() => void> {
   if (!isDesktop()) return () => {}

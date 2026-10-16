@@ -15,20 +15,22 @@ import { cloneProject, createClip, createProject, createTrack, validateProject }
 import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, redoHistory, undoHistory } from './core/timeline.ts'
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
 import { exportProjectFile, importProjectFile } from './core/project-file.ts'
+import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, type BrowserProjectFileHandle } from './core/browser-project-files.ts'
 import { downloadBlob, importMediaFile } from './core/media-import.ts'
-import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, type MediaJob } from './native.ts'
+import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, saveProjectFile, type ProjectFileTarget, type MediaJob } from './native.ts'
 
 type Workspace = 'home' | 'edit' | 'record' | 'gif' | 'image' | 'video'
 const workspaces: { id: Workspace; title: string; icon: string; description: string; color: string }[] = [
-  { id: 'edit', title: '视频剪辑', icon: 'scissors', description: '多轨剪辑、字幕与配乐，组合你的故事', color: '#2563eb' },
   { id: 'record', title: '录屏', icon: 'record', description: '录制屏幕与声音，随时暂停和继续', color: '#e35764' },
   { id: 'gif', title: '片段转 GIF', icon: 'gif', description: '截取多个精彩片段，生成循环动图', color: '#9161d1' },
-  { id: 'image', title: '图片转换', icon: 'image', description: '批量转换格式，调整尺寸与画面', color: '#2a9d80' },
+  { id: 'edit', title: '视频剪辑', icon: 'scissors', description: '多轨剪辑、字幕与配乐，组合你的故事', color: '#2563eb' },
   { id: 'video', title: '视频转换', icon: 'convert', description: '转换视频格式、压缩体积与提取音频', color: '#dd9635' },
+  { id: 'image', title: '图片转换', icon: 'image', description: '批量转换格式，调整尺寸与画面', color: '#2a9d80' },
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
 const autoSave = ref(true), draftState = ref<'idle' | 'pending' | 'saved' | 'error'>('idle'), draftError = ref(''), lastSaved = ref('')
+let nativeProjectTarget: ProjectFileTarget | undefined, browserProjectTarget: BrowserProjectFileHandle | undefined
 const recent = ref<ProjectSummary[]>([]), status = ref('本地创作，自由表达'), busy = ref(''), error = ref(''), recording = ref(false), browserExporting = ref(false)
 const exportOpen = ref(false), jobsOpen = ref(false), jobs = ref<MediaJob[]>([])
 const mediaInput = ref<HTMLInputElement>(), projectInput = ref<HTMLInputElement>(), renameInput = ref<HTMLInputElement>(), renaming = ref(false), renameValue = ref(''), search = ref('')
@@ -280,6 +282,7 @@ function releaseUnusedMedia(next: Project) {
 }
 function adoptProject(next: Project, restored = false) {
   draftGeneration++; clearTimeout(draftTimer)
+  nativeProjectTarget = undefined; browserProjectTarget = undefined
   releaseUnusedMedia(next)
   project.value = next; history.value = createHistory(next); cleanKey.value = contentKey(next); draftState.value = restored ? 'saved' : 'idle'; lastSaved.value = ''; remember()
   view.value = 'edit'; screenshotAssetId.value = ''; error.value = ''; if (!restored) scheduleDraft()
@@ -309,14 +312,30 @@ async function hydrate(imported: ImportedProject) {
 }
 async function openProject(file?: File) {
   if (busy.value || switching.value || booting.value) return
-  if (!file && !native) { projectInput.value?.click(); return }
+  let browserSelection: { file: File; handle: BrowserProjectFileHandle } | null | undefined
+  if (!file && !native) {
+    if (mediaIsWorking()) { fail('请先完成或取消录制、配音、转换及导出，再切换项目。'); return }
+    try {
+      const selection = pickBrowserProjectFile()
+      if (!selection) { projectInput.value?.click(); return }
+      busy.value = '正在选择项目…'
+      browserSelection = await selection
+      if (!browserSelection) return
+      file = browserSelection.file
+    } catch (cause) { fail(cause); return } finally { busy.value = '' }
+  }
   await changeProject(async () => {
     busy.value = '正在打开项目…'; error.value = ''
     try {
       const selected = file || await openProjectFile()
       if (!selected) return
       const imported = await importProjectFile(selected instanceof File ? selected : new Uint8Array(selected.bytes))
-      try { adoptProject(await hydrate(imported)); cleanKey.value = contentKey(project.value); announce('项目与素材已打开。') } catch (cause) { imported.revoke(); throw cause }
+      try {
+        adoptProject(await hydrate(imported))
+        if (!(selected instanceof File)) { nativeProjectTarget = { name: selected.name, path: selected.path, token: selected.token }; lastSaved.value = selected.path }
+        else if (browserSelection) { browserProjectTarget = browserSelection.handle; lastSaved.value = browserSelection.handle.name }
+        cleanKey.value = contentKey(project.value); announce('项目与素材已打开。')
+      } catch (cause) { imported.revoke(); throw cause }
     } finally { busy.value = '' }
   })
 }
@@ -331,17 +350,27 @@ async function removeRecent(item: ProjectSummary) {
   if (choice !== 'remove') return
   try { if (item.id === project.value.id) { draftGeneration++; clearTimeout(draftTimer) }; await saveQueue; await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) draftState.value = 'idle' } catch (cause) { fail(cause) }
 }
-async function save() {
-  if (busy.value || switching.value || booting.value) return
+async function save(saveAs = false) {
+  if (busy.value || switching.value || booting.value || speechWorking.value) return
   busy.value = '正在打包项目与素材…'; error.value = ''
   const snapshot = cloneProject(project.value), key = contentKey(snapshot)
   try {
-    const blob = await exportProjectFile(snapshot, { blobs, onProgress: (done, total) => { busy.value = `正在打包项目 ${Math.round(done / Math.max(1, total) * 100)}%` } })
     const name = `${snapshot.title.replace(/[\\/:*?"<>|]/g, '-') || '媒体项目'}.omedia`
-    if (native) { const path = await saveBytes(name, new Uint8Array(await blob.arrayBuffer())); if (!path) return; lastSaved.value = path }
-    else { downloadBlob(blob, name); lastSaved.value = name }
+    const browserTarget = native ? undefined : await prepareBrowserProjectSave(name, saveAs ? undefined : browserProjectTarget)
+    if (browserTarget === null) return
+    const blob = await exportProjectFile(snapshot, { blobs, onProgress: (done, total) => { busy.value = `正在打包项目 ${Math.round(done / Math.max(1, total) * 100)}%` } })
+    let downloaded = false
+    if (native) {
+      const target = await saveProjectFile(name, new Uint8Array(await blob.arrayBuffer()), saveAs ? undefined : nativeProjectTarget?.token)
+      if (!target) return
+      nativeProjectTarget = target; lastSaved.value = target.path
+    } else if (browserTarget) {
+      await writeBrowserProjectFile(browserTarget, blob)
+      browserProjectTarget = browserTarget; lastSaved.value = browserTarget.name
+    } else { downloadBlob(blob, name); lastSaved.value = name; downloaded = true }
     if (project.value.id === snapshot.id) cleanKey.value = key
-    await persist(); announce('项目与素材已保存，可重新打开继续编辑。')
+    await persist()
+    announce(downloaded ? '已下载项目副本；当前浏览器不支持直接覆盖文件。' : `${saveAs ? '项目已另存为' : '项目已保存'}：${lastSaved.value}`)
   } catch (cause) { fail(cause) } finally { busy.value = '' }
 }
 async function rename() { renameValue.value = project.value.title; renaming.value = true; await nextTick(); renameInput.value?.focus(); renameInput.value?.select() }
@@ -374,7 +403,7 @@ function keyboard(event: KeyboardEvent) {
   if (!native && matchesScreenshotShortcut(event, screenshotShortcut.value)) { event.preventDefault(); void takeScreenshot(); return }
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return
   const key = event.key.toLowerCase()
-  if (key === 's') { event.preventDefault(); void save() }
+  if (key === 's') { event.preventDefault(); void save(event.shiftKey) }
   if (key === 'o') { event.preventDefault(); void openProject() }
   if ((event.target as HTMLElement)?.closest('input,textarea,[contenteditable]')) return
   if (key === 'z') { event.preventDefault(); moveHistory(event.shiftKey ? 'redo' : 'undo') }
@@ -401,7 +430,7 @@ onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screensh
 <template>
   <div class="app-shell" :data-theme="effectiveTheme" @dragover.prevent @drop="dropped">
     <header class="topbar">
-      <button class="brand" :disabled="speechWorking" title="开始" @click="view='home'"><img src="/favicon.svg" width="29" height="29" alt=""/><strong>Open Media</strong></button>
+      <button class="brand" :disabled="speechWorking" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
     </header>
     <div class="workbench-body" :inert="switching || booting">
@@ -412,8 +441,9 @@ onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screensh
       </aside>
       <main class="main-area">
         <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
-        <button title="保存项目 (Ctrl+S)" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-project" @click="save"><Icon name="save"/><span>保存</span></button>
+        <button :title="lastSaved && (native || browserProjectTarget) ? `保存到 ${lastSaved} (Ctrl/⌘+S)` : '保存项目 (Ctrl/⌘+S)'" aria-label="保存项目" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-project" @click="save()"><Icon name="save"/><span>保存</span></button>
         <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
+        <button title="另存为项目 (Ctrl/⌘+Shift+S)" aria-label="另存为项目" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-as-project" @click="save(true)"><Icon name="save-as"/><span>另存为</span></button>
         <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting || speechWorking" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting || speechWorking" @click="moveHistory('redo')"><Icon name="redo"/></button>
       </div></div>
         <div v-if="error" class="app-error" role="alert"><Icon name="alert" :size="16"/><span>{{ error }}</span><button class="icon-button" aria-label="关闭提示" @click="error=''"><Icon name="close" :size="15"/></button></div>

@@ -48,7 +48,7 @@ export function quantizeGifFrame(rgba: Uint8ClampedArray | Uint8Array, width: nu
   return indexed
 }
 
-function lzw(pixels: Uint8Array): Uint8Array {
+export function encodeGifIndices(pixels: Uint8Array): Uint8Array {
   const bytes: number[] = []
   let buffer = 0
   let bitCount = 0
@@ -110,7 +110,7 @@ export class GifEncoder {
     if (rgba.length !== this.width * this.height * 4) throw new Error('帧尺寸与 GIF 尺寸不一致。')
     const delay = Math.max(2, Math.min(65535, Math.round(delaySeconds * 100)))
     this.chunks.push(new Uint8Array([0x21, 0xf9, 4, 4, delay & 255, delay >> 8, 0, 0, 0x2c, 0, 0, 0, 0, this.width & 255, this.width >> 8, this.height & 255, this.height >> 8, 0]))
-    this.chunks.push(lzw(quantizeGifFrame(rgba, this.width, quality)))
+    this.chunks.push(encodeGifIndices(quantizeGifFrame(rgba, this.width, quality)))
     this.frames++
   }
   finish(): Blob {
