@@ -206,10 +206,12 @@ fn clip_filter_graph_preserves_each_alpha_byte_and_luma_grayscale() {
         [64, 160, 240, 128],
         [0, 255, 0, 0],
         [0, 0, 255, 64],
+        [0, 0, 255, 255],
+        [160, 40, 10, 192],
+        [255, 0, 0, 32],
+        [0, 255, 0, 1],
     ]
     .into_iter()
-    .cycle()
-    .take(8)
     .flatten()
     .collect();
     let source = temp.path().join("rgba.raw");

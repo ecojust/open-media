@@ -114,8 +114,9 @@ pub(crate) fn filter_chain(clip: &Value, visual: bool) -> Result<Option<String>>
     if matrix == IDENTITY {
         return Ok(None);
     }
-    // Compose the whole RGB transform first, then clamp once. The caller restores
-    // the original alpha separately so pixel-format conversion cannot round it.
+    // Compose the whole RGB transform first, then clamp once. Sample the exact
+    // pixel: bilinear lookup in older engines clamps the final row and column.
+    // The caller restores alpha separately so format conversion cannot round it.
     let expression = |row: [f64; 4]| {
         format!(
             "clip(({:.12})*r(X,Y)+({:.12})*g(X,Y)+({:.12})*b(X,Y)+({:.12}),0,255)",
@@ -123,7 +124,7 @@ pub(crate) fn filter_chain(clip: &Value, visual: bool) -> Result<Option<String>>
         )
     };
     Ok(Some(format!(
-        "format=gbrp,geq=r='{}':g='{}':b='{}',format=rgba",
+        "format=gbrp,geq=interpolation=nearest:r='{}':g='{}':b='{}',format=rgba",
         expression(matrix[0]), expression(matrix[1]), expression(matrix[2])
     )))
 }
