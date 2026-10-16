@@ -62,8 +62,8 @@ case "$(uname -s)" in
   *) build_component zlib ./configure --prefix="$prefix_dir" --static ;;
 esac
 
-build_component x264 ./configure --prefix="$prefix_dir" --enable-static --disable-cli --disable-opencl "${x264_platform[@]}" "${assembly[@]}"
-build_component libvpx ./configure --prefix="$prefix_dir" --disable-shared --enable-static --disable-examples --disable-tools --disable-docs --disable-unit-tests --enable-vp9-highbitdepth "${vpx_platform[@]}"
+build_component x264 ./configure --prefix="$prefix_dir" --enable-static --disable-cli --disable-opencl ${x264_platform[@]+"${x264_platform[@]}"} ${assembly[@]+"${assembly[@]}"}
+build_component libvpx ./configure --prefix="$prefix_dir" --disable-shared --enable-static --disable-examples --disable-tools --disable-docs --disable-unit-tests --enable-vp9-highbitdepth ${vpx_platform[@]+"${vpx_platform[@]}"}
 build_component opus ./configure "${common[@]}" --disable-doc --disable-extra-programs
 build_component libwebp ./configure "${common[@]}" --disable-everything --enable-libwebpmux --enable-libwebpdemux
 build_component lame env CFLAGS="$CFLAGS -std=gnu99 -Wno-implicit-function-declaration" ./configure "${common[@]}" --disable-frontend --disable-gtktest --disable-dependency-tracking
@@ -73,7 +73,7 @@ build_component ffmpeg ./configure \
   --disable-autodetect --disable-doc --disable-debug --disable-ffplay \
   --enable-libx264 --enable-libvpx --enable-libopus --enable-libwebp --enable-libmp3lame --enable-zlib \
   --pkg-config-flags=--static --extra-cflags="-I$prefix_dir/include" \
-  --extra-ldflags="$LDFLAGS" "${ffmpeg_platform[@]}"
+  --extra-ldflags="$LDFLAGS" ${ffmpeg_platform[@]+"${ffmpeg_platform[@]}"}
 
 extension=''
 case "$(uname -s)" in MINGW*|MSYS*) extension='.exe' ;; esac

@@ -6,7 +6,7 @@
 
 `scripts/media-runtime.lock.json` 记录每一个媒体组件的版本、下载地址、SHA-256 和许可证。下载后必须通过校验，缓存中的文件校验失败也会终止构建。构建禁用自动探测额外依赖，避免无意链接构建机器上的库。项目不修改这些组件的源码。
 
-工具链要求：Node.js 24、Bash、C/C++ 编译器、Make、Perl、pkg-config；x86 平台建议安装 NASM 以获得汇编优化。macOS 使用系统编译器，最低系统目标为 11.0。Windows 使用 MSYS2 的 MINGW64 环境，安装 `make diffutils perl nasm mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf`；媒体工具为独立静态程序，应用壳使用原生桌面工具链。Linux 可以使用 GCC 构建和测试媒体工具。
+工具链要求：Node.js 24、Bash、curl、tar、C/C++ 编译器、Make、Perl、pkg-config；x86 平台建议安装 NASM 以获得汇编优化。macOS 使用系统编译器，最低系统目标为 11.0。Windows 使用 MSYS2 的 MINGW64 环境，安装 `make diffutils perl nasm mingw-w64-x86_64-gcc mingw-w64-x86_64-pkgconf`；媒体工具为独立静态程序，应用壳使用原生桌面工具链。Linux 可以使用 GCC 构建和测试媒体工具。
 
 ```sh
 node scripts/media-runtime.mjs prepare

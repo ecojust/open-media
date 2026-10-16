@@ -1,11 +1,9 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { access, chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cache = join(root, '.media-runtime');
@@ -13,6 +11,7 @@ const runtime = join(root, 'src-tauri/resources/media');
 const lockPath = join(root, 'scripts/media-runtime.lock.json');
 const lock = JSON.parse(await readFile(lockPath, 'utf8'));
 const binaryExtension = process.platform === 'win32' ? '.exe' : '';
+const tar = process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 const exists = async (path) => { try { await access(path); return true; } catch { return false; } };
 async function sha256(path) {
   const hash = createHash('sha256');
@@ -34,10 +33,8 @@ async function download(source) {
   }
   const partial = `${destination}.partial`;
   console.log(`Downloading ${source.id} ${source.version}`);
-  const response = await fetch(source.url, { signal: AbortSignal.timeout(180_000), redirect: 'follow' });
-  if (!response.ok || !response.body) throw new Error(`Download failed (${response.status}): ${source.url}`);
   try {
-    await pipeline(Readable.fromWeb(response.body), createWriteStream(partial));
+    run('curl', ['--fail', '--location', '--silent', '--show-error', '--retry', '3', '--retry-all-errors', '--connect-timeout', '30', '--max-time', '180', '--output', partial, source.url]);
     if (await sha256(partial) !== source.sha256) throw new Error(`Downloaded source checksum mismatch: ${source.archive}`);
     await rename(partial, destination);
   } finally { await rm(partial, { force: true }); }
@@ -51,7 +48,7 @@ async function prepare() {
     if (await exists(marker) && (await readFile(marker, 'utf8')).trim() === source.sha256) continue;
     await rm(directory, { recursive: true, force: true });
     await mkdir(directory, { recursive: true });
-    run('tar', ['-xf', archive, '-C', directory, '--strip-components=1']);
+    run(tar, ['-xf', archive, '-C', directory, '--strip-components=1']);
     await writeFile(marker, `${source.sha256}\n`);
   }
   console.log('Verified media sources are ready.');
@@ -126,7 +123,7 @@ async function sources() {
   }
   await writeFile(join(bundle, 'README.txt'), 'Open Media bundled media tools: complete corresponding source\n\nAll original source archives are included in .media-runtime/downloads.\nNo media sources are patched. See docs/MEDIA_RUNTIME.md for prerequisites.\nRun: node scripts/media-runtime.mjs prepare\nThen: bash scripts/build-media-runtime.sh\n\nThe build scripts and source checksums are included. Each component retains\nits original copyright, license, patent notices, and build instructions.\n');
   await mkdir(dirname(output), { recursive: true });
-  run('tar', ['-czf', output, '-C', stage, 'media-runtime-source']);
+  run(tar, ['-czf', output, '-C', stage, 'media-runtime-source']);
   console.log(`Corresponding source: ${output}\nSHA256 ${await sha256(output)}`);
 }
 const command = process.argv[2] ?? 'prepare';
