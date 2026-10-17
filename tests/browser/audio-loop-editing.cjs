@@ -31,11 +31,14 @@ async function mount(page, url) {
     const audioBlob = new Blob([bytes], { type: 'audio/wav' })
     const context = new AudioContext({ sampleRate }), decoded = await context.decodeAudioData(bytes.slice(0)); await context.close()
     const audio = { id: 'asset-audio', kind: 'audio', name: '四秒配音.wav', url: URL.createObjectURL(audioBlob), duration: decoded.duration, width: 0, height: 0, mime: audioBlob.type, size: audioBlob.size }
-    const videoBlob = await (await fetch('/watermarks/cursor-click.mp4')).blob()
+    const videoResponse = await fetch('/watermarks/cursor-click.webm')
+    if (!videoResponse.ok) throw new Error(`真实视频素材读取失败：HTTP ${videoResponse.status}`)
+    const videoBlob = await videoResponse.blob()
     const videoUrl = URL.createObjectURL(videoBlob), media = document.createElement('video')
     media.src = videoUrl; media.preload = 'auto'; media.muted = true
-    await new Promise((resolve, reject) => { media.onloadeddata = resolve; media.onerror = () => reject(new Error('真实视频素材无法解码')); media.load() })
-    const video = { id: 'asset-video', kind: 'video', name: '真实视频.mp4', url: videoUrl, duration: media.duration, width: media.videoWidth, height: media.videoHeight, mime: 'video/mp4', size: videoBlob.size }
+    await new Promise((resolve, reject) => { media.onloadeddata = resolve; media.onerror = () => reject(new Error(`真实视频素材无法解码：${media.error?.code} ${media.error?.message || ''}`)); media.load() })
+    if (media.videoWidth !== 640 || media.videoHeight !== 360 || Math.abs(media.duration - 4) > 0.05) throw new Error(`真实视频素材尺寸或时长错误：${media.videoWidth}×${media.videoHeight}，${media.duration}秒`)
+    const video = { id: 'asset-video', kind: 'video', name: '真实视频.webm', url: videoUrl, duration: media.duration, width: media.videoWidth, height: media.videoHeight, mime: 'video/webm', size: videoBlob.size }
     media.removeAttribute('src'); media.load()
     const project = createProject('音频延长与恢复验证', { width: 320, height: 180, fps: 20 })
     const sound = createTrack('audio', '配音轨道'); sound.id = 'audio-track'
