@@ -6,7 +6,7 @@ on:
       job_id:
         description: Completed runtime job whose logs should be inspected
         type: string
-        default: '117461271277'
+        default: '117464202971'
         required: true
   push:
     branches: ['work/speech-runtime-diagnostics-*']
@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      TARGET_JOB_ID: ${{ inputs.job_id || '117461271277' }}
+      TARGET_JOB_ID: ${{ inputs.job_id || '117464202971' }}
       PYTHONUTF8: '1'
     steps:
       - name: Read the existing job log without rerunning speech generation
@@ -96,11 +96,12 @@ jobs:
           run-id: ${{ steps.source.outputs.run_id }}
           name: ${{ steps.source.outputs.artifact_name }}
           path: existing-runtime-evidence
-      - name: Expose native compilation errors
+      - name: Expose native compilation and runtime audit errors
         if: steps.source.outputs.artifact_name != ''
         shell: bash
         run: |
           python3 - <<'PY'
+          import json
           from pathlib import Path
           for path in Path('existing-runtime-evidence').rglob('normalizer-build.log'):
               text = path.read_text(encoding='utf-8', errors='replace')[-45000:]
@@ -109,6 +110,15 @@ jobs:
                   part = text[start:start + 12000]
                   escaped = part.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
                   print(f'::warning title=Native compiler, part {start // 12000 + 1}::{escaped}')
+          for path in Path('existing-runtime-evidence').rglob('macos-native-audit.json'):
+              audit = json.loads(path.read_text(encoding='utf-8'))
+              problems = [entry for entry in audit['files'] if entry.get('signatureValid') is False or
+                          any(tuple(int(x) for x in value.split('.')[:2]) > (13, 0) for value in entry.get('minimumMacOS', []))]
+              text = json.dumps({'inspectedFiles': len(audit['files']), 'problems': problems}, ensure_ascii=False, indent=2)
+              Path('runtime-diagnostics/macos-native-audit.json').write_text(path.read_text(encoding='utf-8'), encoding='utf-8')
+              for start in range(0, len(text), 12000):
+                  escaped = text[start:start+12000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::warning title=Complete native audit, part {start // 12000 + 1}::{escaped}')
           PY
       - uses: actions/upload-artifact@v4
         with:
