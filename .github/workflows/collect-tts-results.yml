@@ -28,9 +28,12 @@ jobs:
     env:
       MODEL: ${{ inputs.model }}
       SOURCE_RUN: ${{ inputs.run_id }}
-      DOWNLOAD_ROOT: ${{ runner.temp }}/tts-result-artifacts
-      SOURCE_METADATA: ${{ runner.temp }}/tts-result-source.json
     steps:
+      - name: Prepare collection paths
+        run: |
+          echo "DOWNLOAD_ROOT=$RUNNER_TEMP/tts-result-artifacts" >> "$GITHUB_ENV"
+          echo "SOURCE_METADATA=$RUNNER_TEMP/tts-result-source.json" >> "$GITHUB_ENV"
+
       - name: Verify source run and complete artifact set
         id: source
         uses: actions/github-script@v7
