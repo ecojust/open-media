@@ -1,0 +1,58 @@
+name: Speech runtime diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Completed runtime job whose logs should be inspected
+        type: string
+        default: '117461271277'
+        required: true
+  push:
+    branches: ['work/speech-runtime-diagnostics-*']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_JOB_ID: ${{ inputs.job_id || '117461271277' }}
+      PYTHONUTF8: '1'
+    steps:
+      - name: Read the existing job log without rerunning speech generation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          from pathlib import Path
+          job = os.environ['TARGET_JOB_ID']
+          if not re.fullmatch(r'[1-9][0-9]{0,19}', job):
+              raise ValueError('Expected a numeric job identifier')
+          repository = os.environ['GITHUB_REPOSITORY']
+          result = subprocess.run(['gh', 'api', f'repos/{repository}/actions/jobs/{job}/logs'], check=True, capture_output=True)
+          text = result.stdout.decode('utf-8', errors='replace')
+          output = Path('runtime-diagnostics')
+          output.mkdir()
+          (output / f'job-{job}.log').write_text(text, encoding='utf-8')
+          lines = text.splitlines()
+          indices = set()
+          for i, line in enumerate(lines):
+              if any(word in line for word in ['Traceback (most recent call last)', 'UnicodeEncodeError', 'RuntimeError:', 'ValueError:', 'Error:', 'error:', 'FAILED', 'Process completed with exit code']):
+                  indices.update(range(max(0, i - 8), min(len(lines), i + 22)))
+          selected = '\n'.join(lines[i] for i in sorted(indices))[-45000:] if indices else text[-24000:]
+          (output / 'error-extract.log').write_text(selected, encoding='utf-8')
+          for start in range(0, len(selected), 12000):
+              part = selected[start:start + 12000]
+              escaped = part.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::warning title=Runtime job {job}, part {start // 12000 + 1}::{escaped}')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: speech-runtime-diagnostics-${{ github.run_id }}
+          retention-days: 7
+          path: runtime-diagnostics/
