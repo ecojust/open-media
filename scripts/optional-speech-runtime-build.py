@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
 import shutil
 import stat
 import subprocess
@@ -57,16 +58,20 @@ def checked_file(path: Path, size: int, digest: str) -> bool:
 
 
 def download(spec: dict, destination: Path) -> None:
-    size, digest, url = int(spec["size"]), spec["sha256"], spec["url"]
-    if size <= 0 or size > MAX_ARCHIVE_BYTES or len(digest) != 64 or urllib.parse.urlparse(url).scheme != "https":
+    size, digest = int(spec["size"]), spec["sha256"]
+    urls = list(dict.fromkeys([spec["url"], *spec.get("mirrors", [])]))
+    if size <= 0 or size > MAX_ARCHIVE_BYTES or len(digest) != 64 or any(urllib.parse.urlparse(url).scheme != "https" for url in urls):
         raise ValueError(f"Invalid download record for {destination.name}")
     if checked_file(destination, size, digest):
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     part = destination.with_name(destination.name + ".part")
-    for attempt in range(3):
+    # Every mirror must return the same locked bytes; a reachable wrong revision
+    # is never accepted as a fallback.
+    for attempt in range(len(urls) * 2):
+        url = urls[attempt // 2]
         try:
-            print(f"Downloading {destination.name}: {size:,} bytes", flush=True)
+            print(f"Downloading {destination.name}: {size:,} bytes from {urllib.parse.urlparse(url).netloc}", flush=True)
             with urllib.request.urlopen(url, timeout=120) as response, part.open("wb") as out:
                 total = 0
                 while chunk := response.read(4 * 1024**2):
@@ -80,7 +85,7 @@ def download(spec: dict, destination: Path) -> None:
             return
         except Exception:
             part.unlink(missing_ok=True)
-            if attempt == 2:
+            if attempt == len(urls) * 2 - 1:
                 raise
             time.sleep(2)
 
@@ -171,6 +176,36 @@ def flatten_links(root: Path) -> None:
                 shutil.copy2(target, path)
 
 
+def audit_macos(root: Path, report: Path) -> None:
+    if platform.system() != "Darwin":
+        return
+    magic = {b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+             b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"}
+    records = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        with path.open("rb") as stream:
+            if stream.read(4) not in magic:
+                continue
+        headers = subprocess.check_output(["otool", "-l", str(path)], text=True)
+        minima = re.findall(r"cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform \d+\s+minos ([\d.]+)", headers)
+        minima += re.findall(r"cmd LC_VERSION_MIN_MACOSX\s+cmdsize \d+\s+version ([\d.]+)", headers)
+        signature = subprocess.run(["codesign", "-d", str(path)], capture_output=True, text=True)
+        entry = {"path": path.relative_to(root).as_posix(), "minimumMacOS": minima,
+                 "hasCodeSignature": signature.returncode == 0}
+        if signature.returncode == 0:
+            verified = subprocess.run(["codesign", "--verify", "--strict", str(path)], capture_output=True, text=True)
+            entry.update(signatureValid=verified.returncode == 0, signatureDiagnostic=verified.stderr.strip())
+        records.append(entry)
+    write_json(report, {"schema": 1, "supportedMinimumMacOS": "13.0", "files": records})
+    for entry in records:
+        if any(tuple(int(x) for x in value.split(".")[:2]) > (13, 0) for value in entry["minimumMacOS"]):
+            raise ValueError(f"Runtime library requires macOS newer than 13.0: {entry['path']}")
+        if entry.get("signatureValid") is False:
+            raise ValueError(f"Runtime library has an invalid existing signature: {entry['path']}")
+
+
 def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
     archive = args.work / "downloads" / f"python-{args.platform}.tar.gz"
     download(spec, archive)
@@ -212,6 +247,7 @@ def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
         if path.is_dir():
             shutil.rmtree(path)
     flatten_links(root)
+    audit_macos(root, logs / "macos-native-audit.json")
     write_json(root / "runtime-info.json", {"schema": 1, "id": lock["id"], "version": lock["version"],
                "platform": args.platform, "pythonVersion": lock["pythonVersion"], "torchVersion": spec["torch"],
                "f5Source": lock["f5Source"], "qwenPackage": "qwen-tts==0.1.1", "device": "cpu",
@@ -344,6 +380,9 @@ def verify_archive(archive: Path, destination: Path, metadata: dict) -> None:
 
 
 def main() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", required=True, choices=("macos-arm64", "macos-x64", "windows-x64"))
     parser.add_argument("--work", type=Path, required=True)
@@ -392,4 +431,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        detail = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", str(error))
+        detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=Optional speech runtime::{detail}", flush=True)
+        raise

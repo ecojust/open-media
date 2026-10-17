@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "modelId": "multivoice-zh-en-v1",
+  "modelSource": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/tree/155831f1b4ba23b1f5c058be6a61df90cefb2a37",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "LICENSE",
+      "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/LICENSE",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "README.md",
+      "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/README.md",
+      "bytes": 114,
+      "sha256": "e2d39356ea4d67ac15c39a7e5a238ea12b0f6fb8a55bb0c87bc2f659eb1cf7ac"
+    }
+  ],
+  "catalog": "src-tauri/resources/speech-models.json",
+  "notes": "Original publisher license and model reference are retained unmodified. Model files are downloaded on request; fixed audition recordings are generated from the listed speaker IDs with the shared bundled text-processing data."
+}

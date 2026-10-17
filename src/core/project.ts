@@ -33,7 +33,7 @@ export function createTrack(kind: TrackKind = 'video', name?: string): Track {
 
 export function createProject(title = '未命名项目', options: Partial<Pick<Project, 'width' | 'height' | 'fps' | 'background'>> = {}): Project {
   const now = new Date().toISOString()
-  return validateProject({ version: 1, id: newId('project'), title, width: 1920, height: 1080, fps: 30, background: '#101018', ...options, createdAt: now, updatedAt: now, assets: [], tracks: [createTrack('text'), createTrack('video'), createTrack('audio')] }, { trusted: true })
+  return validateProject({ version: 1, id: newId('project'), title, width: 1920, height: 1080, fps: 30, background: '#101018', ...options, autoSizeFromVideo: options.width === undefined && options.height === undefined, createdAt: now, updatedAt: now, assets: [], tracks: [createTrack('text'), createTrack('video'), createTrack('audio')] }, { trusted: true })
 }
 
 export function createClip(asset: MediaAsset, project: Pick<Project, 'width' | 'height'>, options: Partial<Clip> = {}): Clip {
@@ -43,7 +43,7 @@ export function createClip(asset: MediaAsset, project: Pick<Project, 'width' | '
 }
 
 export function createTextClip(project: Pick<Project, 'width' | 'height'>, options: Partial<Clip> = {}): Clip {
-  return { id: newId('clip'), generatedAt: new Date().toISOString(), name: '文本字幕', start: 0, trimIn: 0, trimOut: 5, speed: 1, volume: 0, opacity: 1, x: project.width * 0.1, y: project.height * 0.75, width: project.width * 0.8, height: project.height * 0.2, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, textRole: 'subtitle', text: '双击编辑字幕', fontSize: 64, fontFamily: 'sans-serif', fontWeight: 600, color: '#ffffff', background: 'transparent', textAlign: 'center', ...options }
+  return { id: newId('clip'), generatedAt: new Date().toISOString(), name: '文本字幕', start: 0, trimIn: 0, trimOut: 5, speed: 1, volume: 0, opacity: 1, x: project.width * 0.1, y: project.height * 0.75, width: project.width * 0.8, height: project.height * 0.2, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, textRole: 'subtitle', text: '双击编辑字幕', fontSize: 64, fontFamily: 'sans-serif', fontWeight: 600, color: '#ffffff', background: 'transparent', textAlign: 'center', textVerticalAlign: 'middle', ...options }
 }
 
 export function createSubtitleClip(project: Pick<Project, 'width' | 'height' | 'subtitleStyle'>, options: Partial<Clip> = {}): Clip {
@@ -102,6 +102,7 @@ function validateSubtitleStyle(value: unknown): SubtitleStyle {
     fontSize: number(style.fontSize, '字幕字号', 4, 2048), fontFamily: text(style.fontFamily, '字幕字体', 200),
     fontWeight: number(style.fontWeight, '字幕字重', 100, 900), color: color(style.color, '字幕颜色'),
     background: color(style.background, '字幕背景'), textAlign: choice(style.textAlign, ['left', 'center', 'right'] as const, '字幕对齐'),
+    textVerticalAlign: choice(style.textVerticalAlign ?? 'middle', ['top', 'middle', 'bottom'] as const, '字幕纵向对齐'),
   }
 }
 
@@ -166,6 +167,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
         clip.color = color(c.color ?? '#ffffff', '文字颜色')
         clip.background = color(c.background ?? 'transparent', '文字背景')
         clip.textAlign = choice(c.textAlign ?? 'center', ['left', 'center', 'right'] as const, '文字对齐')
+        clip.textVerticalAlign = choice(c.textVerticalAlign ?? 'middle', ['top', 'middle', 'bottom'] as const, '文字纵向对齐')
       } else {
         if (c.textRole !== undefined) throw new Error('文字用途只能用于文字轨道。')
         clip.assetId = text(c.assetId, '片段素材标识', 160)
@@ -173,7 +175,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
         if (!asset) throw new Error('片段引用的素材不存在。')
         if (kind === 'video' && asset.kind === 'audio') throw new Error('视频轨道不能放置纯音频素材。')
         if (kind === 'audio' && asset.kind === 'image') throw new Error('音频轨道不能放置图片素材。')
-        if (asset.kind !== 'image' && clip.trimOut > asset.duration + 1e-6) throw new Error('片段裁剪范围超出素材时长。')
+        if (kind !== 'audio' && asset.kind !== 'image' && clip.trimOut > asset.duration + 1e-6) throw new Error('片段裁剪范围超出素材时长。')
       }
       if (c.speech !== undefined) {
         if (kind !== 'audio' || assetMap.get(clip.assetId!)?.kind !== 'audio') throw new Error('文字配音信息只能用于音频轨道中的音频素材。')
@@ -202,5 +204,5 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     if (speechTextIds.has(textClipId)) throw new Error('同一字幕不能关联多个配音片段。')
     speechTextIds.add(textClipId)
   }
-  return { version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks, ...(root.subtitleStyle !== undefined ? { subtitleStyle: validateSubtitleStyle(root.subtitleStyle) } : {}) }
+  return { version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks, ...(root.autoSizeFromVideo !== undefined ? { autoSizeFromVideo: boolean(root.autoSizeFromVideo) } : {}), ...(root.subtitleStyle !== undefined ? { subtitleStyle: validateSubtitleStyle(root.subtitleStyle) } : {}) }
 }

@@ -14,6 +14,7 @@ pub mod project_files;
 pub mod image_clipboard;
 pub mod speech;
 mod speech_models;
+mod speech_chinese;
 #[cfg(any(feature = "desktop", test))]
 pub mod screenshot;
 #[cfg(feature = "desktop")]

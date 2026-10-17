@@ -5,8 +5,8 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "cbb2601a21a45a9fdf57eaa10f293a81951469d9cc379a59137f31d4a8e4eb5c",
-      "reviewMethod": "Application version updated to 0.1.12 and browser regression coverage expanded. Dependency versions and original license files are unchanged. Production frontend build verified."
+      "sha256": "703ef860f41c52f92706e35500538c2591e2b904bfd4b928f5f90d3b4beb8dfe",
+      "reviewMethod": "Source review: browser regression commands extended for editor sizing, subtitle alignment, audio looping and per-track clip counts. Dependency versions, package lock and original license files are unchanged. No production build was run for this scripts-only metadata update."
     },
     {
       "path": "package-lock.json",

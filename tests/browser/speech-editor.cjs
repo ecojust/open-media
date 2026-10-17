@@ -47,8 +47,7 @@ async function expectDialogFocus(dialog) {
   await expect.poll(() => dialog.evaluate(element => element.contains(document.activeElement))).toBe(true)
 }
 
-async function selectVoice(page, category, name) {
-  await page.getByRole('tab', { name: new RegExp(`^${category}`) }).click()
+async function selectVoice(page, name) {
   await page.getByRole('button', { name: `选择 ${name}`, exact: true }).click()
   await expect(page.getByRole('button', { name: `选择 ${name}`, exact: true })).toHaveAttribute('aria-pressed', 'true')
 }
@@ -174,7 +173,7 @@ async function verifyInspectorSpeechActions(browser, url) {
     await expect(dialog).toBeVisible()
     await expect(dialog.getByTestId('speech-generate-selected')).toHaveCount(0)
     await expect(dialog.getByTestId('speech-align-selected')).toHaveCount(0)
-    await selectVoice(page, '中文男声', '温和')
+    await selectVoice(page, '温和')
     await page.getByLabel('配音语速').fill('1.25')
     await page.getByLabel('文字时长对齐语音', { exact: true }).uncheck()
     await dialog.getByRole('button', { name: '关闭文字转语音', exact: true }).click()
@@ -227,14 +226,10 @@ async function verifyBundledVoiceCatalog(browser, url) {
     const picker = page.getByTestId('voice-picker')
     const previewAudio = page.getByLabel('声音试听音频')
     await expect(picker).toBeVisible()
-    await expect(picker.getByRole('tab')).toHaveCount(1)
+    await expect(picker.getByRole('tab')).toHaveCount(0)
     for (const [category, categoryId] of [['中英女声', 'zh-en-female']]) {
       const expected = catalog.filter(voice => voice.category === categoryId), count = expected.length
       assert.ok(count > 0, `${category}应保留可选择的声音`)
-      const tab = picker.getByRole('tab', { name: new RegExp(`^${category}`) })
-      await expect(tab).toContainText(String(count))
-      await tab.click()
-      await expect(tab).toHaveAttribute('aria-selected', 'true')
       await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(count)
       assert.deepEqual(await picker.locator('.voice-card').evaluateAll(cards => cards.map(card => card.dataset.voiceId)), expected.map(voice => voice.id), '卡片应使用精简后的代表目录及原始标识')
       const portraits = picker.locator('.voice-artwork')
@@ -277,7 +272,6 @@ async function verifyBundledVoiceCatalog(browser, url) {
         await expect(previewAudio).toHaveJSProperty('paused', true)
       }
     }
-    await picker.getByRole('tab', { name: /^中英女声/ }).click()
     const bilingualVoices = catalog.filter(voice => voice.category === 'zh-en-female'), chosen = bilingualVoices[0]
     const search = picker.getByLabel('搜索声音', { exact: true })
     await search.fill(chosen.id)
@@ -320,7 +314,6 @@ async function verifyBundledVoiceCatalog(browser, url) {
     await expect(page.locator('.timeline-clip.audio')).toHaveCount(0)
     assert.deepEqual(foreignRequests, [], '卡片图片不应依赖网络服务')
     assert.deepEqual(errors, [])
-    await picker.getByRole('tab', { name: /^中英女声/ }).click()
     await page.screenshot({ animations: 'disabled', path: '/tmp/open-media-speech-editor/voice-catalog.png' })
     const theme = await page.locator('.app-shell').getAttribute('data-theme')
     await page.locator('.app-shell').evaluate(element => element.setAttribute('data-theme', 'dark'))
@@ -389,16 +382,12 @@ async function main() {
     await expect(speechDialog.getByRole('button', { name: '全部文字对齐已有语音', exact: true })).toBeVisible()
     await expect(page.locator('.property-panel').getByTestId('speech-panel')).toHaveCount(0)
     await expect(page.getByRole('button', { name: '选择 清朗', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.getByRole('tab', { name: /^中文女声/ })).toBeVisible()
-    await expect(page.getByRole('tab', { name: /^中文男声/ })).toBeVisible()
-    await expect(page.getByRole('tab', { name: /^英文女声/ })).toBeVisible()
+    await expect(speechDialog.getByRole('tab')).toHaveCount(0)
+    await expect(speechDialog.locator('.voice-card')).toHaveCount(3)
     await expect(speechDialog.locator('select[aria-label="配音声音"]')).toHaveCount(0)
-    await page.getByRole('tab', { name: /^中文男声/ }).click()
     await expect(page.getByRole('button', { name: '选择 温和', exact: true })).toHaveAttribute('aria-pressed', 'false')
-    await expect(page.getByRole('button', { name: '选择 清朗', exact: true })).toHaveCount(0)
-    await page.getByRole('tab', { name: /^英文女声/ }).click()
+    await expect(page.getByRole('button', { name: '选择 清朗', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: '选择 英语女声', exact: true })).toHaveAttribute('aria-pressed', 'false')
-    await page.getByRole('tab', { name: /^中文女声/ }).click()
     await expect(page.getByRole('button', { name: '选择 清朗', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await closeSpeech.focus()
     for (const key of ['Tab', 'Shift+Tab']) for (let index = 0; index < 16; index++) {
@@ -441,7 +430,7 @@ async function main() {
     console.log('PASS 原生桥契约：实际工作台批量配音锁定导航/保存/撤销，取消释放并保持时间线')
 
     await page.evaluate(() => { window.speechHarness.mode = 'completed' })
-    await selectVoice(page, '中文男声', '温和')
+    await selectVoice(page, '温和')
     await page.getByLabel('配音语速').fill('1.25')
     await page.getByTestId('speech-generate-all').click()
     await expect(page.locator('.timeline-clip.audio')).toHaveCount(2)
@@ -478,7 +467,6 @@ async function main() {
     await speechButton.click()
     await expectDialogFocus(speechDialog)
 
-    await page.getByRole('tab', { name: /^英文女声/ }).click()
     const beforeCardPreview = (await speechRequests(page)).length
     const speaker = page.getByRole('button', { name: '试听 英语女声', exact: true })
     const speakerBounds = await speaker.boundingBox(), cardBounds = await page.locator('.voice-card[data-voice-id="english-first"]').boundingBox()
@@ -499,9 +487,7 @@ async function main() {
     await speaker.click()
     await expect(page.getByLabel('声音试听音频')).toHaveJSProperty('paused', true)
     await expect(speaker).toHaveAttribute('aria-pressed', 'false')
-    await page.getByRole('tab', { name: /^中文男声/ }).click()
     await expect(page.getByRole('button', { name: '选择 温和', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await page.getByRole('tab', { name: /^英文女声/ }).click()
     await page.getByRole('button', { name: '试听 英语女声', exact: true }).click()
     await expect(page.getByLabel('声音试听音频')).toHaveJSProperty('paused', false)
     assert.equal((await speechRequests(page)).length, beforeCardPreview + 1, '重复试听应复用已生成的音频')
@@ -515,7 +501,6 @@ async function main() {
     await expect.poll(() => page.evaluate(id => window.speechHarness.discarded.includes(id), previewId)).toBe(true)
     await expect(page.locator('.asset-card')).toHaveCount(3)
     await speechButton.click()
-    await page.getByRole('tab', { name: /^中文男声/ }).click()
     await expect(page.getByRole('button', { name: '选择 温和', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByLabel('配音语速')).toHaveValue('1.25')
     await expect(page.getByLabel('声音试听音频')).toHaveCount(0)
@@ -543,7 +528,7 @@ async function main() {
     assert.equal((await speechRequests(page)).at(-1).text, '你好，这是一段语音试听。让文字拥有清晰自然的声音。', '中文卡片试听应使用固定中文样句')
     assert.equal((await speechRequests(page)).at(-1).voiceId, 'voice-2')
     const fixedPreviewId = (await speechRequests(page)).at(-1).requestId
-    await selectVoice(page, '中文女声', '清朗')
+    await selectVoice(page, '清朗')
     await expect(page.getByLabel('声音试听音频')).toHaveCount(0)
     await expect.poll(() => page.evaluate(id => window.speechHarness.discarded.includes(id), fixedPreviewId)).toBe(true)
     assert.equal(await page.evaluate(() => window.speechHarness.accepted.some(id => window.speechHarness.discarded.includes(id))), false)

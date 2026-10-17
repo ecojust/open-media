@@ -2,16 +2,51 @@ import type { SpeechVoice } from '../native'
 
 export function voiceReady(voice: SpeechVoice | undefined): boolean {
   return !!voice && (!voice.status || voice.status === 'bundled' || voice.status === 'ready')
+    && (!voice.runtimeStatus || voice.runtimeStatus === 'ready')
 }
 
 export function voiceDownloading(voice: SpeechVoice): boolean {
   return voice.status === 'downloading' || voice.status === 'verifying'
+    || voice.runtimeStatus === 'downloading' || voice.runtimeStatus === 'verifying'
+}
+
+export function voiceUnsupported(voice: SpeechVoice): boolean {
+  return voice.status === 'unsupported' || voice.runtimeStatus === 'unsupported'
+}
+
+export function voiceRuntimeLabel(voice: SpeechVoice): string {
+  if (!voice.runtimeStatus && !voice.runtimeSize) return ''
+  const labels: Record<NonNullable<SpeechVoice['runtimeStatus']>, string> = {
+    'not-downloaded': '待下载', downloading: '下载中', verifying: '校验中', ready: '已就绪', failed: '未就绪', unsupported: '当前平台不可用',
+  }
+  const size = voiceModelSize(voice.runtimeSize)
+  const state = voice.runtimeStatus ? labels[voice.runtimeStatus] : ''
+  return ['运行组件', size, state].filter(Boolean).join(' · ')
 }
 
 export function voiceDownloadProgress(voice: SpeechVoice): number {
   if (!Number.isFinite(voice.downloadSize) || !voice.downloadSize || voice.downloadSize <= 0) return 0
   const bytes = Number.isFinite(voice.downloadedBytes) ? voice.downloadedBytes || 0 : 0
   return Math.min(100, Math.max(0, Math.floor(bytes / voice.downloadSize * 100)))
+}
+
+/** Installed runtime bytes count toward progress, but are not downloaded twice. */
+export function voiceDownloadSize(voice: SpeechVoice): number | undefined {
+  if (!Number.isFinite(voice.downloadSize) || !voice.downloadSize || voice.downloadSize < 0) return undefined
+  const installedRuntime = voice.runtimeStatus === 'ready' && Number.isFinite(voice.runtimeSize) ? Math.max(0, voice.runtimeSize || 0) : 0
+  return Math.max(0, voice.downloadSize - installedRuntime)
+}
+
+export function voiceSourceOrigin(source: string | undefined): string {
+  if (!source) return ''
+  try {
+    const url = new URL(source)
+    return url.protocol === 'https:' && !url.username && !url.password ? url.origin : ''
+  } catch { return '' }
+}
+
+export function voiceDownloadSources(voice: SpeechVoice): string[] {
+  return [...new Set((voice.downloadSources || []).map(voiceSourceOrigin).filter(Boolean))]
 }
 
 export function voiceModelSize(bytes: number | undefined): string {

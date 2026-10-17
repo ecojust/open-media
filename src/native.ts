@@ -16,10 +16,13 @@ export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopp
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
 export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
 export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
-export type SpeechVoiceStatus = 'bundled' | 'not-downloaded' | 'downloading' | 'verifying' | 'ready' | 'failed'
+export type SpeechVoiceStatus = 'bundled' | 'not-downloaded' | 'downloading' | 'verifying' | 'ready' | 'failed' | 'unsupported'
 export interface SpeechVoice {
   id: string; name: string; language: string; gender?: string
   modelId?: string; modelSize?: number; downloadSize?: number; status?: SpeechVoiceStatus; downloadedBytes?: number; error?: string
+  runtimeSize?: number; runtimeStatus?: Exclude<SpeechVoiceStatus, 'bundled'>; runtimeError?: string
+  license?: string; usageNote?: string
+  downloadSources?: string[]; downloadSource?: string
 }
 export interface SpeechStatus { ready: boolean; voices: SpeechVoice[]; error?: string }
 export interface SpeechRequest { requestId: string; text: string; voiceId: string; speed: number }

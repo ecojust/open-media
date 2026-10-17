@@ -9,7 +9,7 @@ const timelineClip = (page, id) => page.locator(`.timeline-clip[data-clip-id="${
 const input = page => page.getByTestId('clip-text-content')
 const state = page => page.evaluate(() => window.subtitleFixture.state.value)
 const clip = async (page, id) => (await state(page)).tracks.flatMap(track => track.clips).find(item => item.id === id)
-const styleKeys = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fadeIn', 'fadeOut', 'fontSize', 'fontFamily', 'fontWeight', 'color', 'background', 'textAlign']
+const styleKeys = ['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fadeIn', 'fadeOut', 'fontSize', 'fontFamily', 'fontWeight', 'color', 'background', 'textAlign', 'textVerticalAlign']
 const style = clip => Object.fromEntries(styleKeys.map(key => [key, clip[key]]))
 const identity = clip => Object.fromEntries(Object.entries(clip).filter(([key]) => !styleKeys.includes(key)))
 
@@ -26,7 +26,7 @@ async function installEditor(page, url) {
     const project = createProject('字幕输入与整轨样式验证', { width: 640, height: 360, fps: 20, background: '#102030' })
     const track = createTrack('text', '主字幕'); track.id = 'subtitles'
     track.clips = [
-      createTextClip(project, { id: 'source', textRole: 'subtitle', name: '源字幕', text: '第一段原文', start: 0, trimOut: 3, x: 70, y: 80, width: 250, height: 60, rotation: 7, opacity: 0.85, fadeIn: 0.2, fadeOut: 0.3, fontSize: 23, fontFamily: 'serif', fontWeight: 700, color: '#ffd166', background: '#234567', textAlign: 'right', generatedAt: '2026-10-17T01:02:03.000Z' }),
+      createTextClip(project, { id: 'source', textRole: 'subtitle', name: '源字幕', text: '第一段原文', start: 0, trimOut: 3, x: 70, y: 80, width: 250, height: 60, rotation: 7, opacity: 0.85, fadeIn: 0.2, fadeOut: 0.3, fontSize: 23, fontFamily: 'serif', fontWeight: 700, color: '#ffd166', background: '#234567', textAlign: 'right', textVerticalAlign: 'top', generatedAt: '2026-10-17T01:02:03.000Z' }),
       createTextClip(project, { id: 'second', textRole: 'subtitle', name: '另一段字幕', text: '第二段原文', start: 4, trimIn: 1, trimOut: 3, x: 20, y: 200, fontSize: 18, color: '#ffffff', generatedAt: '2026-10-17T02:03:04.000Z' }),
       createTextClip(project, { id: 'third', textRole: 'subtitle', name: '第三段字幕', text: '第三段原文', start: 7, trimOut: 3, x: 90, y: 200, fontSize: 16, background: 'transparent' }),
       createTextClip(project, { id: 'watermark', textRole: 'watermark', name: '保留文字水印', text: '水印原文', start: 11, trimOut: 2, x: 100, y: 150, fontSize: 14, color: '#00ff00' }),
@@ -237,6 +237,76 @@ async function draftPersistence(page, url) {
   console.log('PASS 实际应用在输入框未失焦时自动保存 IndexedDB 草稿；重载应用后完整恢复文字')
 }
 
+async function subtitleWarnings(page) {
+  await reset(page)
+  await page.evaluate(async () => {
+    const f = window.subtitleFixture, project = JSON.parse(JSON.stringify(f.state.value))
+    project.tracks[0].clips.find(c => c.id === 'source').text = '  \n\t '
+    project.tracks[0].clips.find(c => c.id === 'second').text = '在这里输入字幕'
+    const late = project.tracks[0].clips.find(c => c.id === 'third')
+    late.text = '双击编辑字幕'; late.start = 80
+    project.tracks[0].clips.find(c => c.id === 'watermark').text = ''
+    f.reset(project); await f.nextTick()
+  })
+  await timelineClip(page, 'other-subtitle').click()
+  const warning = page.getByTestId('track-subtitle-warning')
+  await expect(warning).toHaveCount(1)
+  await expect(warning).toHaveText('3')
+  await warning.click()
+  await expect(timelineClip(page, 'source')).toBeFocused()
+  await expect(input(page)).toHaveValue('  \n\t ')
+  await expect(page.locator('.subtitle-issue-note')).toContainText('字幕内容为空')
+  await warning.click()
+  await expect(timelineClip(page, 'second')).toBeFocused()
+  await expect(input(page)).toHaveValue('在这里输入字幕')
+  await expect(page.locator('.subtitle-issue-note')).toContainText('字幕仍为默认文字')
+  await warning.click()
+  await expect(timelineClip(page, 'third')).toBeFocused()
+  await expect(timelineClip(page, 'third')).toBeInViewport()
+  assert.ok(await page.locator('.timeline-scroll').evaluate(el => el.scrollLeft > 0), '定位远处字幕应滚动时间线')
+  assert.match(await page.locator('.time-code').innerText(), /01:20:00/, '播放头跳到问题字幕起点')
+  await input(page).fill('远处字幕已修正')
+  await expect(warning).toHaveText('2')
+  await warning.click()
+  await expect(timelineClip(page, 'source')).toBeFocused()
+  await input(page).fill('空白字幕已修正')
+  await expect(warning).toHaveText('1')
+  await warning.click()
+  await input(page).fill('默认文字已替换')
+  await expect(warning).toHaveCount(0)
+  await expect(page.locator('.subtitle-issue-note')).toHaveCount(0)
+  await page.evaluate(() => window.subtitleFixture.undo())
+  await expect(warning).toHaveText('1')
+  await page.evaluate(() => window.subtitleFixture.redo())
+  await expect(warning).toHaveCount(0)
+
+  await page.evaluate(async () => {
+    const f = window.subtitleFixture, project = JSON.parse(JSON.stringify(f.state.value))
+    project.tracks[0].clips.find(c => c.id === 'source').text = ''
+    project.tracks[0].locked = true
+    f.reset(project); await f.nextTick()
+  })
+  await warning.click()
+  await expect(timelineClip(page, 'source')).toBeFocused()
+  await expect(input(page)).toBeDisabled()
+  assert.match(await page.evaluate(() => window.subtitleFixture.messages.at(-1)), /解锁/)
+  await page.screenshot({ path: path.join(artifacts, 'subtitle-warning.png') })
+  console.log('PASS 空白/两种默认字幕触发轨道报警，文字水印排除；连续点击循环定位并滚动到远处片段；修改立即消警，撤销恢复，锁定轨道仍可定位')
+}
+
+async function verticalAlignmentControls(page) {
+  await reset(page)
+  const control = page.getByLabel('字幕纵向对齐', { exact: true })
+  await expect(control).toHaveValue('top')
+  await control.selectOption('bottom')
+  assert.equal((await clip(page, 'source')).textVerticalAlign, 'bottom')
+  await page.getByTitle('添加字幕', { exact: true }).click()
+  await expect(control).toHaveValue('bottom')
+  await expect(page.getByTestId('track-subtitle-warning')).toHaveText('1')
+  await expect(input(page)).toHaveValue('在这里输入字幕')
+  console.log('PASS 纵向对齐控件即时保存，新字幕沿用纵向样式且默认文字会报警')
+}
+
 async function main() {
   mkdirSync(artifacts, { recursive: true })
   const { createServer } = await import('vite')
@@ -255,6 +325,8 @@ async function main() {
     await immediateEditing(page)
     await compositionEditing(page)
     await trackStyleEditing(page)
+    await subtitleWarnings(page)
+    await verticalAlignmentControls(page)
     await draftPersistence(page, url)
     assert.deepEqual(errors, [])
   } catch (error) {

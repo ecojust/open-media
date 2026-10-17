@@ -197,6 +197,150 @@ fn clip(asset: &Asset) -> Value {
     json!({"id":"clip","assetId":asset.id,"name":"sample","start":0.2,"trimIn":0.0,"trimOut":2.0,"speed":2.0,"volume":0.8,"opacity":0.8,"x":20.0,"y":10.0,"width":100.0,"height":80.0,"rotation":15.0,"fit":"contain","fadeIn":0.1,"fadeOut":0.1})
 }
 
+fn decoded_audio(runtime: &Runtime, path: &Path) -> Vec<f32> {
+    let output = process(&runtime.encoder)
+        .args(["-v", "error", "-i"])
+        .arg(path)
+        .args(["-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output
+        .stdout
+        .chunks_exact(4)
+        .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+        .collect()
+}
+
+fn audio_window(samples: &[f32], start: f64, duration: f64) -> &[f32] {
+    &samples[(start * 16000.0).round() as usize..((start + duration) * 16000.0).round() as usize]
+}
+
+fn audio_rms(samples: &[f32]) -> f64 {
+    (samples
+        .iter()
+        .map(|value| f64::from(*value).powi(2))
+        .sum::<f64>()
+        / samples.len() as f64)
+        .sqrt()
+}
+
+#[test]
+fn timeline_audio_extension_repeats_source_with_offset_speed_and_clip_fades() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let source = temp.path().join("alternating.wav");
+    let output = process(&rt.encoder)
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=0.5",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:sample_rate=48000:duration=0.5",
+            "-filter_complex",
+            "[0:a][1:a]concat=n=2:v=0:a=1[a]",
+            "-map",
+            "[a]",
+            "-c:a",
+            "pcm_s16le",
+        ])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let asset = MediaStore::new(temp.path())
+        .unwrap()
+        .import(&rt, &source, None)
+        .unwrap();
+    assert!((asset.duration - 1.0).abs() < 0.001);
+    let spec = json!({"kind":"timeline","project":{"width":160,"height":120,"assets":[asset.clone()],"tracks":[{"kind":"audio","clips":[{"id":"loop","assetId":asset.id,"start":0.4,"trimIn":2.2,"trimOut":8.2,"speed":2,"volume":1,"fadeIn":0.2,"fadeOut":0.2}]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20}});
+    let (_, probe) = run(temp.path(), &rt, spec, "looped.mp4");
+    let duration = probe["format"]["duration"]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!(
+        (duration - 3.4).abs() < 0.1,
+        "extended duration: {duration}"
+    );
+    let samples = decoded_audio(&rt, &temp.path().join("looped.mp4"));
+    assert!(
+        audio_rms(audio_window(&samples, 0.1, 0.1)) < 0.001,
+        "track start must remain silent"
+    );
+    for (time, frequency) in [
+        (0.45, 440.0),
+        (0.7, 880.0),
+        (1.45, 440.0),
+        (1.7, 880.0),
+        (2.95, 440.0),
+        (3.2, 880.0),
+    ] {
+        let window = audio_window(&samples, time, 0.05);
+        assert!(
+            audio_rms(window) > 0.01,
+            "loop unexpectedly silent at {time}"
+        );
+        let crossings = window
+            .windows(2)
+            .filter(|pair| pair[0] <= 0.0 && pair[1] > 0.0)
+            .count();
+        let actual = crossings as f64 / 0.05;
+        assert!(
+            (actual - frequency).abs() < 100.0,
+            "loop phase changed at {time}: {actual} instead of {frequency}"
+        );
+    }
+    let middle = audio_rms(audio_window(&samples, 1.1, 0.05));
+    assert!(
+        audio_rms(audio_window(&samples, 0.41, 0.02)) < middle * 0.4,
+        "fade-in belongs to the whole extended clip"
+    );
+    assert!(
+        audio_rms(audio_window(&samples, 3.36, 0.02)) < middle * 0.4,
+        "fade-out belongs to the whole extended clip"
+    );
+}
+
+#[test]
+fn timeline_loops_video_sound_only_when_used_on_an_audio_track() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let mut spec = json!({"kind":"timeline","project":{"width":160,"height":120,"assets":[asset.clone()],"tracks":[{"kind":"audio","clips":[{"id":"sound","assetId":asset.id,"start":0,"trimIn":2.5,"trimOut":5.5,"speed":2,"volume":1}]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20}});
+    let (_, probe) = run(temp.path(), &rt, spec.clone(), "video-sound-loop.mp4");
+    let duration = probe["format"]["duration"]
+        .as_str()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!((duration - 1.5).abs() < 0.1);
+    let samples = decoded_audio(&rt, &temp.path().join("video-sound-loop.mp4"));
+    assert!(
+        audio_rms(audio_window(&samples, 1.2, 0.1)) > 0.01,
+        "extracted sound must repeat past the source end"
+    );
+    spec["project"]["tracks"][0]["kind"] = json!("video");
+    let error = build_plan(&MediaStore::new(temp.path()).unwrap(), &rt, &spec)
+        .err()
+        .expect("visual video clips cannot exceed source duration");
+    assert!(error.contains("原始时长"), "{error}");
+}
+
 #[test]
 fn clip_filter_graph_preserves_each_alpha_byte_and_luma_grayscale() {
     let temp = tempfile::tempdir().unwrap();

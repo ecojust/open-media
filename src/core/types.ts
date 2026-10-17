@@ -77,6 +77,8 @@ export interface Clip {
   color?: string
   background?: string
   textAlign?: 'left' | 'center' | 'right'
+  /** Align the text block inside its existing clip bounds. */
+  textVerticalAlign?: 'top' | 'middle' | 'bottom'
   speech?: SpeechBinding
   filters?: ClipFilters
   chromaKey?: ClipChromaKey
@@ -85,7 +87,7 @@ export interface Clip {
 /** Visual settings remembered independently of subtitle content and timing. */
 export type SubtitleStyle = Required<Pick<Clip,
   'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity' | 'fadeIn' | 'fadeOut' |
-  'fontSize' | 'fontFamily' | 'fontWeight' | 'color' | 'background' | 'textAlign'
+  'fontSize' | 'fontFamily' | 'fontWeight' | 'color' | 'background' | 'textAlign' | 'textVerticalAlign'
 >>
 
 export interface Track {
@@ -105,6 +107,8 @@ export interface Project {
   width: number
   height: number
   fps: number
+  /** New projects wait for their first video size; matching or manual sizing disables this. */
+  autoSizeFromVideo?: boolean
   background: string
   createdAt: string
   updatedAt: string

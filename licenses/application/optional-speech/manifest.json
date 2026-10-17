@@ -1,22 +1,186 @@
 {
-  "schema": 1,
-  "modelId": "multivoice-zh-en-v1",
-  "modelSource": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/tree/155831f1b4ba23b1f5c058be6a61df90cefb2a37",
-  "license": "Apache-2.0",
-  "files": [
+  "schema": 2,
+  "catalog": "src-tauri/resources/speech-models.json",
+  "runtimeCatalog": "src-tauri/resources/speech-models.json#runtimes",
+  "models": [
     {
-      "path": "LICENSE",
-      "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/LICENSE",
-      "bytes": 11358,
-      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      "modelId": "zipvoice-distill-fp32",
+      "name": "ZipVoice Distill FP32",
+      "weightLicense": "CC-BY-NC",
+      "implementationLicense": "Apache-2.0",
+      "sources": [
+        "https://huggingface.co/k2-fsa/ZipVoice",
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia.tar.bz2",
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx"
+      ],
+      "files": [
+        {
+          "path": "zipvoice-distill-fp32/CODE_LICENSE",
+          "bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "source": "https://raw.githubusercontent.com/k2-fsa/ZipVoice/2f7326fbfe999a3ad179e3f1af82a424d4a62819/LICENSE",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/zipvoice-distill-fp32-zh-frontend/CODE_LICENSE"
+        },
+        {
+          "path": "zipvoice-distill-fp32/MODEL_METADATA.json",
+          "bytes": 3102,
+          "sha256": "989e7d40829f40ca9cd1c2a461c80a7897cb27afe5f40b273e6af54e793ceecb",
+          "source": "https://huggingface.co/api/models/k2-fsa/ZipVoice/revision/889dd609a42f0de9cf9aac335eae42677becb1b9",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/zipvoice-distill-fp32-zh-frontend/MODEL_METADATA.json"
+        },
+        {
+          "path": "zipvoice-distill-fp32/MODEL_README.md",
+          "bytes": 3390,
+          "sha256": "f70e09af66ce80f5aa439069ba68c9f39136fb99d6b2e09fc64260fa2e85b6c7",
+          "source": "https://huggingface.co/k2-fsa/ZipVoice/raw/889dd609a42f0de9cf9aac335eae42677becb1b9/README.md",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/zipvoice-distill-fp32-zh-frontend/MODEL_README.md"
+        }
+      ],
+      "notes": "Original publisher notices and license text retained byte-for-byte. Model weight licensing is distinct from implementation and vocoder licensing."
     },
     {
-      "path": "README.md",
-      "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/README.md",
-      "bytes": 114,
-      "sha256": "e2d39356ea4d67ac15c39a7e5a238ea12b0f6fb8a55bb0c87bc2f659eb1cf7ac"
+      "modelId": "f5-v1-base-fp32",
+      "name": "F5-TTS v1 Base FP32",
+      "weightLicense": "CC-BY-NC-4.0",
+      "implementationLicense": "MIT",
+      "sources": [
+        {
+          "url": "https://github.com/SWivid/F5-TTS",
+          "revision": "2f866649b779881af8bd644e76b9a6d95053da29",
+          "role": "inference source"
+        },
+        {
+          "url": "https://huggingface.co/SWivid/F5-TTS",
+          "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+          "license": "cc-by-nc-4.0"
+        },
+        {
+          "url": "https://huggingface.co/charactr/vocos-mel-24khz",
+          "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+          "license": "mit"
+        }
+      ],
+      "files": [
+        {
+          "path": "f5-v1-base-fp32/CC-BY-NC-4.0.txt",
+          "bytes": 17649,
+          "sha256": "cc97a2c4ff7723a1f25179dc7c18f676fa84191bbb36ea7d0061acaf3c102559",
+          "source": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/CC-BY-NC-4.0.txt",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/f5-v1-base-fp32/CC-BY-NC-4.0.txt"
+        },
+        {
+          "path": "f5-v1-base-fp32/F5-code-MIT.txt",
+          "bytes": 1068,
+          "sha256": "c70811d1402134de900e811d3eaa349eb60f4d38a8f635b27b1e378c630facd2",
+          "source": "https://github.com/SWivid/F5-TTS/blob/2f866649b779881af8bd644e76b9a6d95053da29/LICENSE",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/f5-v1-base-fp32/F5-code-MIT.txt"
+        },
+        {
+          "path": "f5-v1-base-fp32/Vocos-MIT.txt",
+          "bytes": 1069,
+          "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46",
+          "source": "https://github.com/gemelo-ai/vocos/blob/main/LICENSE",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/f5-v1-base-fp32/Vocos-MIT.txt"
+        },
+        {
+          "path": "f5-v1-base-fp32/f5-repository.json",
+          "bytes": 6222,
+          "sha256": "44976594026a83b7c5074279670949901d13b90e6b8dfd426ec2e53dc947c346",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/f5-v1-base-fp32/f5-repository.json"
+        },
+        {
+          "path": "f5-v1-base-fp32/sources.json",
+          "bytes": 297,
+          "sha256": "75246b175ff3cb66f860391bba89baf32a6c600050182ce0f535e4e64a3c62b1",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/f5-v1-base-fp32/sources.json"
+        },
+        {
+          "path": "f5-v1-base-fp32/vocos-repository.json",
+          "bytes": 4455,
+          "sha256": "8c7ea6718915ddad7889f4cdb96f7fd2673ed441cca3fbd7e8303b771b1b3dfa",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/f5-v1-base-fp32/vocos-repository.json"
+        }
+      ],
+      "notes": "Original publisher notices and license text retained byte-for-byte. Model weight licensing is distinct from implementation and vocoder licensing."
+    },
+    {
+      "modelId": "qwen3-tts-1.7b-serena",
+      "name": "Qwen3-TTS 1.7B BF16 · Serena",
+      "weightLicense": "Apache-2.0",
+      "implementationLicense": "Apache-2.0",
+      "sources": [
+        {
+          "name": "Qwen3-TTS-12Hz-1.7B-CustomVoice",
+          "url": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/tree/0c0e3051f131929182e2c023b9537f8b1c68adfe"
+        },
+        {
+          "name": "qwen-tts 0.1.1",
+          "url": "https://pypi.org/project/qwen-tts/0.1.1/"
+        },
+        {
+          "name": "固定源码许可证",
+          "url": "https://github.com/QwenLM/Qwen3-TTS/blob/022e286b98fbec7e1e916cb940cdf532cd9f488e/LICENSE"
+        }
+      ],
+      "files": [
+        {
+          "path": "qwen3-tts-1.7b-serena/LICENSE",
+          "bytes": 11343,
+          "sha256": "a44a6081c73ad75f0255bb2bb5cab74ef1829565a895a24e53a4f11290ab7655",
+          "source": "https://raw.githubusercontent.com/QwenLM/Qwen3-TTS/022e286b98fbec7e1e916cb940cdf532cd9f488e/LICENSE",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/qwen3-tts-1.7b-serena/LICENSE"
+        },
+        {
+          "path": "qwen3-tts-1.7b-serena/MODEL_CARD.md",
+          "bytes": 57846,
+          "sha256": "64f65e809b51cc0c35f393fbbfcc2d735c0cb3fdbbc6f3fdc4a5e6ce55e9d088",
+          "source": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/raw/0c0e3051f131929182e2c023b9537f8b1c68adfe/README.md",
+          "copiedFrom": "test/chinese-tts-benchmark/licenses/qwen3-tts-1.7b-serena/MODEL_CARD.md"
+        }
+      ],
+      "notes": "Original publisher notices and license text retained byte-for-byte. Model weight licensing is distinct from implementation and vocoder licensing."
     }
   ],
-  "catalog": "src-tauri/resources/speech-models.json",
-  "notes": "Original publisher license and model reference are retained unmodified. Model files are downloaded on request; fixed audition recordings are generated from the listed speaker IDs with the shared bundled text-processing data."
+  "applicationComponents": [
+    {
+      "name": "cn2an",
+      "version": "0.5.23",
+      "license": "MIT",
+      "files": [
+        {
+          "path": "cn2an/LICENSE",
+          "bytes": 1062,
+          "sha256": "b18d8d4ad8bc57e00ae80d08d9da80a32176f031062f87c739ea7557c1b5d759",
+          "source": "https://files.pythonhosted.org/packages/02/5c/03f0cb3d31c132e09f5523c76e963436fcd13c0318428021bd210f7bb216/cn2an-0.5.23-py3-none-any.whl"
+        },
+        {
+          "path": "cn2an/fixture-source.json",
+          "bytes": 1177,
+          "sha256": "c1e9a4d0e6371435941d7f05c8d35d39da94dc236b23d181e720000b6d73e1d7"
+        },
+        {
+          "path": "cn2an/source.json",
+          "bytes": 864,
+          "sha256": "ba9992f2d0bf62f700bb3077e9ae92489c76b57b16c84bfefcec8e7c3abdd04a"
+        },
+        {
+          "path": "cn2an/upstream-wrapper-source.json",
+          "bytes": 1256,
+          "sha256": "8ec67354f50b2c267bb256a077abae2b618b776b96137de48627a20a8dcb1b56"
+        }
+      ]
+    }
+  ],
+  "historicalNotices": [
+    {
+      "manifest": "legacy-multivoice/manifest.json",
+      "scope": "Attribution for earlier generated material and preserved research samples only; not an available download option."
+    }
+  ],
+  "auditions": {
+    "manifest": "src/assets/voice-previews/optional-manifest.json",
+    "source": "test/chinese-tts-benchmark/manifest.json",
+    "notes": "Three exact published benchmark recordings copied byte-for-byte; independent model voices, not substituted or synthesized at preview time."
+  },
+  "notes": "Weights and platform-specific execution dependencies are downloaded only on explicit request. Original license files are unmodified; inventory documentation does not replace their terms."
 }

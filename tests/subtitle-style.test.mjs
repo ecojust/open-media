@@ -7,7 +7,7 @@ import { exportProjectFile, importProjectFile } from '../src/core/project-file.t
 
 const style = {
   x: 123, y: 240, width: 800, height: 140, rotation: 12, opacity: 0.8, fadeIn: 0.4, fadeOut: 0.7,
-  fontSize: 42, fontFamily: 'serif', fontWeight: 700, color: '#ffcc55', background: '#223344', textAlign: 'left',
+  fontSize: 42, fontFamily: 'serif', fontWeight: 700, color: '#ffcc55', background: '#223344', textAlign: 'left', textVerticalAlign: 'bottom',
 }
 const watermark = {
   id: 'text-watermark', name: '章节标题', kind: 'text', category: '文字', tags: [], url: '', poster: '', duration: 5, width: 640, height: 360,
@@ -116,13 +116,31 @@ test('淡入淡出适配新字幕时长但不丢失记忆，损坏的默认样�
   const shorter = createSubtitleClip(edited, { trimOut: 1.2 })
   assert.equal(shorter.fadeIn, 1.2); assert.equal(shorter.fadeOut, 1.2)
   assert.equal(edited.subtitleStyle.fadeOut, 8)
-  for (const patch of [{ width: 0 }, { fontSize: 0 }, { x: Infinity }, { opacity: 2 }, { color: 'bad' }, { textAlign: 'invalid' }]) {
+  for (const patch of [{ width: 0 }, { fontSize: 0 }, { x: Infinity }, { opacity: 2 }, { color: 'bad' }, { textAlign: 'invalid' }, { textVerticalAlign: 'invalid' }]) {
     assert.throws(() => validateProject({ ...edited, subtitleStyle: { ...edited.subtitleStyle, ...patch } }), /字幕/)
   }
   assert.throws(() => validateProject({ ...edited, subtitleStyle: null }), /字幕/)
   const clean = validateProject({ ...edited, subtitleStyle: { ...edited.subtitleStyle, text: '不能复用正文', id: 'old', start: 100 } })
   assert.equal(Object.hasOwn(clean.subtitleStyle, 'text'), false)
   assert.equal(Object.hasOwn(clean.subtitleStyle, 'start'), false)
+})
+
+test('旧项目字幕及默认样式缺少纵向对齐时保留居中，非法对齐值拒绝导入', () => {
+  const { project, clip } = fixture()
+  const old = updateClip(project, clip.id, style)
+  delete old.subtitleStyle.textVerticalAlign
+  delete old.tracks[0].clips[0].textVerticalAlign
+  const loaded = validateProject(old)
+  assert.equal(loaded.subtitleStyle.textVerticalAlign, 'middle')
+  assert.equal(loaded.tracks[0].clips[0].textVerticalAlign, 'middle')
+  assert.equal(createSubtitleClip(loaded).textVerticalAlign, 'middle')
+  for (const alignment of ['top', 'middle', 'bottom']) {
+    const changed = updateClip(loaded, clip.id, { textVerticalAlign: alignment })
+    assert.equal(changed.subtitleStyle.textVerticalAlign, alignment)
+    assert.equal(changed.tracks[0].clips[0].y, loaded.tracks[0].clips[0].y)
+    assert.equal(changed.tracks[0].clips[0].height, loaded.tracks[0].clips[0].height)
+  }
+  assert.throws(() => updateClip(loaded, clip.id, { textVerticalAlign: 'invalid' }), /纵向对齐/)
 })
 
 function trackStyleFixture() {

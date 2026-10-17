@@ -11,6 +11,23 @@ function finish(project: Project): Project {
   return validateProject(project, { trusted: true })
 }
 
+/** Return to one complete source pass without moving the clip or changing its speed. */
+export function restoreAudioClipLength(project: Project, clipId: string): Project {
+  const current = findClip(project, clipId)
+  if (!current) throw new Error('片段不存在。')
+  if (current.track.locked) throw new Error('请先解锁此轨道。')
+  const asset = project.assets.find(item => item.id === current.clip.assetId)
+  if (current.track.kind !== 'audio' || !asset || asset.kind === 'image') throw new Error('请选择音频轨道中的片段。')
+  const copy = cloneProject(project)
+  const clip = findClip(copy, clipId)!.clip
+  clip.trimIn = 0
+  clip.trimOut = asset.duration
+  clip.fadeIn = Math.min(clip.fadeIn, clipDuration(clip))
+  clip.fadeOut = Math.min(clip.fadeOut, clipDuration(clip))
+  if (clip.speech) delete clip.speech.textClipId
+  return finish(copy)
+}
+
 /** Crop at a timeline position while retaining the source timing of the remaining media. */
 export function trimClipAtPlayhead(project: Project, clipId: string, time: number, side: 'start' | 'end'): Project {
   const current = findClip(project, clipId)

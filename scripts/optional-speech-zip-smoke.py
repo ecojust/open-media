@@ -106,6 +106,9 @@ def inspect_audio(path):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     parser = argparse.ArgumentParser()
     parser.add_argument('--catalog', type=Path, default=ROOT / 'src-tauri/resources/speech-models.json')
     parser.add_argument('--speech-directory', type=Path, default=ROOT / 'src-tauri/resources/speech')
@@ -150,11 +153,20 @@ def main():
         print(f'Verified {item["path"]}', flush=True)
 
     suffix = '.exe' if os.name == 'nt' else ''
+    rustc = [args.rustc, '--edition=2021']
+    if os.name == 'nt':
+        # Git Bash also places a POSIX utility named link.exe on PATH. Resolve
+        # the real compiler's sibling linker instead of letting rustc pick it.
+        compiler = shutil.which('cl.exe')
+        linker = Path(compiler).with_name('link.exe') if compiler else None
+        if not linker or not linker.is_file():
+            raise RuntimeError('The native speech smoke requires the MSVC developer command environment')
+        rustc += ['-C', f'linker={linker}']
     normalizer = work / f'number-normalizer{suffix}'
-    run([args.rustc, '--edition=2021', ROOT / 'scripts/speech-chinese-smoke.rs', '-o', normalizer],
+    run([*rustc, ROOT / 'scripts/speech-chinese-smoke.rs', '-o', normalizer],
         args.output / 'normalizer-build.log', 300)
     normalizer_tests = work / f'number-normalizer-tests{suffix}'
-    run([args.rustc, '--edition=2021', '--test', ROOT / 'src-tauri/src/speech_chinese.rs', '-o', normalizer_tests],
+    run([*rustc, '--test', ROOT / 'src-tauri/src/speech_chinese.rs', '-o', normalizer_tests],
         args.output / 'normalizer-tests-build.log', 300)
     run([normalizer_tests], args.output / 'normalizer-tests.log', 120)
 

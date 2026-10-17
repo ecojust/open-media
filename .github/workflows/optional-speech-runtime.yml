@@ -34,6 +34,8 @@ jobs:
             runner: windows-2022
     env:
       PYTHONUNBUFFERED: '1'
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
       PIP_NO_CACHE_DIR: '1'
       HF_HUB_DISABLE_TELEMETRY: '1'
@@ -49,6 +51,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
+      - name: Select the native Windows linker
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os, shutil
+          from pathlib import Path
+          compiler = shutil.which('cl.exe')
+          if not compiler:
+              raise RuntimeError('The native Windows compiler is unavailable')
+          linker = Path(compiler).with_name('link.exe')
+          if not linker.is_file():
+              raise RuntimeError('The native Windows linker is unavailable')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as target:
+              target.write(f'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={linker}\n')
       - name: Build a self-contained interpreter and inference runtime
         shell: bash
         run: |
@@ -58,6 +74,8 @@ jobs:
             --output artifacts/optional-speech-runtime \
             --phase build
       - name: Verify native optional speech and Chinese normalization
+        id: native-speech
+        continue-on-error: true
         shell: bash
         run: |
           python scripts/optional-speech-zip-smoke.py \
@@ -73,6 +91,29 @@ jobs:
             --work "$RUNNER_TEMP/optional-speech-runtime" \
             --output artifacts/optional-speech-runtime \
             --phase validate
+      - name: Verify application command and audio import with downloaded models
+        shell: bash
+        run: |
+          set -o pipefail
+          export OPEN_MEDIA_TEST_RUNTIME_ROOT="$RUNNER_TEMP/optional-speech-runtime/移动验证 中文 空格/runtime"
+          for engine in f5 qwen3; do
+            if [[ "$engine" == f5 ]]; then
+              model=f5-v1-base-fp32
+            else
+              model=qwen3-tts-1.7b-serena
+            fi
+            export OPEN_MEDIA_TEST_ENGINE="$engine"
+            export OPEN_MEDIA_TEST_MODEL_ROOT="$RUNNER_TEMP/optional-speech-runtime/移动验证 中文 空格/models/$model"
+            cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib \
+              real_portable_runtime_command_and_audio_round_trip -- --ignored --nocapture \
+              2>&1 | tee "artifacts/optional-speech-runtime/logs/application-$engine.log"
+          done
+      - name: Require every speech engine validation to pass
+        if: steps.native-speech.outcome != 'success'
+        shell: bash
+        run: |
+          echo 'Native speech validation failed. Runtime publication is blocked.' >&2
+          exit 1
       - name: Report failure diagnostics
         if: failure()
         shell: bash
@@ -93,7 +134,9 @@ jobs:
           if-no-files-found: warn
           path: |
             artifacts/optional-speech-runtime/logs/
-            artifacts/optional-speech-runtime/validation/
+            artifacts/optional-speech-runtime/validation/**/*.log
+            artifacts/optional-speech-runtime/validation/**/*.json
+            artifacts/optional-speech-runtime/validation/**/*.wav
             artifacts/optional-speech-runtime/validation.json
       - name: Upload verified portable runtime
         uses: actions/upload-artifact@v4

@@ -46,7 +46,19 @@ Required dependency names, file-format names, copyright statements, and licensin
 
 ## Optional offline voices
 
-The optional Kokoro INT8 1.1 model package is downloaded only on request and is licensed under Apache-2.0. Its exact revision, files, sizes and hashes are pinned in `src-tauri/resources/speech-models.json`; original publisher notices and provenance are preserved in `licenses/application/optional-speech/`. The package shares the bundled speech runtime and text-processing resources. Its three fixed local audition recordings are generated from the corresponding model voices. Downloading a model does not send user text to a remote synthesis service.
+Three optional Chinese voice packages are downloaded only on explicit request. Their model weights, implementation code, vocoders and execution dependencies have separate licenses:
+
+| Model / voice | Model weights | Implementation |
+| --- | --- | --- |
+| ZipVoice Distill FP32 | CC-BY-NC, as stated by the model publisher; no specific version stated | Apache-2.0 |
+| F5-TTS v1 Base FP32 | CC-BY-NC-4.0 | MIT |
+| Qwen3-TTS 1.7B BF16 · Serena | Apache-2.0 | Apache-2.0 |
+
+The first two model weight licenses restrict commercial use; the voice cards display that restriction. Original publisher notices, model metadata, vocoder notices, fixed sources and file hashes are preserved in `licenses/application/optional-speech/`. The exact model and platform runtime download inventory is pinned in `src-tauri/resources/speech-models.json`. Installed shared execution dependencies are reused. A model is available for synthesis only after both its files and the current platform's execution dependencies have been verified. User text is processed locally and is not sent to a remote synthesis service.
+
+The native Chinese number normalization compatibility implementation follows cn2an 0.5.23 behavior. Its original MIT copyright and license, wheel provenance, upstream source digests and the independent 1,538-case normalization fixture provenance are retained in `licenses/application/optional-speech/cn2an/`. The complete expected input/output fixtures are available in `tests/fixtures/speech-chinese-normalizer.tsv`.
+
+Three fixed audition recordings are copied byte-for-byte from the corresponding published Chinese benchmark samples; their settings, reference audio, hashes and model attribution are recorded in `src/assets/voice-previews/optional-manifest.json`. Historical notices retained under `licenses/application/optional-speech/legacy-multivoice/` apply only to earlier generated material and preserved research samples, not to currently offered download voices.
 
 ## Bundled background music
 
