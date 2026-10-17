@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "id": "python-cpu-v1",
+  "version": 1,
+  "pythonVersion": "3.11.14",
+  "pythonRelease": "20251014",
+  "f5Source": {
+    "repository": "https://github.com/SWivid/F5-TTS.git",
+    "revision": "2f866649b779881af8bd644e76b9a6d95053da29"
+  },
+  "platforms": {
+    "macos-arm64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "size": 18836160,
+      "sha256": "cd54cc868a9b1056fbd4654509431f402f0365329618e2583b60c82f73da4e56",
+      "executable": "python/bin/python3",
+      "torch": "2.9.1",
+      "torchIndex": "https://pypi.org/simple"
+    },
+    "macos-x64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-x86_64-apple-darwin-install_only_stripped.tar.gz",
+      "size": 18750086,
+      "sha256": "a1eb602d2bbbfdbba005c54334b33779de8e0f2225f1d5e03c7a1e3e95cb822e",
+      "executable": "python/bin/python3",
+      "torch": "2.2.2",
+      "torchIndex": "https://pypi.org/simple"
+    },
+    "windows-x64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "size": 25648990,
+      "sha256": "c2a7b0bb86eb9f1cc094a01bdabef7ddc77f89f8e45161fa7819f2b4a7ba7bc1",
+      "executable": "python/python.exe",
+      "torch": "2.9.1+cpu",
+      "torchIndex": "https://download.pytorch.org/whl/cpu"
+    }
+  }
+}

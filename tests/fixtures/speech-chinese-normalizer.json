@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "generator": "cn2an.transform(input, \"an2cn\")",
+  "version": "0.5.23",
+  "source": "https://pypi.org/project/cn2an/0.5.23/",
+  "upstreamFiles": [
+    {
+      "name": "transform.py",
+      "sha256": "826f1139711e8f93bf3a4b41e8a27b27002e1b99cd9f1c67968bc35259397c85",
+      "bytes": 5400
+    },
+    {
+      "name": "an2cn.py",
+      "sha256": "0680b6921f5ebd5a172e6a8e7fd316d702622f8609581c72f6d3a9696f03ac3e",
+      "bytes": 8295
+    },
+    {
+      "name": "conf.py",
+      "sha256": "0f037fe7cdafaa4dcd5ef5759ee83ab8f134ff3f22cb9acaaab9116e879ef499",
+      "bytes": 1983
+    }
+  ],
+  "fixtures": 1538,
+  "seed": 20261017,
+  "scope": "10 published benchmark texts, the upstream strict transform examples, full-width and unsupported Unicode digits, dates, fractions, percentages, temperatures, range and precision boundaries, plus 1200 seeded numeric combinations. Expected output was produced by the original Python package, independently of the Rust implementation. 309 overlapping and malformed token combinations cover regex restart behavior.",
+  "sha256": "0caeb017db77192225e2b2b93d8c567b9c24cd0cc14a6b394ab35f48f6ddb4ac",
+  "additionalSeed": 932041
+}

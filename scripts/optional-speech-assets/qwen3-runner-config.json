@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "engine": "qwen3",
+  "dtype": "bfloat16",
+  "model": ".",
+  "speaker": "Serena",
+  "language": "Chinese",
+  "instruct": "用自然流畅的标准普通话朗读，语气温和，语速适中。",
+  "sampleRate": 24000,
+  "seed": 20261017
+}

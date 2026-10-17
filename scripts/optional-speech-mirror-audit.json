@@ -1,0 +1,1003 @@
+{
+  "schema": 1,
+  "checkedAt": "2026-10-17T17:43:19.722415+00:00",
+  "scope": "Measured from the current development workspace. Mainland China carrier connectivity has not been directly tested.",
+  "notes": [
+    "Every installed model file must still match the pinned complete SHA-256 and byte size. Range probes are availability evidence, not complete-file integrity verification.",
+    "ModelScope independent copies were checked against fixed revisions and matching API-reported SHA-256 values.",
+    "HF Mirror large weight responses currently redirect to us.aws.cdn.hf.co; keep ModelScope as an independent route.",
+    "GitHub proxies were tested with an existing 650 MB release asset and the 54 MB vocoder. Newly published runtime archives require separate verification.",
+    "gh-proxy.com may return HTTP 200 for a Range request; restart from byte zero when a server ignores Range.",
+    "No expiring signed redirect URLs are retained."
+  ],
+  "mappings": {
+    "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/text_encoder.onnx": [
+      "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ftext_encoder.onnx",
+      "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/text_encoder.onnx"
+    ],
+    "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/fm_decoder.onnx": [
+      "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ffm_decoder.onnx",
+      "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/fm_decoder.onnx"
+    ],
+    "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/tokens.txt": [
+      "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ftokens.txt",
+      "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/tokens.txt"
+    ],
+    "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors": [
+      "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&FilePath=F5TTS_v1_Base%2Fmodel_1250000.safetensors",
+      "https://hf-mirror.com/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors"
+    ],
+    "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt": [
+      "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&FilePath=F5TTS_v1_Base%2Fvocab.txt",
+      "https://hf-mirror.com/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt"
+    ],
+    "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin": [
+      "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&FilePath=pytorch_model.bin",
+      "https://hf-mirror.com/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin"
+    ],
+    "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml": [
+      "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&FilePath=config.yaml",
+      "https://hf-mirror.com/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/config.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=config.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/config.json"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/generation_config.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=generation_config.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/generation_config.json"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/merges.txt": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=merges.txt",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/merges.txt"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/model.safetensors": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=model.safetensors",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/model.safetensors"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/preprocessor_config.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=preprocessor_config.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/preprocessor_config.json"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/config.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fconfig.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/config.json"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/configuration.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fconfiguration.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/configuration.json"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/model.safetensors": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fmodel.safetensors",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/model.safetensors"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/preprocessor_config.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fpreprocessor_config.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/preprocessor_config.json"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/tokenizer_config.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=tokenizer_config.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/tokenizer_config.json"
+    ],
+    "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/vocab.json": [
+      "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=vocab.json",
+      "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/vocab.json"
+    ],
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx": [
+      "https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+      "https://ghproxy.net/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+      "https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx"
+    ]
+  },
+  "catalogEvidence": [
+    {
+      "sourceUrl": "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/text_encoder.onnx",
+      "path": "encoder.onnx",
+      "size": 17633735,
+      "sha256": "495eca2d5f8a911f5c361bcce5bd55cdd2508ccdd26ce3e9bf1d3c29eb974861",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo/files?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&Recursive=true",
+        "revision": "f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b",
+        "path": "zipvoice_distill/text_encoder.onnx",
+        "size": 17633735,
+        "sha256": "495eca2d5f8a911f5c361bcce5bd55cdd2508ccdd26ce3e9bf1d3c29eb974861",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/fm_decoder.onnx",
+      "path": "decoder.onnx",
+      "size": 477534010,
+      "sha256": "4510d4f5f049f14ef80207fca695e13c820e2cea61635f402954950bc62b1e3c",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo/files?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&Recursive=true",
+        "revision": "f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b",
+        "path": "zipvoice_distill/fm_decoder.onnx",
+        "size": 477534010,
+        "sha256": "4510d4f5f049f14ef80207fca695e13c820e2cea61635f402954950bc62b1e3c",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/tokens.txt",
+      "path": "tokens.txt",
+      "size": 2570,
+      "sha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo/files?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&Recursive=true",
+        "revision": "f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b",
+        "path": "zipvoice_distill/tokens.txt",
+        "size": 2570,
+        "sha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors",
+      "path": "model_1250000.safetensors",
+      "size": 1348435761,
+      "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo/files?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&Recursive=true",
+        "revision": "de616f8be9ce6388c7e862a75c665de9da9a3ef8",
+        "path": "F5TTS_v1_Base/model_1250000.safetensors",
+        "size": 1348435761,
+        "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt",
+      "path": "vocab.txt",
+      "size": 13800,
+      "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo/files?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&Recursive=true",
+        "revision": "de616f8be9ce6388c7e862a75c665de9da9a3ef8",
+        "path": "F5TTS_v1_Base/vocab.txt",
+        "size": 13800,
+        "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin",
+      "path": "vocos/pytorch_model.bin",
+      "size": 54365991,
+      "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo/files?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&Recursive=true",
+        "revision": "8dde403ededa9c617f8b312c61027c8a9a7a3ae2",
+        "path": "pytorch_model.bin",
+        "size": 54365991,
+        "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml",
+      "path": "vocos/config.yaml",
+      "size": 461,
+      "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo/files?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&Recursive=true",
+        "revision": "8dde403ededa9c617f8b312c61027c8a9a7a3ae2",
+        "path": "config.yaml",
+        "size": 461,
+        "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/config.json",
+      "path": "config.json",
+      "size": 4908,
+      "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "config.json",
+        "size": 4908,
+        "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/generation_config.json",
+      "path": "generation_config.json",
+      "size": 245,
+      "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "generation_config.json",
+        "size": 245,
+        "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/merges.txt",
+      "path": "merges.txt",
+      "size": 1671839,
+      "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "merges.txt",
+        "size": 1671839,
+        "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/model.safetensors",
+      "path": "model.safetensors",
+      "size": 3833402552,
+      "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "model.safetensors",
+        "size": 3833402552,
+        "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/preprocessor_config.json",
+      "path": "preprocessor_config.json",
+      "size": 127,
+      "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "preprocessor_config.json",
+        "size": 127,
+        "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/config.json",
+      "path": "speech_tokenizer/config.json",
+      "size": 2336,
+      "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "speech_tokenizer/config.json",
+        "size": 2336,
+        "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/configuration.json",
+      "path": "speech_tokenizer/configuration.json",
+      "size": 76,
+      "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "speech_tokenizer/configuration.json",
+        "size": 76,
+        "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/model.safetensors",
+      "path": "speech_tokenizer/model.safetensors",
+      "size": 682293092,
+      "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "speech_tokenizer/model.safetensors",
+        "size": 682293092,
+        "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/preprocessor_config.json",
+      "path": "speech_tokenizer/preprocessor_config.json",
+      "size": 234,
+      "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "speech_tokenizer/preprocessor_config.json",
+        "size": 234,
+        "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/tokenizer_config.json",
+      "path": "tokenizer_config.json",
+      "size": 7344,
+      "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "tokenizer_config.json",
+        "size": 7344,
+        "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/vocab.json",
+      "path": "vocab.json",
+      "size": 2776833,
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "modelscopeMetadata": {
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo/files?Revision=ae999bce1d1356e93686274865bc72744daab1a5&Recursive=true",
+        "revision": "ae999bce1d1356e93686274865bc72744daab1a5",
+        "path": "vocab.json",
+        "size": 2776833,
+        "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+        "matchesExpected": true
+      }
+    },
+    {
+      "sourceUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+      "path": "vocos_24khz.onnx",
+      "size": 54157409,
+      "sha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0",
+      "githubMetadata": {
+        "url": "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/vocoder-models",
+        "assetName": "vocos_24khz.onnx",
+        "size": 54157409,
+        "digest": "sha256:bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0",
+        "matchesExpected": true
+      }
+    }
+  ],
+  "httpEvidence": [
+    {
+      "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ftext_encoder.onnx",
+      "provider": "modelscope",
+      "expectedSize": 17633735,
+      "expectedSha256": "495eca2d5f8a911f5c361bcce5bd55cdd2508ccdd26ce3e9bf1d3c29eb974861",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/17633735",
+      "prefixSha256": "4639344b8a43bd9868aa3f32a79ca720e31e8cb1d248c58f5a3ca8cd17e1c8a1",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/text_encoder.onnx",
+      "provider": "hf-mirror",
+      "expectedSize": 17633735,
+      "expectedSha256": "495eca2d5f8a911f5c361bcce5bd55cdd2508ccdd26ce3e9bf1d3c29eb974861",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "us.aws.cdn.hf.co",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/17633735",
+      "prefixSha256": "4639344b8a43bd9868aa3f32a79ca720e31e8cb1d248c58f5a3ca8cd17e1c8a1",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ffm_decoder.onnx",
+      "provider": "modelscope",
+      "expectedSize": 477534010,
+      "expectedSha256": "4510d4f5f049f14ef80207fca695e13c820e2cea61635f402954950bc62b1e3c",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/477534010",
+      "prefixSha256": "2d41b5253e0b5aaf43f63eb6cb370457910bb1e13fd346253eb5dec1b0cc282b",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/fm_decoder.onnx",
+      "provider": "hf-mirror",
+      "expectedSize": 477534010,
+      "expectedSha256": "4510d4f5f049f14ef80207fca695e13c820e2cea61635f402954950bc62b1e3c",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "us.aws.cdn.hf.co",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/477534010",
+      "prefixSha256": "2d41b5253e0b5aaf43f63eb6cb370457910bb1e13fd346253eb5dec1b0cc282b",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ftokens.txt",
+      "provider": "modelscope",
+      "expectedSize": 2570,
+      "expectedSha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 2570,
+      "contentLength": "2570",
+      "contentRange": "bytes 0-2569/2570",
+      "sha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/tokens.txt",
+      "provider": "hf-mirror",
+      "expectedSize": 2570,
+      "expectedSha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 2570,
+      "contentLength": "2570",
+      "contentRange": null,
+      "sha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&FilePath=F5TTS_v1_Base%2Fmodel_1250000.safetensors",
+      "provider": "modelscope",
+      "expectedSize": 1348435761,
+      "expectedSha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/1348435761",
+      "prefixSha256": "cc05c3c43f3f982cbc83da0ed3593e1a9e17167189ec5a8df7393e72048e1559",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://hf-mirror.com/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors",
+      "provider": "hf-mirror",
+      "expectedSize": 1348435761,
+      "expectedSha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "us.aws.cdn.hf.co",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/1348435761",
+      "prefixSha256": "cc05c3c43f3f982cbc83da0ed3593e1a9e17167189ec5a8df7393e72048e1559",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&FilePath=F5TTS_v1_Base%2Fvocab.txt",
+      "provider": "modelscope",
+      "expectedSize": 13800,
+      "expectedSha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 13800,
+      "contentLength": "13800",
+      "contentRange": null,
+      "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt",
+      "provider": "hf-mirror",
+      "expectedSize": 13800,
+      "expectedSha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 13800,
+      "contentLength": "13800",
+      "contentRange": null,
+      "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&FilePath=pytorch_model.bin",
+      "provider": "modelscope",
+      "expectedSize": 54365991,
+      "expectedSha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/54365991",
+      "prefixSha256": "b698fefde8ecf59d77cae8eeea6b383127af3bffffddd8ca982940a211c0370d",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://hf-mirror.com/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin",
+      "provider": "hf-mirror",
+      "expectedSize": 54365991,
+      "expectedSha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "us.aws.cdn.hf.co",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/54365991",
+      "prefixSha256": "b698fefde8ecf59d77cae8eeea6b383127af3bffffddd8ca982940a211c0370d",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&FilePath=config.yaml",
+      "provider": "modelscope",
+      "expectedSize": 461,
+      "expectedSha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 461,
+      "contentLength": "461",
+      "contentRange": null,
+      "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml",
+      "provider": "hf-mirror",
+      "expectedSize": 461,
+      "expectedSha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 461,
+      "contentLength": "461",
+      "contentRange": null,
+      "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=config.json",
+      "provider": "modelscope",
+      "expectedSize": 4908,
+      "expectedSha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 4908,
+      "contentLength": "4908",
+      "contentRange": "bytes 0-4907/4908",
+      "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/config.json",
+      "provider": "hf-mirror",
+      "expectedSize": 4908,
+      "expectedSha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 4908,
+      "contentLength": "4908",
+      "contentRange": null,
+      "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=generation_config.json",
+      "provider": "modelscope",
+      "expectedSize": 245,
+      "expectedSha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 245,
+      "contentLength": "245",
+      "contentRange": "bytes 0-244/245",
+      "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/generation_config.json",
+      "provider": "hf-mirror",
+      "expectedSize": 245,
+      "expectedSha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 245,
+      "contentLength": "245",
+      "contentRange": null,
+      "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=merges.txt",
+      "provider": "modelscope",
+      "expectedSize": 1671839,
+      "expectedSha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 1671839,
+      "contentLength": "1671839",
+      "contentRange": "bytes 0-1671838/1671839",
+      "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/merges.txt",
+      "provider": "hf-mirror",
+      "expectedSize": 1671839,
+      "expectedSha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 1671839,
+      "contentLength": "1671839",
+      "contentRange": null,
+      "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=model.safetensors",
+      "provider": "modelscope",
+      "expectedSize": 3833402552,
+      "expectedSha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/3833402552",
+      "prefixSha256": "d78e6e5d17b4ec7541d64cf1bef640db3794743d708c876b27782a7d1c416c75",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/model.safetensors",
+      "provider": "hf-mirror",
+      "expectedSize": 3833402552,
+      "expectedSha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "us.aws.cdn.hf.co",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/3833402552",
+      "prefixSha256": "d78e6e5d17b4ec7541d64cf1bef640db3794743d708c876b27782a7d1c416c75",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=preprocessor_config.json",
+      "provider": "modelscope",
+      "expectedSize": 127,
+      "expectedSha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 127,
+      "contentLength": "127",
+      "contentRange": "bytes 0-126/127",
+      "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/preprocessor_config.json",
+      "provider": "hf-mirror",
+      "expectedSize": 127,
+      "expectedSha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 127,
+      "contentLength": "127",
+      "contentRange": null,
+      "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fconfig.json",
+      "provider": "modelscope",
+      "expectedSize": 2336,
+      "expectedSha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 2336,
+      "contentLength": "2336",
+      "contentRange": "bytes 0-2335/2336",
+      "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/config.json",
+      "provider": "hf-mirror",
+      "expectedSize": 2336,
+      "expectedSha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 2336,
+      "contentLength": "2336",
+      "contentRange": null,
+      "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fconfiguration.json",
+      "provider": "modelscope",
+      "expectedSize": 76,
+      "expectedSha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 76,
+      "contentLength": "76",
+      "contentRange": "bytes 0-75/76",
+      "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/configuration.json",
+      "provider": "hf-mirror",
+      "expectedSize": 76,
+      "expectedSha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 76,
+      "contentLength": "76",
+      "contentRange": null,
+      "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fmodel.safetensors",
+      "provider": "modelscope",
+      "expectedSize": 682293092,
+      "expectedSha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/682293092",
+      "prefixSha256": "3918803dbb7bd227bf8cab378871a558c1d752043fc8e52ee262641e8df6058c",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/model.safetensors",
+      "provider": "hf-mirror",
+      "expectedSize": 682293092,
+      "expectedSha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "us.aws.cdn.hf.co",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/682293092",
+      "prefixSha256": "3918803dbb7bd227bf8cab378871a558c1d752043fc8e52ee262641e8df6058c",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fpreprocessor_config.json",
+      "provider": "modelscope",
+      "expectedSize": 234,
+      "expectedSha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 234,
+      "contentLength": "234",
+      "contentRange": "bytes 0-233/234",
+      "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/preprocessor_config.json",
+      "provider": "hf-mirror",
+      "expectedSize": 234,
+      "expectedSha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 234,
+      "contentLength": "234",
+      "contentRange": null,
+      "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=tokenizer_config.json",
+      "provider": "modelscope",
+      "expectedSize": 7344,
+      "expectedSha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 7344,
+      "contentLength": "7344",
+      "contentRange": "bytes 0-7343/7344",
+      "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/tokenizer_config.json",
+      "provider": "hf-mirror",
+      "expectedSize": 7344,
+      "expectedSha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 7344,
+      "contentLength": "7344",
+      "contentRange": null,
+      "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=vocab.json",
+      "provider": "modelscope",
+      "expectedSize": 2776833,
+      "expectedSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "modelscope.cn",
+      "bytesRead": 2776833,
+      "contentLength": "2776833",
+      "contentRange": "bytes 0-2776832/2776833",
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/vocab.json",
+      "provider": "hf-mirror",
+      "expectedSize": 2776833,
+      "expectedSha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "huggingface.co",
+      "bytesRead": 2776833,
+      "contentLength": "2776833",
+      "contentRange": null,
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+      "provider": "github-proxy",
+      "expectedSize": 54157409,
+      "expectedSha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "ghfast.top",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/54157409",
+      "prefixSha256": "deda8ca29d8ffdd95afd6882f31597cf3389c81f6533cb8dfe9041ec90655981",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/v0.1.12/SHA256SUMS",
+      "provider": "github-proxy",
+      "expectedSize": 869,
+      "expectedSha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "ghfast.top",
+      "bytesRead": 869,
+      "contentLength": "869",
+      "contentRange": null,
+      "sha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/v0.1.12/Open-Media_0.1.12_speech-runtime-source.tar.gz",
+      "provider": "github-proxy",
+      "expectedSize": 650139186,
+      "expectedSha256": "aab56deb9bf76d7cb6928ecc23793087dfff8737a3fe72a774b5721c2f5fc533",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "ghfast.top",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/650139186",
+      "prefixSha256": "d2c48ff33175c6444a9e666f2c401f0e263949bfaa89c1b4aec841684f600bef",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://ghproxy.net/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+      "provider": "github-proxy",
+      "expectedSize": 54157409,
+      "expectedSha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "ghproxy.net",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/54157409",
+      "prefixSha256": "deda8ca29d8ffdd95afd6882f31597cf3389c81f6533cb8dfe9041ec90655981",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/v0.1.12/SHA256SUMS",
+      "provider": "github-proxy",
+      "expectedSize": 869,
+      "expectedSha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "ghproxy.net",
+      "bytesRead": 869,
+      "contentLength": "869",
+      "contentRange": null,
+      "sha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/v0.1.12/Open-Media_0.1.12_speech-runtime-source.tar.gz",
+      "provider": "github-proxy",
+      "expectedSize": 650139186,
+      "expectedSha256": "aab56deb9bf76d7cb6928ecc23793087dfff8737a3fe72a774b5721c2f5fc533",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "ghproxy.net",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/650139186",
+      "prefixSha256": "d2c48ff33175c6444a9e666f2c401f0e263949bfaa89c1b4aec841684f600bef",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+      "provider": "github-proxy",
+      "expectedSize": 54157409,
+      "expectedSha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 206,
+      "finalHost": "gh-proxy.com",
+      "bytesRead": 1024,
+      "contentLength": "1024",
+      "contentRange": "bytes 0-1023/54157409",
+      "prefixSha256": "deda8ca29d8ffdd95afd6882f31597cf3389c81f6533cb8dfe9041ec90655981",
+      "matchesExpectedSize": true
+    },
+    {
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/v0.1.12/SHA256SUMS",
+      "provider": "github-proxy",
+      "expectedSize": 869,
+      "expectedSha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25",
+      "method": "full-download-sha256",
+      "httpStatus": 200,
+      "finalHost": "gh-proxy.com",
+      "bytesRead": 869,
+      "contentLength": "869",
+      "contentRange": null,
+      "sha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25",
+      "matchesExpected": true
+    },
+    {
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/v0.1.12/Open-Media_0.1.12_speech-runtime-source.tar.gz",
+      "provider": "github-proxy",
+      "expectedSize": 650139186,
+      "expectedSha256": "aab56deb9bf76d7cb6928ecc23793087dfff8737a3fe72a774b5721c2f5fc533",
+      "method": "range-prefix-and-metadata",
+      "httpStatus": 200,
+      "finalHost": "gh-proxy.com",
+      "bytesRead": 1024,
+      "contentLength": "650139186",
+      "contentRange": null,
+      "prefixSha256": "d2c48ff33175c6444a9e666f2c401f0e263949bfaa89c1b4aec841684f600bef",
+      "matchesExpectedSize": true
+    }
+  ],
+  "githubProxyPrefixes": [
+    "https://ghfast.top/",
+    "https://ghproxy.net/",
+    "https://gh-proxy.com/"
+  ],
+  "unavailable": [
+    {
+      "url": "https://ghproxy.cc/https://github.com/ecojust/open-media/releases/download/v0.1.12/SHA256SUMS",
+      "httpStatus": 503,
+      "action": "excluded"
+    }
+  ]
+}
