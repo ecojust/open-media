@@ -1,4 +1,5 @@
 import type { MediaAsset, Project } from './core/types'
+import type { CaptureControlAction, CaptureControlsSnapshot } from './core/capture-controls'
 import { ensureMediaPreview, type MediaPreviewFormat } from './core/media-import'
 
 export interface RuntimeStatus { ready: boolean; version?: string; source?: string; error?: string }
@@ -11,7 +12,7 @@ export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed
 export interface CaptureSize { width: number; height: number }
 export interface CaptureRegion extends CaptureSize { x: number; y: number }
 export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
-export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize }
+export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize; muted?: boolean; audioAvailable?: boolean }
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
 export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize }
 export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize }
@@ -85,6 +86,17 @@ export async function startCapture(options: CaptureOptions): Promise<CaptureStat
 export async function cancelCaptureStart(requestId: string): Promise<void> { return call('cancel_capture_start', { requestId }) }
 export async function pauseCapture(): Promise<CaptureStatus> { return call('pause_capture') }
 export async function resumeCapture(): Promise<CaptureStatus> { return call('resume_capture') }
+export async function setCaptureMuted(muted: boolean): Promise<CaptureStatus> { return call('set_capture_muted', { muted }) }
+export async function captureControlsReady(): Promise<CaptureControlsSnapshot> { return call('capture_controls_ready') }
+export async function requestCaptureControlAction(action: CaptureControlAction): Promise<void> { return call('capture_controls_action', { action }) }
+export async function onCaptureControlsState(handler: (snapshot: CaptureControlsSnapshot) => void): Promise<() => void> {
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen<CaptureControlsSnapshot>('capture-controls-state', event => handler(event.payload))
+}
+export async function onCaptureControlsAction(handler: (action: CaptureControlAction) => void): Promise<() => void> {
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen<{ action: CaptureControlAction }>('capture-controls-action', event => handler(event.payload.action))
+}
 export async function stopCapture(): Promise<MediaAsset | null> { const asset = await call<MediaAsset | null>('stop_capture'); return asset ? assetUrl(asset) : null }
 export async function saveBytes(name: string, bytes: Uint8Array): Promise<string | null> { return call('save_bytes', { name, bytes: Array.from(bytes) }) }
 export interface ProjectFileTarget { name: string; path: string; token: string }

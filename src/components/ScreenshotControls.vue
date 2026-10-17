@@ -37,7 +37,6 @@ function keydown(event: KeyboardEvent): void {
 
 <template>
   <section class="screenshot-controls" data-testid="screenshot-controls" aria-label="截屏设置">
-    <h3><Icon name="camera" :size="16" />截屏</h3>
     <p>选择范围后，自动打开图片转换并载入截屏。</p>
     <div class="screenshot-shortcut-row">
       <span>快捷键</span>
@@ -52,10 +51,11 @@ function keydown(event: KeyboardEvent): void {
     </div>
     <p v-if="hint" class="shortcut-error" role="status">{{ hint }}</p>
     <p v-if="error" class="shortcut-error" role="alert">{{ error }}</p>
+    <p v-if="disabled" role="status">当前操作结束后，即可截屏和修改快捷键。</p>
     <button class="screenshot-start" type="button" data-testid="screenshot-start" :disabled="locked || unavailable" @click="emit('capture')"><Icon :name="busy ? 'clock' : 'camera'" :size="16" />{{ busy ? '正在截屏…' : '立即截屏' }}</button>
   </section>
 </template>
 
 <style scoped>
-.screenshot-controls{display:grid;gap:9px;grid-column:1/-1;min-width:0;border-top:1px solid var(--ui-border,#e5e8f0);padding-top:16px;color:var(--ui-text,#253044)}.screenshot-controls h3{display:flex;align-items:center;gap:7px;margin:0;font-size:12px}.screenshot-controls p{margin:0;color:var(--ui-muted,#7c8492);font-size:10px;line-height:1.7}.screenshot-shortcut-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px}.shortcut-editor{min-width:126px;min-height:var(--ui-control-height,32px);justify-content:center;border:1px solid var(--ui-border,#e5e8f0);border-radius:6px;background:var(--ui-surface-2,#f7f8fc);color:inherit;padding:4px 8px;font-size:11px}.shortcut-editor kbd{font:inherit;font-weight:600;white-space:nowrap}.shortcut-editor.listening{border-color:var(--ui-accent,#6257db);color:var(--ui-accent,#6257db)}.shortcut-editor:focus-visible{outline:2px solid var(--ui-accent,#6257db);outline-offset:2px}.shortcut-options{display:flex;gap:12px}.shortcut-options button{border:0;padding:0;background:transparent;color:var(--ui-accent,#6257db);font-size:10px;min-height:24px}.screenshot-start{justify-content:center;gap:7px;min-height:var(--ui-control-height,32px);border:1px solid var(--ui-border,#e5e8f0);border-radius:6px;background:var(--ui-surface-2,#f7f8fc);color:var(--ui-text,#253044);font-size:11px}.screenshot-controls .shortcut-error{color:var(--ui-danger,#c34e59)}.screenshot-controls button:disabled{opacity:.45;cursor:not-allowed}
+.screenshot-controls{display:grid;gap:12px;min-width:0;padding:16px;color:var(--ui-text,#253044)}.screenshot-controls p{margin:0;color:var(--ui-muted,#7c8492);font-size:11px;line-height:1.7}.screenshot-shortcut-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px}.shortcut-editor{min-width:126px;min-height:var(--ui-control-height,32px);justify-content:center;border:1px solid var(--ui-border,#e5e8f0);border-radius:6px;background:var(--ui-surface-2,#f7f8fc);color:inherit;padding:4px 8px;font-size:11px}.shortcut-editor kbd{font:inherit;font-weight:600;white-space:nowrap}.shortcut-editor.listening{border-color:var(--ui-accent,#6257db);color:var(--ui-accent,#6257db)}.shortcut-editor:focus-visible{outline:2px solid var(--ui-accent,#6257db);outline-offset:2px}.shortcut-options{display:flex;gap:12px}.shortcut-options button{border:0;padding:0;background:transparent;color:var(--ui-accent,#6257db);font-size:10px;min-height:24px}.screenshot-start{justify-content:center;gap:7px;min-height:var(--ui-control-height,32px);border:1px solid var(--ui-border,#e5e8f0);border-radius:6px;background:var(--ui-surface-2,#f7f8fc);color:var(--ui-text,#253044);font-size:11px}.screenshot-controls .shortcut-error{color:var(--ui-danger,#c34e59)}.screenshot-controls button:disabled{opacity:.45;cursor:not-allowed}
 </style>

@@ -93,8 +93,10 @@ async function main() {
       assert(trace.findIndex(call => call.command === 'plugin:event|listen' && call.args.event === 'screenshot-requested') < trace.findIndex(call => call.command === 'configure_screenshot_shortcut'))
       for (const command of ['pick_capture_source', 'capture_screenshot', 'start_capture', 'list_capture_devices', 'show_main_window']) assert.equal((await calls(page, command)).length, 0)
       await page.getByTestId('nav-record').click()
+      await page.getByTestId('screenshot-settings-open').click()
       await expect(page.getByTestId('screenshot-shortcut')).toContainText('Ctrl + Shift + 2')
       await expect(page.getByTestId('screenshot-controls')).toContainText('全局生效')
+      await page.keyboard.press('Escape')
     })
 
     await check('原生事件选择截屏范围，等待完成才前置应用，仅选中新图片并显示真实PNG', async () => {
@@ -150,12 +152,17 @@ async function main() {
 
     await check('快捷键冲突保留旧组合，成功修改持久化，停用后重启继续停用', async () => {
       await page.getByTestId('nav-record').click()
+      await page.getByTestId('screenshot-settings-open').click()
       const editor = page.getByTestId('screenshot-shortcut')
       await page.evaluate(() => { window.screenshotHarness.rejectShortcut = 'Ctrl+Shift+9' })
       await editor.click()
       await editor.press('Control+Shift+9')
       await expect(page.getByTestId('screenshot-controls').getByRole('alert')).toContainText('此快捷键已被占用')
       await expect(editor).toContainText('Ctrl + Shift + 2')
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('recorder-workspace').getByRole('alert')).toContainText('此快捷键已被占用')
+      await page.getByTestId('screenshot-settings-open').click()
+      await expect(page.getByTestId('screenshot-controls').getByRole('alert')).toContainText('此快捷键已被占用')
       assert.equal(await page.evaluate(() => window.screenshotHarness.shortcut), defaultShortcut)
       assert.equal(await page.evaluate(() => localStorage.getItem('open-media:screenshot-shortcut')), null)
       await editor.click()
@@ -173,10 +180,23 @@ async function main() {
       await expect.poll(async () => (await calls(page, 'configure_screenshot_shortcut')).length).toBe(1)
       assert.deepEqual((await calls(page, 'configure_screenshot_shortcut'))[0].args, { shortcut: null })
       await page.getByTestId('nav-record').click()
+      await page.getByTestId('screenshot-settings-open').click()
       await expect(page.getByTestId('screenshot-shortcut')).toContainText('未启用')
       await page.getByRole('button', { name: '恢复默认', exact: true }).click()
       await expect(page.getByTestId('screenshot-shortcut')).toContainText('Ctrl + Shift + 2')
       assert.equal(await page.evaluate(() => localStorage.getItem('open-media:screenshot-shortcut')), defaultShortcut)
+    })
+
+    await check('顶部弹窗立即截屏先关闭设置，再启动原生范围选择', async () => {
+      const before = (await calls(page, 'pick_capture_source')).length
+      await emitScreenshot(page)
+      assert.equal((await calls(page, 'pick_capture_source')).length, before, '设置弹窗打开时不响应原生快捷键')
+      await page.getByTestId('screenshot-start').click()
+      await expect(page.getByRole('dialog', { name: '截屏设置', exact: true })).toHaveCount(0)
+      await expect.poll(async () => (await calls(page, 'pick_capture_source')).length).toBe(before + 1)
+      await page.evaluate(() => window.screenshotHarness.finishPicker(null))
+      await expect(page.locator('.status-main')).toContainText('已取消截屏')
+      await expect(page.getByTestId('screenshot-settings-open')).toBeFocused()
     })
 
     assert.deepEqual(errors, [])

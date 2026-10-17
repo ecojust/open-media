@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "recording-controls",
+  "description": "Recording controls receive state and send checked actions to the main workspace.",
+  "windows": ["recording-controls"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

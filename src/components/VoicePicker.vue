@@ -35,7 +35,7 @@ watch([activeTab, search], () => { if (scroller.value) scroller.value.scrollTop 
 function artwork(voice: SpeechVoice): Record<string, string> {
   const portrait = voiceStyle(voice).portrait
   // Crop a square inside each portrait; the generated sheet has unequal row heights.
-  const left = [11, 373, 735][portrait % 3]!, top = [7, 358, 707, 1080][Math.floor(portrait / 3)]!
+  const left = [11, 373, 735][portrait % 3]!, top = [10, 367, 717, 1080][Math.floor(portrait / 3)]!
   return { backgroundImage: `url(${voicePortraits})`, backgroundSize: `${1086 / 340 * 100}% ${1448 / 340 * 100}%`, backgroundPosition: `${left / (1086 - 340) * 100}% ${top / (1448 - 340) * 100}%` }
 }
 function playing(voice: SpeechVoice): boolean { return props.previewVoiceId === voice.id && props.previewState === 'playing' }
@@ -68,7 +68,7 @@ function tabKeyboard(event: KeyboardEvent, id: VoiceCategoryId): void {
             <span v-if="modelValue === voice.id" class="voice-check" aria-hidden="true"><Icon name="check" :size="12" /></span>
             <span class="voice-card-copy"><strong :title="voice.name">{{ voice.name }}</strong><span>{{ voiceTypeLabel(voice) }}</span></span>
           </button>
-          <button type="button" class="voice-preview-button" :disabled="disabled" :aria-label="`试听 ${voice.name}`" :aria-pressed="playing(voice)" :aria-busy="loading(voice) || undefined" :title="loading(voice) ? '正在生成试听' : playing(voice) ? '暂停试听' : '试听声音'" @click="emit('preview', voice.id)"><Icon :name="loading(voice) ? 'refresh' : playing(voice) ? 'pause' : 'volume'" :class="{ 'voice-loading': loading(voice) }" :size="15" /></button>
+          <button type="button" class="voice-preview-button" :disabled="disabled" :aria-label="`试听 ${voice.name}`" :aria-pressed="playing(voice)" :aria-busy="loading(voice) || undefined" :title="loading(voice) ? '正在准备试听' : playing(voice) ? '暂停试听' : '试听声音'" @click="emit('preview', voice.id)"><Icon :name="loading(voice) ? 'refresh' : playing(voice) ? 'pause' : 'volume'" :class="{ 'voice-loading': loading(voice) }" :size="15" /></button>
         </div>
       </div>
       <p v-else class="voice-empty" role="status">{{ voices.length ? '没有找到匹配的声音，试试其他名称或分类。' : '暂时没有可用的声音。' }}</p>

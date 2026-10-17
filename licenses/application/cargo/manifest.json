@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "sourceLock": "src-tauri/Cargo.lock",
-  "sourceLockSha256": "d98ec3832658c3cc5a6751cbe1f21ee95ff7b9d2ac5350b4f06712b2e6914cb7",
+  "sourceLockSha256": "e429194b3e1a51d56ebe1a8beb371bc3f72b18fe42dbf94ba78bcf3e89c08f38",
   "coverage": "All registry packages in the locked dependency graph, including build-only and platform-specific packages. The inventory may exceed the dependencies present in an individual installer.",
   "originalTextPolicy": "Original license, copyright and notice bytes are retained without modification. Identical texts share one stored copy. Supplemental upstream sources are recorded where published package archives omit their notices.",
   "packages": [

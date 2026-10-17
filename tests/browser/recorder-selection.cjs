@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const { chromium } = require('@playwright/test')
+const { chromium, expect } = require('@playwright/test')
 
 async function mountRecorder(page, baseURL, native, surface = 'window') {
   await page.route('**/__recorder_selection__', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>录制范围验证</title></head><body><div id="app" class="app-shell"></div></body></html>' }))
@@ -11,12 +11,20 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
     const vueImport = componentSource.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
     const { createApp, h } = await import(vueImport)
     const RecorderWorkspace = (await import('/src/components/RecorderWorkspace.vue')).default
-    const state = { calls: [], events: [], blobs: [], status: { state: 'idle', elapsed: 0, segments: 0 } }
+    const state = { calls: [], events: [], blobs: [], assets: [], status: { state: 'idle', elapsed: 0, segments: 0 } }
     window.recorderHarness = state
     if (native) {
+      const callbacks = new Map(), listeners = new Map()
+      let callbackId = 0, listenerId = 0
+      state.action = action => { for (const [id, listener] of listeners) if (listener.event === 'capture-controls-action') callbacks.get(listener.handler)?.({ event: listener.event, id, payload: { action } }) }
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_event, id) => listeners.delete(id) }
       window.__TAURI_INTERNALS__ = {
+        transformCallback: callback => { const id = ++callbackId; callbacks.set(id, callback); return id },
+        unregisterCallback: id => callbacks.delete(id),
         invoke: async (command, args) => {
           state.calls.push({ command, args })
+          if (command === 'plugin:event|listen') { const id = ++listenerId; listeners.set(id, args); return id }
+          if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null }
           if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
           if (command === 'pick_capture_source') {
             if (state.permissionFailure) { state.permissionFailure = false; throw new Error('未获得屏幕录制权限，请在系统设置中允许后重试。') }
@@ -25,13 +33,14 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
           if (command === 'cancel_capture_picker') { state.resolvePicker(null); return }
           if (command === 'start_capture') {
             const options = args.options
-            state.status = { state: 'recording', elapsed: 0, segments: 0, sourceId: options.sourceId, sourceName: state.selectedName ?? '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: options.outputSize ?? options.region ?? { width: 1200, height: 900 } }
+            state.status = { state: 'recording', elapsed: 0, segments: 0, audioAvailable: options.microphone, muted: false, sourceId: options.sourceId, sourceName: state.selectedName ?? '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: options.outputSize ?? options.region ?? { width: 1200, height: 900 } }
             return { ...state.status }
           }
           if (command === 'get_capture_status') return { ...state.status }
           if (command === 'pause_capture') { state.status.state = 'paused'; return { ...state.status } }
           if (command === 'resume_capture') { state.status.state = 'recording'; return { ...state.status } }
-          if (command === 'stop_capture') { state.status.state = 'idle'; return null }
+          if (command === 'set_capture_muted') { state.status.muted = args.muted; return { ...state.status } }
+          if (command === 'stop_capture') { state.status.state = 'idle'; return { id: 'native-recorded', name: '录制.webm', kind: 'video', url: '', duration: 1, width: 1280, height: 720, size: 1000, mime: 'video/webm' } }
           throw new Error(`未预期的录制命令：${command}`)
         },
       }
@@ -49,7 +58,7 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
       Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async options => { state.calls.push({ command: 'getDisplayMedia', args: options }); return stream } })
       state.stopSource = () => { clearInterval(timer); stream.getTracks().forEach(track => track.stop()) }
     }
-    const app = createApp({ render: () => h(RecorderWorkspace, { assets: [], native, onCaptured: (blob, name) => state.blobs.push({ blob, name }), onRecordingChange: active => state.events.push(active) }) })
+    const app = createApp({ render: () => h(RecorderWorkspace, { assets: [], native, onCaptured: (blob, name) => state.blobs.push({ blob, name }), onAsset: asset => state.assets.push(asset), onRecordingChange: active => state.events.push(active) }) })
     app.mount('#app')
     state.cleanup = () => { app.unmount(); state.stopSource?.(); delete window.__TAURI_INTERNALS__ }
   }, { native, surface })
@@ -69,11 +78,12 @@ async function main() {
     page.on('pageerror', error => errors.push(error.message))
     await mountRecorder(page, baseURL, true)
     await page.getByTestId('record-start').waitFor()
-    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command !== 'get_runtime_status')), [], '打开录制页不能枚举来源或申请采集权限')
+    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => !['get_runtime_status', 'plugin:event|listen'].includes(call.command))), [], '打开录制页不能枚举来源或申请采集权限')
     assert.equal(await page.getByTestId('capture-source').count(), 0)
     assert.equal(await page.getByTestId('capture-region-x').count(), 0)
     assert.equal(await page.getByTestId('capture-output').count(), 0)
     await page.getByLabel('开始倒计时').selectOption('0')
+    await page.getByRole('switch', { name: /录制麦克风/ }).check()
     fs.mkdirSync('test-results/browser', { recursive: true })
     await page.screenshot({ path: 'test-results/browser/recorder-start-desktop.png', fullPage: true })
     await page.getByTestId('record-start').click()
@@ -88,9 +98,20 @@ async function main() {
     const started = await page.evaluate(() => window.recorderHarness.calls.find(call => call.command === 'start_capture').args.options)
     assert.equal(started.sourceId, 'window:4')
     assert.deepEqual(started.outputSize, { width: 1280, height: 720 })
-    await page.getByTestId('record-stop').click()
+    await page.evaluate(() => window.recorderHarness.action('toggle-mute'))
+    await expect(page.getByRole('button', { name: '恢复录音', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await page.evaluate(() => window.recorderHarness.action('pause'))
+    await expect(page.getByRole('button', { name: '继续', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '恢复录音', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await page.evaluate(() => window.recorderHarness.action('resume'))
+    await expect(page.getByRole('button', { name: '暂停', exact: true })).toBeVisible()
+    await page.evaluate(() => { window.recorderHarness.action('stop'); window.recorderHarness.action('stop') })
     await page.getByTestId('record-start').waitFor()
-    console.log('PASS 开始后选择来源、确认后才录制、尺寸传递及活动保护')
+    assert.equal(await page.evaluate(() => window.recorderHarness.assets.length), 1)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'stop_capture').length), 1)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pause_capture').length), 1)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'resume_capture').length), 1)
+    console.log('PASS 开始后选择来源、确认后才录制、尺寸传递，浮栏事件复用暂停/继续/静音/停止且仅导入一次')
 
     await page.evaluate(() => { window.recorderHarness.permissionFailure = true })
     await page.getByTestId('record-start').click()
@@ -129,7 +150,24 @@ async function main() {
     assert.deepEqual(border, { width: '3px', color: 'rgb(239, 69, 87)', pointerEvents: 'none' })
     assert.match(await page.locator('.settings-hint').innerText(), /共享标识由浏览器提供/)
     await page.waitForFunction(() => document.querySelector('[data-testid="recording-preview"] video').currentTime > 0.2)
-    await page.getByTestId('record-stop').click()
+    const toolbar = page.getByTestId('recording-toolbar')
+    await expect(toolbar).toBeVisible()
+    await expect(toolbar.getByRole('button', { name: '未开启录音', exact: true })).toBeDisabled()
+    assert.equal(await toolbar.locator('button svg').count(), 3)
+    const bounds = await toolbar.boundingBox(), previewBounds = await page.getByTestId('recording-preview').boundingBox()
+    assert(Math.abs(previewBounds.x + previewBounds.width - bounds.x - bounds.width - 8) < 3, '控制栏位于红框右上角')
+    assert(Math.abs(bounds.y - previewBounds.y - 8) < 3)
+    await expect(toolbar.locator('.recording-clock')).not.toContainText('00:00:00')
+    await toolbar.getByRole('button', { name: '暂停录制', exact: true }).click()
+    await expect(toolbar.getByRole('button', { name: '继续录制', exact: true })).toBeVisible()
+    const pausedClock = await toolbar.locator('.recording-clock').innerText()
+    await page.screenshot({ path: 'test-results/browser/recorder-preview-paused.png', fullPage: true })
+    await page.waitForTimeout(1200)
+    assert.equal(await toolbar.locator('.recording-clock').innerText(), pausedClock, '暂停期间时长不增加')
+    await toolbar.getByRole('button', { name: '继续录制', exact: true }).click()
+    await expect(toolbar.locator('.recording-clock')).not.toHaveText(pausedClock)
+    await page.screenshot({ path: 'test-results/browser/recorder-preview-toolbar.png', fullPage: true })
+    await toolbar.getByRole('button', { name: '停止录制', exact: true }).click()
     await page.waitForFunction(() => window.recorderHarness.blobs.length === 1)
     const recording = await page.evaluate(async () => ({ bytes: Array.from(new Uint8Array(await window.recorderHarness.blobs[0].blob.arrayBuffer())).slice(0, 4), size: window.recorderHarness.blobs[0].blob.size, released: window.recorderHarness.screenTrack.readyState, events: window.recorderHarness.events }))
     assert.deepEqual(recording.bytes, [26, 69, 223, 163])

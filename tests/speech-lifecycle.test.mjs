@@ -21,7 +21,7 @@ function complete(request, duration = 2.5) {
 }
 function panel(overrides = {}, options = {}) {
   const source = readFileSync(new URL('../src/components/SpeechPanel.vue', import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
-  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, cancel, align, busy, error, notice, operationKind, generationLabel, voiceId, speed, alignText, previewUrl, previewVoice, previewVoiceId, previewState }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
+  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, cancel, align, busy, error, notice, operationKind, generationLabel, voiceId, speed, alignText, previewUrl, previewVoice, previewVoiceId, previewState, player }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   const props = vue.shallowReactive({ project: fixture(), selectedClipId: '', active: true, ...options })
   const events = [], calls = [], unmount = []
   const injections = {
@@ -29,6 +29,8 @@ function panel(overrides = {}, options = {}) {
     onBeforeUnmount: callback => unmount.push(callback), defineProps: () => props,
     defineEmits: () => (...event) => { events.push(event); if (event[0] === 'change' && options.applyChanges !== false) props.project = event[1] }, defineExpose: () => {},
     planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, isDesktop: () => true,
+    bundledVoicePreviewUrl: () => undefined,
+    VOICE_PREVIEW_TEXT: { zh: '你好，这是一段语音试听。让文字拥有清晰自然的声音。', en: 'Hello, this is a voice preview. Let your story come to life with a clear and natural voice.' },
     getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }),
     beginSpeechJob: async request => { calls.push(['begin', request]); return complete(request) },
     getSpeechJob: async id => { throw new Error(`unexpected poll ${id}`) },
@@ -42,6 +44,82 @@ function panel(overrides = {}, options = {}) {
   return { state, props, events, calls, dispose() { unmount.forEach(callback => callback()); scope.stop() } }
 }
 async function settle() { for (let index = 0; index < 8; index++) await Promise.resolve(); await vue.nextTick() }
+
+function audioPlayer() {
+  return { paused: true, ended: false, playbackRate: 1, preservesPitch: false, currentTime: 0,
+    async play() { this.paused = false }, pause() { this.paused = true }, removeAttribute() {}, load() {} }
+}
+
+test('bundled auditions play immediately without native jobs, preserve pitch and reuse files after switching or reopening', async () => {
+  const harness = panel({ bundledVoicePreviewUrl: id => `/assets/${id}.mp3` })
+  try {
+    await settle()
+    harness.state.player.value = audioPlayer()
+    await harness.state.previewVoice('voice-1')
+    assert.equal(harness.state.previewUrl.value, '/assets/voice-1.mp3')
+    assert.equal(harness.state.player.value.paused, false)
+    assert.equal(harness.state.player.value.preservesPitch, true)
+    harness.state.player.value.currentTime = 2
+    harness.state.speed.value = 1.25
+    await settle()
+    assert.equal(harness.state.player.value.playbackRate, 1.25)
+    assert.equal(harness.state.player.value.currentTime, 2, 'rate changes must not seek or recreate the sample')
+    await harness.state.previewVoice('voice-1')
+    assert.equal(harness.state.player.value.paused, true)
+    await harness.state.previewVoice('voice-1')
+    assert.equal(harness.state.player.value.paused, false)
+    assert.equal(harness.state.player.value.currentTime, 2)
+    await harness.state.previewVoice('voice-2')
+    assert.equal(harness.state.previewUrl.value, '/assets/voice-2.mp3')
+    harness.props.active = false
+    await settle()
+    assert.equal(harness.state.previewUrl.value, '')
+    assert.equal(harness.state.player.value.paused, true)
+    harness.props.active = true
+    await settle()
+    await harness.state.previewVoice('voice-1')
+    assert.equal(harness.state.previewUrl.value, '/assets/voice-1.mp3')
+    assert.deepEqual(harness.calls, [], 'local auditions must not synthesize, poll, accept or discard jobs')
+    assert.deepEqual(harness.events.filter(event => event[0] === 'change' || event[0] === 'busy'), [])
+    assert.equal(harness.props.project.assets.length, 0)
+  } finally { harness.dispose() }
+})
+
+test('a broken bundled sample reports an error and retries the same file without synthesizing a replacement', async () => {
+  const harness = panel({ bundledVoicePreviewUrl: id => `/assets/${id}.mp3` })
+  try {
+    await settle()
+    harness.state.player.value = { ...audioPlayer(), async play() { throw new Error('decode failed') } }
+    await harness.state.previewVoice('voice-1')
+    assert.match(harness.state.error.value, /内置试听音频无法播放.*重试/)
+    assert.equal(harness.state.previewUrl.value, '')
+    assert.equal(harness.state.previewState.value, 'idle')
+    harness.state.player.value = audioPlayer()
+    await harness.state.previewVoice('voice-1')
+    assert.equal(harness.state.previewUrl.value, '/assets/voice-1.mp3')
+    assert.equal(harness.state.error.value, '')
+    assert.deepEqual(harness.calls, [])
+  } finally { harness.dispose() }
+})
+
+test('closing during local playback startup invalidates late playback results', async () => {
+  const pending = deferred(), started = deferred()
+  const harness = panel({ bundledVoicePreviewUrl: id => `/assets/${id}.mp3` })
+  try {
+    await settle()
+    harness.state.player.value = { ...audioPlayer(), play() { started.resolve(); return pending.promise } }
+    const audition = harness.state.previewVoice('voice-1')
+    await started.promise
+    harness.props.active = false
+    await settle()
+    pending.resolve()
+    await audition
+    assert.equal(harness.state.previewUrl.value, '')
+    assert.equal(harness.state.previewState.value, 'idle')
+    assert.equal(harness.state.notice.value, '')
+    assert.deepEqual(harness.calls, [])
+  } finally { harness.dispose() }
+})
 
 test('Chinese narration is selected by default even when the bundled manifest lists English voices first', async () => {
   const harness = panel({ getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'english-first', name: '英语声音', language: 'en-US' }, { id: 'chinese-default', name: '中文声音', language: 'zh-CN' }] }) })

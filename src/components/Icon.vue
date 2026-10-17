@@ -68,6 +68,7 @@ const paths: Record<string, string> = {
   globe: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M3 12h18M12 3c-5 5-5 13 0 18m0-18c5 5 5 13 0 18',
   shield: 'M12 3 3 7v5c0 5 9 10 9 10s9-5 9-10V7zM8 12l3 3 5-6',
   mic: 'M9 4a3 3 0 0 1 6 0v8a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8',
+  'mic-off': 'M3 3l18 18M9 5V4a3 3 0 0 1 6 0v7M9 9v3a3 3 0 0 0 4.5 2.6M5 10v2a7 7 0 0 0 11 5.7M19 10v2a7 7 0 0 1-.8 3.2M12 19v3M8 22h8',
   film: 'M3 4h18v16H3zM7 4v16M17 4v16M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4',
   'mark-in': 'M8 3H4v18h4M9 12h12m-5-5-5 5 5 5',
   'mark-out': 'M16 3h4v18h-4M3 12h12m-5-5 5 5-5 5',

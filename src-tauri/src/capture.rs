@@ -64,6 +64,8 @@ pub struct CaptureDevice {
 #[serde(rename_all = "camelCase")]
 pub struct CaptureStatus {
     pub state: String,
+    pub muted: bool,
+    pub audio_available: bool,
     pub elapsed: f64,
     pub segments: usize,
     pub error: Option<String>,
@@ -138,6 +140,7 @@ pub struct CaptureManager {
     elapsed: f64,
     state: String,
     error: Option<String>,
+    muted: bool,
 }
 impl Default for CaptureManager {
     fn default() -> Self {
@@ -151,6 +154,7 @@ impl Default for CaptureManager {
             elapsed: 0.0,
             state: "idle".into(),
             error: None,
+            muted: false,
         }
     }
 }
@@ -199,6 +203,11 @@ impl CaptureManager {
         }
         CaptureStatus {
             state: self.state.clone(),
+            muted: self.muted,
+            audio_available: self
+                .options
+                .as_ref()
+                .is_some_and(|options| options.microphone),
             elapsed: self.elapsed
                 + self
                     .active
@@ -279,6 +288,7 @@ impl CaptureManager {
         self.segments.clear();
         self.elapsed = 0.0;
         self.error = None;
+        self.muted = false;
         if let Err(error) = self.spawn_segment(cancelled) {
             self.state = "idle".into();
             self.workspace = None;
@@ -379,7 +389,22 @@ impl CaptureManager {
                 "yuv420p",
             ]);
             if options.microphone {
-                command.args(["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]);
+                command.args([
+                    "-af",
+                    if self.muted {
+                        "volume@capture_volume=0"
+                    } else {
+                        "volume@capture_volume=1"
+                    },
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                ]);
             } else {
                 command.arg("-an");
             }
@@ -390,9 +415,11 @@ impl CaptureManager {
         #[cfg(target_os = "macos")]
         let mut command = {
             let config = root.join(format!("{id}.json"));
+            let mut configuration = serde_json::to_value(options).map_err(|e| e.to_string())?;
+            configuration["muted"] = serde_json::Value::Bool(self.muted);
             fs::write(
                 &config,
-                serde_json::to_vec(options).map_err(|e| e.to_string())?,
+                serde_json::to_vec(&configuration).map_err(|e| e.to_string())?,
             )
             .map_err(|e| e.to_string())?;
             let mut command = crate::capture_service::command()?;
@@ -472,6 +499,34 @@ impl CaptureManager {
         result?;
         Ok(self.status())
     }
+    pub fn controls_target(&self) -> Option<(CaptureDevice, Option<Region>)> {
+        Some((self.source.clone()?, self.options.as_ref()?.region.clone()))
+    }
+    pub fn set_muted(&mut self, muted: bool) -> Result<CaptureStatus> {
+        // Refresh an unexpectedly ended child before writing to its input.
+        self.status();
+        if self.state != "recording" && self.state != "paused" {
+            return Err("当前没有可控制的录制。".into());
+        }
+        if !self
+            .options
+            .as_ref()
+            .is_some_and(|options| options.microphone)
+        {
+            return Err("本次录制未启用声音。".into());
+        }
+        if self.muted != muted {
+            if let Some(active) = self.active.as_mut() {
+                let input = active.child.stdin.as_mut().ok_or("录制声音控制不可用。")?;
+                input
+                    .write_all(mute_command(muted, cfg!(target_os = "macos")))
+                    .and_then(|_| input.flush())
+                    .map_err(|error| format!("无法切换录制声音：{error}"))?;
+            }
+            self.muted = muted;
+        }
+        Ok(self.status())
+    }
     pub fn resume(&mut self) -> Result<CaptureStatus> {
         if self.state != "paused" {
             return Err("当前录制未暂停。".into());
@@ -493,6 +548,7 @@ impl CaptureManager {
             self.workspace = None;
             self.options = None;
             self.source = None;
+            self.muted = false;
             finish?;
             return Ok(None);
         }
@@ -505,6 +561,7 @@ impl CaptureManager {
             self.error = None;
             self.options = None;
             self.source = None;
+            self.muted = false;
         } else {
             self.state = "paused".into();
             self.error = imported.as_ref().err().cloned();
@@ -570,6 +627,15 @@ impl CaptureManager {
         self.segments.clear();
         self.elapsed = 0.0;
         self.error = None;
+        self.muted = false;
+    }
+}
+fn mute_command(muted: bool, native_helper: bool) -> &'static [u8] {
+    match (native_helper, muted) {
+        (true, true) => b"mute\n",
+        (true, false) => b"unmute\n",
+        (false, true) => b"cvolume@capture_volume -1 volume 0\n",
+        (false, false) => b"cvolume@capture_volume -1 volume 1\n",
     }
 }
 fn tail(text: &str, max: usize) -> String {
@@ -1009,6 +1075,33 @@ mod capture_tests {
             region: None,
             output_size: None,
         }
+    }
+    #[test]
+    fn mute_preserves_paused_state_and_never_enables_an_unrequested_device() {
+        let mut manager = CaptureManager::default();
+        assert!(manager.set_muted(true).is_err());
+        manager.options = Some(options());
+        manager.state = "paused".into();
+        manager.elapsed = 12.5;
+        assert!(!manager.status().audio_available);
+        assert!(manager.set_muted(true).is_err());
+        manager.options.as_mut().unwrap().microphone = true;
+        let muted = manager.set_muted(true).unwrap();
+        assert!(muted.muted && muted.audio_available);
+        assert_eq!(muted.state, "paused");
+        assert_eq!(muted.elapsed, 12.5);
+        assert!(!manager.set_muted(false).unwrap().muted);
+        manager.set_muted(true).unwrap();
+        manager.abort();
+        let idle = manager.status();
+        assert!(!idle.muted && !idle.audio_available);
+    }
+    #[test]
+    fn mute_commands_address_only_the_recording_audio_filter() {
+        assert_eq!(mute_command(true, true), b"mute\n");
+        assert_eq!(mute_command(false, true), b"unmute\n");
+        assert_eq!(mute_command(true, false), b"cvolume@capture_volume -1 volume 0\n");
+        assert_eq!(mute_command(false, false), b"cvolume@capture_volume -1 volume 1\n");
     }
     #[test]
     fn selection_never_substitutes_another_window_or_screen() {

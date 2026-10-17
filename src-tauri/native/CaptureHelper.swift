@@ -54,6 +54,7 @@ struct Options: Decodable {
     let audioDevice: String?
     let region: Region?
     let outputSize: OutputSize
+    var muted: Bool? = nil
 
     func validate(sourceWidth: Int, sourceHeight: Int, isWindow: Bool) throws {
         guard (1...60).contains(fps) else { throw CaptureFailure("录制帧率应为 1 至 60。") }
@@ -235,12 +236,12 @@ func captureError(_ error: Error, during stage: String) -> CaptureFailure {
     return CaptureFailure("\(action) 系统信息：\(details.joined(separator: "；"))")
 }
 
-@MainActor func shareableContent(excludingDesktop: Bool = true) async throws -> SCShareableContent {
+@MainActor func shareableContent(excludingDesktop: Bool = true, onScreenOnly: Bool = true) async throws -> SCShareableContent {
     do {
         // A recording or source selection is an explicit user action. Let the
         // capture API decide access; legacy preflight results can be stale after
         // the user changes permission in System Settings.
-        return try await SCShareableContent.excludingDesktopWindows(excludingDesktop, onScreenWindowsOnly: true)
+        return try await SCShareableContent.excludingDesktopWindows(excludingDesktop, onScreenWindowsOnly: onScreenOnly)
     } catch { throw captureError(error, during: "读取屏幕和窗口") }
 }
 
@@ -260,6 +261,56 @@ func retimeAudioSample(_ sample: CMSampleBuffer, to hostPTS: CMTime) throws -> C
                                                      sampleBufferOut: &copy)
     guard status == noErr, let copy = copy else { throw CaptureFailure("无法同步麦克风音轨。") }
     return copy
+}
+
+func silentAudioSample(_ sample: CMSampleBuffer) throws -> CMSampleBuffer {
+    guard let format = CMSampleBufferGetFormatDescription(sample),
+          let description = CMAudioFormatDescriptionGetStreamBasicDescription(format),
+          description.pointee.mFormatID == kAudioFormatLinearPCM,
+          description.pointee.mFormatFlags & (kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsFloat) != 0,
+          let original = CMSampleBufferGetDataBuffer(sample) else {
+        throw CaptureFailure("无法将当前麦克风格式静音，录制已暂停。")
+    }
+    let length = CMBlockBufferGetDataLength(original)
+    var block: CMBlockBuffer?
+    guard length > 0, CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault,
+        memoryBlock: nil, blockLength: length, blockAllocator: kCFAllocatorDefault,
+        customBlockSource: nil, offsetToData: 0, dataLength: length, flags: 0,
+        blockBufferOut: &block) == kCMBlockBufferNoErr, let block = block,
+        CMBlockBufferFillDataBytes(with: 0, blockBuffer: block, offsetIntoDestination: 0,
+                                  dataLength: length) == kCMBlockBufferNoErr else {
+        throw CaptureFailure("无法创建静音样本，录制已暂停。")
+    }
+    // PCM frames share their format, size and per-sample timing. Allocate a new
+    // data block so the capture provider's original buffer is never modified.
+    var timing = CMSampleTimingInfo()
+    guard CMSampleBufferGetSampleTimingInfo(sample, at: 0, timingInfoOut: &timing) == noErr else {
+        throw CaptureFailure("无法保留静音样本时间信息。")
+    }
+    var sampleSize = CMSampleBufferGetSampleSize(sample, at: 0)
+    var copy: CMSampleBuffer?
+    guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block,
+        formatDescription: format, sampleCount: CMSampleBufferGetNumSamples(sample),
+        sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+        sampleSizeEntryCount: sampleSize > 0 ? 1 : 0, sampleSizeArray: &sampleSize,
+        sampleBufferOut: &copy) == noErr, let copy = copy else {
+        throw CaptureFailure("无法写入静音样本。")
+    }
+    return copy
+}
+
+@_cdecl("open_media_capture_window_bounds")
+public func openMediaCaptureWindowBounds(_ windowID: UInt32, _ x: UnsafeMutablePointer<Double>,
+    _ y: UnsafeMutablePointer<Double>, _ width: UnsafeMutablePointer<Double>,
+    _ height: UnsafeMutablePointer<Double>) -> Int32 {
+    guard let windows = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
+          let info = windows.first, (info[kCGWindowIsOnscreen as String] as? Bool) == true,
+          let values = info[kCGWindowBounds as String] as? [String: Any],
+          let rect = CGRect(dictionaryRepresentation: values as CFDictionary),
+          rect.width >= 1, rect.height >= 1 else { return 0 }
+    x.pointee = rect.minX; y.pointee = rect.minY
+    width.pointee = rect.width; height.pointee = rect.height
+    return 1
 }
 
 @MainActor func listSources(requestPermission: Bool) async throws -> [Source] {
@@ -510,6 +561,15 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
     private var smokeTestHardDeadline: DispatchWorkItem?
     private var receivedScreenFrames = 0
     private var encodedFrames = 0
+    // Read and written only on the same serial queue as microphone samples.
+    private var muted = false
+
+    func setMuted(_ value: Bool) {
+        queue.async { [weak self] in
+            guard let self = self, !self.stopping else { return }
+            self.muted = value
+        }
+    }
 
     // This path is available only through an explicit command-line request. It
     // uses the normal recorder and real screen samples, never generated frames.
@@ -571,6 +631,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
 
     @MainActor func start(options: Options, output: URL, showsBorder: Bool = true) async throws {
         self.options = options
+        queue.sync { muted = options.muted ?? false }
         reportStage("sources")
         let content = try await shareableContent()
         try requireActive()
@@ -707,23 +768,45 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
 
     @MainActor private func displayFilter(_ display: SCDisplay, excluding border: RecordingBorder) async throws -> SCContentFilter {
         // Showing a window and publishing it to the capture service are separate
-        // operations. Retry discovery rather than failing a valid first start.
+        // operations. Exclude the UI process as well as this helper, then retain
+        // its identified ordinary windows. A control window published after
+        // discovery stays excluded, while the existing main UI remains visible.
+        // The explicit smoke test has no parent UI or recording controls.
+        let excludesParent = smokeTestOutput == nil
         let deadline = Date().addingTimeInterval(3)
         repeat {
             try requireActive()
-            let updated = try await shareableContent(excludingDesktop: false)
+            // Include minimized UI windows when identifying the parent process.
+            let updated = try await shareableContent(excludingDesktop: false, onScreenOnly: false)
             try requireActive()
-            let ownApplications = updated.applications.filter { $0.processID == getpid() }
-            if !ownApplications.isEmpty {
-                return SCContentFilter(display: display, excludingApplications: ownApplications, exceptingWindows: [])
+            var seen = Set<pid_t>()
+            let applications = (updated.applications + updated.windows.compactMap { $0.owningApplication }).filter {
+                ($0.processID == getpid() || (excludesParent && $0.processID == parentPID))
+                    && seen.insert($0.processID).inserted
             }
-            let ownWindows = updated.windows.filter {
-                $0.owningApplication?.processID == getpid() || $0.windowID == CGWindowID(border.panel.windowNumber)
+            if applications.contains(where: { $0.processID == getpid() }),
+               !excludesParent || applications.contains(where: { $0.processID == parentPID }) {
+                let retainedWindows = updated.windows.filter { window in
+                    guard excludesParent, window.owningApplication?.processID == parentPID,
+                          let title = window.title, !title.isEmpty else { return false }
+                    return title != "Open Media 录制控制"
+                }
+                // Exceptions re-include windows excluded by the app rule. A
+                // window without a readable title may still be the controls.
+                return SCContentFilter(display: display, excludingApplications: applications,
+                                       exceptingWindows: retainedWindows)
             }
-            if !ownWindows.isEmpty { return SCContentFilter(display: display, excludingWindows: ownWindows) }
+            if !excludesParent {
+                let ownWindows = updated.windows.filter {
+                    $0.owningApplication?.processID == getpid() || $0.windowID == CGWindowID(border.panel.windowNumber)
+                }
+                if ownWindows.contains(where: { $0.windowID == CGWindowID(border.panel.windowNumber) }) {
+                    return SCContentFilter(display: display, excludingWindows: ownWindows)
+                }
+            }
             try await Task.sleep(nanoseconds: 100_000_000)
         } while Date() < deadline
-        throw CaptureFailure("系统尚未登记录制指示框，未开始采集画面。请重新选择录制范围。")
+        throw CaptureFailure("系统尚未登记录制控制窗口，未开始采集画面。请重新选择录制范围。")
     }
 
     @MainActor private func prepareMicrophone(_ deviceID: String?) async throws {
@@ -801,7 +884,10 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         if let last = lastAudioPTS, CMTimeCompare(hostPTS, last) <= 0 { return }
         do {
             let retimed = try retimeAudioSample(sampleBuffer, to: hostPTS)
-            guard audio.append(retimed) else {
+            let frame: CMSampleBuffer
+            if muted { frame = try silentAudioSample(retimed) }
+            else { frame = retimed }
+            guard audio.append(frame) else {
                 reportFailure(writer?.error ?? CaptureFailure("无法写入麦克风音轨。")); return
             }
         } catch {
@@ -1039,6 +1125,10 @@ func verifyAudioTiming() throws {
         flags: 0, blockBufferOut: &block) == kCMBlockBufferNoErr else {
         throw CaptureFailure("音轨时间验证无法创建音频数据。")
     }
+    guard let block = block, CMBlockBufferFillDataBytes(with: 0x33, blockBuffer: block,
+        offsetIntoDestination: 0, dataLength: 4096) == kCMBlockBufferNoErr else {
+        throw CaptureFailure("音轨时间验证无法写入测试数据。")
+    }
     var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 48000),
         presentationTimeStamp: CMTime(value: 10, timescale: 1), decodeTimeStamp: .invalid)
     var sampleSize = 4
@@ -1053,6 +1143,22 @@ func verifyAudioTiming() throws {
           CMTimeCompare(CMSampleBufferGetPresentationTimeStamp(retimed), destination) == 0,
           CMSampleBufferGetNumSamples(retimed) == 1024 else {
         throw CaptureFailure("音轨同步改变了音频帧的时长。")
+    }
+    let silent = try silentAudioSample(retimed)
+    guard let silentBlock = CMSampleBufferGetDataBuffer(silent),
+          CMTimeCompare(CMSampleBufferGetDuration(silent), CMSampleBufferGetDuration(retimed)) == 0,
+          CMTimeCompare(CMSampleBufferGetPresentationTimeStamp(silent), destination) == 0,
+          CMSampleBufferGetNumSamples(silent) == 1024 else {
+        throw CaptureFailure("静音改变了音频样本时间。")
+    }
+    var originalBytes = [UInt8](repeating: 0, count: 4096)
+    var silentBytes = [UInt8](repeating: 0xff, count: 4096)
+    guard CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: 4096,
+        destination: &originalBytes) == kCMBlockBufferNoErr,
+        CMBlockBufferCopyDataBytes(silentBlock, atOffset: 0, dataLength: 4096,
+        destination: &silentBytes) == kCMBlockBufferNoErr,
+        originalBytes.allSatisfy({ $0 == 0x33 }), silentBytes.allSatisfy({ $0 == 0 }) else {
+        throw CaptureFailure("静音样本未清零，或修改了原始麦克风数据。")
     }
 }
 
@@ -1199,7 +1305,12 @@ public func openMediaCaptureMain() -> Int32 {
             }
             DispatchQueue.global(qos: .utility).async {
                 while let line = readLine() {
-                    if line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "q" { break }
+                    let command = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if command == "q" { break }
+                    if !screenshotMode {
+                        if command == "mute" { recorder.setMuted(true) }
+                        if command == "unmute" { recorder.setMuted(false) }
+                    }
                 }
                 DispatchQueue.main.async {
                     if screenshotMode { screenshot.cancel() } else { recorder.stop() }

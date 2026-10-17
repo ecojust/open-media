@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import * as vue from 'vue'
 import { captureErrorMessage } from '../src/core/capture.ts'
+import { recordingClock } from '../src/core/capture-controls.ts'
 import { validateGifSegments, gifFrameCount } from '../src/core/gif.ts'
 
 function deferred() {
@@ -16,13 +17,16 @@ const captureDevices = [{ id: 'screen:1', name: '屏幕一', kind: 'screen', wid
 
 function workspace(name, overrides = {}) {
   const script = readFileSync(new URL(`../src/components/${name}.vue`, import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
-  const exposed = name === 'RecorderWorkspace' ? 'phase, elapsed, error, countdown, begin, stop, pauseOrResume, selection, pickerPreferences, actualSource, browserPicker, chooseBrowserSource' : 'exporting, error, jobId, exportGif, cancel'
+  const exposed = name === 'RecorderWorkspace' ? 'phase, elapsed, error, countdown, begin, stop, pauseOrResume, toggleMuted, muted, audioAvailable, controlBusy, selection, pickerPreferences, actualSource, browserPicker, chooseBrowserSource' : 'exporting, error, jobId, exportGif, cancel'
   const compiled = ts.transpileModule(`${script.replace(/^import .*$/gm, '')}\nreturn { ${exposed} }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
-  const mounted = [], unmounted = [], timers = new Map(), events = []
+  const mounted = [], unmounted = [], deactivated = [], timers = new Map(), events = []
+  let actionListener, unlistened = 0
   let nextTimer = 1
   const injected = {
     ref: vue.ref, shallowRef: vue.shallowRef, computed: vue.computed, nextTick: vue.nextTick, watch: vue.watch,
-    onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback),
+    onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback), onDeactivated: callback => deactivated.push(callback),
+    onCaptureControlsAction: async callback => { actionListener = callback; return () => { unlistened++; actionListener = undefined } },
+    setCaptureMuted: async muted => ({ state: 'recording', elapsed: 1, segments: 0, audioAvailable: true, muted }), recordingClock,
     defineProps: () => ({ assets: [asset], native: true }), withDefaults: (props, defaults) => ({ ...defaults, ...props }), defineEmits: () => (...args) => events.push(args), defineExpose: () => {},
     window: { addEventListener() {}, removeEventListener() {} },
     setInterval: callback => { const id = nextTimer++; timers.set(id, callback); return id }, clearInterval: id => timers.delete(id),
@@ -38,7 +42,7 @@ function workspace(name, overrides = {}) {
   const scope = vue.effectScope()
   const state = scope.run(() => new Function(...Object.keys(injected), compiled)(...Object.values(injected)))
   mounted.forEach(callback => callback())
-  return { state, events, timers, tick: () => [...timers.values()].forEach(callback => callback()), dispose: () => { unmounted.forEach(callback => callback()); scope.stop() } }
+  return { state, events, timers, action: value => actionListener?.(value), get unlistened() { return unlistened }, deactivate: () => deactivated.forEach(callback => callback()), tick: () => [...timers.values()].forEach(callback => callback()), dispose: () => { unmounted.forEach(callback => callback()); scope.stop() } }
 }
 async function settle() { await Promise.resolve(); await Promise.resolve(); await vue.nextTick() }
 
@@ -233,6 +237,7 @@ test('cancelling source selection waits for native acknowledgement and never sta
   try {
     harness.state.countdown.value = 0
     const start = harness.state.begin()
+    await settle()
     await harness.state.stop()
     assert.deepEqual(cancelled, [pickerId])
     assert.equal(harness.state.phase.value, 'selecting', '恢复主窗口前必须保留活动保护')
@@ -274,6 +279,7 @@ test('unmount cancels an open native picker and rejects its late selection', asy
   })
   harness.state.countdown.value = 0
   const start = harness.state.begin()
+  await settle()
   harness.dispose()
   assert.equal(cancelled.length, 1)
   picker.resolve({ sourceId: 'screen:1' })
@@ -364,4 +370,132 @@ test('cancelling a pending GIF save dialog also handles choosing no destination'
     assert.equal(harness.state.exporting.value, false)
     assert.equal(harness.timers.size, 0)
   } finally { harness.dispose() }
+})
+
+
+test('floating recording actions pause, resume and stop through the same recorder and import once', async () => {
+  let status = { state: 'recording', elapsed: 3, segments: 0, muted: false, audioAvailable: true }
+  const calls = []
+  const stopped = deferred()
+  const harness = workspace('RecorderWorkspace', {
+    startCapture: async () => ({ ...status }), getCaptureStatus: async () => ({ ...status }),
+    pauseCapture: async () => { calls.push('pause'); status = { ...status, state: 'paused', segments: 1 }; return { ...status } },
+    resumeCapture: async () => { calls.push('resume'); status = { ...status, state: 'recording' }; return { ...status } },
+    stopCapture: async () => { calls.push('stop'); return stopped.promise },
+  })
+  try {
+    await settle()
+    harness.state.countdown.value = 0
+    await harness.state.begin()
+    harness.action('pause'); await settle()
+    assert.equal(harness.state.phase.value, 'paused')
+    harness.action('pause'); await settle()
+    assert.deepEqual(calls, ['pause'], '重复 pause 不允许反向恢复录制')
+    harness.action('resume'); await settle()
+    assert.equal(harness.state.phase.value, 'recording')
+    harness.action('resume'); await settle()
+    assert.deepEqual(calls, ['pause', 'resume'], '重复 resume 不允许反向暂停')
+    harness.action('stop')
+    harness.action('stop')
+    await harness.state.stop()
+    harness.action('pause')
+    assert.equal(harness.state.phase.value, 'stopping')
+    assert.equal(harness.state.controlBusy.value, true)
+    assert.deepEqual(calls, ['pause', 'resume', 'stop'])
+    stopped.resolve(asset); await settle(); await settle()
+    assert.equal(harness.state.phase.value, 'idle')
+    assert.equal(harness.state.controlBusy.value, false)
+    assert.deepEqual(harness.events.filter(event => event[0] === 'asset'), [['asset', asset]])
+    harness.action('stop'); await settle()
+    assert.equal(calls.filter(call => call === 'stop').length, 1)
+  } finally { harness.dispose() }
+  assert.equal(harness.unlistened, 1)
+  harness.action('stop')
+  assert.equal(calls.filter(call => call === 'stop').length, 1, '卸载后浮栏事件不再触发录制命令')
+})
+
+test('native microphone mute survives pause and resume without changing the recording phase', async () => {
+  let status = { state: 'recording', elapsed: 4.5, segments: 0, muted: false, audioAvailable: true }
+  const muted = []
+  const harness = workspace('RecorderWorkspace', {
+    startCapture: async () => ({ ...status }), getCaptureStatus: async () => ({ ...status }),
+    pauseCapture: async () => { status = { ...status, state: 'paused', segments: 1 }; return { ...status } },
+    resumeCapture: async () => { status = { ...status, state: 'recording' }; return { ...status } },
+    setCaptureMuted: async value => { muted.push(value); status = { ...status, muted: value }; return { ...status } },
+  })
+  try {
+    await settle(); harness.state.countdown.value = 0; await harness.state.begin()
+    harness.action('toggle-mute'); await settle()
+    assert.equal(harness.state.muted.value, true)
+    assert.equal(harness.state.phase.value, 'recording')
+    harness.action('pause'); await settle()
+    assert.equal(harness.state.muted.value, true)
+    assert.equal(harness.state.phase.value, 'paused')
+    harness.action('resume'); await settle()
+    assert.equal(harness.state.muted.value, true)
+    assert.equal(harness.state.phase.value, 'recording')
+    harness.action('pause'); await settle()
+    harness.action('toggle-mute'); await settle()
+    assert.equal(harness.state.muted.value, false)
+    assert.equal(harness.state.phase.value, 'paused', '暂停时取消静音不能偷偷恢复录制')
+    assert.equal(harness.state.elapsed.value, 4.5)
+    assert.deepEqual(muted, [true, false])
+    status.audioAvailable = false
+    harness.tick(); await settle()
+    harness.action('toggle-mute'); await settle()
+    assert.deepEqual(muted, [true, false], '未开启音频时忽略静音操作')
+  } finally { harness.dispose() }
+})
+
+test('pending native controls reject repeated actions and stale status updates', async () => {
+  const pending = deferred(), stale = deferred()
+  let pauses = 0, muted = 0, stops = 0
+  const harness = workspace('RecorderWorkspace', {
+    startCapture: async () => ({ state: 'recording', elapsed: 2, segments: 0, muted: false, audioAvailable: true }),
+    getCaptureStatus: () => stale.promise,
+    pauseCapture: async () => { pauses++; return pending.promise },
+    setCaptureMuted: async () => { muted++; return {} },
+    stopCapture: async () => { stops++; return null },
+  })
+  try {
+    await settle(); harness.state.countdown.value = 0; await harness.state.begin()
+    harness.tick()
+    harness.action('pause')
+    harness.action('pause'); harness.action('toggle-mute'); harness.action('stop')
+    await harness.state.pauseOrResume()
+    assert.equal(harness.state.controlBusy.value, true)
+    assert.equal(pauses, 1); assert.equal(muted, 0); assert.equal(stops, 0)
+    stale.resolve({ state: 'recording', elapsed: 99, segments: 0, muted: false, audioAvailable: false })
+    await settle()
+    assert.equal(harness.state.elapsed.value, 2)
+    assert.equal(harness.state.audioAvailable.value, true)
+    pending.resolve({ state: 'paused', elapsed: 2.8, segments: 1, muted: true, audioAvailable: true })
+    await settle()
+    assert.equal(harness.state.phase.value, 'paused')
+    assert.equal(harness.state.elapsed.value, 2.8)
+    assert.equal(harness.state.muted.value, true)
+    assert.equal(harness.state.controlBusy.value, false)
+  } finally { harness.dispose() }
+})
+
+
+test('cancelling before the floating action listener is ready never opens a picker', async () => {
+  const listening = deferred()
+  let pickers = 0, starts = 0, unlistened = 0
+  const harness = workspace('RecorderWorkspace', {
+    onCaptureControlsAction: () => listening.promise,
+    pickCaptureSource: async () => { pickers++; return { sourceId: 'screen:1' } },
+    startCapture: async () => { starts++; return { state: 'recording', elapsed: 0, segments: 0 } },
+  })
+  harness.state.countdown.value = 0
+  const starting = harness.state.begin()
+  await harness.state.stop()
+  assert.equal(harness.state.phase.value, 'selecting')
+  harness.dispose()
+  listening.resolve(() => { unlistened++ })
+  await starting
+  assert.equal(pickers, 0)
+  assert.equal(starts, 0)
+  assert.equal(unlistened, 1)
+  assert.equal(harness.state.phase.value, 'idle')
 })

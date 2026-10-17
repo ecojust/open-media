@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Project } from '../core/types'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity, type SpeechSource } from '../core/speech'
 import { compactVoiceCatalog } from '../core/voice-catalog'
+import { bundledVoicePreviewUrl, VOICE_PREVIEW_TEXT } from '../core/voice-previews'
 import { acceptSpeechJobs, beginSpeechJob, cancelSpeechJob, discardSpeechJob, getSpeechJob, getSpeechStatus, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
@@ -23,6 +24,7 @@ const selectedPlan = computed(() => planSpeech(props.project, props.selectedClip
 const selectedLinked = computed(() => props.project.tracks.some(track => track.clips.some(clip => clip.speech?.textClipId === props.selectedClipId)))
 let statusPromise: Promise<void> | undefined
 let disposed = false, previewJobId = ''
+let previewRevision = 0, previewIsBundled = false
 interface Operation { project: Project; controller: AbortController; jobs: Set<string>; current: string; applying: boolean; reason: string }
 let operation: Operation | undefined
 
@@ -61,6 +63,9 @@ async function discardJobs(ids: Iterable<string>): Promise<void> {
   await Promise.allSettled([...ids].map(id => discardSpeechJob(id)))
 }
 function clearPreview(): void {
+  previewRevision++
+  previewIsBundled = false
+  previewLoading.value = false
   player.value?.pause()
   if (player.value) { player.value.removeAttribute('src'); player.value.load() }
   if (previewUrl.value) notice.value = ''
@@ -68,20 +73,47 @@ function clearPreview(): void {
   previewVoiceId.value = ''; previewPlaying.value = false
   if (previewJobId) { const id = previewJobId; previewJobId = ''; void discardJobs([id]) }
 }
+function previewFailed(): void {
+  if (!previewUrl.value) return
+  const message = previewIsBundled ? '内置试听音频无法播放，请再次点击试听重试。' : '试听音频无法播放，请再次点击试听重试。'
+  clearPreview()
+  error.value = message; emit('status', message)
+}
+async function playPreview(): Promise<void> {
+  const audio = player.value, revision = previewRevision
+  if (!audio || disposed || !props.active) return
+  previewLoading.value = true
+  audio.playbackRate = previewIsBundled ? speed.value : 1
+  audio.preservesPitch = true
+  try {
+    await audio.play()
+    if (revision !== previewRevision || disposed) return
+    previewLoading.value = false
+    notice.value = previewIsBundled ? '内置试听已就绪，未添加到时间线。' : '试听已就绪，未添加到时间线。'
+  } catch { if (revision === previewRevision && !disposed) previewFailed() }
+}
 async function previewVoice(id: string): Promise<void> {
-  if (busy.value) return
+  if (busy.value || disposed || !props.active) return
   const voice = status.value.voices.find(item => item.id === id)
   if (!voice) return
   if (previewVoiceId.value === id && previewUrl.value && player.value) {
-    if (previewPlaying.value) player.value.pause()
-    else { if (player.value.ended) player.value.currentTime = 0; await player.value.play().catch(() => {}) }
+    if (!player.value.paused) { previewRevision++; player.value.pause(); previewLoading.value = false }
+    else { if (player.value.ended) player.value.currentTime = 0; await playPreview() }
+    return
+  }
+  const bundledUrl = bundledVoicePreviewUrl(id)
+  if (bundledUrl) {
+    clearPreview()
+    const revision = previewRevision
+    error.value = ''; notice.value = ''
+    previewIsBundled = true; previewVoiceId.value = id; previewUrl.value = bundledUrl; previewLoading.value = true
+    await nextTick()
+    if (revision === previewRevision) await playPreview()
     return
   }
   await run(undefined, {
     voiceId: id,
-    text: voice.language.toLowerCase().startsWith('en')
-      ? 'Hello, this is a voice preview. Let your story come to life with a clear and natural voice.'
-      : '你好，这是一段语音试听。让文字拥有清晰自然的声音。',
+    text: VOICE_PREVIEW_TEXT[voice.language.toLowerCase().startsWith('en') ? 'en' : 'zh'],
   })
 }
 async function synthesize(active: Operation, text: string, voice: string, rate: number): Promise<NonNullable<SpeechJob['asset']>> {
@@ -130,10 +162,9 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
       checkOperation(active)
       previewJobId = [...active.jobs][0] || ''; active.jobs.clear()
       previewUrl.value = asset.url
-      notice.value = '试听已就绪，未添加到时间线。'
       await nextTick()
       checkOperation(active)
-      if (!disposed && !active.controller.signal.aborted) await player.value?.play().catch(() => {})
+      if (!disposed && !active.controller.signal.aborted) await playPreview()
     } else {
       const results = []
       for (const source of sources) {
@@ -187,7 +218,11 @@ watch(() => props.active, active => {
   if (!active) { clearPreview(); if (operation) void cancel('配音面板已关闭，语音生成已取消。') }
 }, { immediate: true })
 watch(() => props.project, value => { if (operation && !operation.applying && value !== operation.project) void cancel('项目已经变化，本次语音未写入时间线，请重新生成。') }, { flush: 'sync' })
-watch([voiceId, speed], clearPreview)
+watch(voiceId, clearPreview)
+watch(speed, value => {
+  if (previewIsBundled && player.value) player.value.playbackRate = value
+  else clearPreview()
+})
 onBeforeUnmount(() => { disposed = true; clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
 defineExpose({ generate, align, cancel })
 </script>
@@ -210,7 +245,7 @@ defineExpose({ generate, align, cancel })
         <button :disabled="busy || !status.ready || !selectedPlan.sources.length" :aria-busy="busy && operationKind === 'selected'" data-testid="speech-generate-selected" @click="generate([selectedClipId])"><template v-if="busy && operationKind === 'selected'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="text" :size="14" />选中文字转语音</template></button>
         <div v-if="busy" class="speech-cancel-row"><span v-if="operationKind === 'preview'" role="status"><span class="speech-spinner" />{{ cancelling ? '正在取消…' : '正在准备试听…' }}</span><button :disabled="cancelling || finalizing" @click="cancel()"><Icon name="close" :size="13" />取消生成</button></div>
       </div>
-      <audio v-if="previewUrl" ref="player" :src="previewUrl" hidden preload="metadata" aria-label="生成的试听音频" @play="previewPlaying = true" @pause="previewPlaying = false" @ended="previewPlaying = false" />
+      <audio v-if="previewUrl" ref="player" :src="previewUrl" hidden preload="auto" aria-label="声音试听音频" @playing="previewPlaying = true; previewLoading = false" @waiting="previewLoading = !player?.paused" @pause="previewPlaying = false; previewLoading = false" @ended="previewPlaying = false; previewLoading = false" @error="previewFailed" />
     </template>
     <div class="speech-align"><button :disabled="busy || !selectedLinked" data-testid="speech-align-selected" @click="align([selectedClipId])"><Icon name="clock" :size="14" />选中文字对齐已有语音</button><button :disabled="busy || !project.tracks.some(track => track.clips.some(clip => clip.speech?.textClipId))" @click="align()">全部文字对齐已有语音</button></div>
     <details v-if="allPlan.skipped.length" class="speech-skipped"><summary>{{ allPlan.skipped.length }} 段文字不可生成，将跳过</summary><ul><li v-for="item in allPlan.skipped" :key="item.clipId">{{ item.name }}：{{ item.reason }}</li></ul></details>

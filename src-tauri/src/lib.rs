@@ -14,6 +14,8 @@ pub mod speech;
 pub mod screenshot;
 #[cfg(feature = "desktop")]
 pub mod screenshot_shortcut;
+#[cfg(any(feature = "desktop", test))]
+pub mod recording_controls;
 #[cfg(test)]
 mod tests;
 
@@ -28,6 +30,7 @@ mod desktop {
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
         preview::{self, PreviewResult},
         project_files::{self, ProjectFile, ProjectFiles, ProjectTarget},
+        recording_controls::{ControlsAction, ControlsManager, ControlsSnapshot},
         speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
     };
     use serde_json::Value;
@@ -357,30 +360,87 @@ mod desktop {
         }).await
     }
     #[tauri::command]
-    pub async fn get_capture_status(state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
+    pub async fn get_capture_status(app: tauri::AppHandle, state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
         let state = state.inner().clone();
-        blocking(move || Ok(state.capture.lock().unwrap().status())).await
+        blocking(move || {
+            let mut capture = state.capture.lock().unwrap();
+            let status = capture.status();
+            sync_recording_controls(&app, &status, false, None);
+            Ok(status)
+        }).await
+    }
+    fn sync_recording_controls(app: &tauri::AppHandle, status: &CaptureStatus, busy: bool, error: Option<String>) {
+        let controls = app.state::<ControlsManager>();
+        if status.state == "idle" {
+            // The protected window is published before the capture child starts.
+            // A concurrent status read must not remove it during that preparation.
+            if controls.snapshot().is_ok_and(|snapshot| snapshot.phase != "starting") {
+                controls.close(app);
+            }
+        } else {
+            let _ = controls.sync(app, ControlsSnapshot {
+                phase: status.state.clone(), elapsed: status.elapsed,
+                muted: status.muted, audio_available: status.audio_available, busy,
+                error: error.or_else(|| status.error.clone()),
+            });
+        }
+    }
+    async fn change_capture(
+        app: tauri::AppHandle,
+        state: MediaState,
+        change: impl FnOnce(&mut CaptureManager) -> engine::Result<CaptureStatus> + Send + 'static,
+    ) -> engine::Result<CaptureStatus> {
+        blocking(move || {
+            let mut capture = state.capture.lock().unwrap();
+            sync_recording_controls(&app, &capture.status(), true, None);
+            let result = change(&mut capture);
+            let status = capture.status();
+            if let Some((source, region)) = capture.controls_target() {
+                let _ = app.state::<ControlsManager>().set_target(&app, source, region);
+            }
+            sync_recording_controls(&app, &status, false, result.as_ref().err().cloned());
+            result
+        }).await
+    }
+    #[tauri::command]
+    pub fn capture_controls_ready(app: tauri::AppHandle, window: tauri::WebviewWindow) -> engine::Result<ControlsSnapshot> {
+        app.state::<ControlsManager>().ready(&app, window.label())
+    }
+    #[tauri::command]
+    pub fn capture_controls_action(app: tauri::AppHandle, window: tauri::WebviewWindow, action: ControlsAction) -> engine::Result<()> {
+        app.state::<ControlsManager>().action(&app, window.label(), action)
     }
     #[tauri::command]
     pub async fn start_capture(
         options: CaptureOptions,
+        app: tauri::AppHandle,
+        window: tauri::WebviewWindow,
         state: State<'_, MediaState>,
     ) -> engine::Result<CaptureStatus> {
+        project_files::require_main_window(window.label())?;
         let state = state.inner().clone();
         let request_id = options.request_id.clone().unwrap_or_else(engine::new_id);
         let cancelled = state.capture_starts.token(&request_id)?;
-        blocking(move || {
-            let result = (|| {
-                state.capture.lock().unwrap().start_cancellable(
-                    &state.runtime()?,
-                    options,
-                    &cancelled,
-                )
-            })();
+        let controls = app.state::<ControlsManager>().inner().clone();
+        let preparation = controls.prepare(&app, ControlsSnapshot::default()).await;
+        if let Err(error) = preparation {
             state.capture_starts.complete(&request_id);
-            result
-        })
-        .await
+            return Err(error);
+        }
+        let worker_state = state.clone();
+        let worker_app = app.clone();
+        let result = blocking(move || {
+            let mut capture = worker_state.capture.lock().unwrap();
+            let status = capture.start_cancellable(&worker_state.runtime()?, options, &cancelled)?;
+            if let Some((source, region)) = capture.controls_target() {
+                let _ = worker_app.state::<ControlsManager>().set_target(&worker_app, source, region);
+            }
+            sync_recording_controls(&worker_app, &status, false, None);
+            Ok(status)
+        }).await;
+        state.capture_starts.complete(&request_id);
+        if result.is_err() { controls.close(&app); }
+        result
     }
     #[tauri::command]
     pub fn cancel_capture_start(
@@ -390,19 +450,33 @@ mod desktop {
         state.capture_starts.cancel(&request_id)
     }
     #[tauri::command]
-    pub async fn pause_capture(state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
-        let state = state.inner().clone();
-        blocking(move || state.capture.lock().unwrap().pause()).await
+    pub async fn pause_capture(app: tauri::AppHandle, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
+        project_files::require_main_window(window.label())?;
+        change_capture(app, state.inner().clone(), |capture| capture.pause()).await
     }
     #[tauri::command]
-    pub async fn resume_capture(state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
-        let state = state.inner().clone();
-        blocking(move || state.capture.lock().unwrap().resume()).await
+    pub async fn resume_capture(app: tauri::AppHandle, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
+        project_files::require_main_window(window.label())?;
+        change_capture(app, state.inner().clone(), |capture| capture.resume()).await
     }
     #[tauri::command]
-    pub async fn stop_capture(state: State<'_, MediaState>) -> engine::Result<Option<Asset>> {
+    pub async fn set_capture_muted(muted: bool, app: tauri::AppHandle, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<CaptureStatus> {
+        project_files::require_main_window(window.label())?;
+        change_capture(app, state.inner().clone(), move |capture| capture.set_muted(muted)).await
+    }
+    #[tauri::command]
+    pub async fn stop_capture(app: tauri::AppHandle, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Option<Asset>> {
+        project_files::require_main_window(window.label())?;
         let state = state.inner().clone();
-        blocking(move || state.capture.lock().unwrap().stop(&state.store)).await
+        blocking(move || {
+            let mut capture = state.capture.lock().unwrap();
+            let mut stopping = capture.status();
+            if stopping.state != "idle" { stopping.state = "stopping".into(); }
+            sync_recording_controls(&app, &stopping, true, None);
+            let result = capture.stop(&state.store);
+            sync_recording_controls(&app, &capture.status(), false, result.as_ref().err().cloned());
+            result
+        }).await
     }
     #[tauri::command]
     pub async fn save_bytes(
@@ -506,6 +580,7 @@ mod desktop {
             .manage(Closing::default())
             .manage(CapturePicker::default())
             .manage(ProjectFiles::default())
+            .manage(ControlsManager::default())
             .setup(|app| {
                 app.manage(crate::screenshot_shortcut::ShortcutManager::new(app.handle().clone()));
                 let data = app.path().app_data_dir()?;
@@ -529,6 +604,10 @@ mod desktop {
             })
             .on_window_event(|window, event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if window.label() == crate::recording_controls::WINDOW_LABEL {
+                        api.prevent_close();
+                        return;
+                    }
                     window
                         .state::<CapturePicker>()
                         .cancel_window(window.app_handle(), window.label());
@@ -572,10 +651,13 @@ mod desktop {
                 capture_picker_ready,
                 complete_capture_picker,
                 get_capture_status,
+                capture_controls_ready,
+                capture_controls_action,
                 start_capture,
                 cancel_capture_start,
                 pause_capture,
                 resume_capture,
+                set_capture_muted,
                 stop_capture,
                 save_bytes,
                 save_project_file,
@@ -597,6 +679,7 @@ mod desktop {
             if matches!(event, tauri::RunEvent::Exit) {
                 let state = handle.state::<MediaState>();
                 handle.state::<crate::screenshot_shortcut::ShortcutManager>().shutdown();
+                handle.state::<ControlsManager>().close(handle);
                 state.capture_starts.cancel_all();
                 state.speech.shutdown();
                 state.jobs.shutdown();

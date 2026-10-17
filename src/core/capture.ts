@@ -91,6 +91,9 @@ export interface BrowserCapture {
   readonly source: BrowserCaptureSource
   readonly phase: CapturePhase
   readonly elapsed: number
+  readonly muted: boolean
+  readonly audioAvailable: boolean
+  setMuted(muted: boolean): void
   pause(): void
   resume(): void
   stop(): Promise<CapturedRecording>
@@ -334,6 +337,8 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find(value => MediaRecorder.isTypeSupported(value))
     recorder = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 8_000_000 })
     let phase: CapturePhase = 'recording'
+    let muted = false
+    const outputAudioTracks = stream.getAudioTracks()
     let startedAt = performance.now()
     let accumulated = 0
     let bytes = 0
@@ -398,6 +403,15 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       get source() { updateSource(); return { ...source, ...(source.region ? { region: { ...source.region } } : {}) } },
       get phase() { return phase },
       get elapsed() { return elapsed() },
+      get muted() { return muted },
+      get audioAvailable() { return phase !== 'stopped' && outputAudioTracks.some(track => track.readyState === 'live') },
+      setMuted(value) {
+        if (phase === 'stopped' || !outputAudioTracks.some(track => track.readyState === 'live')) return
+        // Disable the mixed output as well as every authorized source. Keep the
+        // tracks alive so silent samples preserve timing and can be resumed.
+        for (const track of new Set([...audioTracks, ...outputAudioTracks])) track.enabled = !value
+        muted = value
+      },
       pause() {
         if (phase !== 'recording') return
         recorder.pause()
