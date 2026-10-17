@@ -28,14 +28,40 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import os, re, subprocess
+          import os, re, urllib.error, urllib.parse, urllib.request
           from pathlib import Path
           job = os.environ['TARGET_JOB_ID']
           if not re.fullmatch(r'[1-9][0-9]{0,19}', job):
               raise ValueError('Expected a numeric job identifier')
           repository = os.environ['GITHUB_REPOSITORY']
-          result = subprocess.run(['gh', 'api', f'repos/{repository}/actions/jobs/{job}/logs'], check=True, capture_output=True)
-          text = result.stdout.decode('utf-8', errors='replace')
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          def redact(value):
+              value = value.replace(os.environ['GH_TOKEN'], '[redacted]')
+              return re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', value)
+          try:
+              request = urllib.request.Request(
+                  f'https://api.github.com/repos/{repository}/actions/jobs/{job}/logs',
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'})
+              try:
+                  with urllib.request.build_opener(NoRedirect).open(request, timeout=60) as response:
+                      data = response.read()
+              except urllib.error.HTTPError as response:
+                  if response.code not in (301, 302, 303, 307, 308):
+                      raise RuntimeError(f'GitHub job logs API HTTP {response.code}: ' + response.read().decode('utf-8', errors='replace'))
+                  location = response.headers.get('Location', '')
+                  if urllib.parse.urlparse(location).scheme != 'https':
+                      raise ValueError('Expected an HTTPS log download location')
+                  # New request deliberately has no GitHub Authorization header.
+                  with urllib.request.urlopen(location, timeout=120) as download:
+                      data = download.read()
+          except Exception as error:
+              detail = redact(str(error)).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error title=Log retrieval failure::{detail}')
+              raise SystemExit(1)
+          text = data.decode('utf-8', errors='replace')
           output = Path('runtime-diagnostics')
           output.mkdir()
           (output / f'job-{job}.log').write_text(text, encoding='utf-8')
@@ -44,7 +70,7 @@ jobs:
           for i, line in enumerate(lines):
               if any(word in line for word in ['Traceback (most recent call last)', 'UnicodeEncodeError', 'RuntimeError:', 'ValueError:', 'Error:', 'error:', 'FAILED', 'Process completed with exit code']):
                   indices.update(range(max(0, i - 8), min(len(lines), i + 22)))
-          selected = '\n'.join(lines[i] for i in sorted(indices))[-45000:] if indices else text[-24000:]
+          selected = redact('\n'.join(lines[i] for i in sorted(indices))[-45000:] if indices else text[-24000:])
           (output / 'error-extract.log').write_text(selected, encoding='utf-8')
           for start in range(0, len(selected), 12000):
               part = selected[start:start + 12000]
