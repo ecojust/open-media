@@ -1,0 +1,1130 @@
+{
+  "schema": 1,
+  "id": "f5-v1-base-fp32",
+  "name": "F5-TTS v1 Base FP32",
+  "model_family": "F5-TTS",
+  "voice": "基于本地生成的中英女声参考（纯合成参考，无真人录音）",
+  "model_download_bytes": 1402816013,
+  "weights_bytes": 1402801752,
+  "download_scope": "完整推理所需声学权重、词表、24kHz声码器权重与配置；分别从固定版本原始文件下载。没有压缩包；不含运行环境、许可说明及参考WAV。",
+  "runtime_size_notes": "复用CPU版PyTorch与音频依赖，环境体积未计入模型下载量；没有安装或使用CUDA。依赖版本见requirements-resolved.txt。",
+  "model_files": [
+    {
+      "path": "models/f5/model_1250000.safetensors",
+      "bytes": 1348435761,
+      "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+    },
+    {
+      "path": "models/f5/vocab.txt",
+      "bytes": 13800,
+      "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+    },
+    {
+      "path": "models/vocos/pytorch_model.bin",
+      "bytes": 54365991,
+      "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+    },
+    {
+      "path": "models/vocos/config.yaml",
+      "bytes": 461,
+      "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc"
+    }
+  ],
+  "peak_rss_bytes": 3237777408,
+  "memory_notes": "Maximum observed process ru_maxrss among the successfully saved original sample records and the three saved recovery chunks. This is not the sum of concurrent runners and does not capture the unsaved failed sample 10 process peak.",
+  "runtime": {
+    "python": "3.12.15",
+    "torch": "2.9.1+cpu",
+    "torchaudio": "2.9.1+cpu",
+    "vocos": "0.1.0",
+    "source_commit": "2f866649b779881af8bd644e76b9a6d95053da29",
+    "device": "cpu",
+    "dtype": "float32",
+    "inference": "Unmodified upstream DiT, CFM, text tokenizer and mel processing; direct inference skips only Trainer/UI/ASR imports."
+  },
+  "hardware": {
+    "provider": "GitHub Actions",
+    "shards": [
+      {
+        "name": "f5-chinese-tts-39048766863-1",
+        "run_id": "39048766863",
+        "commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+        "sample_ids": [
+          "01",
+          "02"
+        ],
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "AMD EPYC 7763 64-Core Processor",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9163540 kB\nMemAvailable:   15317068 kB\nBuffers:          127636 kB\nCached:          6154960 kB\nSwapCached:            0 kB\nActive:           750420 kB\nInactive:        5796144 kB\nActive(anon):     318828 kB\nInactive(anon):        0 kB\nActive(file):     431592 kB\nInactive(file):  5796144 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1393656 kB\nWriteback:             0 kB\nAnonPages:        304308 kB\nMapped:           327988 kB\nShmem:             46108 kB\nKReclaimable:     271744 kB\nSlab:             370848 kB\nSReclaimable:     271744 kB\nSUnreclaim:        99104 kB\nKernelStack:        4208 kB\nPageTables:         6268 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2067328 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39504 kB\nVmallocChunk:          0 kB\nPercpu:             2240 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:    143360 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      130176 kB\nDirectMap2M:     6156288 kB\nDirectMap1G:    12582912 kB",
+          "githubRunId": "39048766863",
+          "githubCommit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237429248
+      },
+      {
+        "name": "f5-chinese-tts-39048766863-3",
+        "run_id": "39048766863",
+        "commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+        "sample_ids": [
+          "03",
+          "04"
+        ],
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "INTEL(R) XEON(R) PLATINUM 8573C",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16372440 kB\nMemFree:         9109516 kB\nMemAvailable:   15315932 kB\nBuffers:          127656 kB\nCached:          6208524 kB\nSwapCached:            0 kB\nActive:           822964 kB\nInactive:        5807088 kB\nActive(anon):     348652 kB\nInactive(anon):        0 kB\nActive(file):     474312 kB\nInactive(file):  5807088 kB\nUnevictable:       46728 kB\nMlocked:           43656 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1264172 kB\nWriteback:             0 kB\nAnonPages:        337236 kB\nMapped:           329004 kB\nShmem:             46032 kB\nKReclaimable:     270976 kB\nSlab:             368508 kB\nSReclaimable:     270976 kB\nSUnreclaim:        97532 kB\nKernelStack:        4092 kB\nPageTables:         6508 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11331944 kB\nCommitted_AS:    2122472 kB\nVmallocTotal:   13743895347199 kB\nVmallocUsed:       37828 kB\nVmallocChunk:          0 kB\nPercpu:             2240 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:    126976 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      115840 kB\nDirectMap2M:     4073472 kB\nDirectMap1G:    14680064 kB",
+          "githubRunId": "39048766863",
+          "githubCommit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237777408
+      },
+      {
+        "name": "f5-chinese-tts-39048766863-5",
+        "run_id": "39048766863",
+        "commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+        "sample_ids": [
+          "05",
+          "06"
+        ],
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "AMD EPYC 7763 64-Core Processor",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9156436 kB\nMemAvailable:   15314732 kB\nBuffers:          127720 kB\nCached:          6159268 kB\nSwapCached:            0 kB\nActive:           753412 kB\nInactive:        5801220 kB\nActive(anon):     322388 kB\nInactive(anon):        0 kB\nActive(file):     431024 kB\nInactive(file):  5801220 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1475600 kB\nWriteback:             0 kB\nAnonPages:        304536 kB\nMapped:           327788 kB\nShmem:             46000 kB\nKReclaimable:     272004 kB\nSlab:             371336 kB\nSReclaimable:     272004 kB\nSUnreclaim:        99332 kB\nKernelStack:        4304 kB\nPageTables:         6260 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2036968 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39600 kB\nVmallocChunk:          0 kB\nPercpu:             2208 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     96256 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      126080 kB\nDirectMap2M:     5111808 kB\nDirectMap1G:    13631488 kB",
+          "githubRunId": "39048766863",
+          "githubCommit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237597184
+      },
+      {
+        "name": "f5-chinese-tts-39048766863-7",
+        "run_id": "39048766863",
+        "commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+        "sample_ids": [
+          "07",
+          "08"
+        ],
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "AMD EPYC 7763 64-Core Processor",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9178056 kB\nMemAvailable:   15331292 kB\nBuffers:          127488 kB\nCached:          6154960 kB\nSwapCached:            0 kB\nActive:           739784 kB\nInactive:        5796096 kB\nActive(anon):     308260 kB\nInactive(anon):        0 kB\nActive(file):     431524 kB\nInactive(file):  5796096 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1228232 kB\nWriteback:             0 kB\nAnonPages:        290836 kB\nMapped:           328652 kB\nShmem:             46092 kB\nKReclaimable:     271568 kB\nSlab:             370696 kB\nSReclaimable:     271568 kB\nSUnreclaim:        99128 kB\nKernelStack:        4148 kB\nPageTables:         6164 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2048016 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39424 kB\nVmallocChunk:          0 kB\nPercpu:             2208 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     88064 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      152704 kB\nDirectMap2M:     5085184 kB\nDirectMap1G:    13631488 kB",
+          "githubRunId": "39048766863",
+          "githubCommit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237588992
+      },
+      {
+        "name": "f5-chinese-tts-39048766863-9",
+        "run_id": "39048766863",
+        "commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+        "sample_ids": [
+          "09"
+        ],
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "AMD EPYC 7763 64-Core Processor",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9120492 kB\nMemAvailable:   15278340 kB\nBuffers:          127768 kB\nCached:          6161004 kB\nSwapCached:            0 kB\nActive:           773272 kB\nInactive:        5800432 kB\nActive(anon):     341888 kB\nInactive(anon):        0 kB\nActive(file):     431384 kB\nInactive(file):  5800432 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1410120 kB\nWriteback:             0 kB\nAnonPages:        319096 kB\nMapped:           330160 kB\nShmem:             48212 kB\nKReclaimable:     271984 kB\nSlab:             371600 kB\nSReclaimable:     271984 kB\nSUnreclaim:        99616 kB\nKernelStack:        4108 kB\nPageTables:         6376 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2048060 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39440 kB\nVmallocChunk:          0 kB\nPercpu:             2224 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:    102400 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      124032 kB\nDirectMap2M:     4065280 kB\nDirectMap1G:    14680064 kB",
+          "githubRunId": "39048766863",
+          "githubCommit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237744640
+      },
+      {
+        "name": "f5-recovery-39051471837-0",
+        "run_id": "39051471837",
+        "commit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+        "sample_ids": [
+          "10"
+        ],
+        "chunk_index": 0,
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "AMD EPYC 7763 64-Core Processor",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16373444 kB\nMemFree:         9130928 kB\nMemAvailable:   15289648 kB\nBuffers:          127600 kB\nCached:          6160040 kB\nSwapCached:            0 kB\nActive:           758936 kB\nInactive:        5800360 kB\nActive(anon):     326324 kB\nInactive(anon):        0 kB\nActive(file):     432612 kB\nInactive(file):  5800360 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1453588 kB\nWriteback:             0 kB\nAnonPages:        309144 kB\nMapped:           329020 kB\nShmem:             45936 kB\nKReclaimable:     271868 kB\nSlab:             371024 kB\nSReclaimable:     271868 kB\nSUnreclaim:        99156 kB\nKernelStack:        4236 kB\nPageTables:         6564 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332444 kB\nCommitted_AS:    2071360 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39504 kB\nVmallocChunk:          0 kB\nPercpu:             2224 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     98304 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      111744 kB\nDirectMap2M:     3028992 kB\nDirectMap1G:    15728640 kB",
+          "githubRunId": "39051471837",
+          "githubCommit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237502976
+      },
+      {
+        "name": "f5-recovery-39051471837-1",
+        "run_id": "39051471837",
+        "commit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+        "sample_ids": [
+          "10"
+        ],
+        "chunk_index": 1,
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "AMD EPYC 7763 64-Core Processor",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9133576 kB\nMemAvailable:   15291320 kB\nBuffers:          127572 kB\nCached:          6159296 kB\nSwapCached:            0 kB\nActive:           755340 kB\nInactive:        5800308 kB\nActive(anon):     323728 kB\nInactive(anon):        0 kB\nActive(file):     431612 kB\nInactive(file):  5800308 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1401368 kB\nWriteback:             0 kB\nAnonPages:        313408 kB\nMapped:           329268 kB\nShmem:             46204 kB\nKReclaimable:     271776 kB\nSlab:             371232 kB\nSReclaimable:     271776 kB\nSUnreclaim:        99456 kB\nKernelStack:        4160 kB\nPageTables:         6480 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2051976 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39456 kB\nVmallocChunk:          0 kB\nPercpu:             2240 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:    135168 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      130176 kB\nDirectMap2M:     3010560 kB\nDirectMap1G:    15728640 kB",
+          "githubRunId": "39051471837",
+          "githubCommit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237478400
+      },
+      {
+        "name": "f5-recovery-39051471837-2",
+        "run_id": "39051471837",
+        "commit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+        "sample_ids": [
+          "10"
+        ],
+        "chunk_index": 2,
+        "hardware": {
+          "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+          "machine": "x86_64",
+          "python": "3.12.15",
+          "cpuModel": "AMD EPYC 7763 64-Core Processor",
+          "visibleLogicalCpus": 4,
+          "memoryMax": null,
+          "cpuMax": null,
+          "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9200008 kB\nMemAvailable:   15356592 kB\nBuffers:          127512 kB\nCached:          6158012 kB\nSwapCached:            0 kB\nActive:           744940 kB\nInactive:        5800004 kB\nActive(anon):     314336 kB\nInactive(anon):        0 kB\nActive(file):     430604 kB\nInactive(file):  5800004 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1425404 kB\nWriteback:             0 kB\nAnonPages:        294252 kB\nMapped:           327592 kB\nShmem:             46180 kB\nKReclaimable:     271928 kB\nSlab:             371228 kB\nSReclaimable:     271928 kB\nSUnreclaim:        99300 kB\nKernelStack:        4192 kB\nPageTables:         6268 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2044124 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39504 kB\nVmallocChunk:          0 kB\nPercpu:             2240 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     88064 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      121984 kB\nDirectMap2M:     4067328 kB\nDirectMap1G:    14680064 kB",
+          "githubRunId": "39051471837",
+          "githubCommit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+          "runnerOs": "Linux",
+          "runnerArch": "X64"
+        },
+        "peak_rss_bytes": 3237670912
+      }
+    ],
+    "note": "Two documented runs; hardware and timings are per shard, not identical-load performance rankings."
+  },
+  "settings": {
+    "steps": 32,
+    "cfg_strength": 2.0,
+    "sway_sampling_coef": -1.0,
+    "ode_method": "euler",
+    "sample_rate": 24000,
+    "threads": 4,
+    "interop_threads": 1,
+    "speed": "默认1.0；UTF-8字节数小于10的短片段按上游逻辑使用0.3，实际值见samples[].chunks[].speed",
+    "target_rms": 0.1,
+    "chunking": "Unchanged upstream UTF-8 byte-based sentence splitting targeting 22 seconds including reference. Original samples 01–09 run sequential chunks; sample 10 recovers three unchanged chunks in parallel, then combines them in original order.",
+    "crossfade_seconds": 0.15,
+    "random_seed": "20261017 + corpus_number*100 + chunk_number",
+    "text_normalization": "Exact original Chinese input. Upstream rjieba/pypinyin conversion only; numbers, English abbreviations and punctuation were not manually rewritten.",
+    "reference": {
+      "kind": "synthetic-reference",
+      "model": "Matcha icefall zh-en steps-3",
+      "speaker": 0,
+      "text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
+      "wav": "reference.wav",
+      "sampleRate": 24000,
+      "durationSeconds": 8.729375,
+      "sourceSampleRate": 16000,
+      "sourceWavSha256": "a0951947112f1651479c58af99e4c1870fa3fcc5452cb185383a3e16044089b3",
+      "wavSha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+      "conversion": "ffmpeg -ar 24000 -ac 1; no other audio edits",
+      "consent": "Reference generated locally by the application model for this evaluation; no recording of a human person was used."
+    },
+    "postprocessing": "Original upstream crossfade and RMS restoration only. Samples 01–09 retain original PCM16 files; recovered 10 uses FLOAT to preserve finite above-full-scale samples. No additional gain normalization, denoising, pitch or tempo edits. MP3 files are lossy listening derivatives."
+  },
+  "sources": [
+    {
+      "url": "https://github.com/SWivid/F5-TTS",
+      "revision": "2f866649b779881af8bd644e76b9a6d95053da29",
+      "role": "inference source"
+    },
+    {
+      "url": "https://huggingface.co/SWivid/F5-TTS",
+      "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+      "license": "cc-by-nc-4.0"
+    },
+    {
+      "url": "https://huggingface.co/charactr/vocos-mel-24khz",
+      "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+      "license": "mit"
+    }
+  ],
+  "license": {
+    "weights": "CC-BY-NC-4.0",
+    "inference_code": "MIT",
+    "vocoder": "MIT",
+    "texts": [
+      "licenses/CC-BY-NC-4.0.txt",
+      "licenses/F5-code-MIT.txt",
+      "licenses/Vocos-MIT.txt"
+    ],
+    "restriction": "非商业研究试听；未作为产品内置或可下载模型发布。"
+  },
+  "notes": [
+    "这是模型对给定10条中文文本的真实离线CPU合成（本机或云端 runner 见 hardware），不是原公开试听，也没有使用云端语音服务。",
+    "该模型由参考音频决定声线。本次采用此前本地模型生成的女声，语气及音质可能受到这段参考声音影响；并非展示一款模型的全部音色能力。",
+    "与其他模型的运行环境和并发负载可能不同，生成耗时不能作为严格同条件性能排名。",
+    "上游权重为非商业许可；本次只供研究比较，不能据此假定适合商业分发。",
+    "01–09 沿用原运行的 PCM16 WAV 原文件（字节不变）；第10条原推理成功但峰值1.0092947483062744触发保存前断言，未留下WAV，因此用完全相同模型、参考、32步、seed和分块参数仅重新生成其3个分块。",
+    "第10条由第二次恢复运行的3片原始 FLOAT WAV 按原0.15秒交叉淡化拼接；FLOAT保留超满量程样本，没有通过降低音量或截幅掩盖问题。每条格式、来源及峰值已分别记录。",
+    "第10条生成时间为三个并行分块的合成时间之和，不是整句墙钟时间，不能与其他顺序运行样本当作同条件性能对比。原始日志、逐片元数据、FLOAT分块以及两次运行的来源信息均保留。"
+  ],
+  "samples": [
+    {
+      "id": "01",
+      "title": "原句回归",
+      "text": "这是一款全程由AI接管并生成的软件",
+      "wav": "audio/01.wav",
+      "generation_seconds": 258.534842229,
+      "audio_seconds": 3.3173333333333335,
+      "wav_sha256": "5e8e111868d80f8d6ba0f3e20c20845924ad4b7c8eb1f48e99a36cefdf6e670f",
+      "started_at": "2026-10-17T16:19:08.959500+00:00",
+      "finished_at": "2026-10-17T16:23:27.607966+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.9806376189999924,
+      "chunks": [
+        {
+          "text": "这是一款全程由AI接管并生成的软件",
+          "seed": 20261117,
+          "speed": 1.0,
+          "framesIncludingReference": 1130,
+          "seconds": 258.53440292799996,
+          "audioSeconds": 3.3173333333333335
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.7953543663024902,
+      "stored_peak": 0.79534912109375,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-1",
+      "source_wav_sha256": "5e8e111868d80f8d6ba0f3e20c20845924ad4b7c8eb1f48e99a36cefdf6e670f",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "02",
+      "title": "功能解说",
+      "text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。你只需要专注于内容，把想法一步一步变成作品。",
+      "wav": "audio/02.wav",
+      "generation_seconds": 700.662389133,
+      "audio_seconds": 13.226,
+      "wav_sha256": "43db7ec4f1014f6ecb9206bcbc765ac4fd12b5ee608b7bc5745d4a7432ab48ee",
+      "started_at": "2026-10-17T16:23:27.608901+00:00",
+      "finished_at": "2026-10-17T16:35:08.394148+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.9806376189999924,
+      "chunks": [
+        {
+          "text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。你只需要专注于内容，",
+          "seed": 20261217,
+          "speed": 1.0,
+          "framesIncludingReference": 1835,
+          "seconds": 461.7760278989999,
+          "audioSeconds": 10.837333333333333
+        },
+        {
+          "text": "把想法一步一步变成作品。",
+          "seed": 20261218,
+          "speed": 1.0,
+          "framesIncludingReference": 1057,
+          "seconds": 238.88555159099997,
+          "audioSeconds": 2.538666666666667
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.8491942286491394,
+      "stored_peak": 0.84918212890625,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-1",
+      "source_wav_sha256": "43db7ec4f1014f6ecb9206bcbc765ac4fd12b5ee608b7bc5745d4a7432ab48ee",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "03",
+      "title": "疑问与对话",
+      "text": "你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。",
+      "wav": "audio/03.wav",
+      "generation_seconds": 226.087262096,
+      "audio_seconds": 11.050666666666666,
+      "wav_sha256": "435a43596f6d2fc72baf718f4e57c1cd057a3a73ea22c792e19cde74fbce3e4c",
+      "started_at": "2026-10-17T16:18:59.913498+00:00",
+      "finished_at": "2026-10-17T16:22:46.158592+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.6836865790000104,
+      "chunks": [
+        {
+          "text": "你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。",
+          "seed": 20261317,
+          "speed": 1.0,
+          "framesIncludingReference": 1855,
+          "seconds": 226.08687529499997,
+          "audioSeconds": 11.050666666666666
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.7696024775505066,
+      "stored_peak": 0.76959228515625,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-3",
+      "source_wav_sha256": "435a43596f6d2fc72baf718f4e57c1cd057a3a73ea22c792e19cde74fbce3e4c",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "04",
+      "title": "惊喜与庆祝",
+      "text": "成功了！我们终于完成了第一个作品！从最初的一个小想法，到现在看得见、听得到的成果，每一步都值得记住。谢谢一直坚持的你！",
+      "wav": "audio/04.wav",
+      "generation_seconds": 241.869722824,
+      "audio_seconds": 12.544,
+      "wav_sha256": "f9cee6ebb7d0aa856d88d70b44b3267780fc39b0e70bc66b4540a53987cb9df3",
+      "started_at": "2026-10-17T16:22:46.160065+00:00",
+      "finished_at": "2026-10-17T16:26:48.128208+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.6836865790000104,
+      "chunks": [
+        {
+          "text": "成功了！我们终于完成了第一个作品！从最初的一个小想法，到现在看得见、听得到的成果，每一步都值得记住。谢谢一直坚持的你！",
+          "seed": 20261417,
+          "speed": 1.0,
+          "framesIncludingReference": 1995,
+          "seconds": 241.869626708,
+          "audioSeconds": 12.544
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.8016977310180664,
+      "stored_peak": 0.80169677734375,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-3",
+      "source_wav_sha256": "f9cee6ebb7d0aa856d88d70b44b3267780fc39b0e70bc66b4540a53987cb9df3",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "05",
+      "title": "温柔安慰",
+      "text": "没关系，今天没有完成也没关系。先喝一口水，让自己慢慢放松下来。你已经很努力了，剩下的事情，我们明天再一起处理。",
+      "wav": "audio/05.wav",
+      "generation_seconds": 486.310032097,
+      "audio_seconds": 11.690666666666667,
+      "wav_sha256": "c9159c796411c2e5dd0768fd94073b0f38b1c4b3823c9e0ec9b424d30478f52e",
+      "started_at": "2026-10-17T16:19:03.538499+00:00",
+      "finished_at": "2026-10-17T16:27:10.172239+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.902045373000007,
+      "chunks": [
+        {
+          "text": "没关系，今天没有完成也没关系。先喝一口水，让自己慢慢放松下来。你已经很努力了，剩下的事情，我们明天再一起处理。",
+          "seed": 20261517,
+          "speed": 1.0,
+          "framesIncludingReference": 1915,
+          "seconds": 486.30937453799993,
+          "audioSeconds": 11.690666666666667
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.7340160012245178,
+      "stored_peak": 0.734039306640625,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-5",
+      "source_wav_sha256": "c9159c796411c2e5dd0768fd94073b0f38b1c4b3823c9e0ec9b424d30478f52e",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "06",
+      "title": "故事旁白",
+      "text": "雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。风吹过树叶，她忽然觉得，明天也许会有新的答案。",
+      "wav": "audio/06.wav",
+      "generation_seconds": 701.983736731,
+      "audio_seconds": 13.439333333333334,
+      "wav_sha256": "bbd6b8d0f4fe9557b556b7923fc878896b587fd613d6b9cb1b39d56ffe38288f",
+      "started_at": "2026-10-17T16:27:10.173756+00:00",
+      "finished_at": "2026-10-17T16:38:52.279837+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.902045373000007,
+      "chunks": [
+        {
+          "text": "雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。风吹过树叶，她忽然觉得，",
+          "seed": 20261617,
+          "speed": 1.0,
+          "framesIncludingReference": 1875,
+          "seconds": 469.63260000900004,
+          "audioSeconds": 11.264
+        },
+        {
+          "text": "明天也许会有新的答案。",
+          "seed": 20261618,
+          "speed": 1.0,
+          "framesIncludingReference": 1037,
+          "seconds": 232.35042039300015,
+          "audioSeconds": 2.3253333333333335
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.886762797832489,
+      "stored_peak": 0.886749267578125,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-5",
+      "source_wav_sha256": "bbd6b8d0f4fe9557b556b7923fc878896b587fd613d6b9cb1b39d56ffe38288f",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "07",
+      "title": "旅行纪录",
+      "text": "清晨六点，山谷还笼罩在薄雾之中。第一束阳光越过山脊，照亮远处的村庄。我们沿着河流向北出发，去寻找地图上那个没有名字的小镇。",
+      "wav": "audio/07.wav",
+      "generation_seconds": 526.938007969,
+      "audio_seconds": 12.970666666666666,
+      "wav_sha256": "d23dd64d091c78afd52765ecd837e34544ebbd27c52661d41259fdd508e7cf70",
+      "started_at": "2026-10-17T16:19:07.886073+00:00",
+      "finished_at": "2026-10-17T16:27:54.981482+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.9963921399999975,
+      "chunks": [
+        {
+          "text": "清晨六点，山谷还笼罩在薄雾之中。第一束阳光越过山脊，照亮远处的村庄。我们沿着河流向北出发，去寻找地图上那个没有名字的小镇。",
+          "seed": 20261717,
+          "speed": 1.0,
+          "framesIncludingReference": 2035,
+          "seconds": 526.937101,
+          "audioSeconds": 12.970666666666666
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.7360169887542725,
+      "stored_peak": 0.735992431640625,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-7",
+      "source_wav_sha256": "d23dd64d091c78afd52765ecd837e34544ebbd27c52661d41259fdd508e7cf70",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "08",
+      "title": "操作教学",
+      "text": "首先，把需要剪辑的视频拖入素材区。然后，将片段放到时间线上，移动播放头，找到需要保留的画面。最后检查字幕和背景音乐，确认无误后再导出。",
+      "wav": "audio/08.wav",
+      "generation_seconds": 737.299992463,
+      "audio_seconds": 14.079333333333333,
+      "wav_sha256": "79f9c9f5fbf2cd7ac7f845866c285be13e5cb1543fa6f9f3cf81970a90c0b4a0",
+      "started_at": "2026-10-17T16:27:54.983124+00:00",
+      "finished_at": "2026-10-17T16:40:12.415921+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.9963921399999975,
+      "chunks": [
+        {
+          "text": "首先，把需要剪辑的视频拖入素材区。然后，将片段放到时间线上，移动播放头，找到需要保留的画面。最后检查字幕和背景音乐，",
+          "seed": 20261817,
+          "speed": 1.0,
+          "framesIncludingReference": 1975,
+          "seconds": 512.6546754420001,
+          "audioSeconds": 12.330666666666668
+        },
+        {
+          "text": "确认无误后再导出。",
+          "seed": 20261818,
+          "speed": 1.0,
+          "framesIncludingReference": 997,
+          "seconds": 224.64462606799998,
+          "audioSeconds": 1.8986666666666667
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.8500127196311951,
+      "stored_peak": 0.850006103515625,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-7",
+      "source_wav_sha256": "79f9c9f5fbf2cd7ac7f845866c285be13e5cb1543fa6f9f3cf81970a90c0b4a0",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "09",
+      "title": "数字日期与单位",
+      "text": "今天是2026年10月17日，下午3点30分。视频长度是12.5秒，分辨率为1920乘1080，文件大小约256MB。目前进度为85%，预计还需要2分钟。",
+      "wav": "audio/09.wav",
+      "generation_seconds": 490.65289973000006,
+      "audio_seconds": 11.829333333333333,
+      "wav_sha256": "14f7c824a94c1157199000ebcc64409281335c70ba2ed9e4b4d3f299f9786174",
+      "started_at": "2026-10-17T16:19:09.641908+00:00",
+      "finished_at": "2026-10-17T16:27:20.666319+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.9620807369999937,
+      "chunks": [
+        {
+          "text": "今天是2026年10月17日，下午3点30分。视频长度是12.5秒，分辨率为1920乘1080，文件大小约256MB。目前进度为85%，预计还需要2分钟。",
+          "seed": 20261917,
+          "speed": 1.0,
+          "framesIncludingReference": 1928,
+          "seconds": 490.652132902,
+          "audioSeconds": 11.829333333333333
+        }
+      ],
+      "wav_subtype": "PCM_16",
+      "raw_peak": 0.6069809198379517,
+      "stored_peak": 0.606964111328125,
+      "over_full_scale_sample_count": 0,
+      "over_full_scale_sample_ratio": 0.0,
+      "source_run_id": "39048766863",
+      "source_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "source_artifact": "f5-chinese-tts-39048766863-9",
+      "source_wav_sha256": "14f7c824a94c1157199000ebcc64409281335c70ba2ed9e4b4d3f299f9786174",
+      "format_notes": "Original PCM16 WAV copied byte-for-byte; original generation peak was below full scale."
+    },
+    {
+      "id": "10",
+      "title": "长段落与多音词",
+      "text": "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。",
+      "wav": "audio/10.wav",
+      "wav_sha256": "532860f2fa8f74798a93a1a88e65858bbfa098a7cccc1833cf076a0de0c13437",
+      "wav_subtype": "FLOAT",
+      "audio_seconds": 32.00933333333333,
+      "generation_seconds": 1408.352173128,
+      "generation_notes": "Sum of three separately measured chunk inference times from a recovery workflow. Chunks ran in parallel; this is compute time, not elapsed wall time. Excludes model loads and local crossfade/encoding. Original run completed inference but discarded sample 10 because a peak above 1 triggered a save-time assertion.",
+      "started_at": "2026-10-17T16:56:17.488503+00:00",
+      "finished_at": "2026-10-17T17:05:19.027671+00:00",
+      "raw_peak": 1.0092947483062744,
+      "stored_peak": 1.0092947483062744,
+      "raw_rms": 0.1273551678811983,
+      "over_full_scale_sample_count": 1,
+      "over_full_scale_sample_ratio": 1.3017036697629857e-06,
+      "format_notes": "FLOAT WAV preserves the generated waveform including finite samples above full scale. No gain normalization or clipping. MP3 is a lossy preview derivative.",
+      "source_run_id": "39051471837",
+      "source_commit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+      "original_failed_run_id": "39048766863",
+      "original_failed_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+      "chunks": [
+        {
+          "schema": 1,
+          "modelId": "f5-v1-base-fp32",
+          "id": "10",
+          "title": "长段落与多音词",
+          "text": "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。",
+          "chunkText": "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，",
+          "chunkIndex": 0,
+          "expectedChunkCount": 3,
+          "allChunkTexts": [
+            "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，",
+            "故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，",
+            "我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。"
+          ],
+          "seed": 20262017,
+          "speed": 1.0,
+          "framesIncludingReference": 1955,
+          "seconds": 509.298460919,
+          "audioSeconds": 12.117333333333333,
+          "startedAt": "2026-10-17T16:56:17.488503+00:00",
+          "finishedAt": "2026-10-17T17:04:46.790535+00:00",
+          "loadSeconds": 1.9833548670000027,
+          "torchThreads": 4,
+          "peakRssBytes": 3237502976,
+          "sampleRate": 24000,
+          "channels": 1,
+          "sampleCount": 290816,
+          "wavSubtype": "FLOAT",
+          "peak": 0.7524444460868835,
+          "rms": 0.12293607741594315,
+          "overFullScaleSampleCount": 0,
+          "overFullScaleSampleRatio": 0.0,
+          "wav": "chunks/10-0.wav",
+          "wavSha256": "9d874e61f589257502cf09c4be3551548484e70cf90c4834d94b0704aaedcecc",
+          "referenceSha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+          "corpusSha256": "e443b5926fda7370cb4c16eec30a300cde69d58f9fdc1f44e9b463ceb18a2434",
+          "source": {
+            "models": [
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "license": "cc-by-nc-4.0"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "license": "mit"
+              }
+            ],
+            "code": {
+              "repository": "https://github.com/SWivid/F5-TTS",
+              "commit": "2f866649b779881af8bd644e76b9a6d95053da29"
+            },
+            "files": [
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "F5TTS_v1_Base/model_1250000.safetensors",
+                "path": "models/f5/model_1250000.safetensors",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors",
+                "bytes": 1348435761,
+                "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+              },
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "F5TTS_v1_Base/vocab.txt",
+                "path": "models/f5/vocab.txt",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt",
+                "bytes": 13800,
+                "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+              },
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "README.md",
+                "path": "models/f5/README.md",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/README.md",
+                "bytes": 630,
+                "sha256": "cf3354feaf4020527b3642b12a5a382de13d0af6bc99e8d37bee84425c1ca224"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "pytorch_model.bin",
+                "path": "models/vocos/pytorch_model.bin",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin",
+                "bytes": 54365991,
+                "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "config.yaml",
+                "path": "models/vocos/config.yaml",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml",
+                "bytes": 461,
+                "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "README.md",
+                "path": "models/vocos/README.md",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/README.md",
+                "bytes": 1830,
+                "sha256": "5858497d76d58914b29958a0f448e7b4fd3bb54940100baaa7520d4a56d8b3df"
+              }
+            ]
+          },
+          "hardware": {
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "machine": "x86_64",
+            "python": "3.12.15",
+            "cpuModel": "AMD EPYC 7763 64-Core Processor",
+            "visibleLogicalCpus": 4,
+            "memoryMax": null,
+            "cpuMax": null,
+            "memoryInfo": "MemTotal:       16373444 kB\nMemFree:         9130928 kB\nMemAvailable:   15289648 kB\nBuffers:          127600 kB\nCached:          6160040 kB\nSwapCached:            0 kB\nActive:           758936 kB\nInactive:        5800360 kB\nActive(anon):     326324 kB\nInactive(anon):        0 kB\nActive(file):     432612 kB\nInactive(file):  5800360 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1453588 kB\nWriteback:             0 kB\nAnonPages:        309144 kB\nMapped:           329020 kB\nShmem:             45936 kB\nKReclaimable:     271868 kB\nSlab:             371024 kB\nSReclaimable:     271868 kB\nSUnreclaim:        99156 kB\nKernelStack:        4236 kB\nPageTables:         6564 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332444 kB\nCommitted_AS:    2071360 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39504 kB\nVmallocChunk:          0 kB\nPercpu:             2224 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     98304 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      111744 kB\nDirectMap2M:     3028992 kB\nDirectMap1G:    15728640 kB",
+            "githubRunId": "39051471837",
+            "githubCommit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+            "runnerOs": "Linux",
+            "runnerArch": "X64"
+          },
+          "settings": {
+            "device": "cpu",
+            "dtype": "float32",
+            "steps": 32,
+            "cfg_strength": 2.0,
+            "sway_sampling_coef": -1.0,
+            "ode_method": "euler",
+            "sample_rate": 24000,
+            "threads": 4,
+            "interop_threads": 1,
+            "crossfade_seconds": 0.15,
+            "reference_text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
+            "reference_frames": 818,
+            "reference_rms": 0.13129623234272003,
+            "target_rms": 0.1,
+            "chunk_max_utf8_bytes": 186,
+            "postprocessing": "Raw individual vocoder chunk after unchanged upstream RMS restoration; FLOAT WAV preserves finite samples above full scale. No gain normalization, clipping or crossfade at this stage."
+          },
+          "source_artifact": "f5-recovery-39051471837-0"
+        },
+        {
+          "schema": 1,
+          "modelId": "f5-v1-base-fp32",
+          "id": "10",
+          "title": "长段落与多音词",
+          "text": "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。",
+          "chunkText": "故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，",
+          "chunkIndex": 1,
+          "expectedChunkCount": 3,
+          "allChunkTexts": [
+            "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，",
+            "故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，",
+            "我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。"
+          ],
+          "seed": 20262018,
+          "speed": 1.0,
+          "framesIncludingReference": 2035,
+          "seconds": 531.999543562,
+          "audioSeconds": 12.970666666666666,
+          "startedAt": "2026-10-17T16:56:27.024366+00:00",
+          "finishedAt": "2026-10-17T17:05:19.027671+00:00",
+          "loadSeconds": 1.9955867880000255,
+          "torchThreads": 4,
+          "peakRssBytes": 3237478400,
+          "sampleRate": 24000,
+          "channels": 1,
+          "sampleCount": 311296,
+          "wavSubtype": "FLOAT",
+          "peak": 0.7261440753936768,
+          "rms": 0.11961417645215988,
+          "overFullScaleSampleCount": 0,
+          "overFullScaleSampleRatio": 0.0,
+          "wav": "chunks/10-1.wav",
+          "wavSha256": "b5ea0e0586b8d33eecb80f50d3e676ee1ff4bb07777ef036d1ccd1213e2db666",
+          "referenceSha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+          "corpusSha256": "e443b5926fda7370cb4c16eec30a300cde69d58f9fdc1f44e9b463ceb18a2434",
+          "source": {
+            "models": [
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "license": "cc-by-nc-4.0"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "license": "mit"
+              }
+            ],
+            "code": {
+              "repository": "https://github.com/SWivid/F5-TTS",
+              "commit": "2f866649b779881af8bd644e76b9a6d95053da29"
+            },
+            "files": [
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "F5TTS_v1_Base/model_1250000.safetensors",
+                "path": "models/f5/model_1250000.safetensors",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors",
+                "bytes": 1348435761,
+                "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+              },
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "F5TTS_v1_Base/vocab.txt",
+                "path": "models/f5/vocab.txt",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt",
+                "bytes": 13800,
+                "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+              },
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "README.md",
+                "path": "models/f5/README.md",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/README.md",
+                "bytes": 630,
+                "sha256": "cf3354feaf4020527b3642b12a5a382de13d0af6bc99e8d37bee84425c1ca224"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "pytorch_model.bin",
+                "path": "models/vocos/pytorch_model.bin",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin",
+                "bytes": 54365991,
+                "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "config.yaml",
+                "path": "models/vocos/config.yaml",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml",
+                "bytes": 461,
+                "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "README.md",
+                "path": "models/vocos/README.md",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/README.md",
+                "bytes": 1830,
+                "sha256": "5858497d76d58914b29958a0f448e7b4fd3bb54940100baaa7520d4a56d8b3df"
+              }
+            ]
+          },
+          "hardware": {
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "machine": "x86_64",
+            "python": "3.12.15",
+            "cpuModel": "AMD EPYC 7763 64-Core Processor",
+            "visibleLogicalCpus": 4,
+            "memoryMax": null,
+            "cpuMax": null,
+            "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9133576 kB\nMemAvailable:   15291320 kB\nBuffers:          127572 kB\nCached:          6159296 kB\nSwapCached:            0 kB\nActive:           755340 kB\nInactive:        5800308 kB\nActive(anon):     323728 kB\nInactive(anon):        0 kB\nActive(file):     431612 kB\nInactive(file):  5800308 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1401368 kB\nWriteback:             0 kB\nAnonPages:        313408 kB\nMapped:           329268 kB\nShmem:             46204 kB\nKReclaimable:     271776 kB\nSlab:             371232 kB\nSReclaimable:     271776 kB\nSUnreclaim:        99456 kB\nKernelStack:        4160 kB\nPageTables:         6480 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2051976 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39456 kB\nVmallocChunk:          0 kB\nPercpu:             2240 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:    135168 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      130176 kB\nDirectMap2M:     3010560 kB\nDirectMap1G:    15728640 kB",
+            "githubRunId": "39051471837",
+            "githubCommit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+            "runnerOs": "Linux",
+            "runnerArch": "X64"
+          },
+          "settings": {
+            "device": "cpu",
+            "dtype": "float32",
+            "steps": 32,
+            "cfg_strength": 2.0,
+            "sway_sampling_coef": -1.0,
+            "ode_method": "euler",
+            "sample_rate": 24000,
+            "threads": 4,
+            "interop_threads": 1,
+            "crossfade_seconds": 0.15,
+            "reference_text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
+            "reference_frames": 818,
+            "reference_rms": 0.13129623234272003,
+            "target_rms": 0.1,
+            "chunk_max_utf8_bytes": 186,
+            "postprocessing": "Raw individual vocoder chunk after unchanged upstream RMS restoration; FLOAT WAV preserves finite samples above full scale. No gain normalization, clipping or crossfade at this stage."
+          },
+          "source_artifact": "f5-recovery-39051471837-1"
+        },
+        {
+          "schema": 1,
+          "modelId": "f5-v1-base-fp32",
+          "id": "10",
+          "title": "长段落与多音词",
+          "text": "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。",
+          "chunkText": "我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。",
+          "chunkIndex": 2,
+          "expectedChunkCount": 3,
+          "allChunkTexts": [
+            "上个月，我们从重庆出发，经过银行旁边那条长长的街道，重新整理了沿途拍摄的素材。起初，我以为只要把片段按照时间排列，",
+            "故事就会自然出现。后来才发现，真正重要的是节奏：有些画面需要停留，有些声音应该提前进入，而有些沉默，比解释更有力量。于是，",
+            "我们删掉了重复的内容，保留了那些看似平常、却让人愿意再看一遍的瞬间。"
+          ],
+          "seed": 20262019,
+          "speed": 1.0,
+          "framesIncludingReference": 1496,
+          "seconds": 367.054168647,
+          "audioSeconds": 7.221333333333333,
+          "startedAt": "2026-10-17T16:56:34.935678+00:00",
+          "finishedAt": "2026-10-17T17:02:41.992614+00:00",
+          "loadSeconds": 1.9877169600000002,
+          "torchThreads": 4,
+          "peakRssBytes": 3237670912,
+          "sampleRate": 24000,
+          "channels": 1,
+          "sampleCount": 173312,
+          "wavSubtype": "FLOAT",
+          "peak": 1.0092947483062744,
+          "rms": 0.14480850100517273,
+          "overFullScaleSampleCount": 1,
+          "overFullScaleSampleRatio": 5.7699409158050225e-06,
+          "wav": "chunks/10-2.wav",
+          "wavSha256": "f343b6f72918281704e8d6bae549f769d580cc03340feceaa25d98e742db5683",
+          "referenceSha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+          "corpusSha256": "e443b5926fda7370cb4c16eec30a300cde69d58f9fdc1f44e9b463ceb18a2434",
+          "source": {
+            "models": [
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "license": "cc-by-nc-4.0"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "license": "mit"
+              }
+            ],
+            "code": {
+              "repository": "https://github.com/SWivid/F5-TTS",
+              "commit": "2f866649b779881af8bd644e76b9a6d95053da29"
+            },
+            "files": [
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "F5TTS_v1_Base/model_1250000.safetensors",
+                "path": "models/f5/model_1250000.safetensors",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors",
+                "bytes": 1348435761,
+                "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+              },
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "F5TTS_v1_Base/vocab.txt",
+                "path": "models/f5/vocab.txt",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt",
+                "bytes": 13800,
+                "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+              },
+              {
+                "repository": "SWivid/F5-TTS",
+                "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+                "upstreamPath": "README.md",
+                "path": "models/f5/README.md",
+                "url": "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/README.md",
+                "bytes": 630,
+                "sha256": "cf3354feaf4020527b3642b12a5a382de13d0af6bc99e8d37bee84425c1ca224"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "pytorch_model.bin",
+                "path": "models/vocos/pytorch_model.bin",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin",
+                "bytes": 54365991,
+                "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "config.yaml",
+                "path": "models/vocos/config.yaml",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml",
+                "bytes": 461,
+                "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc"
+              },
+              {
+                "repository": "charactr/vocos-mel-24khz",
+                "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+                "upstreamPath": "README.md",
+                "path": "models/vocos/README.md",
+                "url": "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/README.md",
+                "bytes": 1830,
+                "sha256": "5858497d76d58914b29958a0f448e7b4fd3bb54940100baaa7520d4a56d8b3df"
+              }
+            ]
+          },
+          "hardware": {
+            "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+            "machine": "x86_64",
+            "python": "3.12.15",
+            "cpuModel": "AMD EPYC 7763 64-Core Processor",
+            "visibleLogicalCpus": 4,
+            "memoryMax": null,
+            "cpuMax": null,
+            "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9200008 kB\nMemAvailable:   15356592 kB\nBuffers:          127512 kB\nCached:          6158012 kB\nSwapCached:            0 kB\nActive:           744940 kB\nInactive:        5800004 kB\nActive(anon):     314336 kB\nInactive(anon):        0 kB\nActive(file):     430604 kB\nInactive(file):  5800004 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1425404 kB\nWriteback:             0 kB\nAnonPages:        294252 kB\nMapped:           327592 kB\nShmem:             46180 kB\nKReclaimable:     271928 kB\nSlab:             371228 kB\nSReclaimable:     271928 kB\nSUnreclaim:        99300 kB\nKernelStack:        4192 kB\nPageTables:         6268 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2044124 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39504 kB\nVmallocChunk:          0 kB\nPercpu:             2240 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     88064 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      121984 kB\nDirectMap2M:     4067328 kB\nDirectMap1G:    14680064 kB",
+            "githubRunId": "39051471837",
+            "githubCommit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+            "runnerOs": "Linux",
+            "runnerArch": "X64"
+          },
+          "settings": {
+            "device": "cpu",
+            "dtype": "float32",
+            "steps": 32,
+            "cfg_strength": 2.0,
+            "sway_sampling_coef": -1.0,
+            "ode_method": "euler",
+            "sample_rate": 24000,
+            "threads": 4,
+            "interop_threads": 1,
+            "crossfade_seconds": 0.15,
+            "reference_text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
+            "reference_frames": 818,
+            "reference_rms": 0.13129623234272003,
+            "target_rms": 0.1,
+            "chunk_max_utf8_bytes": 186,
+            "postprocessing": "Raw individual vocoder chunk after unchanged upstream RMS restoration; FLOAT WAV preserves finite samples above full scale. No gain normalization, clipping or crossfade at this stage."
+          },
+          "source_artifact": "f5-recovery-39051471837-2"
+        }
+      ],
+      "assembly": "Same original sequential numpy.linspace 0.15-second crossfade, then FLOAT WAV serialization.",
+      "assembly_environment": {
+        "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+        "python": "3.12.14",
+        "numpy": "2.5.4",
+        "soundfile": "0.14.0",
+        "libwav": "1.2.2",
+        "ffmpeg": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers",
+        "note": "Local waveform concatenation and encoding only; no local model inference is included."
+      }
+    }
+  ],
+  "corpus_sha256": "e443b5926fda7370cb4c16eec30a300cde69d58f9fdc1f44e9b463ceb18a2434",
+  "provenance": {
+    "original_run_id": "39048766863",
+    "original_commit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+    "recovery_run_id": "39051471837",
+    "recovery_commit": "baa20fda093d41a34a7f22153963819c215ed7ee",
+    "original_url": "https://github.com/ecojust/open-media/actions/runs/39048766863",
+    "recovery_url": "https://github.com/ecojust/open-media/actions/runs/39051471837",
+    "original_sample_ids": [
+      "01",
+      "02",
+      "03",
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "09"
+    ],
+    "recovered_sample_ids": [
+      "10"
+    ],
+    "original_manifests_retained": true,
+    "original_wav_bytes_unchanged": true,
+    "recovery_chunks_retained": true,
+    "local_incomplete_run_included": false,
+    "collections": [
+      "original-collection.json",
+      "recovery-collection.json"
+    ]
+  }
+}

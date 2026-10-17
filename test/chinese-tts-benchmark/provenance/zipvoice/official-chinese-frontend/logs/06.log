@@ -1,0 +1,752 @@
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/parse-options.cc:Read:374 /tmp/open-media-tts-audit/sherpa-onnx-v1.13.8-linux-x64-shared/bin/sherpa-onnx-offline-tts --zipvoice-encoder=/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/encoder.onnx --zipvoice-decoder=/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/decoder.onnx --zipvoice-tokens=/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/tokens.txt --zipvoice-data-dir=/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/espeak-ng-data --zipvoice-lexicon=/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/lexicon.txt --zipvoice-vocoder=/workspace/tts-benchmark-20261017/small-medium/downloads/vocos_24khz.onnx --reference-audio=/workspace/tts-benchmark-20261017/small-medium/zipvoice-distill-fp32/reference/matcha-reference.wav '--reference-text=你好，这是一段语音试听。让文字拥有清晰自然的声音。' --num-steps=8 --sid=0 --num-threads=1 --speed=1 --tts-silence-scale=1 --tts-max-num-sentences=1 --debug=true --output-filename=/workspace/tts-benchmark-20261017/small-medium/zipvoice-distill-fp32/wav/06.wav '雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。风吹过树叶，她忽然觉得，明天也许会有新的答案。' 
+
+OfflineTtsModelConfig(vits=OfflineTtsVitsModelConfig(model="", lexicon="", tokens="", data_dir="", noise_scale=0.667, noise_scale_w=0.8, length_scale=1), matcha=OfflineTtsMatchaModelConfig(acoustic_model="", vocoder="", lexicon="", tokens="", data_dir="", noise_scale=1, length_scale=1), kokoro=OfflineTtsKokoroModelConfig(model="", voices="", tokens="", lexicon="", data_dir="", length_scale=1, lang=""), zipvoice=OfflineTtsZipvoiceModelConfig(tokens="/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/tokens.txt", encoder="/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/encoder.onnx", decoder="/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/decoder.onnx", vocoder="/workspace/tts-benchmark-20261017/small-medium/downloads/vocos_24khz.onnx", data_dir="/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/espeak-ng-data", lexicon="/workspace/tts-benchmark-20261017/small-medium/models/sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia/lexicon.txt", feat_scale=0.1, t_shift=0.5, target_rms=0.1, guidance_scale=1), kitten=OfflineTtsKittenModelConfig(model="", voices="", tokens="", data_dir="", length_scale=1), pocket=OfflineTtsPocketModelConfig(lm_flow="", lm_main="", encoder="", decoder="", text_conditioner="", vocab_json="", token_scores_json="", voice_embedding_cache_capacity=50), supertonic=OfflineTtsSupertonicModelConfig(duration_predictor="", text_encoder="", vector_estimator="", vocoder="", tts_json="", unicode_indexer="", voice_style=""), num_threads=1, debug=True, provider="cpu")
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-zipvoice-model.cc:InitEncoder:206 ---encoder---
+use_pinyin=1
+use_espeak=1
+comment=ZipVoice text encoder
+model_author=k2-fsa
+version=1
+----------input names----------
+0 tokens
+1 prompt_tokens
+2 prompt_features_len
+3 speed
+----------output names----------
+0 text_condition
+
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-zipvoice-model.cc:InitDecoder:264 ---decoder---
+num_mels=100
+window_length=1024
+hop_length=256
+sample_rate=24000
+n_fft=1024
+feat_dim=100
+comment=ZipVoice flow-matching decoder
+model_author=k2-fsa
+version=1
+----------input names----------
+0 t
+1 x
+2 text_condition
+3 speech_condition
+4 guidance_scale
+----------output names----------
+0 v
+
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/vocoder.cc:GetModelType:56 url3=https://huggingface.co/wetdog/vocos-mel-24khz-onnx
+url2=https://github.com/gemelo-ai/vocos
+url1=https://huggingface.co/charactr/vocos-mel-24khz
+model_type=vocos
+model_author=charactr
+normalized=0
+hop_length=256
+model_filename=mel_spec_24khz.onnx
+sample_rate=24000
+maintainer=k2-fsa
+win_length=1024
+window_type=hann
+version=1
+n_fft=1024
+center=1
+pad_mode=reflect
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/vocos-vocoder.cc:Init:166 ---Vocos model---
+url3=https://huggingface.co/wetdog/vocos-mel-24khz-onnx
+url2=https://github.com/gemelo-ai/vocos
+url1=https://huggingface.co/charactr/vocos-mel-24khz
+model_type=vocos
+model_author=charactr
+normalized=0
+hop_length=256
+model_filename=mel_spec_24khz.onnx
+sample_rate=24000
+maintainer=k2-fsa
+win_length=1024
+window_type=hann
+version=1
+n_fft=1024
+center=1
+pad_mode=reflect
+----------input names----------
+0 mels
+----------output names----------
+0 mag
+1 x
+2 y
+
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-zipvoice-impl.h:Generate:74 GenerationConfig(silence_scale=0.2, speed=1, sid=0, num_steps=8, reference_audio_len=80954, reference_sample_rate=16000, reference_text="你好，这是一段语音试听。让文字拥有清晰自然的声音。")
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:188 After replacing punctuations and merging spaces:
+你好,这是一段语音试听.让文字拥有清晰自然的声音.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:200 input text:
+你好，这是一段语音试听。让文字拥有清晰自然的声音。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:201 after replacing punctuations:
+你好,这是一段语音试听.让文字拥有清晰自然的声音.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:215 after splitting into UTF8:
+你_好_,_这_是_一_段_语_音_试_听_._让_文_字_拥_有_清_晰_自_然_的_声_音_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:255 after removing spaces after punctuations:
+你_好_,_这_是_一_段_语_音_试_听_._让_文_字_拥_有_清_晰_自_然_的_声_音_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:30 max_search_len 10
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-9: 你好,这是一段语音试
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-8: 你好,这是一段语音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-7: 你好,这是一段语
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-6: 你好,这是一段
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-5: 你好,这是一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-4: 你好,这是
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-3: 你好,这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-1: 你好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 0-1: 你好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 2-2: ,
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-12: 这是一段语音试听.让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-10: 这是一段语音试听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-9: 这是一段语音试
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-8: 这是一段语音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-7: 这是一段语
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-6: 这是一段
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-5: 这是一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-4: 这是
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 3-3: 这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-13: 是一段语音试听.让文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-12: 是一段语音试听.让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-10: 是一段语音试听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-9: 是一段语音试
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-8: 是一段语音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-7: 是一段语
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-6: 是一段
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-5: 是一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 4-4: 是
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-14: 一段语音试听.让文字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-13: 一段语音试听.让文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-12: 一段语音试听.让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-10: 一段语音试听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-9: 一段语音试
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-8: 一段语音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-7: 一段语
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-6: 一段
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 5-5: 一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-15: 段语音试听.让文字拥
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-14: 段语音试听.让文字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-13: 段语音试听.让文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-12: 段语音试听.让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-10: 段语音试听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-9: 段语音试
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-8: 段语音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-7: 段语
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 6-6: 段
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-16: 语音试听.让文字拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-15: 语音试听.让文字拥
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-14: 语音试听.让文字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-13: 语音试听.让文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-12: 语音试听.让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-10: 语音试听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-9: 语音试
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-8: 语音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 7-8: 语音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-18: 试听.让文字拥有清晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-17: 试听.让文字拥有清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-16: 试听.让文字拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-15: 试听.让文字拥
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-14: 试听.让文字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-13: 试听.让文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-12: 试听.让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-10: 试听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 9-9: 试
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-19: 听.让文字拥有清晰自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-18: 听.让文字拥有清晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-17: 听.让文字拥有清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-16: 听.让文字拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-15: 听.让文字拥
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-14: 听.让文字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-13: 听.让文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-12: 听.让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 10-10: 听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 11-11: .
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-21: 让文字拥有清晰自然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-20: 让文字拥有清晰自然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-19: 让文字拥有清晰自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-18: 让文字拥有清晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-17: 让文字拥有清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-16: 让文字拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-15: 让文字拥
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-14: 让文字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-13: 让文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 12-12: 让
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-22: 文字拥有清晰自然的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-21: 文字拥有清晰自然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-20: 文字拥有清晰自然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-19: 文字拥有清晰自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-18: 文字拥有清晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-17: 文字拥有清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-16: 文字拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-15: 文字拥
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-14: 文字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 13-13: 文
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-23: 字拥有清晰自然的声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-22: 字拥有清晰自然的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-21: 字拥有清晰自然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-20: 字拥有清晰自然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-19: 字拥有清晰自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-18: 字拥有清晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-17: 字拥有清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-16: 字拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-15: 字拥
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 14-14: 字
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-23: 拥有清晰自然的声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-22: 拥有清晰自然的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-21: 拥有清晰自然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-20: 拥有清晰自然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-19: 拥有清晰自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-18: 拥有清晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-17: 拥有清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-16: 拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 15-16: 拥有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-23: 清晰自然的声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-22: 清晰自然的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-21: 清晰自然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-20: 清晰自然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-19: 清晰自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-18: 清晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 17-17: 清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-23: 晰自然的声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-22: 晰自然的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-21: 晰自然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-20: 晰自然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-19: 晰自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 18-18: 晰
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-23: 自然的声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-22: 自然的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-21: 自然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-20: 自然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 19-19: 自
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-23: 然的声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-22: 然的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-21: 然的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 20-20: 然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-23: 的声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-22: 的声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 21-21: 的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-23: 声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 22-22: 声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 23-23: 音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 24-24: .
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:48 After phrase matching: 你好_,_这_是_一_段_语音_试_听_._让_文_字_拥有_清_晰_自_然_的_声_音_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 你好: 'n0'(276),'i2'(220),'h0'(218),'ao3'(181),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 ,: ','(8),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [276, 220, 218, 181, 8]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 这: 'zh0'(355),'e4'(191),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 是: 'sh0'(301),'i4'(222),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 一: 'y0'(353),'i1'(219),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 段: 'd0'(187),'uan4'(320),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 语音: 'y0'(353),'u3'(305),'y0'(353),'in1'(249),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 试: 'sh0'(301),'i4'(222),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 听: 't0'(302),'ing1'(254),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 .: '.'(10),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [355, 191, 301, 222, 353, 219, 187, 320, 353, 305, 353, 249, 301, 222, 302, 254, 10]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 让: 'r0'(299),'ang4'(177),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 文: 'w0'(351),'en2'(199),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 字: 'z0'(354),'i4'(222),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 拥有: 'y0'(353),'ong1'(287),'y0'(353),'ou3'(294),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 清: 'q0'(298),'ing1'(254),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 晰: 'x0'(352),'i1'(219),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 自: 'z0'(354),'i4'(222),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 然: 'r0'(299),'an2'(170),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 的: 'd0'(187),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 声: 'sh0'(301),'eng1'(203),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 音: 'y0'(353),'in1'(249),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 .: '.'(10),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [299, 177, 351, 199, 354, 222, 353, 287, 353, 294, 298, 254, 352, 219, 354, 222, 299, 170, 187, 192, 301, 203, 353, 249, 10]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-zipvoice-impl.h:ComputeMelSpectrogram:302 Creating a resampler:
+   in_sample_rate: 16000
+   output_sample_rate: 24000
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-zipvoice-impl.h:Generate:210 Processing 1/2: 雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:188 After replacing punctuations and merging spaces:
+雨停的时候,街角的灯刚好亮了.她把那封没有寄出的信放进口袋,沿着熟悉的小路往前走.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:200 input text:
+雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:201 after replacing punctuations:
+雨停的时候,街角的灯刚好亮了.她把那封没有寄出的信放进口袋,沿着熟悉的小路往前走.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:215 after splitting into UTF8:
+雨_停_的_时_候_,_街_角_的_灯_刚_好_亮_了_._她_把_那_封_没_有_寄_出_的_信_放_进_口_袋_,_沿_着_熟_悉_的_小_路_往_前_走_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:255 after removing spaces after punctuations:
+雨_停_的_时_候_,_街_角_的_灯_刚_好_亮_了_._她_把_那_封_没_有_寄_出_的_信_放_进_口_袋_,_沿_着_熟_悉_的_小_路_往_前_走_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:30 max_search_len 10
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-9: 雨停的时候,街角的灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-8: 雨停的时候,街角的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-7: 雨停的时候,街角
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-6: 雨停的时候,街
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-4: 雨停的时候
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-3: 雨停的时
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-2: 雨停的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-1: 雨停
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 0-0: 雨
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-10: 停的时候,街角的灯刚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-9: 停的时候,街角的灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-8: 停的时候,街角的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-7: 停的时候,街角
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-6: 停的时候,街
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-4: 停的时候
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-3: 停的时
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-2: 停的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 1-1: 停
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-11: 的时候,街角的灯刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-10: 的时候,街角的灯刚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-9: 的时候,街角的灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-8: 的时候,街角的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-7: 的时候,街角
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-6: 的时候,街
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-4: 的时候
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-3: 的时
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 2-2: 的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-12: 时候,街角的灯刚好亮
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-11: 时候,街角的灯刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-10: 时候,街角的灯刚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-9: 时候,街角的灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-8: 时候,街角的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-7: 时候,街角
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-6: 时候,街
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-4: 时候
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 3-3: 时
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-13: 候,街角的灯刚好亮了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-12: 候,街角的灯刚好亮
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-11: 候,街角的灯刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-10: 候,街角的灯刚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-9: 候,街角的灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-8: 候,街角的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-7: 候,街角
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-6: 候,街
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 4-4: 候
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 5-5: ,
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-15: 街角的灯刚好亮了.她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-13: 街角的灯刚好亮了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-12: 街角的灯刚好亮
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-11: 街角的灯刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-10: 街角的灯刚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-9: 街角的灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-8: 街角的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-7: 街角
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 6-7: 街角
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-17: 的灯刚好亮了.她把那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-16: 的灯刚好亮了.她把
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-15: 的灯刚好亮了.她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-13: 的灯刚好亮了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-12: 的灯刚好亮
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-11: 的灯刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-10: 的灯刚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-9: 的灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 8-8: 的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-18: 灯刚好亮了.她把那封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-17: 灯刚好亮了.她把那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-16: 灯刚好亮了.她把
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-15: 灯刚好亮了.她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-13: 灯刚好亮了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-12: 灯刚好亮
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-11: 灯刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-10: 灯刚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 9-9: 灯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-19: 刚好亮了.她把那封没
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-18: 刚好亮了.她把那封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-17: 刚好亮了.她把那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-16: 刚好亮了.她把
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-15: 刚好亮了.她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-13: 刚好亮了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-12: 刚好亮
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 10-11: 刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 10-11: 刚好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-21: 亮了.她把那封没有寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-20: 亮了.她把那封没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-19: 亮了.她把那封没
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-18: 亮了.她把那封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-17: 亮了.她把那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-16: 亮了.她把
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-15: 亮了.她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-13: 亮了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 12-12: 亮
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-22: 了.她把那封没有寄出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-21: 了.她把那封没有寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-20: 了.她把那封没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-19: 了.她把那封没
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-18: 了.她把那封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-17: 了.她把那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-16: 了.她把
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-15: 了.她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 13-13: 了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 14-14: .
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-24: 她把那封没有寄出的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-23: 她把那封没有寄出的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-22: 她把那封没有寄出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-21: 她把那封没有寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-20: 她把那封没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-19: 她把那封没
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-18: 她把那封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-17: 她把那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-16: 她把
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 15-15: 她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-25: 把那封没有寄出的信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-24: 把那封没有寄出的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-23: 把那封没有寄出的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-22: 把那封没有寄出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-21: 把那封没有寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-20: 把那封没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-19: 把那封没
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-18: 把那封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-17: 把那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 16-16: 把
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-26: 那封没有寄出的信放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-25: 那封没有寄出的信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-24: 那封没有寄出的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-23: 那封没有寄出的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-22: 那封没有寄出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-21: 那封没有寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-20: 那封没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-19: 那封没
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-18: 那封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 17-17: 那
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-27: 封没有寄出的信放进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-26: 封没有寄出的信放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-25: 封没有寄出的信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-24: 封没有寄出的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-23: 封没有寄出的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-22: 封没有寄出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-21: 封没有寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-20: 封没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-19: 封没
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 18-18: 封
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-28: 没有寄出的信放进口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-27: 没有寄出的信放进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-26: 没有寄出的信放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-25: 没有寄出的信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-24: 没有寄出的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-23: 没有寄出的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-22: 没有寄出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-21: 没有寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-20: 没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 19-20: 没有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-30: 寄出的信放进口袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-28: 寄出的信放进口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-27: 寄出的信放进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-26: 寄出的信放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-25: 寄出的信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-24: 寄出的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-23: 寄出的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-22: 寄出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 21-21: 寄
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-31: 出的信放进口袋,沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-30: 出的信放进口袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-28: 出的信放进口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-27: 出的信放进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-26: 出的信放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-25: 出的信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-24: 出的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 22-23: 出的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 22-22: 出
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-32: 的信放进口袋,沿着熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-31: 的信放进口袋,沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-30: 的信放进口袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-28: 的信放进口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-27: 的信放进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-26: 的信放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-25: 的信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-24: 的信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 23-23: 的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-33: 信放进口袋,沿着熟悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-32: 信放进口袋,沿着熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-31: 信放进口袋,沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-30: 信放进口袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-28: 信放进口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-27: 信放进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-26: 信放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-25: 信放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 24-24: 信
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-34: 放进口袋,沿着熟悉的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-33: 放进口袋,沿着熟悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-32: 放进口袋,沿着熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-31: 放进口袋,沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-30: 放进口袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-28: 放进口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-27: 放进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-26: 放进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 25-25: 放
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-35: 进口袋,沿着熟悉的小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-34: 进口袋,沿着熟悉的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-33: 进口袋,沿着熟悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-32: 进口袋,沿着熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-31: 进口袋,沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-30: 进口袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-28: 进口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-27: 进口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 26-26: 进
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-36: 口袋,沿着熟悉的小路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-35: 口袋,沿着熟悉的小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-34: 口袋,沿着熟悉的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-33: 口袋,沿着熟悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-32: 口袋,沿着熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-31: 口袋,沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-30: 口袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-28: 口袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 27-27: 口
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-37: 袋,沿着熟悉的小路往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-36: 袋,沿着熟悉的小路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-35: 袋,沿着熟悉的小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-34: 袋,沿着熟悉的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-33: 袋,沿着熟悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-32: 袋,沿着熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-31: 袋,沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-30: 袋,沿
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 28-28: 袋
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 29-29: ,
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-39: 沿着熟悉的小路往前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-38: 沿着熟悉的小路往前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-37: 沿着熟悉的小路往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-36: 沿着熟悉的小路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-35: 沿着熟悉的小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-34: 沿着熟悉的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-33: 沿着熟悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-32: 沿着熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-31: 沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 30-31: 沿着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-39: 熟悉的小路往前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-38: 熟悉的小路往前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-37: 熟悉的小路往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-36: 熟悉的小路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-35: 熟悉的小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-34: 熟悉的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-33: 熟悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 32-32: 熟
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-39: 悉的小路往前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-38: 悉的小路往前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-37: 悉的小路往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-36: 悉的小路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-35: 悉的小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-34: 悉的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 33-33: 悉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-39: 的小路往前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-38: 的小路往前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-37: 的小路往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-36: 的小路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-35: 的小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 34-34: 的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-39: 小路往前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-38: 小路往前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-37: 小路往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-36: 小路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 35-35: 小
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-39: 路往前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-38: 路往前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-37: 路往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 36-36: 路
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 37-39: 往前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 37-38: 往前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 37-37: 往
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-39: 前走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 38-38: 前
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 39-39: 走
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 40-40: .
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:48 After phrase matching: 雨_停_的_时_候_,_街角_的_灯_刚好_亮_了_._她_把_那_封_没有_寄_出_的_信_放_进_口_袋_,_沿着_熟_悉_的_小_路_往_前_走_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 雨: 'y0'(353),'u3'(305),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 停: 't0'(302),'ing2'(255),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 的: 'd0'(187),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 时: 'sh0'(301),'i2'(220),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 候: 'h0'(218),'ou4'(295),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 ,: ','(8),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [353, 305, 302, 255, 187, 192, 301, 220, 218, 295, 8]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 街角: 'j0'(268),'ie1'(244),'j0'(268),'iao3'(241),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 的: 'd0'(187),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 灯: 'd0'(187),'eng1'(203),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 刚好: 'g0'(213),'ang1'(174),'h0'(218),'ao3'(181),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 亮: 'l0'(270),'iang4'(237),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 了: 'l0'(270),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 .: '.'(10),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [268, 244, 268, 241, 187, 192, 187, 203, 213, 174, 218, 181, 270, 237, 270, 192, 10]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 她: 't0'(302),'a1'(159),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 把: 'b0'(184),'a3'(161),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 那: 'n0'(276),'a4'(162),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 封: 'f0'(212),'eng1'(203),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 没有: 'm0'(271),'ei2'(194),'y0'(353),'ou3'(294),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 寄: 'j0'(268),'i4'(222),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 出: 'ch0'(186),'u1'(303),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 的: 'd0'(187),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 信: 'x0'(352),'in4'(252),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 放: 'f0'(212),'ang4'(177),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 进: 'j0'(268),'in4'(252),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 口: 'k0'(269),'ou3'(294),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 袋: 'd0'(187),'ai4'(167),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 ,: ','(8),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [302, 159, 184, 161, 276, 162, 212, 203, 271, 194, 353, 294, 268, 222, 186, 303, 187, 192, 352, 252, 212, 177, 268, 252, 269, 294, 187, 167, 8]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 沿着: 'y0'(353),'an2'(170),'zh0'(355),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 熟: 'sh0'(301),'u2'(304),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 悉: 'x0'(352),'i1'(219),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 的: 'd0'(187),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 小: 'x0'(352),'iao3'(241),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 路: 'l0'(270),'u4'(306),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 往: 'w0'(351),'ang3'(176),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 前: 'q0'(298),'ian2'(230),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 走: 'z0'(354),'ou3'(294),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 .: '.'(10),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [353, 170, 355, 192, 301, 304, 352, 219, 187, 192, 352, 241, 270, 306, 351, 176, 298, 230, 354, 294, 10]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-zipvoice-impl.h:Generate:210 Processing 2/2: 风吹过树叶，她忽然觉得，明天也许会有新的答案。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:188 After replacing punctuations and merging spaces:
+风吹过树叶,她忽然觉得,明天也许会有新的答案.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:200 input text:
+风吹过树叶，她忽然觉得，明天也许会有新的答案。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:201 after replacing punctuations:
+风吹过树叶,她忽然觉得,明天也许会有新的答案.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:215 after splitting into UTF8:
+风_吹_过_树_叶_,_她_忽_然_觉_得_,_明_天_也_许_会_有_新_的_答_案_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:255 after removing spaces after punctuations:
+风_吹_过_树_叶_,_她_忽_然_觉_得_,_明_天_也_许_会_有_新_的_答_案_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:30 max_search_len 10
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-9: 风吹过树叶,她忽然觉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-8: 风吹过树叶,她忽然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-7: 风吹过树叶,她忽
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-6: 风吹过树叶,她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-4: 风吹过树叶
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-3: 风吹过树
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-2: 风吹过
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-1: 风吹
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 0-0: 风
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-10: 吹过树叶,她忽然觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-9: 吹过树叶,她忽然觉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-8: 吹过树叶,她忽然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-7: 吹过树叶,她忽
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-6: 吹过树叶,她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-4: 吹过树叶
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-3: 吹过树
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-2: 吹过
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 1-1: 吹
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-10: 过树叶,她忽然觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-9: 过树叶,她忽然觉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-8: 过树叶,她忽然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-7: 过树叶,她忽
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-6: 过树叶,她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-4: 过树叶
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-3: 过树
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 2-2: 过
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-12: 树叶,她忽然觉得,明
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-10: 树叶,她忽然觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-9: 树叶,她忽然觉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-8: 树叶,她忽然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-7: 树叶,她忽
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-6: 树叶,她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-4: 树叶
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 3-4: 树叶
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 5-5: ,
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-15: 她忽然觉得,明天也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-14: 她忽然觉得,明天也
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-13: 她忽然觉得,明天
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-12: 她忽然觉得,明
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-10: 她忽然觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-9: 她忽然觉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-8: 她忽然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-7: 她忽
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 6-6: 她
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-16: 忽然觉得,明天也许会
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-15: 忽然觉得,明天也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-14: 忽然觉得,明天也
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-13: 忽然觉得,明天
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-12: 忽然觉得,明
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-10: 忽然觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-9: 忽然觉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-8: 忽然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 7-7: 忽
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-17: 然觉得,明天也许会有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-16: 然觉得,明天也许会
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-15: 然觉得,明天也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-14: 然觉得,明天也
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-13: 然觉得,明天
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-12: 然觉得,明
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-10: 然觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-9: 然觉
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 8-8: 然
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-18: 觉得,明天也许会有新
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-17: 觉得,明天也许会有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-16: 觉得,明天也许会
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-15: 觉得,明天也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-14: 觉得,明天也
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-13: 觉得,明天
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-12: 觉得,明
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-10: 觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 9-10: 觉得
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 11-11: ,
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-21: 明天也许会有新的答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-20: 明天也许会有新的答
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-19: 明天也许会有新的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-18: 明天也许会有新
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-17: 明天也许会有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-16: 明天也许会
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-15: 明天也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-14: 明天也
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-13: 明天
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 12-12: 明
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-21: 天也许会有新的答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-20: 天也许会有新的答
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-19: 天也许会有新的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-18: 天也许会有新
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-17: 天也许会有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-16: 天也许会
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-15: 天也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-14: 天也
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 13-13: 天
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-21: 也许会有新的答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-20: 也许会有新的答
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-19: 也许会有新的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-18: 也许会有新
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-17: 也许会有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-16: 也许会
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-15: 也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 14-15: 也许
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-21: 会有新的答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-20: 会有新的答
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-19: 会有新的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-18: 会有新
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-17: 会有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 16-16: 会
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-21: 有新的答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-20: 有新的答
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-19: 有新的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-18: 有新
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 17-17: 有
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-21: 新的答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-20: 新的答
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-19: 新的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 18-18: 新
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-21: 的答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-20: 的答
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 19-19: 的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-21: 答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 20-21: 答案
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 22-22: .
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:48 After phrase matching: 风_吹_过_树叶_,_她_忽_然_觉得_,_明_天_也许_会_有_新_的_答案_.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 风: 'f0'(212),'eng1'(203),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 吹: 'ch0'(186),'ui1'(331),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 过: 'g0'(213),'uo4'(344),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 树叶: 'sh0'(301),'u4'(306),'y0'(353),'e4'(191),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 ,: ','(8),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [212, 203, 186, 331, 213, 344, 301, 306, 353, 191, 8]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 她: 't0'(302),'a1'(159),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 忽: 'h0'(218),'u1'(303),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 然: 'r0'(299),'an2'(170),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 觉得: 'j0'(268),'ue2'(328),'d0'(187),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 ,: ','(8),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [302, 159, 218, 303, 299, 170, 268, 328, 187, 192, 8]
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 明: 'm0'(271),'ing2'(255),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 天: 't0'(302),'ian1'(229),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 也许: 'y0'(353),'e2'(189),'x0'(352),'u3'(305),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 会: 'h0'(218),'ui4'(334),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 有: 'y0'(353),'ou3'(294),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 新: 'x0'(352),'in1'(249),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 的: 'd0'(187),'e5'(192),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 答案: 'd0'(187),'a2'(160),'an4'(172),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertWordToIds:363 .: '.'(10),
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/matcha-tts-lexicon.cc:ConvertTextToTokenIds:299 new sentence: [271, 255, 302, 229, 353, 189, 352, 305, 218, 334, 353, 294, 352, 249, 187, 192, 187, 160, 172, 10]
+Number of threads: 1
+Elapsed seconds: 52.312 s
+Audio duration: 11.063 s
+Real-time factor (RTF): 52.312/11.063 = 4.729
+The text is: 雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。风吹过树叶，她忽然觉得，明天也许会有新的答案。. Speaker ID: 0
+Saved to /workspace/tts-benchmark-20261017/small-medium/zipvoice-distill-fp32/wav/06.wav successfully!
+sample=201728, progress=0.500000
+sample=108544, progress=1.000000

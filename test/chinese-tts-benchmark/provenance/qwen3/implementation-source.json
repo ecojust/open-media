@@ -1,0 +1,27 @@
+{
+  "package": "qwen-tts",
+  "version": "0.1.1",
+  "pypi_url": "https://pypi.org/project/qwen-tts/0.1.1/",
+  "source_files": [
+    {
+      "filename": "qwen_tts-0.1.1-py3-none-any.whl",
+      "size": 113529,
+      "url": "https://files.pythonhosted.org/packages/31/01/95f3ae26f5b7eb2105f69ad2c15af5a28b9ebdd1258a0b27541f5ebd6225/qwen_tts-0.1.1-py3-none-any.whl",
+      "digests": {
+        "blake2b_256": "310195f3ae26f5b7eb2105f69ad2c15af5a28b9ebdd1258a0b27541f5ebd6225",
+        "md5": "0cdd362367d6c697cd65e3f9921c0acb",
+        "sha256": "11a290d8dabc7ef91a90c54478c8ab19b3edb1d85c0882313721892bdc4af15d"
+      }
+    },
+    {
+      "filename": "qwen_tts-0.1.1.tar.gz",
+      "size": 114131,
+      "url": "https://files.pythonhosted.org/packages/39/5d/b339c4f34f22ce838d39d1c015bbad103cd4003f6826ac3afaf1553973a0/qwen_tts-0.1.1.tar.gz",
+      "digests": {
+        "blake2b_256": "395db339c4f34f22ce838d39d1c015bbad103cd4003f6826ac3afaf1553973a0",
+        "md5": "4e27b2940b33841ed79b5427e4d12278",
+        "sha256": "afba5fa235806a6883f46a389e67540b46f8a55da457216bf1d7342903814780"
+      }
+    }
+  ]
+}

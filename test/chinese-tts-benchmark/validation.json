@@ -1,0 +1,22 @@
+{
+  "models": 4,
+  "samples_per_model": 10,
+  "samples": 40,
+  "unique_wav_hashes": 40,
+  "wav_bytes": 37955424,
+  "mp3_bytes": 10868966,
+  "audio_seconds": 516.578,
+  "near_full_scale_samples": 1,
+  "over_full_scale_samples": 1,
+  "provenance_files": 281,
+  "provenance_bytes": 12771928,
+  "validation": [
+    "10 条原文逐字一致，前端规范化输入另列",
+    "全部原始 WAV 实际解码并测量时长、采样率、峰值与 RMS",
+    "原始 WAV 复制前后 SHA256 一致",
+    "全部 MP3 实际解码并核对时长",
+    "完整模型组件按实际字节数排序",
+    "缺失耗时、来源、许可或大小计量范围时拒绝打包",
+    "原始记录、日志与参考证据递归复制前后 SHA256 一致"
+  ]
+}

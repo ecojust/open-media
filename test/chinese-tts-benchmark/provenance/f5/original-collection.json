@@ -1,0 +1,552 @@
+{
+  "model": "f5",
+  "sourceRun": "39048766863",
+  "repository": "ecojust/open-media",
+  "workflow": ".github/workflows/f5-benchmark.yml",
+  "sourceCommit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+  "collectionMode": "diagnostic",
+  "allowIncomplete": true,
+  "sourceUrl": "https://github.com/ecojust/open-media/actions/runs/39048766863",
+  "sourceConclusion": "failure",
+  "artifacts": [
+    {
+      "id": 12107252406,
+      "name": "f5-chinese-tts-39048766863-1",
+      "size_in_bytes": 1285643,
+      "digest": "sha256:c9c987e8996728838bfb30f1c61d80fed6a7c099bb199f3d5d76ac982f2b3152"
+    },
+    {
+      "id": 12107650055,
+      "name": "f5-chinese-tts-39048766863-3",
+      "size_in_bytes": 1561788,
+      "digest": "sha256:2310bb404026b1b5c2af25de9542ac1928af9cab08045b46475257bdac7a4297"
+    },
+    {
+      "id": 12107417289,
+      "name": "f5-chinese-tts-39048766863-5",
+      "size_in_bytes": 1685632,
+      "digest": "sha256:a4f57227beb01ba0d7b61e42c106ab9b2f99574f5312cb07ead1b2c10b4505fa"
+    },
+    {
+      "id": 12107107611,
+      "name": "f5-chinese-tts-39048766863-7",
+      "size_in_bytes": 1835539,
+      "digest": "sha256:c346609886d6b13a3c0f98a7fc0588ff016fcf0c3019ddea4117beabce2f2335"
+    },
+    {
+      "id": 12107428661,
+      "name": "f5-chinese-tts-39048766863-9",
+      "size_in_bytes": 1046576,
+      "digest": "sha256:2b71f4614050e2da11af9e56bffe1328aebc2d85cc39789552fdab3a4a1fa0b3"
+    }
+  ],
+  "collectedCorpusIds": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09"
+  ],
+  "missingCorpusIds": [
+    "10"
+  ],
+  "completeCorpus": false,
+  "incomplete": true,
+  "files": [
+    {
+      "path": "f5-chinese-tts-39048766863-1/manifest.json",
+      "bytes": 9716,
+      "sha256": "443ade3c1fe292a5a50c496ff233d3c07c999e294f14ef43daddd8e0c76650c7"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/hardware.json",
+      "bytes": 2057,
+      "sha256": "1b1793acf91d8ce6d6a68a131a1ef23cc40a8aab8d410bdeabe4b45a25da7259"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/reference.wav",
+      "bytes": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/records.json",
+      "bytes": 2501,
+      "sha256": "bda2fd6f14fe6185423ec4d18cdbdefd4c425534a0705b7b2b2f37fcb9f5d9e5"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/requirements-resolved.txt",
+      "bytes": 847,
+      "sha256": "ff3489c06f7fe0849621581097c331b4f3ea676fef80ef8baf710062faf8c87e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/sources.json",
+      "bytes": 3073,
+      "sha256": "6babb4016506e90a73b938e947a38c1f813143d7f6eb74a96404993134ac335d"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/reference.json",
+      "bytes": 707,
+      "sha256": "418b5898c6f7f5e785c807b4426a900db863eb624ced9ff80e1e6354231782dd"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/licenses/vocos-repository.json",
+      "bytes": 4455,
+      "sha256": "8c7ea6718915ddad7889f4cdb96f7fd2673ed441cca3fbd7e8303b771b1b3dfa"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/licenses/Vocos-MIT.txt",
+      "bytes": 1069,
+      "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/licenses/f5-repository.json",
+      "bytes": 6222,
+      "sha256": "44976594026a83b7c5074279670949901d13b90e6b8dfd426ec2e53dc947c346"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/licenses/CC-BY-NC-4.0.txt",
+      "bytes": 17649,
+      "sha256": "cc97a2c4ff7723a1f25179dc7c18f676fa84191bbb36ea7d0061acaf3c102559"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/licenses/sources.json",
+      "bytes": 297,
+      "sha256": "75246b175ff3cb66f860391bba89baf32a6c600050182ce0f535e4e64a3c62b1"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/licenses/F5-code-MIT.txt",
+      "bytes": 1068,
+      "sha256": "c70811d1402134de900e811d3eaa349eb60f4d38a8f635b27b1e378c630facd2"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/audio/02.wav",
+      "bytes": 634892,
+      "sha256": "43db7ec4f1014f6ecb9206bcbc765ac4fd12b5ee608b7bc5745d4a7432ab48ee"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/audio/01.mp3",
+      "bytes": 54573,
+      "sha256": "6fb5b1e077b9107e093c580c6802005958e13ae6f567a70fd5b91815c0dd1f84"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/audio/02.mp3",
+      "bytes": 213165,
+      "sha256": "0b95c5d30a89be05c3a77604e5dade4e3f6e0583613cf24da6244666eb3d90ee"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/audio/01.wav",
+      "bytes": 159276,
+      "sha256": "5e8e111868d80f8d6ba0f3e20c20845924ad4b7c8eb1f48e99a36cefdf6e670f"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/logs/environment.log",
+      "bytes": 2058,
+      "sha256": "c3d47a875b327de10b2657bb374ed15bd4481a2234adc9c58de17792aa3f5db6"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/logs/generation.log",
+      "bytes": 867,
+      "sha256": "35775fc878683901b0a721b1d9261065c1d55ad50cc91138473e7eaaf333c4b4"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-1/logs/download.log",
+      "bytes": 284,
+      "sha256": "272987a6e06c70d424993642aa9f6d7eda9f00b19702e8981a4d925aea4c3f94"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/manifest.json",
+      "bytes": 9679,
+      "sha256": "0b997325498f1aec4acd4dc1a257a1940efa21fe6845f468d3ff0eb2aae056c9"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/hardware.json",
+      "bytes": 2060,
+      "sha256": "8c3cfe1870a8843466135714ca1adb67ab3117cc7f0042bb30444b7ab898ccaa"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/reference.wav",
+      "bytes": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/records.json",
+      "bytes": 2475,
+      "sha256": "a54fac4728e8d24c893002c1f67054ed33044dfce07f277b9ac94a32444c5aa0"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/requirements-resolved.txt",
+      "bytes": 847,
+      "sha256": "ff3489c06f7fe0849621581097c331b4f3ea676fef80ef8baf710062faf8c87e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/sources.json",
+      "bytes": 3073,
+      "sha256": "6babb4016506e90a73b938e947a38c1f813143d7f6eb74a96404993134ac335d"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/reference.json",
+      "bytes": 707,
+      "sha256": "418b5898c6f7f5e785c807b4426a900db863eb624ced9ff80e1e6354231782dd"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/licenses/vocos-repository.json",
+      "bytes": 4455,
+      "sha256": "8c7ea6718915ddad7889f4cdb96f7fd2673ed441cca3fbd7e8303b771b1b3dfa"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/licenses/Vocos-MIT.txt",
+      "bytes": 1069,
+      "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/licenses/f5-repository.json",
+      "bytes": 6222,
+      "sha256": "44976594026a83b7c5074279670949901d13b90e6b8dfd426ec2e53dc947c346"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/licenses/CC-BY-NC-4.0.txt",
+      "bytes": 17649,
+      "sha256": "cc97a2c4ff7723a1f25179dc7c18f676fa84191bbb36ea7d0061acaf3c102559"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/licenses/sources.json",
+      "bytes": 297,
+      "sha256": "75246b175ff3cb66f860391bba89baf32a6c600050182ce0f535e4e64a3c62b1"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/licenses/F5-code-MIT.txt",
+      "bytes": 1068,
+      "sha256": "c70811d1402134de900e811d3eaa349eb60f4d38a8f635b27b1e378c630facd2"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/audio/04.mp3",
+      "bytes": 202029,
+      "sha256": "d1c9ecfaa02729930d23447d294e021885c0b785b2560211917ea23263fab99e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/audio/03.mp3",
+      "bytes": 178221,
+      "sha256": "427cc9e3fd0eaeee5f4af94c22ddf041a1a585469ead0bb9d9627e9a5de26635"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/audio/04.wav",
+      "bytes": 602156,
+      "sha256": "f9cee6ebb7d0aa856d88d70b44b3267780fc39b0e70bc66b4540a53987cb9df3"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/audio/03.wav",
+      "bytes": 530476,
+      "sha256": "435a43596f6d2fc72baf718f4e57c1cd057a3a73ea22c792e19cde74fbce3e4c"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/logs/environment.log",
+      "bytes": 2061,
+      "sha256": "44f9d5659035e3817d4067d262eb6f0277750f707c23f42aa4c290ea4239996a"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/logs/generation.log",
+      "bytes": 792,
+      "sha256": "f63d494891c301766723c42da503efd9998488b5b3e03f8af6577ae02131ae90"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-3/logs/download.log",
+      "bytes": 285,
+      "sha256": "e61c1d183e06b1e108082fd7368a59c0f2a409f9f18edf541ef6ac14a94bc548"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/manifest.json",
+      "bytes": 9958,
+      "sha256": "f337b74c33ac425ae5131fd1e8ed37824e572eeeec1fcc7f046ac84ec3156c63"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/hardware.json",
+      "bytes": 2057,
+      "sha256": "6d6288c52f595370115f50a5a84ea5b5e6600a2189f74e9613c94cd1b2efe880"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/reference.wav",
+      "bytes": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/records.json",
+      "bytes": 2742,
+      "sha256": "555ceacace677a70ac3f940dd8840f616db24b9f1fd1b28c1207f767a38073e2"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/requirements-resolved.txt",
+      "bytes": 847,
+      "sha256": "ff3489c06f7fe0849621581097c331b4f3ea676fef80ef8baf710062faf8c87e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/sources.json",
+      "bytes": 3073,
+      "sha256": "6babb4016506e90a73b938e947a38c1f813143d7f6eb74a96404993134ac335d"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/reference.json",
+      "bytes": 707,
+      "sha256": "418b5898c6f7f5e785c807b4426a900db863eb624ced9ff80e1e6354231782dd"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/licenses/vocos-repository.json",
+      "bytes": 4455,
+      "sha256": "8c7ea6718915ddad7889f4cdb96f7fd2673ed441cca3fbd7e8303b771b1b3dfa"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/licenses/Vocos-MIT.txt",
+      "bytes": 1069,
+      "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/licenses/f5-repository.json",
+      "bytes": 6222,
+      "sha256": "44976594026a83b7c5074279670949901d13b90e6b8dfd426ec2e53dc947c346"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/licenses/CC-BY-NC-4.0.txt",
+      "bytes": 17649,
+      "sha256": "cc97a2c4ff7723a1f25179dc7c18f676fa84191bbb36ea7d0061acaf3c102559"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/licenses/sources.json",
+      "bytes": 297,
+      "sha256": "75246b175ff3cb66f860391bba89baf32a6c600050182ce0f535e4e64a3c62b1"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/licenses/F5-code-MIT.txt",
+      "bytes": 1068,
+      "sha256": "c70811d1402134de900e811d3eaa349eb60f4d38a8f635b27b1e378c630facd2"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/audio/06.mp3",
+      "bytes": 216237,
+      "sha256": "0763f445968d637611b850060bf9e02167072482d796b3f6c9d1d94288d81fbf"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/audio/05.wav",
+      "bytes": 561196,
+      "sha256": "c9159c796411c2e5dd0768fd94073b0f38b1c4b3823c9e0ec9b424d30478f52e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/audio/06.wav",
+      "bytes": 645132,
+      "sha256": "bbd6b8d0f4fe9557b556b7923fc878896b587fd613d6b9cb1b39d56ffe38288f"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/audio/05.mp3",
+      "bytes": 188589,
+      "sha256": "70404890f23e2e156ebe0f998c8ea1a532ceb53503320d5c03a202e4758dee84"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/logs/environment.log",
+      "bytes": 2058,
+      "sha256": "416388ef0a6f383493632aa1013bb91cd81bab56a36b6d310dc70a841fdd7b6b"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/logs/generation.log",
+      "bytes": 988,
+      "sha256": "d9a3c23b116c0eb317fe1473d816d9161fce28f25d3224332f4df0085c4aa3b6"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-5/logs/download.log",
+      "bytes": 284,
+      "sha256": "64ffa3112312d3ae9e9f76dbf380ff6b15139104c84e1d73bb52411b7ed799ec"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/manifest.json",
+      "bytes": 10016,
+      "sha256": "036520b83815b7ad02252f766df1c8d8330af45b0a613adab138b87591832df4"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/hardware.json",
+      "bytes": 2057,
+      "sha256": "73fea29b30b67025d159b4f5a9d854401f4939b84479fe7b818de75689c52704"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/reference.wav",
+      "bytes": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/records.json",
+      "bytes": 2801,
+      "sha256": "d7a1537cb57ad806898ce1d52ce015676916428c9bf246258005d892d88f0e1e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/requirements-resolved.txt",
+      "bytes": 847,
+      "sha256": "ff3489c06f7fe0849621581097c331b4f3ea676fef80ef8baf710062faf8c87e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/sources.json",
+      "bytes": 3073,
+      "sha256": "6babb4016506e90a73b938e947a38c1f813143d7f6eb74a96404993134ac335d"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/reference.json",
+      "bytes": 707,
+      "sha256": "418b5898c6f7f5e785c807b4426a900db863eb624ced9ff80e1e6354231782dd"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/licenses/vocos-repository.json",
+      "bytes": 4455,
+      "sha256": "8c7ea6718915ddad7889f4cdb96f7fd2673ed441cca3fbd7e8303b771b1b3dfa"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/licenses/Vocos-MIT.txt",
+      "bytes": 1069,
+      "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/licenses/f5-repository.json",
+      "bytes": 6222,
+      "sha256": "44976594026a83b7c5074279670949901d13b90e6b8dfd426ec2e53dc947c346"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/licenses/CC-BY-NC-4.0.txt",
+      "bytes": 17649,
+      "sha256": "cc97a2c4ff7723a1f25179dc7c18f676fa84191bbb36ea7d0061acaf3c102559"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/licenses/sources.json",
+      "bytes": 297,
+      "sha256": "75246b175ff3cb66f860391bba89baf32a6c600050182ce0f535e4e64a3c62b1"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/licenses/F5-code-MIT.txt",
+      "bytes": 1068,
+      "sha256": "c70811d1402134de900e811d3eaa349eb60f4d38a8f635b27b1e378c630facd2"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/audio/07.mp3",
+      "bytes": 208941,
+      "sha256": "dba22cef69f57ff0122e62dc15ba0df373efd21dfbeecee18b52386ff8c1833c"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/audio/08.mp3",
+      "bytes": 226605,
+      "sha256": "414b07464f4e016cac65b414e385014607a88daf6760d41a4923f9e25380a0a3"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/audio/08.wav",
+      "bytes": 675852,
+      "sha256": "79f9c9f5fbf2cd7ac7f845866c285be13e5cb1543fa6f9f3cf81970a90c0b4a0"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/audio/07.wav",
+      "bytes": 622636,
+      "sha256": "d23dd64d091c78afd52765ecd837e34544ebbd27c52661d41259fdd508e7cf70"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/logs/environment.log",
+      "bytes": 2058,
+      "sha256": "ef3b90ea8a1d927ef93276d74c8d215845ddc907977d48a91e173241ac299b0a"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/logs/generation.log",
+      "bytes": 1018,
+      "sha256": "d8a220b898a16cd77c374e41716b3989787b29855b3d5bb462a978ad2918da59"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-7/logs/download.log",
+      "bytes": 285,
+      "sha256": "e3e8b8f16a85e6af9a000dfad32ab346d5f74d345759f196297052b67af95ec7"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/manifest.json",
+      "bytes": 8481,
+      "sha256": "1371ee8447ebefc3ab1c703fc8d07064e9faf1055275a239da0a3f2888c596b1"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/hardware.json",
+      "bytes": 2057,
+      "sha256": "4a79b3cbaaa0057071c60f3bce574e392444df5deef1de6266dcd9c9cc952820"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/reference.wav",
+      "bytes": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/records.json",
+      "bytes": 1259,
+      "sha256": "cb3913bbcb5f53cc83556d24f82a1a0004298b0dec5206bb30c031fb74c6f5a9"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/requirements-resolved.txt",
+      "bytes": 847,
+      "sha256": "ff3489c06f7fe0849621581097c331b4f3ea676fef80ef8baf710062faf8c87e"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/sources.json",
+      "bytes": 3073,
+      "sha256": "6babb4016506e90a73b938e947a38c1f813143d7f6eb74a96404993134ac335d"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/reference.json",
+      "bytes": 707,
+      "sha256": "418b5898c6f7f5e785c807b4426a900db863eb624ced9ff80e1e6354231782dd"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/licenses/vocos-repository.json",
+      "bytes": 4455,
+      "sha256": "8c7ea6718915ddad7889f4cdb96f7fd2673ed441cca3fbd7e8303b771b1b3dfa"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/licenses/Vocos-MIT.txt",
+      "bytes": 1069,
+      "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/licenses/f5-repository.json",
+      "bytes": 6222,
+      "sha256": "44976594026a83b7c5074279670949901d13b90e6b8dfd426ec2e53dc947c346"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/licenses/CC-BY-NC-4.0.txt",
+      "bytes": 17649,
+      "sha256": "cc97a2c4ff7723a1f25179dc7c18f676fa84191bbb36ea7d0061acaf3c102559"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/licenses/sources.json",
+      "bytes": 297,
+      "sha256": "75246b175ff3cb66f860391bba89baf32a6c600050182ce0f535e4e64a3c62b1"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/licenses/F5-code-MIT.txt",
+      "bytes": 1068,
+      "sha256": "c70811d1402134de900e811d3eaa349eb60f4d38a8f635b27b1e378c630facd2"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/audio/09.wav",
+      "bytes": 567852,
+      "sha256": "14f7c824a94c1157199000ebcc64409281335c70ba2ed9e4b4d3f299f9786174"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/audio/09.mp3",
+      "bytes": 190509,
+      "sha256": "920fbe394c42ba59dba2277db7bd84a1f75c781d29205079798ee5b0c8ff0cc3"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/logs/environment.log",
+      "bytes": 2058,
+      "sha256": "c63c19d4f7c7e629c940d48e00e80b48538d66d0e7b084a907213d13f0bb57a5"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/logs/generation.log",
+      "bytes": 1620,
+      "sha256": "42ca7da6de7b7d416caaa9ea68d554b2efdc8a580bdac8a8fe0fe4912aa600ea"
+    },
+    {
+      "path": "f5-chinese-tts-39048766863-9/logs/download.log",
+      "bytes": 284,
+      "sha256": "4129ec87ef9e4a859a1441e8355bfb6830e7f465d90fc26920551fca2200d99c"
+    }
+  ],
+  "totalBytes": 9037628
+}

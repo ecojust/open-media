@@ -1,0 +1,584 @@
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/parse-options.cc:Read:374 /tmp/open-media-tts-audit/sherpa-onnx-v1.13.8-linux-x64-shared/bin/sherpa-onnx-offline-tts --vits-model=/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/model.onnx --vits-lexicon=/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/lexicon.txt --vits-tokens=/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/tokens.txt --tts-rule-fsts=/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/date.fst,/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/number.fst --sid=0 --num-threads=1 --speed=1 --tts-silence-scale=1 --tts-max-num-sentences=1 --debug=true --output-filename=/workspace/tts-benchmark-20261017/small-medium/melo-fp32/wav/03.wav '你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。' 
+
+OfflineTtsModelConfig(vits=OfflineTtsVitsModelConfig(model="/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/model.onnx", lexicon="/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/lexicon.txt", tokens="/workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/tokens.txt", data_dir="", noise_scale=0.667, noise_scale_w=0.8, length_scale=1), matcha=OfflineTtsMatchaModelConfig(acoustic_model="", vocoder="", lexicon="", tokens="", data_dir="", noise_scale=1, length_scale=1), kokoro=OfflineTtsKokoroModelConfig(model="", voices="", tokens="", lexicon="", data_dir="", length_scale=1, lang=""), zipvoice=OfflineTtsZipvoiceModelConfig(tokens="", encoder="", decoder="", vocoder="", data_dir="", lexicon="", feat_scale=0.1, t_shift=0.5, target_rms=0.1, guidance_scale=1), kitten=OfflineTtsKittenModelConfig(model="", voices="", tokens="", data_dir="", length_scale=1), pocket=OfflineTtsPocketModelConfig(lm_flow="", lm_main="", encoder="", decoder="", text_conditioner="", vocab_json="", token_scores_json="", voice_embedding_cache_capacity=50), supertonic=OfflineTtsSupertonicModelConfig(duration_predictor="", text_encoder="", vector_estimator="", vocoder="", tts_json="", unicode_indexer="", voice_style=""), num_threads=1, debug=True, provider="cpu")
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-model.cc:Init:164 ---vits model---
+description=MeloTTS is a high-quality multi-lingual text-to-speech library by MyShell.ai
+license=MIT license
+url=https://github.com/myshell-ai/MeloTTS
+model_type=melo-vits
+version=2
+sample_rate=44100
+add_blank=1
+n_speakers=1
+jieba=1
+bert_dim=1024
+language=Chinese + English
+ja_bert_dim=768
+speaker_id=1
+comment=melo
+lang_id=3
+tone_start=0
+----------input names----------
+0 x
+1 x_lengths
+2 tones
+3 sid
+4 noise_scale
+5 length_scale
+6 noise_scale_w
+----------output names----------
+0 y
+
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-impl.h:OfflineTtsVitsImpl:47 rule fst: /workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/date.fst
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-impl.h:OfflineTtsVitsImpl:47 rule fst: /workspace/tts-comparison-20261017/models/melo/vits-melo-tts-zh_en/number.fst
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-impl.h:Generate:158 GenerationConfig(silence_scale=0.2, speed=1, sid=0, num_steps=5, reference_audio_len=0, reference_sample_rate=0)
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-impl.h:Generate:242 Raw text: 你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-impl.h:Generate:253 After normalizing: 你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-impl.h:Generate:253 After normalizing: 你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:90 input text:
+你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:91 after replacing punctuations:
+你真的准备好了吗?等一下，先别急着按开始.我们再检查一次声音，好吗?嗯，这次听起来清楚多了，可以开始了.
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:105 after splitting into UTF8:
+你_真_的_准_备_好_了_吗_？_等_一_下_，_先_别_急_着_按_开_始_。_我_们_再_检_查_一_次_声_音_，_好_吗_？_嗯_，_这_次_听_起_来_清_楚_多_了_，_可_以_开_始_了_。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:30 max_search_len 10
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-9: 你真的准备好了吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-8: 你真的准备好了吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-7: 你真的准备好了吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-6: 你真的准备好了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-5: 你真的准备好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-4: 你真的准备
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-3: 你真的准
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-2: 你真的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 0-1: 你真
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 0-0: 你
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-10: 真的准备好了吗？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-9: 真的准备好了吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-8: 真的准备好了吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-7: 真的准备好了吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-6: 真的准备好了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-5: 真的准备好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-4: 真的准备
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-3: 真的准
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 1-2: 真的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 1-1: 真
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-11: 的准备好了吗？等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-10: 的准备好了吗？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-9: 的准备好了吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-8: 的准备好了吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-7: 的准备好了吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-6: 的准备好了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-5: 的准备好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-4: 的准备
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 2-3: 的准
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 2-2: 的
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-12: 准备好了吗？等一下，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-11: 准备好了吗？等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-10: 准备好了吗？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-9: 准备好了吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-8: 准备好了吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-7: 准备好了吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-6: 准备好了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-5: 准备好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 3-4: 准备
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 3-3: 准
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-13: 备好了吗？等一下，先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-12: 备好了吗？等一下，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-11: 备好了吗？等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-10: 备好了吗？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-9: 备好了吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-8: 备好了吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-7: 备好了吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-6: 备好了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 4-5: 备好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 4-4: 备
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-14: 好了吗？等一下，先别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-13: 好了吗？等一下，先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-12: 好了吗？等一下，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-11: 好了吗？等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-10: 好了吗？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-9: 好了吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-8: 好了吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-7: 好了吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 5-6: 好了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 5-5: 好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-15: 了吗？等一下，先别急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-14: 了吗？等一下，先别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-13: 了吗？等一下，先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-12: 了吗？等一下，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-11: 了吗？等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-10: 了吗？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-9: 了吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-8: 了吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 6-7: 了吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 6-6: 了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-16: 吗？等一下，先别急着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-15: 吗？等一下，先别急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-14: 吗？等一下，先别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-13: 吗？等一下，先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-12: 吗？等一下，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-11: 吗？等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-10: 吗？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-9: 吗？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 7-8: 吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 7-7: 吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-17: ？等一下，先别急着按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-16: ？等一下，先别急着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-15: ？等一下，先别急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-14: ？等一下，先别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-13: ？等一下，先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-12: ？等一下，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-11: ？等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-10: ？等一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 8-9: ？等
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 8-8: ？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-18: 等一下，先别急着按开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-17: 等一下，先别急着按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-16: 等一下，先别急着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-15: 等一下，先别急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-14: 等一下，先别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-13: 等一下，先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-12: 等一下，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 9-11: 等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 9-11: 等一下
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-21: ，先别急着按开始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-20: ，先别急着按开始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-19: ，先别急着按开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-18: ，先别急着按开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-17: ，先别急着按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-16: ，先别急着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-15: ，先别急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-14: ，先别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 12-13: ，先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 12-12: ，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-22: 先别急着按开始。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-21: 先别急着按开始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-20: 先别急着按开始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-19: 先别急着按开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-18: 先别急着按开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-17: 先别急着按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-16: 先别急着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-15: 先别急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 13-14: 先别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 13-13: 先
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-23: 别急着按开始。我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-22: 别急着按开始。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-21: 别急着按开始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-20: 别急着按开始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-19: 别急着按开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-18: 别急着按开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-17: 别急着按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-16: 别急着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 14-15: 别急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 14-14: 别
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-24: 急着按开始。我们再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-23: 急着按开始。我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-22: 急着按开始。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-21: 急着按开始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-20: 急着按开始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-19: 急着按开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-18: 急着按开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-17: 急着按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 15-16: 急着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 15-15: 急
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-25: 着按开始。我们再检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-24: 着按开始。我们再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-23: 着按开始。我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-22: 着按开始。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-21: 着按开始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-20: 着按开始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-19: 着按开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-18: 着按开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 16-17: 着按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 16-16: 着
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-26: 按开始。我们再检查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-25: 按开始。我们再检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-24: 按开始。我们再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-23: 按开始。我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-22: 按开始。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-21: 按开始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-20: 按开始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-19: 按开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 17-18: 按开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 17-17: 按
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-27: 开始。我们再检查一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-26: 开始。我们再检查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-25: 开始。我们再检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-24: 开始。我们再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-23: 开始。我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-22: 开始。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-21: 开始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-20: 开始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 18-19: 开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 18-18: 开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-28: 始。我们再检查一次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-27: 始。我们再检查一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-26: 始。我们再检查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-25: 始。我们再检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-24: 始。我们再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-23: 始。我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-22: 始。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-21: 始。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 19-20: 始。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 19-19: 始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-29: 。我们再检查一次声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-28: 。我们再检查一次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-27: 。我们再检查一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-26: 。我们再检查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-25: 。我们再检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-24: 。我们再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-23: 。我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-22: 。我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 20-21: 。我
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 20-20: 。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-30: 我们再检查一次声音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-29: 我们再检查一次声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-28: 我们再检查一次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-27: 我们再检查一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-26: 我们再检查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-25: 我们再检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-24: 我们再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-23: 我们再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 21-22: 我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 21-22: 我们
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-32: 再检查一次声音，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-31: 再检查一次声音，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-30: 再检查一次声音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-29: 再检查一次声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-28: 再检查一次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-27: 再检查一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-26: 再检查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-25: 再检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 23-24: 再检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 23-23: 再
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-33: 检查一次声音，好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-32: 检查一次声音，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-31: 检查一次声音，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-30: 检查一次声音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-29: 检查一次声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-28: 检查一次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-27: 检查一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-26: 检查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 24-25: 检查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 24-24: 检
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-34: 查一次声音，好吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-33: 查一次声音，好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-32: 查一次声音，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-31: 查一次声音，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-30: 查一次声音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-29: 查一次声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-28: 查一次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-27: 查一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 25-26: 查一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 25-25: 查
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-35: 一次声音，好吗？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-34: 一次声音，好吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-33: 一次声音，好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-32: 一次声音，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-31: 一次声音，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-30: 一次声音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-29: 一次声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-28: 一次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 26-27: 一次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 26-26: 一
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-36: 次声音，好吗？嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-35: 次声音，好吗？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-34: 次声音，好吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-33: 次声音，好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-32: 次声音，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-31: 次声音，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-30: 次声音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-29: 次声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 27-28: 次声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 27-27: 次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-37: 声音，好吗？嗯，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-36: 声音，好吗？嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-35: 声音，好吗？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-34: 声音，好吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-33: 声音，好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-32: 声音，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-31: 声音，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-30: 声音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 28-29: 声音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 28-28: 声
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-38: 音，好吗？嗯，这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-37: 音，好吗？嗯，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-36: 音，好吗？嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-35: 音，好吗？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-34: 音，好吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-33: 音，好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-32: 音，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-31: 音，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 29-30: 音，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 29-29: 音
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-39: ，好吗？嗯，这次听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-38: ，好吗？嗯，这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-37: ，好吗？嗯，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-36: ，好吗？嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-35: ，好吗？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-34: ，好吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-33: ，好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-32: ，好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 30-31: ，好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 30-30: ，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-40: 好吗？嗯，这次听起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-39: 好吗？嗯，这次听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-38: 好吗？嗯，这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-37: 好吗？嗯，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-36: 好吗？嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-35: 好吗？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-34: 好吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-33: 好吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 31-32: 好吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 31-31: 好
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-41: 吗？嗯，这次听起来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-40: 吗？嗯，这次听起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-39: 吗？嗯，这次听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-38: 吗？嗯，这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-37: 吗？嗯，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-36: 吗？嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-35: 吗？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-34: 吗？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 32-33: 吗？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 32-32: 吗
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-42: ？嗯，这次听起来清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-41: ？嗯，这次听起来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-40: ？嗯，这次听起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-39: ？嗯，这次听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-38: ？嗯，这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-37: ？嗯，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-36: ？嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-35: ？嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 33-34: ？嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 33-33: ？
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-43: 嗯，这次听起来清楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-42: 嗯，这次听起来清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-41: 嗯，这次听起来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-40: 嗯，这次听起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-39: 嗯，这次听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-38: 嗯，这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-37: 嗯，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-36: 嗯，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 34-35: 嗯，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 34-34: 嗯
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-44: ，这次听起来清楚多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-43: ，这次听起来清楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-42: ，这次听起来清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-41: ，这次听起来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-40: ，这次听起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-39: ，这次听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-38: ，这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-37: ，这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 35-36: ，这
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 35-35: ，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-45: 这次听起来清楚多了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-44: 这次听起来清楚多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-43: 这次听起来清楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-42: 这次听起来清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-41: 这次听起来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-40: 这次听起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-39: 这次听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-38: 这次听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 36-37: 这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 36-37: 这次
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-47: 听起来清楚多了，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-46: 听起来清楚多了，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-45: 听起来清楚多了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-44: 听起来清楚多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-43: 听起来清楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-42: 听起来清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-41: 听起来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-40: 听起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 38-39: 听起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 38-38: 听
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-48: 起来清楚多了，可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-47: 起来清楚多了，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-46: 起来清楚多了，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-45: 起来清楚多了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-44: 起来清楚多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-43: 起来清楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-42: 起来清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-41: 起来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 39-40: 起来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 39-39: 起
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-49: 来清楚多了，可以开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-48: 来清楚多了，可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-47: 来清楚多了，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-46: 来清楚多了，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-45: 来清楚多了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-44: 来清楚多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-43: 来清楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-42: 来清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 40-41: 来清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 40-40: 来
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-50: 清楚多了，可以开始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-49: 清楚多了，可以开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-48: 清楚多了，可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-47: 清楚多了，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-46: 清楚多了，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-45: 清楚多了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-44: 清楚多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-43: 清楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 41-42: 清楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 41-41: 清
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-51: 楚多了，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-50: 楚多了，可以开始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-49: 楚多了，可以开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-48: 楚多了，可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-47: 楚多了，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-46: 楚多了，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-45: 楚多了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-44: 楚多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 42-43: 楚多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 42-42: 楚
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-51: 多了，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-50: 多了，可以开始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-49: 多了，可以开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-48: 多了，可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-47: 多了，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-46: 多了，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-45: 多了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 43-44: 多了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 43-43: 多
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 44-51: 了，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 44-50: 了，可以开始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 44-49: 了，可以开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 44-48: 了，可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 44-47: 了，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 44-46: 了，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 44-45: 了，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 44-44: 了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 45-51: ，可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 45-50: ，可以开始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 45-49: ，可以开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 45-48: ，可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 45-47: ，可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 45-46: ，可
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 45-45: ，
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 46-51: 可以开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 46-50: 可以开始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 46-49: 可以开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 46-48: 可以开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 46-47: 可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:91 matched 46-47: 可以
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 48-51: 开始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 48-50: 开始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 48-49: 开始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 48-48: 开
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 49-51: 始了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 49-50: 始了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 49-49: 始
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:80 50-51: 了。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 50-50: 了
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Build:109 single word 51-51: 。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/phrase-matcher.cc:Impl:48 After phrase matching: 你_真_的_准_备_好_了_吗_？_等一下_，_先_别_急_着_按_开_始_。_我们_再_检_查_一_次_声_音_，_好_吗_？_嗯_，_这次_听_起_来_清_楚_多_了_，_可以_开_始_了_。
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 你: n i 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 真: zh en 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 的: d e 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 准: zh un 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 备: b ei 4 4 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 好: h ao 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 了: l e 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 吗: m a 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 ？: ? 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 等一下: d eng y i x ia 3 3 2 2 4 4 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 ，: , 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 先: x ian 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 别: b ie 2 2 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 急: j i 2 2 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 着: zh e 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 按: AA an 4 4 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 开: k ai 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 始: sh ir 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 。: . 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 我们: w o m en 3 3 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 再: z ai 4 4 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 检: j ian 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 查: ch a 2 2 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 一: y i 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 次: c i0 4 4 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 声: sh eng 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 音: y in 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 ，: , 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 好: h ao 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 吗: m a 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 ？: ? 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 嗯: EE en 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 ，: , 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 这次: zh e c i0 4 4 4 4 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 听: t ing 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 起: q i 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 来: l ai 2 2 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 清: q ing 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 楚: ch u 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 多: d uo 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 了: l e 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 ，: , 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 可以: k e y i 3 3 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 开: k ai 1 1 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 始: sh ir 3 3 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 了: l e 5 5 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/melo-tts-lexicon.cc:ConvertTextToTokenIds:139 。: . 0 
+
+/home/runner/work/sherpa-onnx/sherpa-onnx/sherpa-onnx/csrc/offline-tts-vits-impl.h:Generate:324 Text is too long. Split it into 8 batches. batch size: 1. Number of sentences: 8
+Number of threads: 1
+Elapsed seconds: 10.723 s
+Audio duration: 8.791 s
+Real-time factor (RTF): 10.723/8.791 = 1.220
+The text is: 你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。. Speaker ID: 0
+Saved to /workspace/tts-benchmark-20261017/small-medium/melo-fp32/wav/03.wav successfully!
+sample=60928, progress=0.125000
+sample=23552, progress=0.250000
+sample=65024, progress=0.375000
+sample=72704, progress=0.500000
+sample=27136, progress=0.625000
+sample=14438, progress=0.750000
+sample=77312, progress=0.875000
+sample=46592, progress=1.000000

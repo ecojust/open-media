@@ -1,0 +1,9 @@
+{
+  "valid": true,
+  "files_verified": 29,
+  "collection_source_run": "39048371487",
+  "collection_source_commit": "46a50b71769f971bfc75c44a29875cbaa85f6f75",
+  "collection_branch_commit": "2a40e832570afc7e270077ad0bba4b8e6080ffc7",
+  "original_manifest_sha256": "2a85b3dea52bc6d771f070cca2288c3008fe3ffb387f374cea5d87970e36a25c",
+  "note": "The immutable original manifest is checked against collection.json; normalized metadata is kept separately."
+}

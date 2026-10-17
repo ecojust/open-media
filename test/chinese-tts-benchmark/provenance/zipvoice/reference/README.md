@@ -1,0 +1,3 @@
+此参考音频由既有内置模型真实合成，不是真人录音。原文：你好，这是一段语音试听。让文字拥有清晰自然的声音。
+SHA256: e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec
+来源参数与原始WAV摘要见 source-manifest.json；正式清单reference_audio也保留完整来源。

@@ -1,3 +1,9 @@
 * text=auto eol=lf
 # Preserve original license and attribution bytes, including source line endings.
 licenses/** -text -whitespace
+
+# Preserve the exact bytes of listening samples and their checksummed records.
+test/chinese-tts-benchmark/** -text
+test/chinese-tts-benchmark/licenses/** -whitespace
+test/chinese-tts-benchmark/provenance/** -whitespace
+test/chinese-tts-benchmark/scripts/f5-licenses/** -whitespace

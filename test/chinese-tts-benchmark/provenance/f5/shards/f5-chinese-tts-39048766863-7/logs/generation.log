@@ -1,0 +1,6 @@
+loaded 1.9963921399999975
+07 chunk 0 {'text': '清晨六点，山谷还笼罩在薄雾之中。第一束阳光越过山脊，照亮远处的村庄。我们沿着河流向北出发，去寻找地图上那个没有名字的小镇。', 'seed': 20261717, 'speed': 1.0, 'framesIncludingReference': 2035, 'seconds': 526.937101, 'audioSeconds': 12.970666666666666}
+COMPLETE 07 526.94 s, audio 12.970666666666666 s, peak 0.7360169887542725
+08 chunk 0 {'text': '首先，把需要剪辑的视频拖入素材区。然后，将片段放到时间线上，移动播放头，找到需要保留的画面。最后检查字幕和背景音乐，', 'seed': 20261817, 'speed': 1.0, 'framesIncludingReference': 1975, 'seconds': 512.6546754420001, 'audioSeconds': 12.330666666666668}
+08 chunk 1 {'text': '确认无误后再导出。', 'seed': 20261818, 'speed': 1.0, 'framesIncludingReference': 997, 'seconds': 224.64462606799998, 'audioSeconds': 1.8986666666666667}
+COMPLETE 08 737.3 s, audio 14.079333333333333 s, peak 0.8500127196311951

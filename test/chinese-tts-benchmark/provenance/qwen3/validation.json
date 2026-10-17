@@ -1,0 +1,110 @@
+{
+  "valid": true,
+  "count": 10,
+  "model_download_bytes": 4520159586,
+  "peak_rss_bytes": 6383267840,
+  "total_audio_seconds": 143.52,
+  "total_generation_seconds": 801.993168616,
+  "samples": [
+    {
+      "id": "01",
+      "audio_seconds": 3.36,
+      "generation_seconds": 20.03522161799998,
+      "raw_peak": 0.40625,
+      "decoded_mp3_peak": 0.3852290213108063,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 322640,
+      "mp3_bytes": 54957
+    },
+    {
+      "id": "02",
+      "audio_seconds": 12.08,
+      "generation_seconds": 67.96160957099994,
+      "raw_peak": 0.3046875,
+      "decoded_mp3_peak": 0.29027336835861206,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1159760,
+      "mp3_bytes": 194733
+    },
+    {
+      "id": "03",
+      "audio_seconds": 11.84,
+      "generation_seconds": 66.0366028850001,
+      "raw_peak": 0.3671875,
+      "decoded_mp3_peak": 0.3494563698768616,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1136720,
+      "mp3_bytes": 190893
+    },
+    {
+      "id": "04",
+      "audio_seconds": 11.28,
+      "generation_seconds": 62.32958983499998,
+      "raw_peak": 0.5,
+      "decoded_mp3_peak": 0.47481581568717957,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1082960,
+      "mp3_bytes": 181677
+    },
+    {
+      "id": "05",
+      "audio_seconds": 11.68,
+      "generation_seconds": 65.01151620200005,
+      "raw_peak": 0.462890625,
+      "decoded_mp3_peak": 0.437993586063385,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1121360,
+      "mp3_bytes": 188205
+    },
+    {
+      "id": "06",
+      "audio_seconds": 14.08,
+      "generation_seconds": 79.00312933800001,
+      "raw_peak": 0.265625,
+      "decoded_mp3_peak": 0.2513624131679535,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1351760,
+      "mp3_bytes": 226605
+    },
+    {
+      "id": "07",
+      "audio_seconds": 12.88,
+      "generation_seconds": 71.93396694700004,
+      "raw_peak": 0.486328125,
+      "decoded_mp3_peak": 0.46096619963645935,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1236560,
+      "mp3_bytes": 207405
+    },
+    {
+      "id": "08",
+      "audio_seconds": 16.08,
+      "generation_seconds": 87.85861710500001,
+      "raw_peak": 0.408203125,
+      "decoded_mp3_peak": 0.3892119526863098,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1543760,
+      "mp3_bytes": 258477
+    },
+    {
+      "id": "09",
+      "audio_seconds": 18.72,
+      "generation_seconds": 104.08028829800003,
+      "raw_peak": 0.3359375,
+      "decoded_mp3_peak": 0.31698065996170044,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 1797200,
+      "mp3_bytes": 300717
+    },
+    {
+      "id": "10",
+      "audio_seconds": 31.52,
+      "generation_seconds": 177.74262681699997,
+      "raw_peak": 0.310546875,
+      "decoded_mp3_peak": 0.29669812321662903,
+      "raw_samples_over_full_scale": 0,
+      "wav_bytes": 3026000,
+      "mp3_bytes": 505773
+    }
+  ]
+}

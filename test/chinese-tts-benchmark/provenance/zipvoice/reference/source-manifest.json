@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "texts": {
+    "zh": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
+    "en": "Hello, this is a voice preview. Let your story come to life with a clear and natural voice."
+  },
+  "settings": {
+    "speed": 1,
+    "silenceScale": 0.2,
+    "sampleRate": 16000,
+    "noiseScale": 1,
+    "channels": 1,
+    "bitrate": 64000,
+    "threads": 2
+  },
+  "model": {
+    "id": "matcha-icefall-zh-en",
+    "version": "20251125-steps-3",
+    "sha256": "524286bf6cf11be74329ae1c682ac69e34d6860c2ea9fd1290319d561540b16a",
+    "vocoderSha256": "b599142a1fb8ff03de3e84ac35ff537c619e56f4267a6fe894851a42844acf9e"
+  },
+  "engine": {
+    "id": "sherpa-onnx",
+    "version": "1.13.8",
+    "librarySha256": "b8351ca1632571ac108adbb317bcc4bf7cfe84b72690e3017316b0da3e1e344f"
+  },
+  "generator": {
+    "mode": "existing-c-api",
+    "scriptSha256": "0ca3f9bd1f84caaa1e609ffbcac77afb2820de544fb1bc35eba5839ab94bbdda",
+    "headerSha256": "2a1b95084be8fd1deb3228fcad2fd3f7f0258b64582f7402281ec174c7b7f4ce",
+    "voiceGroupsSha256": "49c91fb6a026929685f1edecc636f0b6c74adc747c2a6d7a31d9c7dbd62a55ca",
+    "encoder": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "previews": [
+    {
+      "voiceId": "matcha_zh_en_female",
+      "speakerId": 0,
+      "language": "zh-CN",
+      "file": "matcha_zh_en_female.mp3",
+      "durationSeconds": 5.059625,
+      "decodedDurationSeconds": 5.059625,
+      "sha256": "96f9247054ec5ec278f86ef11b4f1fc0fcf787495ce1793ff5c819909454a14b",
+      "bytes": 41472,
+      "peak": 0.785809,
+      "decodedPeak": 0.747261,
+      "wavSha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
+    }
+  ]
+}
