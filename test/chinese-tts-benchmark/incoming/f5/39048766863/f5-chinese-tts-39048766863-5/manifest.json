@@ -1,0 +1,180 @@
+{
+  "schema": 1,
+  "id": "f5-v1-base-fp32",
+  "name": "F5-TTS v1 Base FP32",
+  "model_family": "F5-TTS",
+  "voice": "基于本地生成的中英女声参考（纯合成参考，无真人录音）",
+  "model_download_bytes": 1402816013,
+  "weights_bytes": 1402801752,
+  "download_scope": "完整推理所需声学权重、词表、24kHz声码器权重与配置；分别从固定版本原始文件下载。没有压缩包；不含运行环境、许可说明及参考WAV。",
+  "runtime_size_notes": "复用CPU版PyTorch与音频依赖，环境体积未计入模型下载量；没有安装或使用CUDA。依赖版本见requirements-resolved.txt。",
+  "model_files": [
+    {
+      "path": "models/f5/model_1250000.safetensors",
+      "bytes": 1348435761,
+      "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+    },
+    {
+      "path": "models/f5/vocab.txt",
+      "bytes": 13800,
+      "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+    },
+    {
+      "path": "models/vocos/pytorch_model.bin",
+      "bytes": 54365991,
+      "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+    },
+    {
+      "path": "models/vocos/config.yaml",
+      "bytes": 461,
+      "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc"
+    }
+  ],
+  "peak_rss_bytes": 3237597184,
+  "memory_notes": "Linux resource.getrusage(RUSAGE_SELF).ru_maxrss 实测进程峰值RSS；包含模型加载、参考处理和合成。不代表安装体积或跨机器最低内存。",
+  "runtime": {
+    "python": "3.12.15",
+    "torch": "2.9.1+cpu",
+    "torchaudio": "2.9.1+cpu",
+    "vocos": "0.1.0",
+    "source_commit": "2f866649b779881af8bd644e76b9a6d95053da29",
+    "device": "cpu",
+    "dtype": "float32",
+    "inference": "Unmodified upstream DiT, CFM, text tokenizer and mel processing; direct inference skips only Trainer/UI/ASR imports."
+  },
+  "hardware": {
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "python": "3.12.15",
+    "cpuModel": "AMD EPYC 7763 64-Core Processor",
+    "visibleLogicalCpus": 4,
+    "memoryMax": null,
+    "cpuMax": null,
+    "memoryInfo": "MemTotal:       16373452 kB\nMemFree:         9156436 kB\nMemAvailable:   15314732 kB\nBuffers:          127720 kB\nCached:          6159268 kB\nSwapCached:            0 kB\nActive:           753412 kB\nInactive:        5801220 kB\nActive(anon):     322388 kB\nInactive(anon):        0 kB\nActive(file):     431024 kB\nInactive(file):  5801220 kB\nUnevictable:       46760 kB\nMlocked:           43688 kB\nSwapTotal:       3145724 kB\nSwapFree:        3145724 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:           1475600 kB\nWriteback:             0 kB\nAnonPages:        304536 kB\nMapped:           327788 kB\nShmem:             46000 kB\nKReclaimable:     272004 kB\nSlab:             371336 kB\nSReclaimable:     272004 kB\nSUnreclaim:        99332 kB\nKernelStack:        4304 kB\nPageTables:         6260 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    11332448 kB\nCommitted_AS:    2036968 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       39600 kB\nVmallocChunk:          0 kB\nPercpu:             2208 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:     96256 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    122880 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:               0 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:      126080 kB\nDirectMap2M:     5111808 kB\nDirectMap1G:    13631488 kB",
+    "githubRunId": "39048766863",
+    "githubCommit": "888274e894bee9c8d243cd4eeddb78e15085c789",
+    "runnerOs": "Linux",
+    "runnerArch": "X64"
+  },
+  "settings": {
+    "steps": 32,
+    "cfg_strength": 2.0,
+    "sway_sampling_coef": -1.0,
+    "ode_method": "euler",
+    "sample_rate": 24000,
+    "threads": 4,
+    "interop_threads": 1,
+    "speed": "默认1.0；UTF-8字节数小于10的短片段按上游逻辑使用0.3，实际值见samples[].chunks[].speed",
+    "target_rms": 0.1,
+    "chunking": "Upstream UTF-8 byte-based sentence splitting targeting 22 seconds including the reference; chunks run sequentially.",
+    "crossfade_seconds": 0.15,
+    "random_seed": "20261017 + corpus_number*100 + chunk_number",
+    "text_normalization": "Exact original Chinese input. Upstream rjieba/pypinyin conversion only; numbers, English abbreviations and punctuation were not manually rewritten.",
+    "reference": {
+      "kind": "synthetic-reference",
+      "model": "Matcha icefall zh-en steps-3",
+      "speaker": 0,
+      "text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
+      "wav": "reference.wav",
+      "sampleRate": 24000,
+      "durationSeconds": 8.729375,
+      "sourceSampleRate": 16000,
+      "sourceWavSha256": "a0951947112f1651479c58af99e4c1870fa3fcc5452cb185383a3e16044089b3",
+      "wavSha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+      "conversion": "ffmpeg -ar 24000 -ac 1; no other audio edits",
+      "consent": "Reference generated locally by the application model for this evaluation; no recording of a human person was used."
+    },
+    "postprocessing": "Upstream chunk crossfade and RMS restoration only; no extra denoising, pitch, tempo or loudness processing. WAV PCM16 and MP3 128kbps."
+  },
+  "sources": [
+    {
+      "url": "https://github.com/SWivid/F5-TTS",
+      "revision": "2f866649b779881af8bd644e76b9a6d95053da29",
+      "role": "inference source"
+    },
+    {
+      "url": "https://huggingface.co/SWivid/F5-TTS",
+      "revision": "84e5a410d9cead4de2f847e7c9369a6440bdfaca",
+      "license": "cc-by-nc-4.0"
+    },
+    {
+      "url": "https://huggingface.co/charactr/vocos-mel-24khz",
+      "revision": "0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21",
+      "license": "mit"
+    }
+  ],
+  "license": {
+    "weights": "CC-BY-NC-4.0",
+    "inference_code": "MIT",
+    "vocoder": "MIT",
+    "texts": [
+      "licenses/CC-BY-NC-4.0.txt",
+      "licenses/F5-code-MIT.txt",
+      "licenses/Vocos-MIT.txt"
+    ],
+    "restriction": "非商业研究试听；未作为产品内置或可下载模型发布。"
+  },
+  "notes": [
+    "这是模型对给定10条中文文本的真实离线CPU合成（本机或云端 runner 见 hardware），不是原公开试听，也没有使用云端语音服务。",
+    "该模型由参考音频决定声线。本次采用此前本地模型生成的女声，语气及音质可能受到这段参考声音影响；并非展示一款模型的全部音色能力。",
+    "与其他模型的运行环境和并发负载可能不同，生成耗时不能作为严格同条件性能排名。",
+    "上游权重为非商业许可；本次只供研究比较，不能据此假定适合商业分发。"
+  ],
+  "samples": [
+    {
+      "id": "05",
+      "title": "温柔安慰",
+      "text": "没关系，今天没有完成也没关系。先喝一口水，让自己慢慢放松下来。你已经很努力了，剩下的事情，我们明天再一起处理。",
+      "wav": "audio/05.wav",
+      "generation_seconds": 486.310032097,
+      "audio_seconds": 11.690666666666667,
+      "wav_sha256": "c9159c796411c2e5dd0768fd94073b0f38b1c4b3823c9e0ec9b424d30478f52e",
+      "started_at": "2026-10-17T16:19:03.538499+00:00",
+      "finished_at": "2026-10-17T16:27:10.172239+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.902045373000007,
+      "chunks": [
+        {
+          "text": "没关系，今天没有完成也没关系。先喝一口水，让自己慢慢放松下来。你已经很努力了，剩下的事情，我们明天再一起处理。",
+          "seed": 20261517,
+          "speed": 1.0,
+          "framesIncludingReference": 1915,
+          "seconds": 486.30937453799993,
+          "audioSeconds": 11.690666666666667
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "title": "故事旁白",
+      "text": "雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。风吹过树叶，她忽然觉得，明天也许会有新的答案。",
+      "wav": "audio/06.wav",
+      "generation_seconds": 701.983736731,
+      "audio_seconds": 13.439333333333334,
+      "wav_sha256": "bbd6b8d0f4fe9557b556b7923fc878896b587fd613d6b9cb1b39d56ffe38288f",
+      "started_at": "2026-10-17T16:27:10.173756+00:00",
+      "finished_at": "2026-10-17T16:38:52.279837+00:00",
+      "generation_notes": "模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。",
+      "load_seconds": 1.902045373000007,
+      "chunks": [
+        {
+          "text": "雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。风吹过树叶，她忽然觉得，",
+          "seed": 20261617,
+          "speed": 1.0,
+          "framesIncludingReference": 1875,
+          "seconds": 469.63260000900004,
+          "audioSeconds": 11.264
+        },
+        {
+          "text": "明天也许会有新的答案。",
+          "seed": 20261618,
+          "speed": 1.0,
+          "framesIncludingReference": 1037,
+          "seconds": 232.35042039300015,
+          "audioSeconds": 2.3253333333333335
+        }
+      ]
+    }
+  ],
+  "corpus_sha256": "e443b5926fda7370cb4c16eec30a300cde69d58f9fdc1f44e9b463ceb18a2434"
+}

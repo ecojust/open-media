@@ -1,0 +1,6 @@
+loaded 1.9806376189999924
+01 chunk 0 {'text': '这是一款全程由AI接管并生成的软件', 'seed': 20261117, 'speed': 1.0, 'framesIncludingReference': 1130, 'seconds': 258.53440292799996, 'audioSeconds': 3.3173333333333335}
+COMPLETE 01 258.53 s, audio 3.3173333333333335 s, peak 0.7953543663024902
+02 chunk 0 {'text': '从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。你只需要专注于内容，', 'seed': 20261217, 'speed': 1.0, 'framesIncludingReference': 1835, 'seconds': 461.7760278989999, 'audioSeconds': 10.837333333333333}
+02 chunk 1 {'text': '把想法一步一步变成作品。', 'seed': 20261218, 'speed': 1.0, 'framesIncludingReference': 1057, 'seconds': 238.88555159099997, 'audioSeconds': 2.538666666666667}
+COMPLETE 02 700.66 s, audio 13.226 s, peak 0.8491942286491394

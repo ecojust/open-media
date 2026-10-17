@@ -1,0 +1,6 @@
+loaded 1.902045373000007
+05 chunk 0 {'text': '没关系，今天没有完成也没关系。先喝一口水，让自己慢慢放松下来。你已经很努力了，剩下的事情，我们明天再一起处理。', 'seed': 20261517, 'speed': 1.0, 'framesIncludingReference': 1915, 'seconds': 486.30937453799993, 'audioSeconds': 11.690666666666667}
+COMPLETE 05 486.31 s, audio 11.690666666666667 s, peak 0.7340160012245178
+06 chunk 0 {'text': '雨停的时候，街角的灯刚好亮了。她把那封没有寄出的信放进口袋，沿着熟悉的小路往前走。风吹过树叶，她忽然觉得，', 'seed': 20261617, 'speed': 1.0, 'framesIncludingReference': 1875, 'seconds': 469.63260000900004, 'audioSeconds': 11.264}
+06 chunk 1 {'text': '明天也许会有新的答案。', 'seed': 20261618, 'speed': 1.0, 'framesIncludingReference': 1037, 'seconds': 232.35042039300015, 'audioSeconds': 2.3253333333333335}
+COMPLETE 06 701.98 s, audio 13.439333333333334 s, peak 0.886762797832489

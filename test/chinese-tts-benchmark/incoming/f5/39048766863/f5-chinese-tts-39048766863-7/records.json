@@ -1,0 +1,70 @@
+[
+  {
+    "id": "07",
+    "title": "旅行纪录",
+    "text": "清晨六点，山谷还笼罩在薄雾之中。第一束阳光越过山脊，照亮远处的村庄。我们沿着河流向北出发，去寻找地图上那个没有名字的小镇。",
+    "startedAt": "2026-10-17T16:19:07.886073+00:00",
+    "finishedAt": "2026-10-17T16:27:54.981482+00:00",
+    "generationSeconds": 526.938007969,
+    "loadSeconds": 1.9963921399999975,
+    "torchThreads": 4,
+    "peakRssBytes": 3237588992,
+    "durationSeconds": 12.970666666666666,
+    "sampleRate": 24000,
+    "channels": 1,
+    "peak": 0.7360169887542725,
+    "rms": 0.12835997343063354,
+    "wav": "audio/07.wav",
+    "mp3": "audio/07.mp3",
+    "wavSha256": "d23dd64d091c78afd52765ecd837e34544ebbd27c52661d41259fdd508e7cf70",
+    "mp3Sha256": "dba22cef69f57ff0122e62dc15ba0df373efd21dfbeecee18b52386ff8c1833c",
+    "chunks": [
+      {
+        "text": "清晨六点，山谷还笼罩在薄雾之中。第一束阳光越过山脊，照亮远处的村庄。我们沿着河流向北出发，去寻找地图上那个没有名字的小镇。",
+        "seed": 20261717,
+        "speed": 1.0,
+        "framesIncludingReference": 2035,
+        "seconds": 526.937101,
+        "audioSeconds": 12.970666666666666
+      }
+    ]
+  },
+  {
+    "id": "08",
+    "title": "操作教学",
+    "text": "首先，把需要剪辑的视频拖入素材区。然后，将片段放到时间线上，移动播放头，找到需要保留的画面。最后检查字幕和背景音乐，确认无误后再导出。",
+    "startedAt": "2026-10-17T16:27:54.983124+00:00",
+    "finishedAt": "2026-10-17T16:40:12.415921+00:00",
+    "generationSeconds": 737.299992463,
+    "loadSeconds": 1.9963921399999975,
+    "torchThreads": 4,
+    "peakRssBytes": 3237588992,
+    "durationSeconds": 14.079333333333333,
+    "sampleRate": 24000,
+    "channels": 1,
+    "peak": 0.8500127196311951,
+    "rms": 0.13075047539908358,
+    "wav": "audio/08.wav",
+    "mp3": "audio/08.mp3",
+    "wavSha256": "79f9c9f5fbf2cd7ac7f845866c285be13e5cb1543fa6f9f3cf81970a90c0b4a0",
+    "mp3Sha256": "414b07464f4e016cac65b414e385014607a88daf6760d41a4923f9e25380a0a3",
+    "chunks": [
+      {
+        "text": "首先，把需要剪辑的视频拖入素材区。然后，将片段放到时间线上，移动播放头，找到需要保留的画面。最后检查字幕和背景音乐，",
+        "seed": 20261817,
+        "speed": 1.0,
+        "framesIncludingReference": 1975,
+        "seconds": 512.6546754420001,
+        "audioSeconds": 12.330666666666668
+      },
+      {
+        "text": "确认无误后再导出。",
+        "seed": 20261818,
+        "speed": 1.0,
+        "framesIncludingReference": 997,
+        "seconds": 224.64462606799998,
+        "audioSeconds": 1.8986666666666667
+      }
+    ]
+  }
+]
