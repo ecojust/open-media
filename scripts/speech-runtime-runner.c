@@ -44,7 +44,19 @@ static char *read_text(const char *path) {
 int main(int argc, char **argv) {
   SherpaOnnxOfflineTtsConfig cfg = {0};
   SherpaOnnxGenerationConfig generation = {0};
-  cfg.model.kokoro.model = option(argc, argv, "--kokoro-model");
+  const char *matcha_model = option(argc, argv, "--matcha-acoustic-model");
+  const char *kokoro_model = option(argc, argv, "--kokoro-model");
+  if ((!matcha_model && !kokoro_model) || (matcha_model && kokoro_model)) {
+    fprintf(stderr, "Select exactly one speech model.\n"); return 2;
+  }
+  cfg.model.matcha.acoustic_model = matcha_model;
+  cfg.model.matcha.vocoder = option(argc, argv, "--matcha-vocoder");
+  cfg.model.matcha.tokens = option(argc, argv, "--matcha-tokens");
+  cfg.model.matcha.data_dir = option(argc, argv, "--matcha-data-dir");
+  cfg.model.matcha.lexicon = option(argc, argv, "--matcha-lexicon");
+  cfg.model.matcha.noise_scale = 1.0f;
+  cfg.model.matcha.length_scale = 1.0f;
+  cfg.model.kokoro.model = kokoro_model;
   cfg.model.kokoro.voices = option(argc, argv, "--kokoro-voices");
   cfg.model.kokoro.tokens = option(argc, argv, "--kokoro-tokens");
   cfg.model.kokoro.data_dir = option(argc, argv, "--kokoro-data-dir");
@@ -53,20 +65,27 @@ int main(int argc, char **argv) {
   cfg.model.num_threads = 2;
   cfg.model.provider = "cpu";
   cfg.max_num_sentences = 1;
-  /* Preserve model pauses instead of compressing them after synthesis. */
-  cfg.silence_scale = 1.0f;
+  /* Keep the synthesis parameters used by the evaluated single-voice model. */
+  cfg.silence_scale = matcha_model ? 0.2f : 1.0f;
   cfg.rule_fsts = option(argc, argv, "--tts-rule-fsts");
   const char *output = option(argc, argv, "--output-filename");
   const char *speaker = option(argc, argv, "--sid");
   const char *speed = option(argc, argv, "--speed");
   const char *debug = option(argc, argv, "--debug");
+  const char *sample_rate = option(argc, argv, "--sample-rate");
+  int expected_sample_rate = sample_rate ? atoi(sample_rate) : (matcha_model ? 16000 : 24000);
   cfg.model.debug = debug && !strcmp(debug, "true");
-  generation.sid = speaker ? atoi(speaker) : 3;
+  generation.sid = speaker ? atoi(speaker) : 0;
   generation.speed = speed ? (float)atof(speed) : 1.0f;
   generation.silence_scale = cfg.silence_scale;
-  if (!output || !cfg.model.kokoro.model || !cfg.model.kokoro.voices ||
-      !cfg.model.kokoro.tokens || !cfg.model.kokoro.data_dir ||
-      !cfg.model.kokoro.lexicon || !cfg.rule_fsts ||
+  if (!output ||
+      (matcha_model && (!cfg.model.matcha.vocoder || !cfg.model.matcha.tokens ||
+        !cfg.model.matcha.data_dir || !cfg.model.matcha.lexicon)) ||
+      (kokoro_model && (!cfg.model.kokoro.voices || !cfg.model.kokoro.tokens ||
+        !cfg.model.kokoro.data_dir || !cfg.model.kokoro.lexicon)) ||
+      !cfg.rule_fsts ||
+      (expected_sample_rate != 16000 && expected_sample_rate != 22050 &&
+       expected_sample_rate != 24000 && expected_sample_rate != 44100 && expected_sample_rate != 48000) ||
       !isfinite(generation.speed) || generation.speed < 0.5f || generation.speed > 2.0f) {
     fprintf(stderr, "Invalid speech configuration.\n"); return 2;
   }
@@ -85,7 +104,7 @@ int main(int argc, char **argv) {
   const SherpaOnnxGeneratedAudio *audio = SherpaOnnxOfflineTtsGenerateWithConfig(
       tts, text, &generation, progress, NULL);
   free(text);
-  int ok = audio && audio->n > 0 && audio->sample_rate == 24000 &&
+  int ok = audio && audio->n > 0 && audio->sample_rate == expected_sample_rate &&
       SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, output);
   if (audio) SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
   SherpaOnnxDestroyOfflineTts(tts);

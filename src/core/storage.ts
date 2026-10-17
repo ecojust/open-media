@@ -4,7 +4,13 @@ import type { ImportedProject, MediaAsset, Project, ProjectSummary } from './typ
 
 const DATABASE_NAME = 'open-media-projects'
 const DATABASE_VERSION = 1
-const pendingSaves = new Map<string, Promise<void>>()
+const pendingSaves = new Map<string, Promise<string>>()
+
+function storedSaveTime(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return undefined
+  const date = new Date(value)
+  return Number.isFinite(date.getTime()) && date.toISOString() === value ? value : undefined
+}
 
 function request<T>(value: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => { value.onsuccess = () => resolve(value.result); value.onerror = () => reject(value.error ?? new Error('无法读取本地项目。')) })
@@ -62,7 +68,7 @@ export async function readStoredAssetBlob(projectId: string, assetId: string): P
 }
 
 /** Media reads finish before a single atomic database write begins. */
-export function saveProject(project: Project, blobs: Map<string, Blob> = new Map()): Promise<void> {
+export function saveProject(project: Project, blobs: Map<string, Blob> = new Map()): Promise<string> {
   const snapshot = validateProject(project, { trusted: true })
   const suppliedBlobs = new Map(blobs)
   const previous = pendingSaves.get(project.id) ?? Promise.resolve()
@@ -72,7 +78,7 @@ export function saveProject(project: Project, blobs: Map<string, Blob> = new Map
   return task
 }
 
-async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promise<void> {
+async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promise<string> {
   const clean = validateProject(project, { trusted: true })
   const db = await openDatabase()
   try {
@@ -91,6 +97,7 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
       } else if (!durableNativeAsset && !existing[index]) pending.set(asset.id, await fetchAssetBlob(asset))
       if (!durableNativeAsset) { asset.url = ''; delete asset.sourceUrl; delete asset.nativePath }
     }
+    const savedAt = new Date().toISOString()
     const writing = db.transaction(['projects', 'blobs'], 'readwrite')
     const writeDone = completed(writing)
     const blobStore = writing.objectStore('blobs')
@@ -98,8 +105,9 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
       for (const [assetId, blob] of pending) blobStore.put(blob, blobKey(clean.id, assetId))
       const retained = new Set(clean.assets.map((asset) => asset.id))
       for (const asset of oldProject?.assets ?? []) if (!retained.has(asset.id)) blobStore.delete(blobKey(clean.id, asset.id))
-      writing.objectStore('projects').put(clean)
+      writing.objectStore('projects').put({ ...clean, localDraftSavedAt: savedAt })
       await writeDone
+      return savedAt
     } catch (error) {
       try { writing.abort() } catch { /* A failed write may have already aborted the transaction. */ }
       await writeDone.catch(() => {})
@@ -112,7 +120,7 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
   } finally { db.close() }
 }
 
-export async function loadProject(id: string): Promise<ImportedProject> {
+export async function loadProject(id: string): Promise<ImportedProject & { savedAt?: string }> {
   const db = await openDatabase()
   const urls: string[] = []
   try {
@@ -135,7 +143,8 @@ export async function loadProject(id: string): Promise<ImportedProject> {
         }
       } else if (!asset.nativePath || !asset.url) throw new Error(`素材“${asset.name}”在本地存储中缺失，无法完整打开项目。`)
     })
-    return { project, blobs, revoke: () => { urls.splice(0).forEach((url) => URL.revokeObjectURL(url)) } }
+    const savedAt = storedSaveTime(raw.localDraftSavedAt)
+    return { project, blobs, ...(savedAt ? { savedAt } : {}), revoke: () => { urls.splice(0).forEach((url) => URL.revokeObjectURL(url)) } }
   } catch (error) { urls.forEach((url) => URL.revokeObjectURL(url)); throw error } finally { db.close() }
 }
 

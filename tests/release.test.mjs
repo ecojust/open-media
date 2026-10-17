@@ -70,6 +70,7 @@ test('streaming source verification rejects missing dependencies and modified mo
       { id: 'engine', archive: 'engine.tar.gz', kind: 'source', bytes: 'complete engine source' },
       { id: 'dependency', archive: 'dependency.tar.gz', kind: 'source', bytes: 'complete dependency source and license' },
       { id: 'model', archive: 'model.tar.gz', kind: 'model', bytes: 'original model weights and license' },
+      { id: 'vocoder', archive: 'vocoder.onnx', kind: 'vocoder', bytes: 'original vocoder weights' },
       { id: 'runtime', archive: 'runtime.tar.gz', kind: 'runtime', bytes: 'verified runtime release' },
     ].map(source => ({ ...source, sha256: digest(Buffer.from(source.bytes)) }));
     const expected = speechSourceRequirements({ sources });
@@ -85,6 +86,8 @@ with tarfile.open(sys.argv[1],'w:gz') as archive:
     writeArchive(sources);
     verifySourceContents(archive, 'speech-runtime-source', expected);
     writeArchive(sources.filter(source => source.id !== 'dependency'));
+    assert.throws(() => verifySourceContents(archive, 'speech-runtime-source', expected), /Missing corresponding source files/);
+    writeArchive(sources.filter(source => source.id !== 'vocoder'));
     assert.throws(() => verifySourceContents(archive, 'speech-runtime-source', expected), /Missing corresponding source files/);
     writeArchive(sources.map(source => source.id === 'model' ? { ...source, bytes: 'modified weights' } : source));
     assert.throws(() => verifySourceContents(archive, 'speech-runtime-source', expected), /checksum mismatch/);

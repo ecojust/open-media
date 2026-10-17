@@ -2,9 +2,10 @@ import type { SpeechVoice } from '../native'
 import { VOICE_PROFILES } from './voice-profiles.ts'
 import { VOICE_GROUPS } from './voice-groups.ts'
 
-export type VoiceCategoryId = 'zh-male' | 'zh-female' | 'en-female' | 'other'
+export type VoiceCategoryId = 'zh-en-female' | 'zh-male' | 'zh-female' | 'en-female' | 'other'
 
 export const VOICE_CATEGORIES: ReadonlyArray<{ id: VoiceCategoryId; label: string }> = [
+  { id: 'zh-en-female', label: '中英女声' },
   { id: 'zh-male', label: '中文男声' },
   { id: 'zh-female', label: '中文女声' },
   { id: 'en-female', label: '英文女声' },
@@ -15,6 +16,7 @@ function language(voice: SpeechVoice): string { return voice.language.toLowerCas
 
 export function voiceCategory(voice: SpeechVoice): VoiceCategoryId {
   const locale = language(voice), gender = voice.gender?.toLowerCase()
+  if (voice.id === 'matcha_zh_en_female' && locale.startsWith('zh') && gender === 'female') return 'zh-en-female'
   if (locale.startsWith('zh') && gender === 'male') return 'zh-male'
   if (locale.startsWith('zh') && gender === 'female') return 'zh-female'
   if (locale.startsWith('en') && gender === 'female') return 'en-female'
@@ -39,6 +41,7 @@ export function compactVoiceCatalog(voices: readonly SpeechVoice[], selectedId =
 
 export function voiceTypeLabel(voice: SpeechVoice): string {
   const category = voiceCategory(voice), locale = language(voice)
+  if (category === 'zh-en-female') return '中文 / 英语 · 女声'
   if (category === 'zh-male') return '中文 · 男声'
   if (category === 'zh-female') return '中文 · 女声'
   if (category === 'en-female') return `${locale === 'en-us' ? '美式英语' : locale === 'en-gb' ? '英式英语' : '英语'} · 女声`
@@ -51,7 +54,7 @@ export function voiceTypeLabel(voice: SpeechVoice): string {
   return `${label} · ${kind}`
 }
 
-export type VoiceStyleId = 'natural' | 'deep' | 'bright' | 'relaxed' | 'mature'
+export type VoiceStyleId = 'gentle' | 'natural' | 'deep' | 'bright' | 'relaxed' | 'mature'
 
 export interface VoiceStyle {
   id: VoiceStyleId
@@ -62,7 +65,14 @@ export interface VoiceStyle {
 export function voiceStyle(voice: SpeechVoice): VoiceStyle {
   const category = voiceCategory(voice)
   const profile = VOICE_PROFILES[voice.id]
-  const id = profile && profile.category === category ? profile.style : 'natural'
+  const optionalStyles: Record<string, { category: VoiceCategoryId; style: VoiceStyleId }> = {
+    zm_013: { category: 'zh-male', style: 'deep' },
+    zf_038: { category: 'zh-female', style: 'bright' },
+    af_maple: { category: 'en-female', style: 'natural' },
+  }
+  const optional = optionalStyles[voice.id]
+  const id = profile && profile.category === category ? profile.style : optional?.category === category ? optional.style : 'natural'
+  if (category === 'zh-en-female') return { id: 'gentle', label: '温柔', portrait: 7 }
   if (category === 'zh-male') {
     if (id === 'deep') return { id, label: '低沉', portrait: 1 }
     if (id === 'bright') return { id, label: '明亮', portrait: 2 }

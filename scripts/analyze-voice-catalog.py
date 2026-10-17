@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Audit bundled voice representatives using existing real WAVs; no synthesis or build.
-Requires Python 3, numpy and scipy. This is catalogue curation, not speaker verification.
+"""Historical audit for the former multi-voice resource bundle; no synthesis or build.
+Requires its original repository revision, Python 3, numpy and scipy.
+The current single-voice model does not use this catalogue curation.
 """
 import argparse, collections, hashlib, json, pathlib, re, wave
 import numpy as np
@@ -19,6 +20,9 @@ root, samples, output = args.repo, args.samples, args.output
 output.mkdir(parents=True, exist_ok=True)
 runtime = root / 'src-tauri/resources/speech'
 manifest = json.loads((runtime / 'manifest.json').read_text())
+lock = json.loads((root / 'scripts/speech-runtime.lock.json').read_text())
+if lock.get('schema') != 1 or manifest.get('schema') != 1:
+    raise SystemExit('This historical audit requires the original multi-voice repository revision and resources.')
 voices = sorted(manifest['voices'], key=lambda voice: voice['speakerId'])
 assert [voice['speakerId'] for voice in voices] == list(range(103))
 profiles = dict(re.findall(r"\s+(\w+): \{ category: '[^']+', speakerId: \d+, style: '([^']+)'", (root / 'src/core/voice-profiles.ts').read_text()))

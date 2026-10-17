@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "a756b282b9381e8527d0a8114bcd897817ce44a2386b944be890790b65911522",
-      "reviewMethod": "Source-only review: application version updated to 0.1.11 with preview positioning, clipboard image, watermark catalog and image editing browser coverage. Dependency versions and original license files are unchanged."
+      "sha256": "cbb2601a21a45a9fdf57eaa10f293a81951469d9cc379a59137f31d4a8e4eb5c",
+      "reviewMethod": "Application version updated to 0.1.12 and browser regression coverage expanded. Dependency versions and original license files are unchanged. Production frontend build verified."
     },
     {
       "path": "package-lock.json",
-      "sha256": "25c5f86d467bf5bdd9790f539d16a895c99e6048cbaa3ac4f16632157319ea90",
-      "reviewMethod": "Source-only review: application version updated to 0.1.11 with preview positioning, clipboard image and watermark catalog browser coverage. Dependency versions and original license files are unchanged."
+      "sha256": "c9809b1d80c28b101e25198265025f98667cb521577d80687077ce079a5a628d",
+      "reviewMethod": "Application version updated to 0.1.12 and browser regression coverage expanded. Dependency versions and original license files are unchanged. Production frontend build verified."
     },
     {
       "path": "vite.config.ts",

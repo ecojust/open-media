@@ -13,6 +13,7 @@ pub mod project_files;
 #[cfg(any(feature = "desktop", test))]
 pub mod image_clipboard;
 pub mod speech;
+mod speech_models;
 #[cfg(any(feature = "desktop", test))]
 pub mod screenshot;
 #[cfg(feature = "desktop")]
@@ -219,6 +220,22 @@ mod desktop {
     pub async fn get_speech_status(state: State<'_, MediaState>) -> engine::Result<SpeechStatus> {
         let speech = state.speech.clone();
         blocking(move || Ok(speech.status())).await
+    }
+    #[tauri::command]
+    pub async fn begin_speech_model_download(
+        model_id: String,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<SpeechStatus> {
+        let speech = state.speech.clone();
+        blocking(move || speech.begin_model_download(&model_id)).await
+    }
+    #[tauri::command]
+    pub async fn cancel_speech_model_download(
+        model_id: String,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<SpeechStatus> {
+        let speech = state.speech.clone();
+        blocking(move || speech.cancel_model_download(&model_id)).await
     }
     #[tauri::command]
     pub async fn begin_speech_job(
@@ -667,6 +684,8 @@ mod desktop {
                 get_media_jobs,
                 cancel_media_job,
                 get_speech_status,
+                begin_speech_model_download,
+                cancel_speech_model_download,
                 begin_speech_job,
                 get_speech_job,
                 cancel_speech_job,

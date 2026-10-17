@@ -70,7 +70,7 @@ async function main() {
   page.on('pageerror', error => pageErrors.push(error.message))
   page.on('dialog', dialog => dialog.accept())
   await page.goto(baseURL)
-  await expect(page.getByTestId('home-workspace')).toBeVisible()
+  await expect(page.getByTestId('home-workspace')).toBeVisible({ timeout: 20000 })
 
   await check('顶部仅保留品牌、主题和信息，保存与自动草稿移入剪辑工作区', async () => {
     await expect(page.locator('.topbar [data-testid="export-project"]')).toHaveCount(0)

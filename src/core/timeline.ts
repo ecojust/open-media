@@ -1,4 +1,5 @@
 import { cloneProject, createTrack, newId, validateProject } from './project.ts'
+import { isSubtitleClip, SUBTITLE_STYLE_KEYS, subtitleStyleFromClip } from './subtitle-style.ts'
 import type { Clip, MediaAsset, Project, ProjectHistory, Track, TrackKind } from './types.ts'
 
 export function clipDuration(clip: Clip): number { return Math.max(0, (clip.trimOut - clip.trimIn) / clip.speed) }
@@ -83,6 +84,7 @@ export function updateClip(project: Project, clipId: string, patch: Partial<Omit
   return edit(project, (copy) => {
     const { clip, track } = requireClip(copy, clipId)
     const textChanged = track.kind === 'text' && patch.text !== undefined && patch.text !== clip.text
+    const subtitleStyleChanged = isSubtitleClip(track, clip) && SUBTITLE_STYLE_KEYS.some(key => patch[key] !== undefined && patch[key] !== clip[key])
     const oldId = clip.id
     const oldAsset = clip.assetId
     Object.assign(clip, patch)
@@ -92,6 +94,28 @@ export function updateClip(project: Project, clipId: string, patch: Partial<Omit
     const duration = clipDuration(clip)
     clip.fadeIn = Math.min(clip.fadeIn, duration)
     clip.fadeOut = Math.min(clip.fadeOut, duration)
+    if (subtitleStyleChanged) copy.subtitleStyle = subtitleStyleFromClip(clip)
+  })
+}
+export function applySubtitleStyleToTrack(project: Project, sourceClipId: string): Project {
+  const { track, clip: source } = requireClip(project, sourceClipId)
+  if (!isSubtitleClip(track, source)) throw new Error('请选择字幕片段。')
+  const style = subtitleStyleFromClip(source)
+  const changes = new Map(track.clips
+    .filter(clip => clip.id !== sourceClipId && isSubtitleClip(track, clip))
+    .map(clip => {
+      const duration = clipDuration(clip)
+      return { clip, style: { ...style, fadeIn: Math.min(style.fadeIn, duration), fadeOut: Math.min(style.fadeOut, duration) } }
+    })
+    .filter(item => SUBTITLE_STYLE_KEYS.some(key => item.clip[key] !== item.style[key]))
+    .map(item => [item.clip.id, item.style]))
+  if (!changes.size) return project
+  return edit(project, copy => {
+    for (const clip of trackById(copy, track.id).clips) {
+      const targetStyle = changes.get(clip.id)
+      if (targetStyle) Object.assign(clip, targetStyle)
+    }
+    copy.subtitleStyle = { ...style }
   })
 }
 export function moveClip(project: Project, clipId: string, targetTrackId: string, start: number): Project {

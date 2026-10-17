@@ -2,8 +2,8 @@
   "schema": 1,
   "files": [
     {
-      "sourceId": "model",
-      "sourcePath": "kokoro-int8-multi-lang-v1_1/LICENSE",
+      "sourceId": "sherpa-onnx",
+      "sourcePath": "sherpa-onnx-1.13.8/LICENSE",
       "path": "files/model/LICENSE",
       "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
     },
@@ -588,6 +588,42 @@
       "sourcePath": "mp11-boost-1.82.0/include/boost/mp11.hpp",
       "path": "files/onnx-mp11/include/boost/mp11.hpp",
       "sha256": "0833ec323b3026fedf48af005792b5b61a1ec941e08a972cd2226f8f447d6079"
+    },
+    {
+      "sourceId": "model",
+      "sourcePath": "matcha-icefall-zh-en/README.md",
+      "path": "files/model/UPSTREAM_README.md",
+      "sha256": "33b8b80010fd6dacddb0cffed0a91445d729ae9ea04ab6e922b67c59ff552552"
+    },
+    {
+      "sourceId": "model",
+      "sourceUrl": "https://modelscope.cn/api/v1/models/dengcunqin/matcha_tts_zh_en_20251010",
+      "retrievedAt": "2026-10-17",
+      "path": "files/model/UPSTREAM_METADATA.json",
+      "sha256": "7eb1673d0d3d17360441bec05e9637f9c9bd17001676338d547ce9f369a6bb49",
+      "sourcePath": "https://modelscope.cn/api/v1/models/dengcunqin/matcha_tts_zh_en_20251010"
+    },
+    {
+      "sourceId": "model",
+      "sourceUrl": "https://modelscope.cn/api/v1/models/dengcunqin/matcha_tts_zh_en_20251010/repo/files?Revision=master&Recursive=true",
+      "retrievedAt": "2026-10-17",
+      "path": "files/model/UPSTREAM_FILES.json",
+      "sha256": "5aa360a08ae283ddd13c6c62e28290ba5b56af4816c19a2f633dd513627a6c3b",
+      "sourcePath": "https://modelscope.cn/api/v1/models/dengcunqin/matcha_tts_zh_en_20251010/repo/files?Revision=master&Recursive=true"
+    },
+    {
+      "sourceId": "model",
+      "sourceUrl": "https://raw.githubusercontent.com/shivammehta25/Matcha-TTS/bd4d90d93214b37f7a159cf205ae85762c2c10aa/LICENSE",
+      "path": "files/model/IMPLEMENTATION_LICENSE",
+      "sha256": "874d84104bdc7b301f369b2f2e66b31f07826a67495af909655f3699c857620d",
+      "sourcePath": "https://raw.githubusercontent.com/shivammehta25/Matcha-TTS/bd4d90d93214b37f7a159cf205ae85762c2c10aa/LICENSE"
+    },
+    {
+      "sourceId": "vocoder",
+      "sourceUrl": "https://raw.githubusercontent.com/gemelo-ai/vocos/eb39abfc42c1dee4854d9b10d44dd7d4fd3b0e53/LICENSE",
+      "path": "files/vocoder/IMPLEMENTATION_LICENSE",
+      "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46",
+      "sourcePath": "https://raw.githubusercontent.com/gemelo-ai/vocos/eb39abfc42c1dee4854d9b10d44dd7d4fd3b0e53/LICENSE"
     }
   ]
 }

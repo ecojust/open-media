@@ -66,7 +66,7 @@ jobs:
           OPEN_MEDIA_SPEECH_ROOT: ${{ github.workspace }}/src-tauri/resources/speech
         run: |
           set -o pipefail
-          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib speech::tests::real_offline_speech_round_trip -- --ignored 2>&1 | tee .speech-runtime/logs/native.log
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib speech::tests::real_ -- --ignored --nocapture --test-threads=1 2>&1 | tee .speech-runtime/logs/native.log
       - run: npx playwright install --with-deps chromium
       - name: Browser interaction checks
         id: browser
@@ -297,7 +297,7 @@ jobs:
           OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
           OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
           OPEN_MEDIA_SPEECH_ROOT: ${{ github.workspace }}/src-tauri/resources/speech
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib speech::tests::real_offline_speech_round_trip -- --ignored 2>&1 | tee .speech-runtime/logs/native.log
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --target ${{ matrix.target }} --lib speech::tests::real_ -- --ignored --nocapture --test-threads=1 2>&1 | tee .speech-runtime/logs/native.log
       - name: Package application
         id: native-package
         run: npx tauri build --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked 2>&1 | tee .media-runtime/logs/package.log

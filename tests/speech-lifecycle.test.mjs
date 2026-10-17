@@ -7,6 +7,7 @@ import { createProject, createTextClip } from '../src/core/project.ts'
 import { addClip, clipDuration } from '../src/core/timeline.ts'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity } from '../src/core/speech.ts'
 import { compactVoiceCatalog } from '../src/core/voice-catalog.ts'
+import { voiceReady, voiceDownloading } from '../src/core/voice-downloads.ts'
 
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 function fixture() {
@@ -21,17 +22,19 @@ function complete(request, duration = 2.5) {
 }
 function panel(overrides = {}, options = {}) {
   const source = readFileSync(new URL('../src/components/SpeechPanel.vue', import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
-  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, cancel, align, busy, error, notice, operationKind, generationLabel, voiceId, speed, alignText, previewUrl, previewVoice, previewVoiceId, previewState, player }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
+  const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, cancel, align, busy, error, notice, operationKind, generationLabel, voiceId, speed, alignText, previewUrl, previewVoice, previewVoiceId, previewState, player, status, loadStatus, changeModelDownload, pendingModels, downloadError }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   const props = vue.shallowReactive({ project: fixture(), active: true, ...options })
   const events = [], calls = [], unmount = []
   const injections = {
     ref: vue.ref, computed: vue.computed, watch: vue.watch, nextTick: vue.nextTick,
     onBeforeUnmount: callback => unmount.push(callback), defineProps: () => props,
     defineEmits: () => (...event) => { events.push(event); if (event[0] === 'change' && options.applyChanges !== false) props.project = event[1] }, defineExpose: () => {},
-    planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, isDesktop: () => true,
+    planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, voiceReady, voiceDownloading, isDesktop: () => true,
     bundledVoicePreviewUrl: () => undefined,
     VOICE_PREVIEW_TEXT: { zh: '你好，这是一段语音试听。让文字拥有清晰自然的声音。', en: 'Hello, this is a voice preview. Let your story come to life with a clear and natural voice.' },
     getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }),
+    beginSpeechModelDownload: async modelId => { throw new Error(`unexpected model download ${modelId}`) },
+    cancelSpeechModelDownload: async modelId => { throw new Error(`unexpected model cancellation ${modelId}`) },
     beginSpeechJob: async request => { calls.push(['begin', request]); return complete(request) },
     getSpeechJob: async id => { throw new Error(`unexpected poll ${id}`) },
     cancelSpeechJob: async id => { calls.push(['cancel', id]) },
@@ -44,6 +47,145 @@ function panel(overrides = {}, options = {}) {
   return { state, props, events, calls, dispose() { unmount.forEach(callback => callback()); scope.stop() } }
 }
 async function settle() { for (let index = 0; index < 8; index++) await Promise.resolve(); await vue.nextTick() }
+
+function downloadableCatalog(state = 'not-downloaded') {
+  return { ready: true, voices: [
+    { id: 'extra-zh', name: '低沉男声', language: 'zh-CN', gender: 'male', modelId: 'extra-model', modelSize: 176_000_000, downloadSize: 176_000_000, status: state },
+    { id: 'voice-1', name: '内置女声', language: 'zh-CN', gender: 'female', status: 'bundled' },
+    { id: 'extra-en', name: '英语女声', language: 'en-US', gender: 'female', modelId: 'extra-model', modelSize: 176_000_000, downloadSize: 176_000_000, status: state },
+  ] }
+}
+
+test('uninstalled voices cannot be synthesized or dynamically previewed and never download implicitly', async () => {
+  const harness = panel({ getSpeechStatus: async () => downloadableCatalog() })
+  try {
+    await settle()
+    assert.equal(harness.state.voiceId.value, 'voice-1', 'defaults skip the uninstalled Chinese voice')
+    await harness.state.previewVoice('extra-zh')
+    assert.deepEqual(harness.calls, [])
+    harness.state.voiceId.value = 'extra-zh'
+    await harness.state.generate()
+    assert.match(harness.state.error.value, /先下载/)
+    assert.deepEqual(harness.calls, [])
+    assert.equal(harness.props.project.assets.length, 0)
+  } finally { harness.dispose() }
+})
+
+test('a fixed local audition remains available before its optional model is downloaded', async () => {
+  const harness = panel({ getSpeechStatus: async () => downloadableCatalog(), bundledVoicePreviewUrl: id => `/local/${id}.mp3` })
+  try {
+    await settle()
+    harness.state.player.value = audioPlayer()
+    await harness.state.previewVoice('extra-zh')
+    assert.equal(harness.state.previewUrl.value, '/local/extra-zh.mp3')
+    assert.equal(harness.state.voiceId.value, 'voice-1')
+    assert.deepEqual(harness.calls, [])
+    assert.equal(harness.state.busy.value, false)
+  } finally { harness.dispose() }
+})
+
+test('optional downloads do not lock editing, deduplicate start clicks and keep running when the dialog closes', async () => {
+  const pending = deferred(), downloads = [], cancelled = []
+  let catalog = downloadableCatalog()
+  const harness = panel({ getSpeechStatus: async () => structuredClone(catalog),
+    beginSpeechModelDownload: async id => { downloads.push(id); return pending.promise },
+    cancelSpeechModelDownload: async id => { cancelled.push(id); return downloadableCatalog() },
+  })
+  try {
+    await settle()
+    const download = harness.state.changeModelDownload('extra-model')
+    await harness.state.changeModelDownload('extra-model')
+    assert.deepEqual(downloads, ['extra-model'])
+    assert.equal(harness.state.busy.value, false)
+    assert.deepEqual(harness.events.filter(event => event[0] === 'busy'), [])
+    harness.props.active = false
+    await settle()
+    catalog = downloadableCatalog('downloading'); pending.resolve(structuredClone(catalog))
+    await download
+    assert.deepEqual(cancelled, [])
+    assert.equal(harness.state.voiceId.value, 'voice-1')
+    catalog = downloadableCatalog('ready')
+    harness.props.active = true
+    await settle()
+    assert(harness.state.status.value.voices.every(voiceReady))
+    assert.equal(harness.state.voiceId.value, 'voice-1', 'completed downloads must not replace the selected voice')
+    harness.state.voiceId.value = 'extra-en'
+    await harness.state.generate()
+    assert(harness.calls.filter(call => call[0] === 'begin').every(call => call[1].voiceId === 'extra-en'))
+  } finally { harness.dispose() }
+})
+
+test('model download cancellation, failed status and retry stay separate from speech generation', async () => {
+  let catalog = downloadableCatalog('downloading'), cancellations = 0, starts = 0
+  const harness = panel({ getSpeechStatus: async () => structuredClone(catalog),
+    cancelSpeechModelDownload: async () => { cancellations++; catalog = downloadableCatalog(); return structuredClone(catalog) },
+    beginSpeechModelDownload: async () => { starts++; catalog = downloadableCatalog('downloading'); return structuredClone(catalog) },
+  })
+  try {
+    await settle()
+    await harness.state.changeModelDownload('extra-model', true)
+    assert.equal(cancellations, 1)
+    assert.equal(harness.state.status.value.voices[0].status, 'not-downloaded')
+    catalog = downloadableCatalog('failed'); catalog.voices[0].error = '连接中断'
+    await harness.state.loadStatus(false)
+    assert.equal(harness.state.status.value.voices[0].error, '连接中断')
+    await harness.state.changeModelDownload('extra-model')
+    assert.equal(starts, 1)
+    assert.equal(harness.state.status.value.voices[0].status, 'downloading')
+    assert.equal(harness.state.busy.value, false)
+    assert.deepEqual(harness.events.filter(event => event[0] === 'change' || event[0] === 'busy'), [])
+  } finally { harness.dispose() }
+})
+
+test('a failed download start remains visible after the following catalog refresh', async () => {
+  const harness = panel({ getSpeechStatus: async () => downloadableCatalog(), beginSpeechModelDownload: async () => { throw new Error('网络不可用') } })
+  try {
+    await settle()
+    await harness.state.changeModelDownload('extra-model')
+    assert.match(harness.state.downloadError.value, /无法开始下载：网络不可用/)
+    assert.deepEqual(harness.state.pendingModels.value, [])
+    assert.equal(harness.state.status.value.voices[0].status, 'not-downloaded')
+    assert.equal(harness.state.voiceId.value, 'voice-1')
+  } finally { harness.dispose() }
+})
+
+test('a stale catalog response cannot overwrite the result of a download action', async () => {
+  let readCount = 0, catalog = downloadableCatalog()
+  const oldRead = deferred()
+  const harness = panel({ getSpeechStatus: async () => ++readCount === 2 ? oldRead.promise : structuredClone(catalog),
+    beginSpeechModelDownload: async () => { catalog = downloadableCatalog('downloading'); return structuredClone(catalog) },
+  })
+  try {
+    await settle()
+    const refresh = harness.state.loadStatus(false)
+    const start = harness.state.changeModelDownload('extra-model')
+    await settle()
+    oldRead.resolve(downloadableCatalog())
+    await refresh; await start
+    assert.equal(harness.state.status.value.voices[0].status, 'downloading')
+    assert.equal(readCount, 3, 'action completion refreshes the authoritative catalog after the old request settles')
+  } finally { harness.dispose() }
+})
+
+test('a read started while the download command is pending cannot restore its earlier state', async () => {
+  const pendingStart = deferred(), pendingRead = deferred()
+  let reads = 0, catalog = downloadableCatalog()
+  const harness = panel({ getSpeechStatus: async () => ++reads === 2 ? pendingRead.promise : structuredClone(catalog),
+    beginSpeechModelDownload: async () => pendingStart.promise,
+  })
+  try {
+    await settle()
+    const start = harness.state.changeModelDownload('extra-model')
+    const refresh = harness.state.loadStatus(false)
+    catalog = downloadableCatalog('downloading')
+    pendingStart.resolve(structuredClone(catalog))
+    await settle()
+    pendingRead.resolve(downloadableCatalog())
+    await refresh; await start
+    assert.equal(harness.state.status.value.voices[0].status, 'downloading')
+    assert.equal(reads, 3)
+  } finally { harness.dispose() }
+})
 
 function audioPlayer() {
   return { paused: true, ended: false, playbackRate: 1, preservesPitch: false, currentTime: 0,

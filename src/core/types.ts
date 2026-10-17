@@ -4,6 +4,8 @@ export type MediaFit = 'contain' | 'cover' | 'fill'
 
 export interface MediaAsset {
   id: string
+  /** Time this asset was added to the project; absent in older documents. */
+  addedAt?: string
   name: string
   kind: AssetKind
   url: string
@@ -68,6 +70,7 @@ export interface Clip {
   fadeIn: number
   fadeOut: number
   text?: string
+  textRole?: 'subtitle' | 'watermark'
   fontSize?: number
   fontFamily?: string
   fontWeight?: number
@@ -78,6 +81,12 @@ export interface Clip {
   filters?: ClipFilters
   chromaKey?: ClipChromaKey
 }
+
+/** Visual settings remembered independently of subtitle content and timing. */
+export type SubtitleStyle = Required<Pick<Clip,
+  'x' | 'y' | 'width' | 'height' | 'rotation' | 'opacity' | 'fadeIn' | 'fadeOut' |
+  'fontSize' | 'fontFamily' | 'fontWeight' | 'color' | 'background' | 'textAlign'
+>>
 
 export interface Track {
   id: string
@@ -101,6 +110,7 @@ export interface Project {
   updatedAt: string
   assets: MediaAsset[]
   tracks: Track[]
+  subtitleStyle?: SubtitleStyle
 }
 
 export type MediaProject = Project

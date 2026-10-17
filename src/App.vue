@@ -12,7 +12,8 @@ import RecorderWorkspace from './components/RecorderWorkspace.vue'
 import GifWorkspace from './components/GifWorkspace.vue'
 import ConvertWorkspace from './components/ConvertWorkspace.vue'
 import ExportPanel from './components/ExportPanel.vue'
-import type { ImportedProject, MediaAsset, Project, ProjectSummary } from './core/types.ts'
+import type { ImportedProject, MediaAsset, Project, ProjectHistory, ProjectSummary } from './core/types.ts'
+import { stampNewAssets } from './core/asset-times.ts'
 import { cloneProject, createClip, createProject, createTrack, validateProject } from './core/project.ts'
 import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, redoHistory, undoHistory } from './core/timeline.ts'
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
@@ -31,7 +32,11 @@ const workspaces: { id: Workspace; title: string; icon: string; description: str
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
-const autoSave = ref(true), draftState = ref<'idle' | 'pending' | 'saved' | 'error'>('idle'), draftError = ref(''), lastSaved = ref('')
+let continuousEdit: { group: string; history: ProjectHistory } | undefined
+const autoSave = ref(true), draftState = ref<'idle' | 'waiting' | 'pending' | 'saved' | 'error'>('idle'), draftError = ref(''), lastSaved = ref('')
+const draftSeconds = ref(0), lastSaveAt = ref(''), lastSaveKind = ref<'draft' | 'file'>('draft')
+const DRAFT_DELAY_MS = 3000
+let draftCountdown: ReturnType<typeof setInterval> | undefined, projectGeneration = 0, draftSaveRequest = 0
 let nativeProjectTarget: ProjectFileTarget | undefined, browserProjectTarget: BrowserProjectFileHandle | undefined
 const recent = ref<ProjectSummary[]>([]), status = ref('本地创作，自由表达'), busy = ref(''), error = ref(''), recording = ref(false), browserExporting = ref(false)
 const exportOpen = ref(false), jobsOpen = ref(false), jobs = ref<MediaJob[]>([])
@@ -51,51 +56,78 @@ const visibleRecent = computed(() => recent.value.filter(item => item.title.toLo
 const runningJobs = computed(() => jobs.value.filter(job => job.state === 'running').length)
 function contentKey(value: Project) { const copy = cloneProject(value); copy.updatedAt = ''; for (const asset of copy.assets) { asset.url = ''; delete asset.nativePath; delete asset.sourceUrl }; return JSON.stringify(copy) }
 const cleanKey = ref(contentKey(initial)), dirty = computed(() => contentKey(project.value) !== cleanKey.value)
-const draftLabel = computed(() => draftState.value === 'error' ? '草稿保存失败' : draftState.value === 'pending' ? '正在保存草稿…' : !autoSave.value ? '自动保存已关闭' : draftState.value === 'saved' ? '本地草稿已保存' : '自动保存已开启')
+const draftLabel = computed(() => draftState.value === 'error' ? '草稿保存失败' : draftState.value === 'waiting' ? `${draftSeconds.value} 秒后保存草稿` : draftState.value === 'pending' ? '正在保存草稿…' : !autoSave.value ? '自动保存已关闭' : draftState.value === 'saved' ? '本地草稿已保存' : '自动保存已开启')
+const autosaveProgress = computed(() => draftState.value === 'waiting' ? `${draftSeconds.value} 秒后保存` : draftState.value === 'pending' ? '保存中…' : '')
+function savedTime(value: string) { return new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) }
+const lastSaveTitle = computed(() => lastSaveAt.value ? `${lastSaveKind.value === 'file' ? '项目文件' : '本地草稿'}上次保存：${savedTime(lastSaveAt.value)}` : '')
 function openVideoExport() { if (view.value === 'edit' && duration.value && !busy.value && !switching.value && !booting.value && !speechWorking.value) exportOpen.value = true }
 function announce(message: string) { status.value = message }
 function fail(cause: unknown) { error.value = cause instanceof Error ? cause.message : String(cause); status.value = error.value }
 function notifyError(cause: unknown) { fail(cause); busy.value = '' }
 function remember() { try { localStorage.setItem('open-media:last-project', project.value.id) } catch { /* Local draft failures are reported by the persistent store. */ } }
 async function refreshRecent() { recent.value = await listProjects() }
+function cancelDraftCountdown() {
+  clearTimeout(draftTimer); draftTimer = undefined
+  clearInterval(draftCountdown); draftCountdown = undefined; draftSeconds.value = 0
+}
 function scheduleDraft() {
-  clearTimeout(draftTimer)
-  if (!autoSave.value || booting.value) return
-  draftState.value = 'pending'
-  const generation = draftGeneration
-  draftTimer = setTimeout(() => { if (generation === draftGeneration && autoSave.value) void persist() }, 650)
+  cancelDraftCountdown()
+  draftError.value = ''
+  if (!autoSave.value || booting.value) { draftState.value = 'idle'; return }
+  draftState.value = 'waiting'
+  const generation = draftGeneration, deadline = Date.now() + DRAFT_DELAY_MS
+  draftSeconds.value = Math.ceil(DRAFT_DELAY_MS / 1000)
+  draftCountdown = setInterval(() => { draftSeconds.value = Math.max(1, Math.ceil((deadline - Date.now()) / 1000)) }, 100)
+  draftTimer = setTimeout(() => { if (generation === draftGeneration && autoSave.value) void persist() }, DRAFT_DELAY_MS)
 }
 function persist(): Promise<boolean> {
-  clearTimeout(draftTimer)
+  cancelDraftCountdown()
   const snapshot = cloneProject(project.value), snapshotBlobs = new Map(blobs), key = contentKey(snapshot)
+  const generation = projectGeneration, request = ++draftSaveRequest
   draftState.value = 'pending'; draftError.value = ''
   const result = saveQueue.then(async () => {
     try {
-      await storeProject(snapshot, snapshotBlobs); await refreshRecent()
-      if (project.value.id === snapshot.id) { if (contentKey(project.value) === key) draftState.value = 'saved'; remember() }
+      const savedAt = await storeProject(snapshot, snapshotBlobs)
+      if (!destroyed && projectGeneration === generation && project.value.id === snapshot.id) {
+        lastSaveAt.value = savedAt; lastSaveKind.value = 'draft'
+        // An earlier write must not hide the countdown or failure of a newer edit.
+        if (request === draftSaveRequest && draftState.value !== 'waiting' && contentKey(project.value) === key) draftState.value = 'saved'
+        remember()
+      }
+      // A recent-project list read is independent of the successful draft write.
+      await refreshRecent().catch(() => {})
       return true
     } catch (cause) {
-      if (project.value.id === snapshot.id) { draftState.value = 'error'; draftError.value = cause instanceof Error ? cause.message : String(cause) }
+      if (!destroyed && projectGeneration === generation && project.value.id === snapshot.id && request === draftSaveRequest && draftState.value !== 'waiting' && contentKey(project.value) === key) {
+        draftState.value = 'error'; draftError.value = cause instanceof Error ? cause.message : String(cause)
+      }
       return false
     }
   })
   saveQueue = result.then(() => undefined)
   return result
 }
-function commit(next: Project, label = '已修改项目') {
+function commit(next: Project, label = '已修改项目', historyGroup?: string) {
   try {
-    const checked = validateProject(next, { trusted: true })
+    const checked = validateProject(stampNewAssets(next, project.value), { trusted: true })
     if (contentKey(checked) === contentKey(project.value)) return
-    checked.updatedAt = new Date().toISOString(); history.value = commitHistory(history.value, checked); project.value = checked
+    checked.updatedAt = new Date().toISOString()
+    // Consecutive live text edits share one undo step; other edits and history navigation end the group.
+    history.value = historyGroup && continuousEdit?.group === historyGroup && continuousEdit.history === history.value
+      ? { ...history.value, present: cloneProject(checked), future: [] }
+      : commitHistory(history.value, checked)
+    continuousEdit = historyGroup ? { group: historyGroup, history: history.value } : undefined
+    project.value = checked
     announce(label); scheduleDraft()
   } catch (cause) { fail(cause) }
 }
 function moveHistory(direction: 'undo' | 'redo') {
   if (switching.value || booting.value || speechWorking.value) return
+  continuousEdit = undefined
   history.value = direction === 'undo' ? undoHistory(history.value) : redoHistory(history.value)
   project.value = cloneProject(history.value.present); announce(direction === 'undo' ? '已撤销' : '已重做'); scheduleDraft()
 }
-function toggleAutosave() { if (switching.value || booting.value) return; autoSave.value = !autoSave.value; draftGeneration++; clearTimeout(draftTimer); try { localStorage.setItem('open-media:autosave', String(autoSave.value)) } catch {} ; if (autoSave.value) void persist() }
+function toggleAutosave() { if (switching.value || booting.value) return; autoSave.value = !autoSave.value; draftGeneration++; cancelDraftCountdown(); if (draftState.value === 'waiting') draftState.value = 'idle'; try { localStorage.setItem('open-media:autosave', String(autoSave.value)) } catch {} ; if (autoSave.value) void persist() }
 function setTheme(value: 'light' | 'dark' | 'system') { theme.value = value; try { localStorage.setItem('open-media:theme', value) } catch {} }
 function rememberAsset(asset: MediaAsset) { if (asset.url.startsWith('blob:')) ownedUrls.add(asset.url) }
 function rememberEditorAsset(asset: MediaAsset, blob: Blob) { rememberAsset(asset); blobs.set(asset.id, blob) }
@@ -298,8 +330,9 @@ function releaseUnusedMedia(next: Project) {
     if (![...entry.urls].some(url => retainedUrls.has(url))) { entry.release(); hydratedReleases.splice(index, 1) }
   }
 }
-function adoptProject(next: Project, restored = false) {
-  draftGeneration++; clearTimeout(draftTimer)
+function adoptProject(next: Project, restored = false, savedAt?: string) {
+  projectGeneration++; draftGeneration++; cancelDraftCountdown()
+  lastSaveAt.value = savedAt || ''; lastSaveKind.value = 'draft'
   nativeProjectTarget = undefined; browserProjectTarget = undefined
   releaseUnusedMedia(next)
   project.value = next; history.value = createHistory(next); cleanKey.value = contentKey(next); draftState.value = restored ? 'saved' : 'idle'; lastSaved.value = ''; remember()
@@ -320,7 +353,7 @@ async function hydrate(imported: ImportedProject) {
       const blob = imported.blobs.get(asset.id)
       if (blob && !asset.nativePath) {
         const recovered = await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), asset.name)
-        Object.assign(asset, recovered, { id: asset.id })
+        Object.assign(asset, recovered, { id: asset.id, addedAt: asset.addedAt })
       }
     }
   }
@@ -360,13 +393,13 @@ async function openProject(file?: File) {
 async function openRecent(id: string) {
   await changeProject(async () => {
     busy.value = '正在恢复本地草稿…'
-    try { const imported = await loadProject(id); try { adoptProject(await hydrate(imported), true); announce('已恢复本地项目。') } catch (cause) { imported.revoke(); throw cause } } finally { busy.value = '' }
+    try { const imported = await loadProject(id); try { adoptProject(await hydrate(imported), true, imported.savedAt); announce('已恢复本地项目。') } catch (cause) { imported.revoke(); throw cause } } finally { busy.value = '' }
   })
 }
 async function removeRecent(item: ProjectSummary) {
   const choice = await ask({ title: '移除本地草稿', text: `移除“${item.title}”的本地草稿？已经导出的项目文件仍可打开。`, choices: [{ id: 'cancel', label: '取消' }, { id: 'remove', label: '移除草稿', primary: true }] })
   if (choice !== 'remove') return
-  try { if (item.id === project.value.id) { draftGeneration++; clearTimeout(draftTimer) }; await saveQueue; await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) draftState.value = 'idle' } catch (cause) { fail(cause) }
+  try { if (item.id === project.value.id) { draftGeneration++; cancelDraftCountdown() }; await saveQueue; await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) { draftState.value = 'idle'; if (lastSaveKind.value === 'draft') lastSaveAt.value = '' } } catch (cause) { fail(cause) }
 }
 async function save(saveAs = false, closing = false): Promise<boolean> {
   if (busy.value || switching.value && !closing || booting.value || speechWorking.value) return false
@@ -386,8 +419,10 @@ async function save(saveAs = false, closing = false): Promise<boolean> {
       await writeBrowserProjectFile(browserTarget, blob)
       browserProjectTarget = browserTarget; lastSaved.value = browserTarget.name
     } else { downloadBlob(blob, name); lastSaved.value = name; downloaded = true }
+    const savedAt = new Date().toISOString()
     if (project.value.id === snapshot.id) cleanKey.value = key
     await persist()
+    if (project.value.id === snapshot.id) { lastSaveAt.value = savedAt; lastSaveKind.value = 'file' }
     announce(downloaded ? '已下载项目副本；当前浏览器不支持直接覆盖文件。' : `${saveAs ? '项目已另存为' : '项目已保存'}：${lastSaved.value}`)
     return true
   } catch (cause) {
@@ -416,7 +451,7 @@ async function nativeClose() {
     finishRename()
     for (const { element } of suspendedDialogs) element.inert = true
     await nextTick()
-    draftGeneration++; clearTimeout(draftTimer)
+    draftGeneration++; cancelDraftCountdown()
     await saveQueue
     jobs.value = await getMediaJobs()
     if (runningJobs.value) { jobsOpen.value = true; fail('请等待导出完成，或先取消正在处理的任务。'); return }
@@ -436,7 +471,7 @@ async function nativeClose() {
     if (!allowClose) {
       switching.value = false
       for (const { element, inert } of suspendedDialogs) element.inert = inert
-      if (autoSave.value && draftState.value === 'pending') scheduleDraft()
+      if (autoSave.value && (draftState.value === 'pending' || draftState.value === 'waiting')) scheduleDraft()
     }
   }
 }
@@ -472,7 +507,7 @@ onMounted(async () => {
   mediaQuery = matchMedia('(prefers-color-scheme: dark)'); systemDark.value = mediaQuery.matches; mediaQuery.addEventListener('change', mediaChanged)
   window.addEventListener('keydown', keyboard); window.addEventListener('beforeunload', unload)
   try { autoSave.value = localStorage.getItem('open-media:autosave') !== 'false'; const value = localStorage.getItem('open-media:theme'); if (value === 'light' || value === 'dark' || value === 'system') theme.value = value } catch {}
-  try { await refreshRecent(); const last = localStorage.getItem('open-media:last-project'); if (last && recent.value.some(item => item.id === last)) { const restored = await hydrate(await loadProject(last)); adoptProject(restored, true); view.value = 'home' } } catch (cause) { fail(cause) }
+  try { await refreshRecent(); const last = localStorage.getItem('open-media:last-project'); if (last && recent.value.some(item => item.id === last)) { const imported = await loadProject(last); const restored = await hydrate(imported); adoptProject(restored, true, imported.savedAt); view.value = 'home' } } catch (cause) { fail(cause) }
   booting.value = false
   void initializeScreenshot()
   if (native) {
@@ -480,7 +515,7 @@ onMounted(async () => {
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; clearTimeout(draftTimer); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>
@@ -497,8 +532,10 @@ onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screensh
       </aside>
       <main class="main-area">
         <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
+        <button title="打开项目 (Ctrl/⌘+O)" aria-label="打开项目" :disabled="!!busy || switching || booting || mediaIsWorking()" data-testid="open-project" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
         <button :title="lastSaved && (native || browserProjectTarget) ? `保存到 ${lastSaved} (Ctrl/⌘+S)` : '保存项目 (Ctrl/⌘+S)'" aria-label="保存项目" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-project" @click="save()"><Icon name="save"/><span>保存</span></button>
-        <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
+        <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" :aria-describedby="autosaveProgress ? 'autosave-progress' : undefined" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
+        <span v-if="autosaveProgress" id="autosave-progress" class="autosave-countdown" data-testid="autosave-countdown">{{ autosaveProgress }}</span>
         <button title="另存为项目 (Ctrl/⌘+Shift+S)" aria-label="另存为项目" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-as-project" @click="save(true)"><Icon name="save-as"/><span>另存为</span></button>
         <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting || speechWorking" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting || speechWorking" @click="moveHistory('redo')"><Icon name="redo"/></button>
       </div></div>
@@ -517,7 +554,7 @@ onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screensh
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
       </main>
     </div>
-    <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/>{{ busy || status }}</span><span v-if="native" class="status-tasks"><button class="job-status" aria-label="处理任务" title="查看视频导出与媒体转换任务" @click="jobsOpen=true"><Icon name="layers" :size="13"/><span>处理任务</span><b v-if="runningJobs">{{ runningJobs }}</b></button></span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>
+    <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/><span class="status-message">{{ busy || status }}</span><time v-if="lastSaveAt" class="last-save-time" data-testid="last-save-time" :datetime="lastSaveAt" :title="lastSaveTitle">上次保存 {{ savedTime(lastSaveAt) }}</time></span><span v-if="native" class="status-tasks"><button class="job-status" aria-label="处理任务" title="查看视频导出与媒体转换任务" @click="jobsOpen=true"><Icon name="layers" :size="13"/><span>处理任务</span><b v-if="runningJobs">{{ runningJobs }}</b></button></span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>
     <input ref="mediaInput" class="sr-only" type="file" accept="video/*,audio/*,image/*,.mkv,.mov,.avi,.flac,.ogg" multiple data-testid="media-input" @change="importFiles([...(($event.target as HTMLInputElement).files || [])]); ($event.target as HTMLInputElement).value=''"/>
     <input ref="projectInput" class="sr-only" type="file" accept=".omedia" data-testid="project-input" @change="openProject(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value=''"/>
     <ScreenshotPicker ref="screenshotPicker"/>
@@ -528,6 +565,10 @@ onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screensh
 </template>
 
 <style scoped>
+.autosave-countdown{font-size:10px;color:var(--ui-muted);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:5.5em;margin-right:4px}
+.status-message{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.last-save-time{flex:none;font-variant-numeric:tabular-nums;border-left:1px solid var(--ui-line);padding-left:8px;margin-left:2px}
+@media(max-width:640px){.status-main{max-width:none;flex:1}.status-message{flex:1}.last-save-time{max-width:60%;overflow:hidden;text-overflow:ellipsis;font-size:9px}}
 .app-confirm{--ed-border:var(--ui-line);--ed-panel:var(--ui-surface);--ed-text:var(--ui-text);--ed-accent:var(--ui-accent);--ed-muted:var(--ui-muted);--ed-bg:var(--ui-hover)}
 .confirmation-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}
 .confirmation-actions button{font-size:12px}

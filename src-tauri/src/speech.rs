@@ -1,4 +1,5 @@
 use crate::engine::{Asset, MediaStore, Result, Runtime};
+use crate::speech_models::SpeechModels;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -29,7 +30,19 @@ pub struct SpeechVoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gender: Option<String>,
     #[serde(skip_serializing)]
-    speaker_id: u32,
+    pub(crate) speaker_id: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloaded_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -64,16 +77,30 @@ pub struct SpeechJob {
     pub error: Option<String>,
 }
 
+#[derive(Clone, Copy, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ModelKind {
+    Matcha,
+    Kokoro,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Model {
-    file: String,
-    voices: String,
-    tokens: String,
-    data_dir: String,
-    lexicons: Vec<String>,
-    rule_fsts: Vec<String>,
-    sample_rate: u32,
+pub(crate) struct Model {
+    pub kind: ModelKind,
+    pub file: String,
+    #[serde(default)]
+    pub vocoder: String,
+    #[serde(default)]
+    pub voices: String,
+    pub tokens: String,
+    #[serde(default)]
+    pub data_dir: String,
+    #[serde(default)]
+    pub lexicons: Vec<String>,
+    #[serde(default)]
+    pub rule_fsts: Vec<String>,
+    pub sample_rate: u32,
 }
 
 #[derive(Deserialize)]
@@ -85,11 +112,11 @@ struct Manifest {
 }
 
 #[derive(Clone)]
-struct SpeechRuntime {
-    root: PathBuf,
-    executable: PathBuf,
-    model: Model,
-    voices: Vec<SpeechVoice>,
+pub(crate) struct SpeechRuntime {
+    pub root: PathBuf,
+    pub executable: PathBuf,
+    pub model: Model,
+    pub voices: Vec<SpeechVoice>,
 }
 
 fn relative_path(root: &Path, relative: &str, directory: bool) -> Result<PathBuf> {
@@ -150,10 +177,10 @@ impl SpeechRuntime {
             &fs::read(&manifest_path).map_err(|e| format!("无法读取语音资源清单：{e}"))?,
         )
         .map_err(|_| "内置语音资源清单无效，请重新安装。")?;
-        if manifest.schema != 1
-            || !(8_000..=192_000).contains(&manifest.model.sample_rate)
-            || manifest.voices.is_empty()
-            || manifest.voices.len() > 512
+        if manifest.schema != 2
+            || manifest.model.kind != ModelKind::Matcha
+            || manifest.model.sample_rate != 16_000
+            || manifest.voices.len() != 1
             || manifest.model.lexicons.is_empty()
             || manifest.model.lexicons.len() > 16
             || manifest.model.rule_fsts.len() > 16
@@ -161,7 +188,7 @@ impl SpeechRuntime {
             return Err("内置语音模型配置不受支持，请重新安装。".into());
         }
         let model = manifest.model;
-        for file in [&model.file, &model.voices, &model.tokens]
+        for file in [&model.file, &model.vocoder, &model.tokens]
             .into_iter()
             .chain(model.lexicons.iter())
             .chain(model.rule_fsts.iter())
@@ -181,7 +208,7 @@ impl SpeechRuntime {
                 || voice.name.chars().count() > 80
                 || voice.language.is_empty()
                 || voice.language.len() > 32
-                || voice.speaker_id > 4096
+                || voice.speaker_id != 0
                 || !ids.insert(&voice.id)
             {
                 return Err("内置音色列表无效，请重新安装。".into());
@@ -219,12 +246,25 @@ impl SpeechRuntime {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        command.current_dir(&self.root).args([
-            format!("--kokoro-model={}", self.model.file),
-            format!("--kokoro-voices={}", self.model.voices),
-            format!("--kokoro-tokens={}", self.model.tokens),
-            format!("--kokoro-data-dir={}", self.model.data_dir),
-            format!("--kokoro-lexicon={}", self.model.lexicons.join(",")),
+        command.current_dir(&self.root);
+        match self.model.kind {
+            ModelKind::Matcha => command.args([
+                format!("--matcha-acoustic-model={}", self.model.file),
+                format!("--matcha-vocoder={}", self.model.vocoder),
+                format!("--matcha-tokens={}", self.model.tokens),
+                format!("--matcha-data-dir={}", self.model.data_dir),
+                format!("--matcha-lexicon={}", self.model.lexicons.join(",")),
+            ]),
+            ModelKind::Kokoro => command.args([
+                format!("--kokoro-model={}", self.model.file),
+                format!("--kokoro-voices={}", self.model.voices),
+                format!("--kokoro-tokens={}", self.model.tokens),
+                format!("--kokoro-data-dir={}", self.model.data_dir),
+                format!("--kokoro-lexicon={}", self.model.lexicons.join(",")),
+            ]),
+        };
+        command.args([
+            format!("--sample-rate={}", self.model.sample_rate),
             format!("--tts-rule-fsts={}", self.model.rule_fsts.join(",")),
             format!("--sid={}", voice.speaker_id),
             format!("--speed={}", request.speed),
@@ -277,6 +317,7 @@ impl Drop for ManagerOwner {
 #[derive(Clone)]
 pub struct SpeechManager {
     runtime: Result<SpeechRuntime>,
+    models: Result<SpeechModels>,
     workspace: PathBuf,
     owner: Arc<ManagerOwner>,
 }
@@ -286,8 +327,11 @@ impl SpeechManager {
         let workspace = app_data.join("speech-work");
         fs::create_dir_all(&workspace).map_err(|e| format!("无法创建配音工作目录：{e}"))?;
         let workspace = workspace.canonicalize().map_err(|e| e.to_string())?;
+        let runtime = SpeechRuntime::discover(resource);
+        let models = SpeechModels::new(app_data, runtime.clone());
         Ok(Self {
-            runtime: SpeechRuntime::discover(resource),
+            runtime,
+            models,
             workspace,
             owner: Arc::new(ManagerOwner {
                 jobs: Arc::new(Mutex::new(Jobs::default())),
@@ -296,18 +340,42 @@ impl SpeechManager {
     }
 
     pub fn status(&self) -> SpeechStatus {
-        match &self.runtime {
-            Ok(runtime) => SpeechStatus {
-                ready: true,
-                voices: runtime.voices.clone(),
-                error: None,
-            },
-            Err(error) => SpeechStatus {
-                ready: false,
-                voices: vec![],
-                error: Some(error.clone()),
-            },
+        let mut voices = self
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.voices.clone())
+            .unwrap_or_default();
+        for voice in &mut voices {
+            voice.model_id = Some("bundled".into());
+            voice.model_size = Some(149_227_292);
+            voice.download_size = Some(0);
+            voice.downloaded_bytes = Some(0);
+            voice.status = Some("bundled".into());
         }
+        if let Ok(models) = &self.models {
+            voices.extend(models.voices());
+        }
+        SpeechStatus {
+            ready: self.runtime.is_ok(),
+            voices,
+            error: self.runtime.as_ref().err().cloned(),
+        }
+    }
+
+    pub fn begin_model_download(&self, model_id: &str) -> Result<SpeechStatus> {
+        self.models
+            .as_ref()
+            .map_err(Clone::clone)?
+            .begin(model_id)?;
+        Ok(self.status())
+    }
+
+    pub fn cancel_model_download(&self, model_id: &str) -> Result<SpeechStatus> {
+        self.models
+            .as_ref()
+            .map_err(Clone::clone)?
+            .cancel(model_id)?;
+        Ok(self.status())
     }
 
     pub fn get(&self, id: &str) -> Result<SpeechJob> {
@@ -330,13 +398,18 @@ impl SpeechManager {
         validate_request(&request)?;
         request.text = request.text.trim().to_owned();
         let speech = self.runtime.clone()?;
-        if !speech
+        let speech = if speech
             .voices
             .iter()
             .any(|voice| voice.id == request.voice_id)
         {
-            return Err("所选音色不可用，请重新选择。".into());
-        }
+            speech
+        } else {
+            self.models
+                .as_ref()
+                .map_err(Clone::clone)?
+                .runtime_for_voice(&request.voice_id)?
+        };
         let id = request.request_id.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let job = {
@@ -513,6 +586,9 @@ impl SpeechManager {
     }
 
     pub fn shutdown(&self) {
+        if let Ok(models) = &self.models {
+            models.shutdown();
+        }
         if let Ok(mut jobs) = self.owner.jobs.lock() {
             jobs.closing = true;
             for entry in jobs.entries.values() {
@@ -869,7 +945,7 @@ mod tests {
         SpeechRequest {
             request_id: crate::engine::new_id(),
             text: text.into(),
-            voice_id: "zf_001".into(),
+            voice_id: "matcha_zh_en_female".into(),
             speed: 1.0,
         }
     }
@@ -919,7 +995,7 @@ mod tests {
         fs::create_dir_all(root.path().join("runtime/bin")).unwrap();
         for name in [
             "model/model.onnx",
-            "model/voices.bin",
+            "model/vocoder.onnx",
             "model/tokens.txt",
             "model/lexicon.txt",
             "model/rule.fst",
@@ -928,10 +1004,10 @@ mod tests {
             fs::write(root.path().join(name), b"test configuration only").unwrap();
         }
         let manifest = json!({
-            "schema": 1,
+            "schema": 2,
             "executable": "runtime/bin/engine",
-            "model": {"file": "model/model.onnx", "voices": "model/voices.bin", "tokens": "model/tokens.txt", "dataDir": "model/data", "lexicons": ["model/lexicon.txt"], "ruleFsts": ["model/rule.fst"], "sampleRate": 24000},
-            "voices": [{"id": "zf_001", "name": "中文女声 01", "language": "zh-CN", "speakerId": 3}]
+            "model": {"kind": "matcha", "file": "model/model.onnx", "vocoder": "model/vocoder.onnx", "tokens": "model/tokens.txt", "dataDir": "model/data", "lexicons": ["model/lexicon.txt"], "ruleFsts": ["model/rule.fst"], "sampleRate": 16000},
+            "voices": [{"id": "matcha_zh_en_female", "name": "温柔女声（中英）", "language": "zh-CN", "gender": "female", "speakerId": 0}]
         });
         fs::write(
             root.path().join("manifest.json"),
@@ -959,6 +1035,117 @@ mod tests {
         assert!(SpeechRuntime::from_root(root.path(), root.path()).is_err());
     }
 
+    #[test]
+    fn manifest_requires_supported_schema_model_and_single_speaker() {
+        let root = fixture();
+        let path = root.path().join("manifest.json");
+        let original: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let mut invalid_manifests = Vec::new();
+        let mut old_schema = original.clone();
+        old_schema["schema"] = json!(1);
+        invalid_manifests.push(old_schema);
+        let mut missing_kind = original.clone();
+        missing_kind["model"]
+            .as_object_mut()
+            .unwrap()
+            .remove("kind");
+        invalid_manifests.push(missing_kind);
+        let mut unknown_kind = original.clone();
+        unknown_kind["model"]["kind"] = json!("unsupported");
+        invalid_manifests.push(unknown_kind);
+        let mut wrong_rate = original.clone();
+        wrong_rate["model"]["sampleRate"] = json!(24000);
+        invalid_manifests.push(wrong_rate);
+        let mut wrong_speaker = original.clone();
+        wrong_speaker["voices"][0]["speakerId"] = json!(1);
+        invalid_manifests.push(wrong_speaker);
+        let mut extra_voice = original.clone();
+        let mut second_voice = original["voices"][0].clone();
+        second_voice["id"] = json!("another_voice");
+        extra_voice["voices"]
+            .as_array_mut()
+            .unwrap()
+            .push(second_voice);
+        invalid_manifests.push(extra_voice);
+        for manifest in invalid_manifests {
+            fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+            assert!(SpeechRuntime::from_root(root.path(), root.path()).is_err());
+        }
+        fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+        fs::remove_file(root.path().join("model/vocoder.onnx")).unwrap();
+        assert!(SpeechRuntime::from_root(root.path(), root.path()).is_err());
+    }
+
+    #[test]
+    fn command_uses_acoustic_model_vocoder_and_valid_voice() {
+        let root = fixture();
+        let runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        let mut input = request("你好，欢迎使用本地配音。");
+        input.speed = 1.25;
+        let command = runtime
+            .command(
+                &input,
+                Path::new("文字 file.txt"),
+                Path::new("配音 file.wav"),
+            )
+            .unwrap();
+        let arguments: Vec<_> = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect();
+        for expected in [
+            "--matcha-acoustic-model=model/model.onnx",
+            "--matcha-vocoder=model/vocoder.onnx",
+            "--matcha-tokens=model/tokens.txt",
+            "--matcha-data-dir=model/data",
+            "--matcha-lexicon=model/lexicon.txt",
+            "--sid=0",
+            "--speed=1.25",
+            "--text-file=文字 file.txt",
+            "--output-filename=配音 file.wav",
+        ] {
+            assert!(
+                arguments.iter().any(|argument| argument == expected),
+                "{expected}"
+            );
+        }
+        input.voice_id = "unavailable_voice".into();
+        assert!(runtime
+            .command(&input, Path::new("text.txt"), Path::new("speech.wav"))
+            .is_err());
+    }
+
+    #[test]
+    fn downloaded_multi_voice_command_selects_model_speaker_and_sample_rate() {
+        let root = fixture();
+        let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        runtime.model.kind = ModelKind::Kokoro;
+        runtime.model.file = "model.int8.onnx".into();
+        runtime.model.voices = "voices.bin".into();
+        runtime.model.sample_rate = 24000;
+        runtime.voices[0].id = "downloaded_voice".into();
+        runtime.voices[0].speaker_id = 62;
+        let mut input = request("测试声音");
+        input.voice_id = "downloaded_voice".into();
+        let command = runtime
+            .command(&input, Path::new("text.txt"), Path::new("speech.wav"))
+            .unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        for expected in [
+            "--kokoro-model=model.int8.onnx",
+            "--kokoro-voices=voices.bin",
+            "--sample-rate=24000",
+            "--sid=62",
+        ] {
+            assert!(args.iter().any(|arg| arg == expected), "{expected}");
+        }
+        assert!(!args.iter().any(|arg| arg.starts_with("--matcha-")));
+    }
+
     #[cfg(unix)]
     #[test]
     fn manifest_rejects_symbolic_link_outside_bundle() {
@@ -972,6 +1159,7 @@ mod tests {
     fn manager(root: &Path, runtime: Result<SpeechRuntime>) -> SpeechManager {
         SpeechManager {
             runtime,
+            models: Err("测试不启用可选音色。".into()),
             workspace: root.into(),
             owner: Arc::new(ManagerOwner {
                 jobs: Arc::new(Mutex::new(Jobs::default())),
@@ -1110,8 +1298,8 @@ mod tests {
         bytes.extend_from_slice(&16_u32.to_le_bytes());
         bytes.extend_from_slice(&1_u16.to_le_bytes());
         bytes.extend_from_slice(&1_u16.to_le_bytes());
-        bytes.extend_from_slice(&24000_u32.to_le_bytes());
-        bytes.extend_from_slice(&48000_u32.to_le_bytes());
+        bytes.extend_from_slice(&16000_u32.to_le_bytes());
+        bytes.extend_from_slice(&32000_u32.to_le_bytes());
         bytes.extend_from_slice(&2_u16.to_le_bytes());
         bytes.extend_from_slice(&16_u16.to_le_bytes());
         bytes.extend_from_slice(b"data");
@@ -1127,18 +1315,18 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
         let valid = wave(&[0, 500, -500, 0]);
         fs::write(file.path(), &valid).unwrap();
-        validate_wave(file.path(), 24000).unwrap();
-        assert!(validate_wave(file.path(), 16000).is_err());
+        validate_wave(file.path(), 16000).unwrap();
+        assert!(validate_wave(file.path(), 24000).is_err());
         fs::write(file.path(), &valid[..valid.len() - 1]).unwrap();
-        assert!(validate_wave(file.path(), 24000).is_err());
+        assert!(validate_wave(file.path(), 16000).is_err());
         fs::write(file.path(), wave(&[0; 20])).unwrap();
-        assert!(validate_wave(file.path(), 24000).is_err());
+        assert!(validate_wave(file.path(), 16000).is_err());
         fs::write(file.path(), wave(&[])).unwrap();
-        assert!(validate_wave(file.path(), 24000).is_err());
+        assert!(validate_wave(file.path(), 16000).is_err());
         let mut extra = valid.clone();
         extra.push(0);
         fs::write(file.path(), extra).unwrap();
-        assert!(validate_wave(file.path(), 24000).is_err());
+        assert!(validate_wave(file.path(), 16000).is_err());
     }
 
     fn await_job(manager: &SpeechManager, id: &str) -> SpeechJob {
@@ -1172,32 +1360,41 @@ mod tests {
         );
         let status = speech.status();
         assert!(status.ready, "{:?}", status.error);
+        assert_eq!(
+            status
+                .voices
+                .iter()
+                .filter(|voice| voice.status.as_deref() == Some("bundled"))
+                .count(),
+            1
+        );
         let female = status
             .voices
             .iter()
             .find(|voice| voice.language == "zh-CN" && voice.gender.as_deref() == Some("female"))
             .expect("Chinese female voice");
-        let male = status
-            .voices
-            .iter()
-            .find(|voice| voice.language == "zh-CN" && voice.gender.as_deref() == Some("male"))
-            .expect("Chinese male voice");
         let mut results = Vec::new();
-        for voice in [female, male] {
+        for speed in [1.0, 1.5] {
             let mut input = request("你好，欢迎使用本地配音。今天是十月十六日。");
-            input.voice_id.clone_from(&voice.id);
+            input.voice_id.clone_from(&female.id);
+            input.speed = speed;
             let started = speech.begin(runtime.clone(), store.clone(), input).unwrap();
             let job = await_job(&speech, &started.id);
             assert_eq!(job.state, "completed", "{:?}", job.error);
             let asset = job.asset.clone().unwrap();
             assert_eq!(asset.kind, "audio");
             assert!(asset.duration > 1.0 && asset.duration < 30.0);
-            validate_wave(Path::new(&asset.native_path), 24000).unwrap();
+            validate_wave(Path::new(&asset.native_path), 16000).unwrap();
             results.push((job, fs::read(&asset.native_path).unwrap()));
         }
         assert_ne!(
             results[0].1, results[1].1,
-            "distinct voices must synthesize distinct audio"
+            "changing the speed must synthesize distinct audio"
+        );
+        assert!(
+            results[1].0.asset.as_ref().unwrap().duration
+                < results[0].0.asset.as_ref().unwrap().duration,
+            "a faster rate must produce a shorter spoken clip"
         );
         speech.accept(&[results[0].0.id.clone()]).unwrap();
         assert!(speech.discard(&results[0].0.id).is_err());
@@ -1223,6 +1420,126 @@ mod tests {
                 .starts_with("voice-")),
             "temporary workspaces must be removed"
         );
+        speech.shutdown();
+    }
+
+    #[test]
+    #[ignore = "requires network access and the prepared offline voice and media runtimes"]
+    fn real_optional_voice_download_and_speech_round_trip() {
+        let root = PathBuf::from(
+            std::env::var_os("OPEN_MEDIA_SPEECH_ROOT")
+                .expect("OPEN_MEDIA_SPEECH_ROOT must point to the prepared bundle"),
+        );
+        let data = tempfile::Builder::new()
+            .prefix("下载音色, test-")
+            .tempdir()
+            .unwrap();
+        let runtime = Runtime::discover(None, None).expect("real media runtime is required");
+        let store = MediaStore::new(data.path()).unwrap();
+        let resource = root.parent().unwrap();
+        let speech = SpeechManager::new(data.path(), resource).unwrap();
+        assert!(speech.status().ready, "{:?}", speech.status().error);
+        let optional = speech
+            .status()
+            .voices
+            .into_iter()
+            .filter(|voice| voice.status.as_deref() == Some("not-downloaded"))
+            .collect::<Vec<_>>();
+        assert!(!optional.is_empty());
+        let model_id = optional[0].model_id.clone().unwrap();
+        assert!(optional
+            .iter()
+            .all(|voice| voice.model_id.as_ref() == Some(&model_id)));
+        let mut input = request("下载前不可生成此声音。");
+        input.voice_id.clone_from(&optional[0].id);
+        assert!(speech.begin(runtime.clone(), store.clone(), input).is_err());
+
+        speech.begin_model_download(&model_id).unwrap();
+        speech.cancel_model_download(&model_id).unwrap();
+        assert!(speech
+            .status()
+            .voices
+            .iter()
+            .filter(|voice| voice.model_id.as_ref() == Some(&model_id))
+            .all(|voice| voice.status.as_deref() == Some("not-downloaded")));
+        speech.begin_model_download(&model_id).unwrap();
+        let await_ready = |speech: &SpeechManager| {
+            let deadline = Instant::now() + Duration::from_secs(1200);
+            let mut report = Instant::now();
+            loop {
+                let status = speech.status();
+                let voices = status
+                    .voices
+                    .iter()
+                    .filter(|voice| voice.model_id.as_ref() == Some(&model_id))
+                    .collect::<Vec<_>>();
+                assert_eq!(voices.len(), optional.len());
+                assert!(
+                    voices
+                        .iter()
+                        .all(|voice| voice.status.as_deref() != Some("failed")),
+                    "{voices:?}"
+                );
+                if voices
+                    .iter()
+                    .all(|voice| voice.status.as_deref() == Some("ready"))
+                {
+                    assert!(voices
+                        .iter()
+                        .all(|voice| voice.downloaded_bytes == voice.download_size));
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "voice download test timed out: {voices:?}"
+                );
+                if report.elapsed() >= Duration::from_secs(10) {
+                    eprintln!(
+                        "voice download: {} / {} bytes ({})",
+                        voices[0].downloaded_bytes.unwrap_or(0),
+                        voices[0].download_size.unwrap_or(0),
+                        voices[0].status.as_deref().unwrap_or("unknown")
+                    );
+                    report = Instant::now();
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        };
+        await_ready(&speech);
+        // Already installed resources must remain usable after an application restart.
+        speech.shutdown();
+        drop(speech);
+        let speech = SpeechManager::new(data.path(), resource).unwrap();
+        await_ready(&speech);
+        speech.begin_model_download(&model_id).unwrap();
+        let mut generated = Vec::new();
+        for voice in &optional {
+            let text = if voice.language.starts_with("zh") {
+                "这是一款全程由人工智能接管并生成的软件。欢迎使用本地配音。"
+            } else {
+                "This application was created with artificial intelligence. Welcome to local voice narration."
+            };
+            let mut input = request(text);
+            input.voice_id.clone_from(&voice.id);
+            let job = speech.begin(runtime.clone(), store.clone(), input).unwrap();
+            let job = await_job(&speech, &job.id);
+            assert_eq!(job.state, "completed", "{}: {:?}", voice.id, job.error);
+            let asset = job.asset.as_ref().unwrap();
+            assert!(asset.duration > 1.0 && asset.duration < 60.0);
+            validate_wave(Path::new(&asset.native_path), 24000).unwrap();
+            let audio = fs::read(&asset.native_path).unwrap();
+            assert!(
+                generated.iter().all(|previous| previous != &audio),
+                "different voices must synthesize distinct audio"
+            );
+            generated.push(audio);
+            eprintln!(
+                "optional voice {}: {:.2}s real audio",
+                voice.id, asset.duration
+            );
+            speech.discard(&job.id).unwrap();
+        }
+        assert_eq!(fs::read_dir(&store.root).unwrap().count(), 0);
         speech.shutdown();
     }
 }

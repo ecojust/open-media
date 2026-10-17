@@ -1,0 +1,96 @@
+{
+  "schema": 1,
+  "models": [
+    {
+      "id": "multivoice-zh-en-v1",
+      "version": 1,
+      "license": "Apache-2.0",
+      "modelSize": 176178663,
+      "downloadSize": 176178663,
+      "voices": [
+        {
+          "id": "zm_013",
+          "name": "沉稳男声",
+          "language": "zh-CN",
+          "gender": "male",
+          "speakerId": 62
+        },
+        {
+          "id": "zf_038",
+          "name": "明亮女声",
+          "language": "zh-CN",
+          "gender": "female",
+          "speakerId": 23
+        },
+        {
+          "id": "af_maple",
+          "name": "英文女声",
+          "language": "en-US",
+          "gender": "female",
+          "speakerId": 0
+        }
+      ],
+      "files": [
+        {
+          "path": "model.int8.onnx",
+          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/model.int8.onnx",
+          "size": 114299010,
+          "sha256": "bda15858163726a492d02a9a727bc263551b86ac77f90812c4b30ff41d380e26"
+        },
+        {
+          "path": "voices.bin",
+          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/voices.bin",
+          "size": 53790720,
+          "sha256": "e64a5a581d8c2a350d848f51c3121657cd83aa07ed6109172177345874a7244c"
+        },
+        {
+          "path": "tokens.txt",
+          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/tokens.txt",
+          "size": 1111,
+          "sha256": "931ab2df2400cd65d580a22402024c2347ced8ae9ea300e545144b1aacc48e14"
+        },
+        {
+          "path": "lexicon-us-en.txt",
+          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/lexicon-us-en.txt",
+          "size": 5956885,
+          "sha256": "7daaab53a181be9885b853a8582bf1838186317e5dadacbcef9c426d6fa0da14"
+        },
+        {
+          "path": "lexicon-zh.txt",
+          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/lexicon-zh.txt",
+          "size": 2119465,
+          "sha256": "11111d8cd695fba2ace1367a1d0a708b586e6ef5c1f9be91da5d7eef129b651c"
+        },
+        {
+          "path": "LICENSE",
+          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/LICENSE",
+          "size": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "README.md",
+          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/README.md",
+          "size": 114,
+          "sha256": "e2d39356ea4d67ac15c39a7e5a238ea12b0f6fb8a55bb0c87bc2f659eb1cf7ac"
+        }
+      ],
+      "model": {
+        "kind": "kokoro",
+        "file": "model.int8.onnx",
+        "voices": "voices.bin",
+        "tokens": "tokens.txt",
+        "dataDir": "@bundled/model/espeak-ng-data",
+        "lexicons": [
+          "lexicon-us-en.txt",
+          "lexicon-zh.txt"
+        ],
+        "ruleFsts": [
+          "@bundled/model/date-zh.fst",
+          "@bundled/model/number-zh.fst",
+          "@bundled/model/phone-zh.fst"
+        ],
+        "sampleRate": 24000
+      }
+    }
+  ]
+}

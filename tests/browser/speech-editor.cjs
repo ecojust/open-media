@@ -203,7 +203,7 @@ async function verifyInspectorSpeechActions(browser, url) {
 
 async function verifyBundledVoiceCatalog(browser, url) {
   const voices = require('../../scripts/speech-runtime.lock.json').voices
-  assert.equal(voices.length, 103)
+  assert.equal(voices.length, 1)
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
   const page = await context.newPage(), foreignRequests = [], errors = []
   try {
@@ -220,14 +220,15 @@ async function verifyBundledVoiceCatalog(browser, url) {
       const { compactVoiceCatalog, voiceCategory } = await import('/src/core/voice-catalog.ts')
       return compactVoiceCatalog(voices).map(voice => ({ ...voice, category: voiceCategory(voice) }))
     }, voices)
-    assert.ok(catalog.length > 3 && catalog.length < voices.length / 2, '声音卡片应精简相似音色，保留明显少于完整目录的代表声音')
+    assert.equal(catalog.length, 1, '内置模型仅提供一种中英女声')
     assert.ok(catalog.every(voice => voices.some(original => original.id === voice.id)), '精简目录必须保留真实声音标识')
     await page.getByTestId('create-project').click()
     await page.locator('.editor-tools').getByRole('button', { name: '文字转语音', exact: true }).click()
     const picker = page.getByTestId('voice-picker')
     const previewAudio = page.getByLabel('声音试听音频')
     await expect(picker).toBeVisible()
-    for (const [category, categoryId] of [['中文男声', 'zh-male'], ['中文女声', 'zh-female'], ['英文女声', 'en-female']]) {
+    await expect(picker.getByRole('tab')).toHaveCount(1)
+    for (const [category, categoryId] of [['中英女声', 'zh-en-female']]) {
       const expected = catalog.filter(voice => voice.category === categoryId), count = expected.length
       assert.ok(count > 0, `${category}应保留可选择的声音`)
       const tab = picker.getByRole('tab', { name: new RegExp(`^${category}`) })
@@ -250,8 +251,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
       assert.equal(artwork.images.length, 1, '同一头像图集应由声音卡片共享')
       assert.ok(artwork.images.every(image => image.width > 0 && image.width / image.height === 3 / 4 && image.local), '3列4行人物头像必须真实加载，随软件提供')
       assert.ok(artwork.sizes.every(size => { const [width, height] = size.split(' ').map(parseFloat); return width > 300 && height > 400 }), '头像必须裁出独立正方形并避开图集分格边缘')
-      assert.ok(new Set(artwork.positions).size >= 2, '不同音色类型应对应不同的头像')
-      assert.ok((await picker.locator('.voice-style').allTextContents()).every(label => ['自然', '低沉', '明亮', '清亮', '舒缓', '成熟'].includes(label)), '每个声音都应有可读的类型标签')
+      assert.ok((await picker.locator('.voice-style').allTextContents()).every(label => ['温柔'].includes(label)), '每个声音都应有可读的类型标签')
       if (count > 3) {
         const grid = picker.locator('.voice-grid-scroll')
         assert.equal(await grid.evaluate(element => element.scrollHeight > element.clientHeight), true, '完整声音目录应在网格内滚动')
@@ -273,10 +273,12 @@ async function verifyBundledVoiceCatalog(browser, url) {
         assert.equal(audio.controls, false)
         await expect(button).toHaveAttribute('aria-pressed', 'true')
         assert.equal((await speechRequests(page)).length, 0, 'first audition must not generate a native speech job')
+        await button.click()
+        await expect(previewAudio).toHaveJSProperty('paused', true)
       }
     }
-    await picker.getByRole('tab', { name: /^中文男声/ }).click()
-    const maleVoices = catalog.filter(voice => voice.category === 'zh-male'), chosen = maleVoices.at(-1)
+    await picker.getByRole('tab', { name: /^中英女声/ }).click()
+    const bilingualVoices = catalog.filter(voice => voice.category === 'zh-en-female'), chosen = bilingualVoices[0]
     const search = picker.getByLabel('搜索声音', { exact: true })
     await search.fill(chosen.id)
     await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(1)
@@ -285,7 +287,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
     await search.fill('不存在的音色')
     await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(0)
     await search.fill('')
-    await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(maleVoices.length)
+    await expect(picker.getByRole('button', { name: /^选择 / })).toHaveCount(bilingualVoices.length)
     const styleLabel = await picker.locator('.voice-style').first().textContent()
     await search.fill(styleLabel)
     assert.ok(await picker.locator('.voice-style').count() > 0)
@@ -318,7 +320,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
     await expect(page.locator('.timeline-clip.audio')).toHaveCount(0)
     assert.deepEqual(foreignRequests, [], '卡片图片不应依赖网络服务')
     assert.deepEqual(errors, [])
-    await picker.getByRole('tab', { name: /^中文女声/ }).click()
+    await picker.getByRole('tab', { name: /^中英女声/ }).click()
     await page.screenshot({ animations: 'disabled', path: '/tmp/open-media-speech-editor/voice-catalog.png' })
     const theme = await page.locator('.app-shell').getAttribute('data-theme')
     await page.locator('.app-shell').evaluate(element => element.setAttribute('data-theme', 'dark'))
@@ -331,7 +333,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
     await page.reload()
     await page.getByTestId('create-project').click()
     await page.locator('.editor-tools').getByRole('button', { name: '文字转语音', exact: true }).click()
-    const restartVoice = catalog.find(voice => voice.category === 'zh-female')
+    const restartVoice = catalog.find(voice => voice.category === 'zh-en-female')
     const brokenPattern = `**/${restartVoice.id}.mp3*`
     await page.route(brokenPattern, route => route.request().resourceType() === 'media'
       ? route.fulfill({ status: 404, contentType: 'text/plain', body: 'Missing local sample' }) : route.continue())
@@ -352,7 +354,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
 
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: null }, logLevel: 'error' })
   await server.listen()
   const url = `http://127.0.0.1:${server.httpServer.address().port}`
   let browser
@@ -592,7 +594,7 @@ async function main() {
     const web = await browser.newPage({ viewport: { width: 1280, height: 900 } })
     await web.goto(url); await web.getByTestId('create-project').click()
     await web.getByRole('button', { name: '文字转语音', exact: true }).click()
-    await expect(web.getByTestId('speech-panel')).toContainText('内置模型和多种声音随桌面端提供')
+    await expect(web.getByTestId('speech-panel')).toContainText('内置中英女声随桌面端提供')
     await expect(web.getByTestId('speech-generate-all')).toHaveCount(0)
     console.log('PASS 网页明确离线语音需要桌面端，未用系统声音冒充内置模型')
     console.log('说明：这些测试验证界面与原生桥合同，语音模型的真实合成由原生运行时测试验证。')

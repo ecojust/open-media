@@ -2,6 +2,8 @@
 import { computed, nextTick, ref, useId, watch } from 'vue'
 import type { SpeechVoice } from '../native'
 import { compactVoiceCatalog, VOICE_CATEGORIES, voiceCategory, voiceSearchText, voiceStyle, voiceTypeLabel, type VoiceCategoryId } from '../core/voice-catalog'
+import { voiceReady, voiceDownloading, voiceDownloadProgress, voiceModelSize } from '../core/voice-downloads'
+import { bundledVoicePreviewUrl } from '../core/voice-previews'
 import Icon from './Icon.vue'
 import voicePortraits from '../assets/voices/voice-portraits.png'
 
@@ -11,8 +13,9 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   previewVoiceId?: string
   previewState?: 'idle' | 'loading' | 'playing'
-}>(), { disabled: false, previewVoiceId: '', previewState: 'idle' })
-const emit = defineEmits<{ 'update:modelValue': [id: string]; preview: [id: string] }>()
+  pendingModels?: string[]
+}>(), { disabled: false, previewVoiceId: '', previewState: 'idle', pendingModels: () => [] })
+const emit = defineEmits<{ 'update:modelValue': [id: string]; preview: [id: string]; download: [modelId: string]; cancelDownload: [modelId: string] }>()
 const instanceId = useId(), search = ref(''), activeTab = ref<VoiceCategoryId>('zh-female')
 const tabs = ref<HTMLElement | null>(null), scroller = ref<HTMLElement | null>(null)
 const catalog = computed(() => compactVoiceCatalog(props.voices, props.modelValue))
@@ -23,6 +26,7 @@ const visibleVoices = computed(() => {
   return catalog.value.filter(voice => voiceCategory(voice) === activeTab.value && (!query || voiceSearchText(voice).includes(query)))
 })
 const categoryLabel = computed(() => VOICE_CATEGORIES.find(category => category.id === activeTab.value)?.label || '声音')
+const hasDownloads = computed(() => catalog.value.some(voice => voice.modelId && voice.status !== 'bundled'))
 
 watch([() => props.modelValue, () => selectedVoice.value && voiceCategory(selectedVoice.value)], ([, category]) => {
   if (category) activeTab.value = category
@@ -40,6 +44,9 @@ function artwork(voice: SpeechVoice): Record<string, string> {
 }
 function playing(voice: SpeechVoice): boolean { return props.previewVoiceId === voice.id && props.previewState === 'playing' }
 function loading(voice: SpeechVoice): boolean { return props.previewVoiceId === voice.id && props.previewState === 'loading' }
+function modelPending(voice: SpeechVoice): boolean { return !!voice.modelId && props.pendingModels.includes(voice.modelId) }
+function sharedVoices(voice: SpeechVoice): number { return voice.modelId ? catalog.value.filter(item => item.modelId === voice.modelId).length : 1 }
+function canPreview(voice: SpeechVoice): boolean { return voiceReady(voice) || !!bundledVoicePreviewUrl(voice.id) }
 function chooseCategory(id: VoiceCategoryId): void { if (!props.disabled) activeTab.value = id }
 function tabKeyboard(event: KeyboardEvent, id: VoiceCategoryId): void {
   if (props.disabled || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
@@ -55,20 +62,34 @@ function tabKeyboard(event: KeyboardEvent, id: VoiceCategoryId): void {
 
 <template>
   <div class="voice-picker" data-testid="voice-picker">
-    <div class="voice-picker-heading"><strong>选择声音</strong><span v-if="selectedVoice" class="voice-current" :title="selectedVoice.name"><Icon name="check" :size="12" />{{ selectedVoice.name }}</span></div>
+    <div class="voice-picker-heading"><strong>{{ catalog.length === 1 ? '内置声音' : '选择声音' }}</strong><span v-if="selectedVoice" class="voice-current" :title="selectedVoice.name"><Icon name="check" :size="12" />{{ selectedVoice.name }}</span></div>
     <div ref="tabs" class="voice-categories" role="tablist" aria-label="声音分类">
       <button v-for="category in categories" :id="`${instanceId}-${category.id}`" :key="category.id" type="button" role="tab" :data-voice-category="category.id" :aria-selected="activeTab === category.id" :aria-controls="`${instanceId}-voices`" :tabindex="activeTab === category.id ? 0 : -1" :disabled="disabled" @click="chooseCategory(category.id)" @keydown="tabKeyboard($event, category.id)">{{ category.label }}<span>{{ category.voices.length }}</span></button>
     </div>
     <div class="voice-search"><Icon name="search" :size="14" /><input v-model="search" type="search" :disabled="disabled" aria-label="搜索声音" :placeholder="`搜索${categoryLabel}名称或类型`" autocomplete="off" spellcheck="false" /><span aria-live="polite">{{ visibleVoices.length }} 个</span></div>
+    <p v-if="hasDownloads" class="voice-download-help">更多声音可按需下载，下载后即可离线使用。试听无需下载模型。</p>
     <div :id="`${instanceId}-voices`" ref="scroller" class="voice-grid-scroll" role="tabpanel" :aria-labelledby="`${instanceId}-${activeTab}`" tabindex="0">
       <div v-if="visibleVoices.length" class="voice-grid">
         <div v-for="voice in visibleVoices" :key="voice.id" class="voice-card" :class="{ selected: modelValue === voice.id, previewing: playing(voice) }" :data-voice-id="voice.id">
-          <button type="button" class="voice-choice" :disabled="disabled" :aria-label="`选择 ${voice.name}`" :aria-description="`${voiceStyle(voice).label}，${voiceTypeLabel(voice)}`" :aria-pressed="modelValue === voice.id" @click="emit('update:modelValue', voice.id)">
+          <button type="button" class="voice-choice" :disabled="disabled || !voiceReady(voice)" :aria-label="`选择 ${voice.name}`" :aria-description="`${voiceStyle(voice).label}，${voiceTypeLabel(voice)}${!voiceReady(voice) ? '，下载模型后可使用' : ''}`" :aria-pressed="modelValue === voice.id" @click="emit('update:modelValue', voice.id)">
             <span class="voice-artwork" :style="artwork(voice)" aria-hidden="true"><span class="voice-style" :data-voice-style="voiceStyle(voice).id">{{ voiceStyle(voice).label }}</span></span>
             <span v-if="modelValue === voice.id" class="voice-check" aria-hidden="true"><Icon name="check" :size="12" /></span>
             <span class="voice-card-copy"><strong :title="voice.name">{{ voice.name }}</strong><span>{{ voiceTypeLabel(voice) }}</span></span>
           </button>
-          <button type="button" class="voice-preview-button" :disabled="disabled" :aria-label="`试听 ${voice.name}`" :aria-pressed="playing(voice)" :aria-busy="loading(voice) || undefined" :title="loading(voice) ? '正在准备试听' : playing(voice) ? '暂停试听' : '试听声音'" @click="emit('preview', voice.id)"><Icon :name="loading(voice) ? 'refresh' : playing(voice) ? 'pause' : 'volume'" :class="{ 'voice-loading': loading(voice) }" :size="15" /></button>
+          <button type="button" class="voice-preview-button" :disabled="disabled || !canPreview(voice)" :aria-label="`试听 ${voice.name}`" :aria-pressed="playing(voice)" :aria-busy="loading(voice) || undefined" :title="loading(voice) ? '正在准备试听' : playing(voice) ? '暂停试听' : canPreview(voice) ? '试听声音' : '下载模型后可试听'" @click="emit('preview', voice.id)"><Icon :name="loading(voice) ? 'refresh' : playing(voice) ? 'pause' : 'volume'" :class="{ 'voice-loading': loading(voice) }" :size="15" /></button>
+          <div v-if="voice.status || voice.modelSize" class="voice-model" :data-model-status="voice.status || 'ready'">
+            <span class="voice-model-size">{{ voice.status === 'bundled' ? '已内置' : voiceReady(voice) ? '已下载' : '模型' }}<template v-if="voiceModelSize(voice.modelSize)"> · {{ voiceModelSize(voice.modelSize) }}</template></span>
+            <span v-if="sharedVoices(voice) > 1" class="voice-model-shared">共享模型 · {{ sharedVoices(voice) }} 种声音</span>
+            <template v-if="voiceDownloading(voice)">
+              <progress :value="voiceDownloadProgress(voice)" max="100" :aria-label="`${voice.name} 模型下载进度`" />
+              <span class="voice-model-state">{{ voice.status === 'verifying' ? '正在校验模型…' : `正在下载 ${voiceDownloadProgress(voice)}%` }}</span>
+              <button type="button" class="voice-download-button" :disabled="disabled || modelPending(voice)" :aria-label="`取消下载 ${voice.name}`" @click="voice.modelId && emit('cancelDownload', voice.modelId)"><Icon name="close" :size="12" />{{ modelPending(voice) ? '正在取消…' : '取消下载' }}</button>
+            </template>
+            <template v-else-if="!voiceReady(voice) && voice.modelId">
+              <span v-if="voice.status === 'failed'" class="voice-model-error" :title="voice.error">{{ voice.error || '下载失败，请重试' }}</span>
+              <button type="button" class="voice-download-button" :disabled="disabled || modelPending(voice)" :aria-label="`${voice.status === 'failed' ? '重试下载' : '下载'} ${voice.name}`" @click="emit('download', voice.modelId)"><Icon :name="modelPending(voice) ? 'refresh' : 'download'" :class="{ 'voice-loading': modelPending(voice) }" :size="12" />{{ modelPending(voice) ? '正在准备…' : voice.status === 'failed' ? '重试下载' : '下载' }}<span v-if="!modelPending(voice) && voiceModelSize(voice.downloadSize)">{{ voiceModelSize(voice.downloadSize) }}</span></button>
+            </template>
+          </div>
         </div>
       </div>
       <p v-else class="voice-empty" role="status">{{ voices.length ? '没有找到匹配的声音，试试其他名称或分类。' : '暂时没有可用的声音。' }}</p>
@@ -94,6 +115,14 @@ function tabKeyboard(event: KeyboardEvent, id: VoiceCategoryId): void {
 .voice-grid-scroll{max-height:340px;overflow:auto;overscroll-behavior:contain;padding:2px 4px 3px 2px;scrollbar-width:thin;scrollbar-color:var(--ed-border) transparent;min-height:110px}
 .voice-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .voice-card{position:relative;min-width:0;border-radius:9px}
+.voice-download-help{margin:0 0 8px;font-size:10px;color:var(--ed-muted);line-height:1.6}
+.voice-model{display:flex;flex-direction:column;gap:5px;padding:9px 5px 3px;font-size:9px;line-height:1.4}
+.voice-model-size{color:var(--ed-text)}.voice-model-shared,.voice-model-state{color:var(--ed-muted)}
+.voice-model progress{display:block;width:100%;height:4px;border:0;border-radius:3px;overflow:hidden;accent-color:var(--ed-accent);background:var(--ed-border)}
+.voice-model progress::-webkit-progress-bar{background:var(--ed-border)}.voice-model progress::-webkit-progress-value{background:var(--ed-accent)}
+.voice-picker .voice-card .voice-download-button{display:flex;align-items:center;justify-content:center;gap:4px;box-sizing:border-box;width:100%;min-height:28px;padding:4px;border:1px solid var(--ed-border);border-radius:6px;background:var(--ed-panel);color:var(--ed-accent);font:inherit;font-size:9px;cursor:pointer}
+.voice-picker .voice-card .voice-download-button:hover:not(:disabled){border-color:var(--ed-accent)}
+.voice-model-error{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:#bc423a;overflow-wrap:anywhere}
 .voice-picker .voice-card .voice-choice{position:relative;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:0;overflow:hidden;width:100%;min-height:0;padding:0;border:1px solid var(--ed-border);border-radius:9px;background:var(--ed-panel);color:var(--ed-text);font:inherit;text-align:left;line-height:1.4;cursor:pointer}
 .voice-picker .voice-card .voice-choice:hover:not(:disabled){border-color:var(--ed-accent);background:var(--ed-panel);color:var(--ed-text)}
 .voice-picker .voice-card.selected .voice-choice{border-color:var(--ed-accent);box-shadow:0 0 0 1px var(--ed-accent)}

@@ -21,7 +21,7 @@ TEXTS = {
     "zh": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
     "en": "Hello, this is a voice preview. Let your story come to life with a clear and natural voice.",
 }
-SETTINGS = {"speed": 1, "silenceScale": 1, "sampleRate": 24000,
+SETTINGS = {"speed": 1, "silenceScale": 0.2, "sampleRate": 16000, "noiseScale": 1,
             "channels": 1, "bitrate": 64000, "threads": 2}
 
 
@@ -92,7 +92,7 @@ def decode_check(path):
         "stream=codec_name,sample_rate,channels", "-of", "json", str(path),
     ], check=True, capture_output=True, text=True)
     stream = json.loads(probe.stdout)["streams"][0]
-    if stream != {"codec_name": "mp3", "sample_rate": "24000", "channels": 1}:
+    if stream != {"codec_name": "mp3", "sample_rate": str(SETTINGS["sampleRate"]), "channels": 1}:
         raise RuntimeError(f"Unexpected audio format: {path}: {stream}")
     decoded = subprocess.run([
         "ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-acodec",
@@ -114,6 +114,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--speech-root", type=pathlib.Path,
                         default=ROOT / "src-tauri/resources/speech")
+    parser.add_argument("--manifest", type=pathlib.Path,
+                        help="Existing runtime manifest; default is inside --speech-root.")
     parser.add_argument("--library", type=pathlib.Path,
                         help="Existing C API library; default is the prepared Linux runtime.")
     parser.add_argument("--output", type=pathlib.Path,
@@ -129,23 +131,26 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
     lock = json.loads((ROOT / "scripts/speech-runtime.lock.json").read_text())
-    runtime = json.loads((speech_root / "manifest.json").read_text())
+    runtime = json.loads((args.manifest or speech_root / "manifest.json").read_text())
     if runtime["version"] != lock["engine"]["version"]:
         raise RuntimeError("Prepared runtime does not match the locked engine version.")
     voices = {voice["id"]: voice for voice in runtime["voices"]}
     groups_path = ROOT / "src/core/voice-groups.ts"
-    ids = re.findall(r'"representative"\s*:\s*"([a-z]+_[a-z0-9]+)"', groups_path.read_text())
+    ids = re.findall(r"\brepresentative[\"']?\s*:\s*[\"']([a-z0-9_-]+)[\"']", groups_path.read_text())
     if not ids or len(ids) != len(set(ids)) or not all(voice in voices for voice in ids):
         raise RuntimeError("Missing, duplicate or unknown representative voices.")
     header = public_header(lock)
     lib, config_type, generation_type = bind_library(library_path, header, lock["engine"]["version"])
     config = config_type()
     model = runtime["model"]
-    for attr, key in [("model", "file"), ("voices", "voices"),
+    if model.get("kind") != "matcha" or model.get("sampleRate") != SETTINGS["sampleRate"]:
+        raise RuntimeError("Preview generation requires the bundled bilingual model.")
+    for attr, key in [("acoustic_model", "file"), ("vocoder", "vocoder"),
                       ("tokens", "tokens"), ("data_dir", "dataDir")]:
-        setattr(config.model.kokoro, attr, str(speech_root / model[key]).encode())
-    config.model.kokoro.length_scale = 1
-    config.model.kokoro.lexicon = ",".join(str(speech_root / p) for p in model["lexicons"]).encode()
+        setattr(config.model.matcha, attr, str(speech_root / model[key]).encode())
+    config.model.matcha.length_scale = 1
+    config.model.matcha.noise_scale = SETTINGS["noiseScale"]
+    config.model.matcha.lexicon = ",".join(str(speech_root / p) for p in model["lexicons"]).encode()
     config.rule_fsts = ",".join(str(speech_root / p) for p in model["ruleFsts"]).encode()
     config.model.num_threads = SETTINGS["threads"]
     config.model.provider = b"cpu"
@@ -169,7 +174,7 @@ def main():
                 engine, TEXTS[language].encode(), c.byref(generation), None, None)
             wav = work / f"{voice_id}.wav"
             try:
-                if not audio or audio.contents.n <= 0 or audio.contents.sample_rate != 24000:
+                if not audio or audio.contents.n <= 0 or audio.contents.sample_rate != SETTINGS["sampleRate"]:
                     raise RuntimeError(f"Invalid synthesis output: {voice_id}")
                 raw = audio.contents
                 samples = array.array("f")
@@ -186,12 +191,12 @@ def main():
             temporary = work / f"{voice_id}.mp3"
             subprocess.run([
                 "ffmpeg", "-v", "error", "-y", "-i", str(wav), "-map_metadata", "-1",
-                "-codec:a", "libmp3lame", "-b:a", "64k", "-ar", "24000", "-ac", "1",
+                "-codec:a", "libmp3lame", "-b:a", "64k", "-ar", str(SETTINGS["sampleRate"]), "-ac", "1",
                 "-id3v2_version", "0", str(temporary),
             ], check=True)
             decoded_duration, decoded_peak = decode_check(temporary)
-            # Encoding may retain a short tail; bound it to one MP3 frame at 24 kHz.
-            if abs(decoded_duration - duration) > 576 / 24000:
+            # Encoding may retain a short tail; bound it to one MP3 frame.
+            if abs(decoded_duration - duration) > 576 / SETTINGS["sampleRate"]:
                 raise RuntimeError(f"Decoded duration does not match generated audio: {voice_id}")
             destination = output / f"{voice_id}.mp3"
             destination.write_bytes(temporary.read_bytes())
@@ -210,11 +215,10 @@ def main():
         "schema": 1, "texts": TEXTS, "settings": SETTINGS,
         "model": {"id": lock["model"]["id"], "version": lock["model"]["version"],
                   "sha256": sha256(speech_root / model["file"]),
-                  "voicesSha256": sha256(speech_root / model["voices"])},
+                  "vocoderSha256": sha256(speech_root / model["vocoder"])},
         "engine": {"id": lock["engine"]["id"], "version": lock["engine"]["version"],
                    "librarySha256": sha256(library_path)},
         "generator": {"mode": "existing-c-api", "scriptSha256": sha256(pathlib.Path(__file__)),
-                      "runnerSourceSha256": sha256(ROOT / "scripts/speech-runtime-runner.c"),
                       "headerSha256": hashlib.sha256(header).hexdigest(),
                       "voiceGroupsSha256": sha256(groups_path),
                       "encoder": subprocess.run(["ffmpeg", "-version"], check=True,

@@ -104,7 +104,8 @@ async function prepare() {
   await verifyLicenses();
   const runtimeSource = lock.sources.find(source => source.kind === 'runtime' && source.target === target);
   const modelSource = lock.sources.find(source => source.kind === 'model');
-  if (!runtimeSource || !modelSource) throw new Error(`Unsupported speech target: ${target}`);
+  const vocoderSource = lock.sources.find(source => source.kind === 'vocoder');
+  if (!runtimeSource || !modelSource || !vocoderSource) throw new Error(`Unsupported speech target: ${target}`);
   const hostTarget = `${process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : process.platform}-${process.arch}`;
   if (target !== hostTarget) throw new Error('Prepare speech resources on the target host so the executable is compiled and tested for that host.');
   const extracted = join(cache, 'extracted', target);
@@ -116,6 +117,8 @@ async function prepare() {
   await mkdir(join(output, 'runtime/bin'), { recursive: true });
   await mkdir(join(output, 'runtime/lib'), { recursive: true });
   await cp(join(extracted, modelSource.directory), join(output, 'model'), { recursive: true });
+  // The vocoder is a pinned ONNX file, not an archive.
+  await copyFile(await download(vocoderSource), join(output, 'model/vocos-16khz-univ.onnx'));
   await cp(join(root, 'licenses/speech-runtime'), join(output, 'licenses'), { recursive: true });
   const libraries = process.platform === 'win32'
     ? ['onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'sherpa-onnx-c-api.dll']
@@ -151,10 +154,10 @@ async function prepare() {
     }
   }
   await writeFile(join(output, 'manifest.json'), JSON.stringify({
-    schema: 1, version: lock.engine.version, executable, input: 'utf8-file',
-    model: { file: 'model/model.int8.onnx', voices: 'model/voices.bin', tokens: 'model/tokens.txt',
-      dataDir: 'model/espeak-ng-data', lexicons: ['model/lexicon-us-en.txt', 'model/lexicon-zh.txt'],
-      ruleFsts: ['model/date-zh.fst', 'model/number-zh.fst', 'model/phone-zh.fst'], sampleRate: 24000 },
+    schema: 2, version: lock.engine.version, executable, input: 'utf8-file',
+    model: { kind: 'matcha', file: 'model/model-steps-3.onnx', vocoder: 'model/vocos-16khz-univ.onnx', tokens: 'model/tokens.txt',
+      dataDir: 'model/espeak-ng-data', lexicons: ['model/lexicon.txt'],
+      ruleFsts: ['model/phone-zh.fst', 'model/date-zh.fst', 'model/number-zh.fst'], sampleRate: lock.model.sampleRate },
     voices: lock.voices,
   }, null, 2) + '\n');
   await copyFile(lockPath, join(output, 'source-lock.json'));
@@ -185,11 +188,12 @@ function inspectWave(bytes) {
     if (id === 'data') pcm = bytes.subarray(offset + 8, offset + 8 + size);
     offset += 8 + size + (size % 2);
   }
-  if (!format || format.length < 16 || !pcm || format.readUInt16LE(0) !== 1 || format.readUInt16LE(2) !== 1 || format.readUInt32LE(4) !== 24000 || format.readUInt16LE(14) !== 16 || pcm.length < 12000) throw new Error('Speech output must be non-empty 24 kHz mono PCM16.');
+  const sampleRate = lock.model.sampleRate;
+  if (!format || format.length < 16 || !pcm || format.readUInt16LE(0) !== 1 || format.readUInt16LE(2) !== 1 || format.readUInt32LE(4) !== sampleRate || format.readUInt16LE(14) !== 16 || pcm.length < sampleRate / 2) throw new Error(`Speech output must be non-empty ${sampleRate / 1000} kHz mono PCM16.`);
   let energy = 0, peak = 0;
   for (let i = 0; i + 1 < pcm.length; i += 2) { const value = pcm.readInt16LE(i); energy += value * value; peak = Math.max(peak, Math.abs(value)); }
   if (Math.sqrt(energy / (pcm.length / 2)) < 30 || peak < 500) throw new Error('Generated speech contains no audible samples.');
-  return { duration: pcm.length / 48000, sha256: createHash('sha256').update(pcm).digest('hex') };
+  return { duration: pcm.length / (sampleRate * 2), sha256: createHash('sha256').update(pcm).digest('hex') };
 }
 function verifyMacBinary(bytes, path) {
   if (bytes.length < 32 || bytes.readUInt32LE(0) !== 0xfeedfacf) throw new Error(`Unexpected speech executable format: ${path}`);
@@ -229,25 +233,34 @@ async function verify() {
     }
   }
   const manifest = JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'));
+  if (manifest.schema !== 2 || manifest.model.kind !== 'matcha' || manifest.model.sampleRate !== lock.model.sampleRate) throw new Error('Unexpected speech manifest schema or model.');
   if (manifest.voices.length !== lock.voices.length || JSON.stringify(manifest.voices) !== JSON.stringify(lock.voices)) throw new Error('Bundled voice mapping changed.');
   const executable = safePath(executableRoot, manifest.executable);
   const directory = join(cache, 'verification', '中文 语音');
   await mkdir(directory, { recursive: true });
   const model = manifest.model;
   const results = [];
-  for (const [sid, text] of [[3, '你好，这是离线语音。今天是2026年10月16日。'], [59, '你好，这是离线语音。今天是2026年10月16日。'], [0, 'Welcome. This voice is generated locally.']]) {
-    const textFile = join(directory, `文字-${sid}.txt`), waveFile = join(directory, `声音-${sid}.wav`);
+  const cases = [
+    { id: '中文', text: '你好，这是离线语音。今天是2026年10月17日。', speed: 1 },
+    { id: '中英混合', text: '这是一款全程由AI接管并生成的软件。Welcome to Open Media.', speed: 1 },
+    { id: '英文', text: 'Welcome. This voice is generated locally.', speed: 1 },
+    { id: '慢速', text: '你好，这是离线语音。今天是2026年10月17日。', speed: 0.8 },
+    { id: '快速', text: '你好，这是离线语音。今天是2026年10月17日。', speed: 1.2 },
+  ];
+  for (const { id, text, speed } of cases) {
+    const textFile = join(directory, `文字-${id}.txt`), waveFile = join(directory, `声音-${id}.wav`);
     await writeFile(textFile, text, 'utf8');
-    const log = run(executable, [`--kokoro-model=${model.file}`, `--kokoro-voices=${model.voices}`, `--kokoro-tokens=${model.tokens}`, `--kokoro-data-dir=${model.dataDir}`, `--kokoro-lexicon=${model.lexicons.join(',')}`, `--tts-rule-fsts=${model.ruleFsts.join(',')}`, `--sid=${sid}`, '--speed=1', `--output-filename=${waveFile}`, `--text-file=${textFile}`, '--debug=true'], { cwd: output });
+    const log = run(executable, [`--matcha-acoustic-model=${model.file}`, `--matcha-vocoder=${model.vocoder}`, `--matcha-tokens=${model.tokens}`, `--matcha-data-dir=${model.dataDir}`, `--matcha-lexicon=${model.lexicons.join(',')}`, `--tts-rule-fsts=${model.ruleFsts.join(',')}`, '--sid=0', `--speed=${speed}`, `--output-filename=${waveFile}`, `--text-file=${textFile}`, '--debug=true'], { cwd: output });
     if (!log.includes(`speakers=${lock.voices.length}, text_bytes=${Buffer.byteLength(text)}`) || !/progress=1\.000000/.test(log) || !log.includes('stage=complete')) throw new Error('Speech process did not confirm complete text and model processing.');
     // Verify the model's own tokenization received Chinese characters unchanged,
     // including on hosts whose default system code page is not UTF-8.
-    if (sid !== 0 && !log.includes('你好')) throw new Error('Chinese text did not reach the speech model intact.');
+    if (text.startsWith('你好') && !log.includes('你好')) throw new Error('Chinese text did not reach the speech model intact.');
     const result = inspectWave(await readFile(waveFile));
     results.push(result);
-    console.log(`Verified voice ${sid}: ${result.duration.toFixed(3)} s, audible PCM, UTF-8 input intact.`);
+    console.log(`Verified voice 0 (${id}, ${speed}x): ${result.duration.toFixed(3)} s, audible PCM, UTF-8 input intact.`);
   }
-  if (results[0].sha256 === results[1].sha256) throw new Error('Different bundled voices produced identical audio.');
+  if (new Set(results.slice(0, 3).map(result => result.sha256)).size !== 3) throw new Error('Different speech texts produced identical audio.');
+  if (!(results[3].duration > results[0].duration && results[0].duration > results[4].duration)) throw new Error('Speech rate did not change the generated duration in the expected direction.');
   console.log(`Offline speech verified on ${process.platform}/${process.arch}.`);
 }
 async function sources() {

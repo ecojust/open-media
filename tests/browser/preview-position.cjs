@@ -272,6 +272,99 @@ async function generatedTimeChecks(page) {
   console.log('PASS 片段右下角显示真实生成时间并悬停提供完整日期；移动/样式保留、修改文案更新；窄片段不溢出且旧项目不伪造时间')
 }
 
+const subtitleAppearance = item => Object.fromEntries(['x', 'y', 'width', 'height', 'rotation', 'opacity', 'fontSize', 'fontFamily', 'fontWeight', 'color', 'background', 'textAlign', 'fadeIn', 'fadeOut'].map(key => [key, item[key]]))
+
+async function setProperty(page, label, value) {
+  const input = page.getByLabel(label, { exact: true })
+  await input.fill(String(value)); await input.press('Tab')
+}
+
+async function addSubtitle(page, start) {
+  const existing = new Set((await state(page)).tracks.flatMap(track => track.clips.map(item => item.id)))
+  await page.evaluate(async start => { window.positionFixture.editor.value.seek(start); await window.positionFixture.nextTick() }, start)
+  await page.getByTitle('添加字幕', { exact: true }).click()
+  const added = (await state(page)).tracks.flatMap(track => track.clips).filter(item => !existing.has(item.id))
+  assert.equal(added.length, 1, '点击添加字幕只应创建一个新片段')
+  assert.equal(added[0].start, start, '新字幕从当前播放头开始')
+  assert.equal(added[0].text, '在这里输入字幕', '继承样式不得复制旧字幕内容')
+  return added[0]
+}
+
+async function subtitleDefaultsChecks(page) {
+  await reset(page)
+  await page.evaluate(() => {
+    const next = JSON.parse(JSON.stringify(window.positionFixture.state.value))
+    next.tracks[0].clips[0].generatedAt = '2026-10-17T01:02:03.000Z'
+    window.positionFixture.reset(next)
+  })
+  await page.getByTestId('clip-text-content').fill('这一段的文字不应复制给新字幕')
+  await page.getByTestId('clip-text-content').press('Tab')
+  await setProperty(page, '字号', 24)
+  await setProperty(page, '宽度', 230)
+  await setProperty(page, '高度', 55)
+  await page.getByLabel('颜色', { exact: true }).fill('#ffcc55')
+  await page.getByLabel('文字底色', { exact: true }).fill('#223344')
+  await page.getByLabel(/^字体/).selectOption('serif')
+  await page.getByLabel(/^字重/).selectOption('700')
+  await page.getByLabel(/^对齐/).selectOption('left')
+  await drag(page, 103, 187, { alt: true })
+  const source = await clip(page)
+  assert.equal(source.color, '#ffcc55'); assert.equal(source.background, '#223344')
+  const added = await addSubtitle(page, 3.25)
+  assert.deepEqual(subtitleAppearance(added), subtitleAppearance(source), '新字幕应继承最新属性编辑及预览拖动后的完整视觉样式')
+  assert.notEqual(added.id, source.id)
+  assert.notEqual(added.generatedAt, source.generatedAt, '新字幕应记录自己的生成时间')
+  assert.equal(added.trimOut - added.trimIn, 5, '字幕时长继续使用新片段默认值')
+  await page.evaluate(() => window.positionFixture.reset(JSON.parse(JSON.stringify(window.positionFixture.state.value))))
+  const reopened = await addSubtitle(page, 3.5)
+  assert.deepEqual(subtitleAppearance(reopened), subtitleAppearance(source), '项目序列化并重新打开后仍应保留字幕样式')
+  await page.getByRole('button', { name: '透明', exact: true }).click()
+  await page.evaluate(() => window.positionFixture.reset(JSON.parse(JSON.stringify(window.positionFixture.state.value))))
+  const transparent = await addSubtitle(page, 4)
+  assert.equal(transparent.color, '#ffcc55', '清除底色后仍应记住文字颜色')
+  assert.equal(transparent.background, 'transparent', '透明底色也应保存并用于后续字幕')
+
+  await reset(page)
+  await setProperty(page, '字号', 22)
+  const committed = await clip(page)
+  await drag(page, 120, 170, { alt: true, cancel: 'escape' })
+  assert.deepEqual(subtitleAppearance(await clip(page)), subtitleAppearance(committed))
+  const afterCancel = await addSubtitle(page, 1.5)
+  assert.deepEqual(subtitleAppearance(afterCancel), subtitleAppearance(committed), '取消拖动的临时坐标不得成为后续字幕配置')
+  await page.evaluate(() => window.positionFixture.undo())
+  await select(page)
+  await drag(page, 121, 177, { alt: true })
+  assert.notEqual((await clip(page)).x, committed.x)
+  await page.evaluate(() => window.positionFixture.undo())
+  const afterUndo = await addSubtitle(page, 2.5)
+  assert.deepEqual(subtitleAppearance(afterUndo), subtitleAppearance(committed), '撤销位置修改时应同步恢复后续字幕配置')
+  console.log('PASS 新字幕继承尺寸、位置、文字颜色及底色/透明样式；保留新内容、当前播放头和生成时间；重开项目保留，取消/撤销不污染')
+}
+
+async function subtitleRatioChecks(page) {
+  await reset(page)
+  await setProperty(page, '字号', 26)
+  await setProperty(page, '宽度', 240)
+  await setProperty(page, '高度', 60)
+  await drag(page, 100, 180, { alt: true })
+  const before = await clip(page)
+  await page.getByRole('button', { name: '项目设置', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '项目设置', exact: true })
+  await dialog.getByLabel('画面比例', { exact: true }).selectOption('portrait')
+  await dialog.getByRole('button', { name: '关闭项目设置', exact: true }).click()
+  const project = await state(page)
+  assert.equal(project.width, 1080); assert.equal(project.height, 1920)
+  const resized = await clip(page)
+  const sx = 1080 / 640, sy = 1920 / 360
+  for (const [key, scale] of [['x', sx], ['y', sy], ['width', sx], ['height', sy], ['fontSize', Math.min(sx, sy)]]) {
+    coordinate(resized[key], before[key] * scale, `调整画面比例后已有字幕 ${key} 应同步缩放`)
+    coordinate(project.subtitleStyle[key], resized[key], `记忆的字幕 ${key} 应与已有字幕同步缩放`)
+  }
+  const added = await addSubtitle(page, 2)
+  assert.deepEqual(subtitleAppearance(added), subtitleAppearance(resized), '切换为竖屏后新增字幕应继承缩放后的配置，不得沿用旧画幅坐标')
+  console.log('PASS 项目设置切换为竖屏时已有字幕与记忆配置同步缩放，后续新增字幕保留一致的位置、尺寸和字号')
+}
+
 async function main() {
   mkdirSync(artifacts, { recursive: true })
   const { createServer } = await import('vite')
@@ -291,6 +384,8 @@ async function main() {
     await restrictionChecks(page)
     await rotatedAndInterruptedChecks(page)
     await generatedTimeChecks(page)
+    await subtitleDefaultsChecks(page)
+    await subtitleRatioChecks(page)
     assert.deepEqual(errors, [])
   } catch (error) {
     await page.screenshot({ path: path.join(artifacts, 'failure.png') }).catch(() => {})

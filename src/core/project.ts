@@ -1,6 +1,7 @@
-import type { Clip, MediaAsset, Project, Track, TrackKind } from './types.ts'
+import type { Clip, MediaAsset, Project, SubtitleStyle, Track, TrackKind } from './types.ts'
 import { validateClipFilters } from './clip-filters.ts'
 import { validateChromaKey } from './chroma-key.ts'
+import { normalizeAssetAddedAt } from './asset-times.ts'
 
 export const MAX_PROJECT_DURATION = 24 * 60 * 60
 export const MAX_ASSETS = 1000
@@ -42,7 +43,15 @@ export function createClip(asset: MediaAsset, project: Pick<Project, 'width' | '
 }
 
 export function createTextClip(project: Pick<Project, 'width' | 'height'>, options: Partial<Clip> = {}): Clip {
-  return { id: newId('clip'), generatedAt: new Date().toISOString(), name: '文本字幕', start: 0, trimIn: 0, trimOut: 5, speed: 1, volume: 0, opacity: 1, x: project.width * 0.1, y: project.height * 0.75, width: project.width * 0.8, height: project.height * 0.2, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, text: '双击编辑字幕', fontSize: 64, fontFamily: 'sans-serif', fontWeight: 600, color: '#ffffff', background: 'transparent', textAlign: 'center', ...options }
+  return { id: newId('clip'), generatedAt: new Date().toISOString(), name: '文本字幕', start: 0, trimIn: 0, trimOut: 5, speed: 1, volume: 0, opacity: 1, x: project.width * 0.1, y: project.height * 0.75, width: project.width * 0.8, height: project.height * 0.2, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, textRole: 'subtitle', text: '双击编辑字幕', fontSize: 64, fontFamily: 'sans-serif', fontWeight: 600, color: '#ffffff', background: 'transparent', textAlign: 'center', ...options }
+}
+
+export function createSubtitleClip(project: Pick<Project, 'width' | 'height' | 'subtitleStyle'>, options: Partial<Clip> = {}): Clip {
+  const clip = createTextClip(project, { ...project.subtitleStyle, ...options, textRole: 'subtitle' })
+  const duration = (clip.trimOut - clip.trimIn) / clip.speed
+  clip.fadeIn = Math.min(clip.fadeIn, duration)
+  clip.fadeOut = Math.min(clip.fadeOut, duration)
+  return clip
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -83,6 +92,19 @@ function iso(value: unknown, label = '项目时间'): string {
   return new Date(result).toISOString()
 }
 
+function validateSubtitleStyle(value: unknown): SubtitleStyle {
+  const style = record(value, '字幕默认样式')
+  return {
+    x: number(style.x, '字幕横坐标', -65536, 65536), y: number(style.y, '字幕纵坐标', -65536, 65536),
+    width: number(style.width, '字幕宽度', 1, 65536), height: number(style.height, '字幕高度', 1, 65536),
+    rotation: number(style.rotation, '字幕旋转角度', -3600, 3600), opacity: number(style.opacity, '字幕不透明度', 0, 1),
+    fadeIn: number(style.fadeIn, '字幕淡入时间', 0, MAX_PROJECT_DURATION), fadeOut: number(style.fadeOut, '字幕淡出时间', 0, MAX_PROJECT_DURATION),
+    fontSize: number(style.fontSize, '字幕字号', 4, 2048), fontFamily: text(style.fontFamily, '字幕字体', 200),
+    fontWeight: number(style.fontWeight, '字幕字重', 100, 900), color: color(style.color, '字幕颜色'),
+    background: color(style.background, '字幕背景'), textAlign: choice(style.textAlign, ['left', 'center', 'right'] as const, '字幕对齐'),
+  }
+}
+
 export interface ValidateProjectOptions { trusted?: boolean }
 
 /** Untrusted documents never retain machine paths or active external URLs. */
@@ -103,6 +125,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     const a = record(item, '素材')
     const kind = choice(a.kind, ['video', 'audio', 'image'] as const, '素材类型')
     const asset: MediaAsset = { id: id(a.id), name: text(a.name, '素材名称', 1000), kind, url: '', duration: number(a.duration, '素材时长', kind === 'image' ? 0 : 0.001, MAX_PROJECT_DURATION), width: number(a.width, '素材宽度', kind === 'audio' ? 0 : 1, 65536), height: number(a.height, '素材高度', kind === 'audio' ? 0 : 1, 65536), size: number(a.size, '素材大小', 0, Number.MAX_SAFE_INTEGER), mime: text(a.mime, '素材格式', 200, true) }
+    if (a.addedAt !== undefined) asset.addedAt = normalizeAssetAddedAt(a.addedAt)
     if (options.trusted) {
       const url = text(a.url ?? '', '素材地址', 2 * 1024 * 1024, true)
       if (url && !/^(?:blob:|data:(?:image|video|audio)\/|https?:\/\/|asset:\/\/)/i.test(url)) throw new Error('素材地址协议不受支持。')
@@ -134,6 +157,8 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       if (clip.fadeIn > duration + 1e-6 || clip.fadeOut > duration + 1e-6) throw new Error('淡入淡出时间不能超过片段时长。')
       if (kind === 'text') {
         if (c.assetId !== undefined) throw new Error('字幕轨道不能引用媒体素材。')
+        if (c.textRole !== undefined) clip.textRole = choice(c.textRole, ['subtitle', 'watermark'] as const, '文字用途')
+        else clip.textRole = t.name === '文字水印轨道' ? 'watermark' : 'subtitle'
         clip.text = text(c.text ?? '', '字幕文字', 20000, true)
         clip.fontSize = number(c.fontSize ?? 64, '字号', 4, 2048)
         clip.fontFamily = text(c.fontFamily ?? 'sans-serif', '字体', 200)
@@ -142,6 +167,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
         clip.background = color(c.background ?? 'transparent', '文字背景')
         clip.textAlign = choice(c.textAlign ?? 'center', ['left', 'center', 'right'] as const, '文字对齐')
       } else {
+        if (c.textRole !== undefined) throw new Error('文字用途只能用于文字轨道。')
         clip.assetId = text(c.assetId, '片段素材标识', 160)
         const asset = assetMap.get(clip.assetId)
         if (!asset) throw new Error('片段引用的素材不存在。')
@@ -176,5 +202,5 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     if (speechTextIds.has(textClipId)) throw new Error('同一字幕不能关联多个配音片段。')
     speechTextIds.add(textClipId)
   }
-  return { version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks }
+  return { version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks, ...(root.subtitleStyle !== undefined ? { subtitleStyle: validateSubtitleStyle(root.subtitleStyle) } : {}) }
 }

@@ -33,7 +33,7 @@ export function addTextWatermark(project: Project, material: WatermarkMaterial, 
   const x = placement.endsWith('left') ? marginX : placement.endsWith('right') ? project.width - marginX - width : (project.width - width) / 2
   const y = placement.startsWith('top') ? marginY : placement.startsWith('bottom') ? project.height - marginY - height : (project.height - height) / 2
   const clip = createTextClip(project, {
-    name: material.name, start, trimOut: duration, width, height, x, y,
+    name: material.name, textRole: 'watermark', start, trimOut: duration, width, height, x, y,
     text: template.text, color: template.color, background: template.background,
     fontFamily: template.fontFamily, fontWeight: template.fontWeight, textAlign: template.textAlign,
     fontSize: Math.max(4, Math.min(2048, template.fontSize * scale)),

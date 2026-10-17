@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "texts": {
+    "zh": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
+    "en": "Hello, this is a voice preview. Let your story come to life with a clear and natural voice."
+  },
+  "settings": {
+    "speed": 1,
+    "silenceScale": 1,
+    "sampleRate": 24000,
+    "channels": 1,
+    "bitrate": 64000,
+    "threads": 2
+  },
+  "model": {
+    "id": "multivoice-zh-en-v1",
+    "version": 1,
+    "sha256": "bda15858163726a492d02a9a727bc263551b86ac77f90812c4b30ff41d380e26",
+    "voicesSha256": "e64a5a581d8c2a350d848f51c3121657cd83aa07ed6109172177345874a7244c"
+  },
+  "engine": {
+    "id": "sherpa-onnx",
+    "version": "1.13.8",
+    "librarySha256": "b8351ca1632571ac108adbb317bcc4bf7cfe84b72690e3017316b0da3e1e344f"
+  },
+  "generator": {
+    "mode": "existing-runtime",
+    "executableSha256": "b1595f8cc7c421ea1587592dc8ec65998ff328ff1c1ccc183e41e236bbef7e36",
+    "sharedTextDataSha256": "04f566542566aeadf0c314320bc4a55293815acbc2c2bbe2c9ceab2a624a393e",
+    "encoder": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "previews": [
+    {
+      "voiceId": "zm_013",
+      "speakerId": 62,
+      "language": "zh-CN",
+      "file": "zm_013.mp3",
+      "durationSeconds": 6.95,
+      "decodedDurationSeconds": 6.95,
+      "sha256": "4126de6a9651614a90cac8299d2a14139b701ebd74419c120d31c2739c0a3b3d",
+      "bytes": 56256,
+      "peak": 0.4238,
+      "decodedPeak": 0.40259090065956116,
+      "wavSha256": "605028fa9529907ff9631e5bd56825b11e60e917dda1c780e6e33f2bd9cad55b"
+    },
+    {
+      "voiceId": "zf_038",
+      "speakerId": 23,
+      "language": "zh-CN",
+      "file": "zf_038.mp3",
+      "durationSeconds": 8.55,
+      "decodedDurationSeconds": 8.55,
+      "sha256": "75746c51f27751ebb82e9d6ffc1ac14299e6fa02222334a80b14f98cc5ee93c0",
+      "bytes": 69120,
+      "peak": 0.2883,
+      "decodedPeak": 0.27612078189849854,
+      "wavSha256": "ec00e05d1d537d8336bb98f9682f7f9260a764ae44a6f930a3bfcda0173773a5"
+    },
+    {
+      "voiceId": "af_maple",
+      "speakerId": 0,
+      "language": "en-US",
+      "file": "af_maple.mp3",
+      "durationSeconds": 6.425,
+      "decodedDurationSeconds": 6.425,
+      "sha256": "f67b04f082e179d715ffa23c8aa08e98afaaa6e5fea3dcb5ac8405402b125004",
+      "bytes": 52032,
+      "peak": 0.23892,
+      "decodedPeak": 0.22358901798725128,
+      "wavSha256": "86ee7e86b860bc7151ed1e157beebc642f1fc15891bf09f311059248af56ea44"
+    }
+  ]
+}

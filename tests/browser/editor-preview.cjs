@@ -273,10 +273,13 @@ async function main() {
 
     await installTimeline(page, [{ name: '工具栏字幕轨道', clips: [] }])
     const clipTools = page.locator('.timeline-clip-tools')
-    await expect(clipTools.getByRole('button')).toHaveCount(7)
+    await expect(clipTools.getByRole('button')).toHaveCount(8)
     const watermarkButton = clipTools.getByRole('button', { name: '添加水印', exact: true })
     await expect(watermarkButton).toBeVisible()
     assert.equal(await watermarkButton.evaluate(button => button.previousElementSibling?.textContent.trim()), '字幕')
+    const musicButton = clipTools.getByRole('button', { name: '背景音乐', exact: true })
+    await expect(musicButton).toBeVisible()
+    assert.equal(await musicButton.evaluate(button => button.previousElementSibling?.textContent.trim()), '水印')
     await expect(page.locator('.editor-tools').getByRole('button')).toHaveCount(4)
     await expect(page.locator('.editor-tools').getByRole('button', { name: '字幕', exact: true })).toHaveCount(0)
     await clipTools.getByRole('button', { name: '字幕', exact: true }).click()
@@ -361,7 +364,7 @@ async function main() {
       const toolbarBounds = await page.locator('.video-editor').evaluate(element => ({ editor: element.getBoundingClientRect().right, button: element.querySelector('.editor-export').getBoundingClientRect().right }))
       assert(toolbarBounds.button <= toolbarBounds.editor + 1, `${width}px 导出按钮被裁切`)
       const timelineToolbar = page.locator('.timeline-toolbar')
-      await expect(timelineToolbar.getByRole('button')).toHaveCount(15)
+      await expect(timelineToolbar.getByRole('button')).toHaveCount(16)
       if (width === 320) {
         assert(await timelineToolbar.evaluate(element => element.scrollWidth > element.clientWidth), '窄屏应允许横向滚动时间线工具栏')
         const controls = timelineToolbar.locator('button,input')

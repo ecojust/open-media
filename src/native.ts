@@ -16,7 +16,11 @@ export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopp
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
 export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
 export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
-export interface SpeechVoice { id: string; name: string; language: string; gender?: string }
+export type SpeechVoiceStatus = 'bundled' | 'not-downloaded' | 'downloading' | 'verifying' | 'ready' | 'failed'
+export interface SpeechVoice {
+  id: string; name: string; language: string; gender?: string
+  modelId?: string; modelSize?: number; downloadSize?: number; status?: SpeechVoiceStatus; downloadedBytes?: number; error?: string
+}
 export interface SpeechStatus { ready: boolean; voices: SpeechVoice[]; error?: string }
 export interface SpeechRequest { requestId: string; text: string; voiceId: string; speed: number }
 export interface SpeechJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress?: number; stage: string; message?: string; asset?: MediaAsset; error?: string }
@@ -72,6 +76,8 @@ export async function cancelMediaJob(id: string): Promise<void> { return call('c
 export async function getSpeechStatus(): Promise<SpeechStatus> {
   return isDesktop() ? call('get_speech_status') : { ready: false, voices: [], error: '离线文字转语音由桌面端提供，安装包内含语音模型和音色。' }
 }
+export async function beginSpeechModelDownload(modelId: string): Promise<SpeechStatus> { return call('begin_speech_model_download', { modelId }) }
+export async function cancelSpeechModelDownload(modelId: string): Promise<SpeechStatus> { return call('cancel_speech_model_download', { modelId }) }
 async function speechJobAsset(job: SpeechJob): Promise<SpeechJob> { return job.asset ? { ...job, asset: await assetUrl(job.asset) } : job }
 export async function beginSpeechJob(request: SpeechRequest): Promise<SpeechJob> { return speechJobAsset(await call('begin_speech_job', { request })) }
 export async function getSpeechJob(id: string): Promise<SpeechJob> { return speechJobAsset(await call('get_speech_job', { id })) }

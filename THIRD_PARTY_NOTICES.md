@@ -20,9 +20,9 @@ The installation's `media/licenses` directory includes upstream license, copyrig
 
 ## Bundled speech runtime
 
-The independent `open-media-speech` executable uses the fixed speech runtime and model archives recorded in [scripts/speech-runtime.lock.json](scripts/speech-runtime.lock.json). The combined executable and its runtime are distributed under **GPL-3.0-or-later**; original component licenses remain applicable and are preserved. The model is distributed under Apache-2.0.
+The independent `open-media-speech` executable uses the fixed speech runtime and model archives recorded in [scripts/speech-runtime.lock.json](scripts/speech-runtime.lock.json). The combined executable and its runtime are distributed under **GPL-3.0-or-later**; original component licenses remain applicable and are preserved. The single-speaker Matcha Chinese/English acoustic model and its Vocos 16 kHz vocoder weights are distributed under Apache-2.0 as declared by their publisher, `dengcunqin/matcha_tts_zh_en_20251010`. The original publisher metadata and file hashes are retained in the license inventory; upstream Matcha-TTS and Vocos implementation MIT notices are also preserved. Implementation licensing does not substitute for the model publisher’s weight license.
 
-The runtime includes sherpa-onnx, ONNX Runtime, eSpeak NG and their exact transitive dependencies. Original licenses, copyrights and notices are retained in `speech/licenses` in each installer; the source inventory and build instructions are included in `open-media-speech-source.tar.gz` beside every release. That archive includes the original pinned sources, model and runtime archives, the independent runner source, its build scripts and source lock. It is required in addition to the separate media source archive.
+The runtime includes sherpa-onnx, ONNX Runtime, eSpeak NG and their exact transitive dependencies. Original licenses, copyrights and notices are retained in `speech/licenses` in each installer; the source inventory and build instructions are included in `open-media-speech-source.tar.gz` beside every release. That archive includes the original pinned sources, acoustic model and runtime archives, vocoder model file, the independent runner source, its build scripts and source lock. It is required in addition to the separate media source archive.
 
 See [docs/SPEECH_RUNTIME.md](docs/SPEECH_RUNTIME.md) and [licenses/speech-runtime/README.md](licenses/speech-runtime/README.md) for exact versions, license texts and source provenance. No text is sent to a remote synthesis service.
 
@@ -43,3 +43,13 @@ The exact dependency graph and versions are retained in `package-lock.json` and 
 The `licenses/application/frontend/manifest.json` inventory records the dependencies actually emitted into the production browser bundle and its direct entry point. It retains or references identical original notices, including the original 0BSD copyright and permission notice for the embedded helper code. Duplicate license texts are shared without changing their contents. Required copyright notices and the full license texts are included in the installation's `licenses/application/` directory.
 
 Required dependency names, file-format names, copyright statements, and licensing references are preserved for accurate attribution.
+
+## Optional offline voices
+
+The optional Kokoro INT8 1.1 model package is downloaded only on request and is licensed under Apache-2.0. Its exact revision, files, sizes and hashes are pinned in `src-tauri/resources/speech-models.json`; original publisher notices and provenance are preserved in `licenses/application/optional-speech/`. The package shares the bundled speech runtime and text-processing resources. Its three fixed local audition recordings are generated from the corresponding model voices. Downloading a model does not send user text to a remote synthesis service.
+
+## Bundled background music
+
+Ten distinct instrumental selections are bundled for offline preview and use in video projects. All ten original works are published under **CC0 1.0 Universal**. The original authors, track titles, publication pages, download URLs, SHA-256 hashes, and excerpt/encoding changes are recorded in [licenses/application/background-music/manifest.json](licenses/application/background-music/manifest.json). The complete legal text and original publication pages carrying each license declaration are preserved alongside that inventory and included with the application notices.
+
+Chinese display titles describe the selected excerpts; the original creators retain their credited authorship. These CC0 selections may be used in exported projects without a mandatory attribution requirement.

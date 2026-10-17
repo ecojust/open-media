@@ -3,8 +3,9 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Project } from '../core/types'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity, type SpeechSource } from '../core/speech'
 import { compactVoiceCatalog } from '../core/voice-catalog'
+import { voiceReady, voiceDownloading } from '../core/voice-downloads'
 import { bundledVoicePreviewUrl, VOICE_PREVIEW_TEXT } from '../core/voice-previews'
-import { acceptSpeechJobs, beginSpeechJob, cancelSpeechJob, discardSpeechJob, getSpeechJob, getSpeechStatus, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
+import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getSpeechJob, getSpeechStatus, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
 
@@ -14,6 +15,8 @@ const desktop = isDesktop()
 const status = ref<SpeechStatus>({ ready: false, voices: [] })
 const loading = ref(false), busy = ref(false), cancelling = ref(false), finalizing = ref(false), error = ref(''), notice = ref('')
 const voiceId = ref(''), speed = ref(1), alignText = ref(true)
+const pendingModels = ref<string[]>([]), downloadError = ref('')
+const selectedVoiceReady = computed(() => voiceReady(status.value.voices.find(voice => voice.id === voiceId.value)))
 const previewUrl = ref(''), player = ref<HTMLAudioElement | null>(null)
 const previewVoiceId = ref(''), previewPlaying = ref(false), previewLoading = ref(false)
 const previewState = computed(() => previewLoading.value ? 'loading' : previewPlaying.value ? 'playing' : 'idle')
@@ -21,29 +24,67 @@ const operationKind = ref<'all' | 'selected' | 'preview'>('all')
 const generationLabel = computed(() => cancelling.value ? '正在取消…' : finalizing.value ? '正在加入时间线…' : '正在生成…')
 const allPlan = computed(() => planSpeech(props.project))
 let statusPromise: Promise<void> | undefined
+let statusTimer: ReturnType<typeof setTimeout> | undefined, statusRevision = 0
 let disposed = false, previewJobId = ''
 let previewRevision = 0, previewIsBundled = false
 interface Operation { project: Project; controller: AbortController; jobs: Set<string>; current: string; applying: boolean; reason: string }
 let operation: Operation | undefined
 
 function errorText(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause) }
-async function loadStatus(): Promise<void> {
+function applyStatus(result: SpeechStatus): void {
+  status.value = result
+  if (!result.voices.some(voice => voice.id === voiceId.value && voiceReady(voice))) {
+    const catalog = compactVoiceCatalog(result.voices).filter(voiceReady)
+    voiceId.value = catalog.find(voice => voice.language.toLowerCase().startsWith('zh'))?.id || catalog[0]?.id || ''
+  }
+}
+function stopStatusPoll(): void { clearTimeout(statusTimer); statusTimer = undefined }
+function scheduleStatusPoll(): void {
+  stopStatusPoll()
+  if (!disposed && props.active && !pendingModels.value.length && status.value.voices.some(voiceDownloading)) {
+    statusTimer = setTimeout(() => { statusTimer = undefined; void loadStatus(false) }, 800)
+  }
+}
+async function loadStatus(showLoading = true): Promise<void> {
   if (!desktop || disposed) return
   if (statusPromise) return statusPromise
-  loading.value = true
+  if (showLoading) loading.value = true
+  const revision = statusRevision
   statusPromise = (async () => {
     try {
       const result = await getSpeechStatus()
-      if (disposed) return
-      status.value = result
-      if (!result.voices.some(voice => voice.id === voiceId.value)) {
-        const catalog = compactVoiceCatalog(result.voices)
-        voiceId.value = catalog.find(voice => voice.language.toLowerCase().startsWith('zh'))?.id || catalog[0]?.id || ''
+      if (disposed || revision !== statusRevision) return
+      applyStatus(result)
+      if (downloadError.value.startsWith('暂时无法刷新声音状态：')) downloadError.value = ''
+    } catch (cause) {
+      if (!disposed && revision === statusRevision) {
+        if (!status.value.voices.length) status.value = { ready: false, voices: [], error: errorText(cause) }
+        else downloadError.value = `暂时无法刷新声音状态：${errorText(cause)}`
       }
-    } catch (cause) { if (!disposed) status.value = { ready: false, voices: [], error: errorText(cause) } }
-    finally { loading.value = false; statusPromise = undefined }
+    } finally { loading.value = false; statusPromise = undefined; scheduleStatusPoll() }
   })()
   return statusPromise
+}
+async function changeModelDownload(modelId: string, cancelDownload = false): Promise<void> {
+  if (!desktop || disposed || busy.value || pendingModels.value.includes(modelId)) return
+  const model = status.value.voices.find(voice => voice.modelId === modelId)
+  if (!model || (cancelDownload ? !voiceDownloading(model) : voiceReady(model) || voiceDownloading(model))) return
+  const revision = ++statusRevision
+  stopStatusPoll()
+  pendingModels.value = [...pendingModels.value, modelId]
+  downloadError.value = ''
+  try {
+    const result = await (cancelDownload ? cancelSpeechModelDownload(modelId) : beginSpeechModelDownload(modelId))
+    if (!disposed && revision === statusRevision) { statusRevision++; applyStatus(result) }
+  } catch (cause) {
+    if (!disposed) downloadError.value = `${cancelDownload ? '取消下载失败' : '无法开始下载'}：${errorText(cause)}`
+  } finally {
+    pendingModels.value = pendingModels.value.filter(id => id !== modelId)
+    if (!disposed && props.active && !pendingModels.value.length) {
+      await statusPromise
+      await loadStatus(false)
+    }
+  }
 }
 function checkOperation(active: Operation): void {
   if (disposed || operation !== active || active.controller.signal.aborted) throw new Error(active.reason || '已取消语音生成。')
@@ -93,12 +134,13 @@ async function previewVoice(id: string): Promise<void> {
   if (busy.value || disposed || !props.active) return
   const voice = status.value.voices.find(item => item.id === id)
   if (!voice) return
+  const bundledUrl = bundledVoicePreviewUrl(id)
+  if (!voiceReady(voice) && !bundledUrl) return
   if (previewVoiceId.value === id && previewUrl.value && player.value) {
     if (!player.value.paused) { previewRevision++; player.value.pause(); previewLoading.value = false }
     else { if (player.value.ended) player.value.currentTime = 0; await playPreview() }
     return
   }
-  const bundledUrl = bundledVoicePreviewUrl(id)
   if (bundledUrl) {
     clearPreview()
     const revision = previewRevision
@@ -152,6 +194,7 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
     checkOperation(active)
     const chosenVoice = audition?.voiceId || voiceId.value, rate = speed.value, shouldAlign = alignText.value
     if (!status.value.ready || !status.value.voices.some(voice => voice.id === chosenVoice)) throw new Error(status.value.error || '内置语音组件暂不可用，请检查安装文件。')
+    if (!voiceReady(status.value.voices.find(voice => voice.id === chosenVoice))) throw new Error('请先下载所选声音的模型，下载完成后即可生成语音。')
     if (!sources) {
       if (!audition) throw new Error('请从声音卡片开始试听。')
       previewVoiceId.value = chosenVoice; previewLoading.value = true
@@ -211,8 +254,8 @@ function align(clipIds?: string[]): void {
   } catch (cause) { error.value = errorText(cause); emit('status', error.value) }
 }
 watch(() => props.active, active => {
-  if (active && !status.value.ready) void loadStatus()
-  if (!active) { clearPreview(); if (operation) void cancel('配音面板已关闭，语音生成已取消。') }
+  if (active) void loadStatus(!status.value.voices.length)
+  if (!active) { stopStatusPoll(); clearPreview(); if (operation) void cancel('配音面板已关闭，语音生成已取消。') }
 }, { immediate: true })
 watch(() => props.project, value => { if (operation && !operation.applying && value !== operation.project) void cancel('项目已经变化，本次语音未写入时间线，请重新生成。') }, { flush: 'sync' })
 watch(voiceId, clearPreview)
@@ -220,25 +263,26 @@ watch(speed, value => {
   if (previewIsBundled && player.value) player.value.playbackRate = value
   else clearPreview()
 })
-onBeforeUnmount(() => { disposed = true; clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
+onBeforeUnmount(() => { disposed = true; stopStatusPoll(); clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
 defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel, error, notice })
 </script>
 
 <template>
   <section class="speech-panel" aria-label="文字转语音" data-testid="speech-panel">
     <header v-if="!inDialog"><Icon name="audio" :size="17" /><strong>文字转语音</strong><span>离线生成</span></header>
-    <p v-if="!desktop" class="speech-note">内置模型和多种声音随桌面端提供，安装后即可离线生成语音。</p>
+    <p v-if="!desktop" class="speech-note">内置中英女声随桌面端提供，安装后即可离线生成语音。</p>
     <p v-else-if="loading" class="speech-note" role="status"><span class="speech-spinner" />正在检查内置声音…</p>
-    <div v-else-if="!status.ready" class="speech-error" role="alert"><p>{{ status.error || '内置语音组件暂不可用。' }}</p><button :disabled="busy" @click="loadStatus"><Icon name="refresh" :size="13" />重新检查</button></div>
+    <div v-else-if="!status.ready" class="speech-error" role="alert"><p>{{ status.error || '内置语音组件暂不可用。' }}</p><button :disabled="busy" @click="loadStatus()"><Icon name="refresh" :size="13" />重新检查</button></div>
     <template v-if="desktop">
       <fieldset :disabled="busy || !status.ready">
-        <VoicePicker v-model="voiceId" :voices="status.voices" :disabled="busy || !status.ready" :preview-voice-id="previewVoiceId" :preview-state="previewState" @preview="previewVoice" />
+        <VoicePicker v-model="voiceId" :voices="status.voices" :disabled="busy || !status.ready" :preview-voice-id="previewVoiceId" :preview-state="previewState" :pending-models="pendingModels" @preview="previewVoice" @download="changeModelDownload($event)" @cancel-download="changeModelDownload($event, true)" />
+        <p v-if="downloadError" class="speech-error" role="alert">{{ downloadError }}</p>
         <label>语速 <output>{{ speed.toFixed(2).replace(/0$/, '') }}×</output><input v-model.number="speed" type="range" min="0.5" max="2" step="0.05" aria-label="配音语速" /></label>
         <label class="speech-check"><input v-model="alignText" type="checkbox" aria-label="文字时长对齐语音" /><span>文字时长对齐语音</span></label>
         <p class="speech-note">保留每段文字的开始位置，按语音长度调整时长。不会移动其他片段。</p>
       </fieldset>
       <div class="speech-actions" aria-live="polite">
-        <button class="speech-primary" :disabled="busy || !status.ready || !allPlan.sources.length" :aria-busy="busy && operationKind === 'all'" data-testid="speech-generate-all" @click="generate()"><template v-if="busy && operationKind === 'all'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="audio" :size="14" />全部文字转语音 <span class="speech-count">{{ allPlan.sources.length }}</span></template></button>
+        <button class="speech-primary" :disabled="busy || !status.ready || !selectedVoiceReady || !allPlan.sources.length" :aria-busy="busy && operationKind === 'all'" data-testid="speech-generate-all" @click="generate()"><template v-if="busy && operationKind === 'all'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="audio" :size="14" />全部文字转语音 <span class="speech-count">{{ allPlan.sources.length }}</span></template></button>
         <div v-if="busy" class="speech-cancel-row"><span v-if="operationKind === 'preview'" role="status"><span class="speech-spinner" />{{ cancelling ? '正在取消…' : '正在准备试听…' }}</span><button :disabled="cancelling || finalizing" @click="cancel()"><Icon name="close" :size="13" />取消生成</button></div>
       </div>
       <audio v-if="previewUrl" ref="player" :src="previewUrl" hidden preload="auto" aria-label="声音试听音频" @playing="previewPlaying = true; previewLoading = false" @waiting="previewLoading = !player?.paused" @pause="previewPlaying = false; previewLoading = false" @ended="previewPlaying = false; previewLoading = false" @error="previewFailed" />

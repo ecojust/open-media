@@ -1,7 +1,7 @@
 import type { AssetKind, MediaAsset } from './types.ts'
 
 const imageExtensions = new Set(['png', 'jpg', 'jpeg', 'webp', 'bmp', 'gif', 'avif', 'svg', 'ico'])
-const audioExtensions = new Set(['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'opus', 'aiff', 'wma'])
+const audioExtensions = new Set(['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac', 'opus', 'aif', 'aiff', 'wma'])
 const videoExtensions = new Set(['mp4', 'webm', 'mov', 'mkv', 'm4v', 'avi', 'mpeg', 'mpg', 'wmv', 'ts'])
 
 export function fileExtension(name: string): string {
