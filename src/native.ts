@@ -12,10 +12,10 @@ export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed
 export interface CaptureSize { width: number; height: number }
 export interface CaptureRegion extends CaptureSize { x: number; y: number }
 export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
-export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize; muted?: boolean; audioAvailable?: boolean }
+export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize; muted?: boolean; audioAvailable?: boolean; microphoneEnabled?: boolean }
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
-export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize }
-export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize }
+export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize; microphone?: boolean }
+export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize; microphone?: boolean }
 export interface SpeechVoice { id: string; name: string; language: string; gender?: string }
 export interface SpeechStatus { ready: boolean; voices: SpeechVoice[]; error?: string }
 export interface SpeechRequest { requestId: string; text: string; voiceId: string; speed: number }
@@ -87,6 +87,7 @@ export async function cancelCaptureStart(requestId: string): Promise<void> { ret
 export async function pauseCapture(): Promise<CaptureStatus> { return call('pause_capture') }
 export async function resumeCapture(): Promise<CaptureStatus> { return call('resume_capture') }
 export async function setCaptureMuted(muted: boolean): Promise<CaptureStatus> { return call('set_capture_muted', { muted }) }
+export async function setCaptureMicrophone(enabled: boolean, requestId: string): Promise<CaptureStatus> { return call('set_capture_microphone', { enabled, requestId }) }
 export async function captureControlsReady(): Promise<CaptureControlsSnapshot> { return call('capture_controls_ready') }
 export async function requestCaptureControlAction(action: CaptureControlAction): Promise<void> { return call('capture_controls_action', { action }) }
 export async function onCaptureControlsState(handler: (snapshot: CaptureControlsSnapshot) => void): Promise<() => void> {

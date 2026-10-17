@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "469f142c730ae2b19714daf24e5fc1da6c774206e6ab024618b54b7738e5592f",
-      "reviewMethod": "Source review: application version updated to 0.1.7 and recording controls and mute regression commands included. Dependency versions and original license files are unchanged."
+      "sha256": "dab14d0c5877a278496b73a13e5d4deb28f0f42881818ef7312681cf6ecbeda9",
+      "reviewMethod": "Source review: only the application version changed to 0.1.8. Dependency versions and original license files are unchanged."
     },
     {
       "path": "package-lock.json",
-      "sha256": "73ef08e50f6dd565791c170b302b07f80d917d682a6702679350b2988b5a1b93",
-      "reviewMethod": "Source review: application version updated to 0.1.7 and recording controls and mute regression commands included. Dependency versions and original license files are unchanged."
+      "sha256": "39711e025c617e42bacb6ef82ac67352cb4758a520fe1ced3fd38c6bcbd59678",
+      "reviewMethod": "Source review: only the application version changed to 0.1.8. Dependency versions and original license files are unchanged."
     },
     {
       "path": "vite.config.ts",

@@ -829,6 +829,23 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         microphone = session
     }
 
+    @MainActor func verifyMicrophone(_ deviceID: String) async throws {
+        // This separate, explicitly requested process checks permission and the
+        // actual device while the existing video recorder continues untouched.
+        try await prepareMicrophone(deviceID)
+        guard let session = microphone else { throw CaptureFailure("无法打开所选麦克风。") }
+        let running: Bool = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                session.startRunning()
+                let running = session.isRunning
+                session.stopRunning()
+                continuation.resume(returning: running)
+            }
+        }
+        microphone = nil
+        guard running else { throw CaptureFailure("麦克风未能开始采集，请检查设备和权限。") }
+    }
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen, CMSampleBufferIsValid(sampleBuffer), !stopping,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
@@ -1299,6 +1316,9 @@ public func openMediaCaptureMain() -> Int32 {
             }
             if (arguments.count == 2 || (arguments.count == 3 && arguments[2] == "--request-permission")), arguments[1] == "sources" {
                 try writeJSON(await listSources(requestPermission: arguments.count == 3)); exit(0)
+            }
+            if arguments.count == 3, arguments[1] == "microphone" {
+                try await recorder.verifyMicrophone(arguments[2]); exit(0)
             }
             guard arguments.count == 4, arguments[1] == "record" || screenshotMode else {
                 throw CaptureFailure("用法：sources、record <配置文件> <输出文件> 或 screenshot <配置文件> <输出文件>。")

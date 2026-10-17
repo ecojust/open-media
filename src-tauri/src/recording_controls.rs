@@ -20,6 +20,8 @@ pub struct ControlsSnapshot {
     pub elapsed: f64,
     pub muted: bool,
     pub audio_available: bool,
+    pub microphone_enabled: bool,
+    pub microphone_pending: bool,
     pub busy: bool,
     pub error: Option<String>,
 }
@@ -31,6 +33,8 @@ impl Default for ControlsSnapshot {
             elapsed: 0.0,
             muted: false,
             audio_available: false,
+            microphone_enabled: false,
+            microphone_pending: false,
             busy: true,
             error: None,
         }
@@ -43,7 +47,7 @@ pub enum ControlsAction {
     Pause,
     Resume,
     Stop,
-    ToggleMute,
+    ToggleMicrophone,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -295,16 +299,16 @@ mod desktop {
         ) -> Result<()> {
             require_controls(label)?;
             let snapshot = self.snapshot()?;
-            let allowed = !snapshot.busy
+            let allowed = (!snapshot.busy
+                || matches!(action, ControlsAction::Stop) && snapshot.microphone_pending)
                 && match action {
                     ControlsAction::Pause => snapshot.phase == "recording",
                     ControlsAction::Resume => snapshot.phase == "paused",
                     ControlsAction::Stop => {
                         matches!(snapshot.phase.as_str(), "recording" | "paused")
                     }
-                    ControlsAction::ToggleMute => {
-                        snapshot.audio_available
-                            && matches!(snapshot.phase.as_str(), "recording" | "paused")
+                    ControlsAction::ToggleMicrophone => {
+                        matches!(snapshot.phase.as_str(), "recording" | "paused")
                     }
                 };
             if !allowed {

@@ -1,10 +1,12 @@
-export type CaptureControlAction = 'pause' | 'resume' | 'stop' | 'toggle-mute'
+export type CaptureControlAction = 'pause' | 'resume' | 'stop' | 'toggle-microphone'
 
 export interface CaptureControlsSnapshot {
   phase: 'idle' | 'starting' | 'recording' | 'paused' | 'stopping'
   elapsed: number
   muted: boolean
   audioAvailable: boolean
+  microphoneEnabled: boolean
+  microphonePending?: boolean
   busy: boolean
   error?: string | null
 }

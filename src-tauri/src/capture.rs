@@ -66,6 +66,7 @@ pub struct CaptureStatus {
     pub state: String,
     pub muted: bool,
     pub audio_available: bool,
+    pub microphone_enabled: bool,
     pub elapsed: f64,
     pub segments: usize,
     pub error: Option<String>,
@@ -208,6 +209,11 @@ impl CaptureManager {
                 .options
                 .as_ref()
                 .is_some_and(|options| options.microphone),
+            microphone_enabled: self
+                .options
+                .as_ref()
+                .is_some_and(|options| options.microphone)
+                && !self.muted,
             elapsed: self.elapsed
                 + self
                     .active
@@ -502,6 +508,112 @@ impl CaptureManager {
     pub fn controls_target(&self) -> Option<(CaptureDevice, Option<Region>)> {
         Some((self.source.clone()?, self.options.as_ref()?.region.clone()))
     }
+    pub fn set_microphone_enabled(&mut self, enabled: bool) -> Result<CaptureStatus> {
+        self.set_microphone_enabled_cancellable(enabled, &AtomicBool::new(false))
+    }
+    pub fn set_microphone_enabled_cancellable(
+        &mut self,
+        enabled: bool,
+        cancelled: &AtomicBool,
+    ) -> Result<CaptureStatus> {
+        check_cancelled(cancelled)?;
+        self.status();
+        if self.state != "recording" && self.state != "paused" {
+            return Err("当前没有可控制的录制。".into());
+        }
+        let options = self.options.as_ref().ok_or("录制设置不可用。")?;
+        if options.microphone == enabled {
+            return if enabled && self.muted {
+                self.set_muted(false)
+            } else {
+                Ok(self.status())
+            };
+        }
+        let mut device = options.audio_device.clone();
+        if enabled {
+            // Authorization and device checks run while the current video keeps
+            // recording. A denied request must never discard or pause that video.
+            let runtime = self.runtime.as_ref().ok_or("录制引擎不可用。")?;
+            let devices = list_devices_with_permission(runtime, false, cancelled)?;
+            device = Some(
+                match device.as_deref().filter(|id| !id.is_empty()) {
+                    Some(id) => devices
+                        .iter()
+                        .find(|device| device.kind == "audio" && device.id == id),
+                    None => devices.iter().find(|device| device.kind == "audio"),
+                }
+                .ok_or("未找到所选麦克风，当前录制将保持原来的麦克风状态。")?
+                .id
+                .clone(),
+            );
+            preflight_microphone(runtime, device.as_deref().unwrap(), cancelled)?;
+        }
+        check_cancelled(cancelled)?;
+        self.switch_microphone(enabled, device, cancelled, |manager, _recovery| {
+            // A stop/exit request also cancels an attempted recovery; never start
+            // another capture process after the pending control was cancelled.
+            manager.spawn_segment(cancelled)
+        })
+    }
+    fn switch_microphone(
+        &mut self,
+        enabled: bool,
+        device: Option<String>,
+        cancelled: &AtomicBool,
+        mut spawn: impl FnMut(&mut Self, bool) -> Result<()>,
+    ) -> Result<CaptureStatus> {
+        check_cancelled(cancelled)?;
+        let previous = self.options.clone().ok_or("录制设置不可用。")?;
+        let previous_muted = self.muted;
+        let recording = self.state == "recording";
+        if recording {
+            let finished = self.finish_segment();
+            self.state = "paused".into();
+            finished?;
+        }
+        check_cancelled(cancelled)?;
+        let options = self.options.as_mut().unwrap();
+        options.microphone = enabled;
+        options.audio_device = device;
+        self.muted = false;
+        self.error = None;
+        if recording {
+            if let Err(error) = spawn(self, false) {
+                self.state = "paused".into();
+                if cancelled.load(Ordering::SeqCst) {
+                    if enabled {
+                        self.options = Some(previous);
+                        self.muted = previous_muted;
+                    }
+                    // Keep completed segments for the pending stop operation.
+                    // Cancellation must not reopen the old recording process.
+                    return Err("录制已取消。".into());
+                }
+                let message = if enabled {
+                    // Restore the usable silent recording after an unavailable
+                    // device, without deleting any already completed segments.
+                    self.options = Some(previous);
+                    self.muted = previous_muted;
+                    match spawn(self, true) {
+                        Ok(()) => format!("无法开启麦克风，已按原设置继续录制。{error}"),
+                        Err(recovery) => {
+                            self.state = "paused".into();
+                            format!("无法开启麦克风，录制已暂停；已完成片段仍然保留。{error} 恢复录制失败：{recovery}")
+                        }
+                    }
+                } else {
+                    // A failed silent restart must not reopen a microphone the
+                    // user explicitly disabled. Resume remains available.
+                    format!(
+                        "麦克风已关闭，但画面录制未能继续；录制已暂停，已完成片段仍然保留。{error}"
+                    )
+                };
+                self.error = Some(message.clone());
+                return Err(message);
+            }
+        }
+        Ok(self.status())
+    }
     pub fn set_muted(&mut self, muted: bool) -> Result<CaptureStatus> {
         // Refresh an unexpectedly ended child before writing to its input.
         self.status();
@@ -571,23 +683,48 @@ impl CaptureManager {
     fn merge_segments(&self, store: &MediaStore) -> Result<Asset> {
         let runtime = self.runtime.as_ref().ok_or("录制引擎不可用。")?;
         let root = self.workspace.as_ref().ok_or("录制目录不可用。")?.path();
-        let list = root.join("segments.txt");
-        let content = self
+        let descriptions = self
             .segments
             .iter()
-            .map(|p| {
-                format!(
+            .map(|path| recording_segment_info(runtime, path))
+            .collect::<Result<Vec<_>>>()?;
+        let mixed_audio = descriptions.iter().any(|info| info.audio)
+            && descriptions.iter().any(|info| !info.audio);
+        let segments = if mixed_audio {
+            self.segments
+                .iter()
+                .zip(&descriptions)
+                .enumerate()
+                .map(|(index, (path, info))| {
+                    normalize_recording_audio(runtime, root, index, path, info)
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            self.segments.clone()
+        };
+        let list = root.join("segments.txt");
+        let content = segments
+            .iter()
+            .zip(&descriptions)
+            .map(|(p, info)| {
+                let file = format!(
                     "file '{}'",
                     p.to_string_lossy()
                         .replace('\\', "/")
                         .replace('\'', "'\\''")
-                )
+                );
+                if mixed_audio {
+                    format!("{file}\nduration {:.9}", info.duration)
+                } else {
+                    file
+                }
             })
             .collect::<Vec<_>>()
             .join("\n");
         fs::write(&list, content).map_err(|e| e.to_string())?;
         let output = root.join("recording.mp4");
-        let merged = process(&runtime.encoder)
+        let mut command = process(&runtime.encoder);
+        command
             .args([
                 "-hide_banner",
                 "-nostdin",
@@ -601,7 +738,16 @@ impl CaptureManager {
                 "-i",
             ])
             .arg(&list)
-            .args(["-c", "copy", "-movflags", "+faststart"])
+            .args(["-map", "0:v:0", "-map", "0:a:0?", "-c:v", "copy"]);
+        if mixed_audio {
+            // Lossless intermediate audio avoids accumulating a new encoder
+            // delay each time the microphone changes. Encode the final track once.
+            command.args(["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]);
+        } else {
+            command.args(["-c:a", "copy"]);
+        }
+        let merged = command
+            .args(["-movflags", "+faststart"])
             .arg(&output)
             .output()
             .map_err(|e| e.to_string())?;
@@ -628,6 +774,146 @@ impl CaptureManager {
         self.elapsed = 0.0;
         self.error = None;
         self.muted = false;
+    }
+}
+struct RecordingSegmentInfo {
+    audio: bool,
+    duration: f64,
+}
+fn recording_segment_info(runtime: &Runtime, path: &Path) -> Result<RecordingSegmentInfo> {
+    let output = process(&runtime.probe)
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type,duration:format=duration",
+            "-of",
+            "json",
+        ])
+        .arg(path)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(format!(
+            "读取录制片段失败，原片段仍保留。{}",
+            tail(&String::from_utf8_lossy(&output.stderr), 800)
+        ));
+    }
+    let info: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("录制片段信息无效：{error}"))?;
+    let streams = info["streams"]
+        .as_array()
+        .ok_or("录制片段中没有可读取的媒体轨道。")?;
+    let video = streams
+        .iter()
+        .find(|stream| stream["codec_type"] == "video")
+        .ok_or("录制片段中没有画面，原片段仍保留。")?;
+    let seconds = |value: &serde_json::Value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str()?.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value > 0.0)
+    };
+    let duration = seconds(&video["duration"])
+        .or_else(|| seconds(&info["format"]["duration"]))
+        .ok_or("无法确定录制片段时长，原片段仍保留。")?;
+    Ok(RecordingSegmentInfo {
+        audio: streams.iter().any(|stream| stream["codec_type"] == "audio"),
+        duration,
+    })
+}
+fn normalize_recording_audio(
+    runtime: &Runtime,
+    root: &Path,
+    index: usize,
+    path: &Path,
+    info: &RecordingSegmentInfo,
+) -> Result<PathBuf> {
+    let output = root.join(format!("normalized-audio-{index}.mkv"));
+    let duration = format!("{:.9}", info.duration);
+    let mut command = process(&runtime.encoder);
+    command
+        .args(["-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i"])
+        .arg(path);
+    if !info.audio {
+        command.args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]);
+    }
+    command
+        .args([
+            "-map",
+            "0:v:0",
+            "-map",
+            if info.audio { "0:a:0" } else { "1:a:0" },
+            "-c:v",
+            "copy",
+            "-af",
+            &format!("aresample=48000:async=1:first_pts=0,apad,atrim=duration={duration}"),
+            "-c:a",
+            "flac",
+            "-sample_fmt",
+            "s16",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-t",
+            &duration,
+        ])
+        .arg(&output);
+    let result = command.output().map_err(|error| error.to_string())?;
+    if !result.status.success() {
+        return Err(format!(
+            "处理麦克风切换片段失败，原片段仍保留。{}",
+            tail(&String::from_utf8_lossy(&result.stderr), 1000)
+        ));
+    }
+    Ok(output)
+}
+fn preflight_microphone(runtime: &Runtime, device: &str, cancelled: &AtomicBool) -> Result<()> {
+    check_cancelled(cancelled)?;
+    #[cfg(target_os = "macos")]
+    let command = {
+        let _ = runtime;
+        let mut command = crate::capture_service::command()?;
+        command.args(["microphone", device]);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let command = {
+        let mut command = process(&runtime.encoder);
+        command.args([
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-f",
+            "dshow",
+            "-i",
+            &format!("audio={device}"),
+            "-t",
+            "0.1",
+            "-vn",
+            "-f",
+            "null",
+            "-",
+        ]);
+        command
+    };
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let (status, _, errors) = run_source_listing(command, cancelled, Duration::from_secs(120))?;
+        if !status.success() {
+            return Err(format!(
+                "无法开启麦克风，当前录制保持原设置。{}",
+                tail(&String::from_utf8_lossy(&errors), 1000)
+            ));
+        }
+        check_cancelled(cancelled)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = (runtime, device);
+        Err("当前系统暂不支持原生麦克风录制。".into())
     }
 }
 fn mute_command(muted: bool, native_helper: bool) -> &'static [u8] {
@@ -836,11 +1122,7 @@ fn from_windows(target: crate::capture_windows::VisualTarget) -> CaptureDevice {
         scale_factor: Some(target.scale_factor),
     }
 }
-fn resolve_source(
-    runtime: &Runtime,
-    id: &str,
-    cancelled: &AtomicBool,
-) -> Result<CaptureDevice> {
+fn resolve_source(runtime: &Runtime, id: &str, cancelled: &AtomicBool) -> Result<CaptureDevice> {
     check_cancelled(cancelled)?;
     #[cfg(target_os = "windows")]
     {
@@ -1100,8 +1382,185 @@ mod capture_tests {
     fn mute_commands_address_only_the_recording_audio_filter() {
         assert_eq!(mute_command(true, true), b"mute\n");
         assert_eq!(mute_command(false, true), b"unmute\n");
-        assert_eq!(mute_command(true, false), b"cvolume@capture_volume -1 volume 0\n");
-        assert_eq!(mute_command(false, false), b"cvolume@capture_volume -1 volume 1\n");
+        assert_eq!(
+            mute_command(true, false),
+            b"cvolume@capture_volume -1 volume 0\n"
+        );
+        assert_eq!(
+            mute_command(false, false),
+            b"cvolume@capture_volume -1 volume 1\n"
+        );
+    }
+    #[test]
+    fn microphone_changes_preserve_paused_time_and_cancellation_preserves_the_device() {
+        let mut manager = CaptureManager::default();
+        assert!(manager.set_microphone_enabled(false).is_err());
+        manager.state = "paused".into();
+        manager.options = Some(options());
+        manager.options.as_mut().unwrap().microphone = true;
+        manager.options.as_mut().unwrap().audio_device = Some("selected-microphone".into());
+        manager.elapsed = 14.25;
+        assert!(manager
+            .set_microphone_enabled_cancellable(false, &AtomicBool::new(true))
+            .is_err());
+        assert!(manager.status().microphone_enabled);
+        let status = manager.set_microphone_enabled(false).unwrap();
+        assert!(!status.microphone_enabled && !status.audio_available);
+        assert_eq!(status.state, "paused");
+        assert_eq!(status.elapsed, 14.25);
+        assert_eq!(
+            manager.options.as_ref().unwrap().audio_device.as_deref(),
+            Some("selected-microphone")
+        );
+        let status = manager
+            .switch_microphone(
+                true,
+                Some("selected-microphone".into()),
+                &AtomicBool::new(false),
+                |_, _| {
+                    panic!("Changing a paused recording must not start video or hold a microphone")
+                },
+            )
+            .unwrap();
+        assert!(status.microphone_enabled);
+        assert_eq!(status.state, "paused");
+        assert_eq!(status.elapsed, 14.25);
+        manager.abort();
+        assert!(!manager.status().microphone_enabled);
+    }
+    #[test]
+    fn failed_microphone_enable_restores_the_original_recording_and_retains_segments() {
+        let mut manager = CaptureManager::default();
+        manager.state = "recording".into();
+        manager.options = Some(options());
+        manager.elapsed = 8.5;
+        manager.segments.push(PathBuf::from("already-saved.mp4"));
+        let mut attempts = 0;
+        let error = manager
+            .switch_microphone(
+                true,
+                Some("unplugged".into()),
+                &AtomicBool::new(false),
+                |manager, recovery| {
+                    attempts += 1;
+                    if !recovery {
+                        assert!(manager.options.as_ref().unwrap().microphone);
+                        Err("设备已断开".into())
+                    } else {
+                        assert!(!manager.options.as_ref().unwrap().microphone);
+                        manager.state = "recording".into();
+                        Ok(())
+                    }
+                },
+            )
+            .err()
+            .unwrap();
+        assert!(error.contains("已按原设置继续录制"));
+        assert_eq!(attempts, 2);
+        let status = manager.status();
+        assert_eq!(status.state, "recording");
+        assert!(!status.microphone_enabled);
+        assert_eq!(status.elapsed, 8.5);
+        assert_eq!(manager.segments, [PathBuf::from("already-saved.mp4")]);
+        let error = manager
+            .switch_microphone(
+                true,
+                Some("unplugged".into()),
+                &AtomicBool::new(false),
+                |_, _| Err("来源已关闭".into()),
+            )
+            .err()
+            .unwrap();
+        assert!(error.contains("录制已暂停"));
+        assert_eq!(manager.status().state, "paused");
+        assert_eq!(manager.segments.len(), 1);
+    }
+    #[test]
+    fn failed_video_restart_after_microphone_disable_never_reopens_the_microphone() {
+        let mut manager = CaptureManager::default();
+        manager.state = "recording".into();
+        manager.options = Some(options());
+        manager.options.as_mut().unwrap().microphone = true;
+        let mut attempts = 0;
+        let error = manager
+            .switch_microphone(false, None, &AtomicBool::new(false), |manager, recovery| {
+                attempts += 1;
+                assert!(!recovery);
+                assert!(!manager.options.as_ref().unwrap().microphone);
+                Err("窗口已关闭".into())
+            })
+            .err()
+            .unwrap();
+        assert!(error.contains("麦克风已关闭"));
+        assert_eq!(attempts, 1);
+        assert_eq!(manager.status().state, "paused");
+        assert!(!manager.status().microphone_enabled);
+    }
+    #[test]
+    fn cancelling_during_microphone_switch_skips_recovery_and_retains_saved_segments() {
+        let mut manager = CaptureManager::default();
+        manager.state = "recording".into();
+        manager.options = Some(options());
+        manager
+            .segments
+            .push(PathBuf::from("saved-before-toggle.mp4"));
+        let cancelled = AtomicBool::new(false);
+        let mut attempts = 0;
+        let error = manager
+            .switch_microphone(
+                true,
+                Some("microphone".into()),
+                &cancelled,
+                |_, recovery| {
+                    attempts += 1;
+                    assert!(
+                        !recovery,
+                        "A cancelled microphone change must not reopen the previous capture"
+                    );
+                    cancelled.store(true, Ordering::SeqCst);
+                    check_cancelled(&cancelled)
+                },
+            )
+            .err()
+            .unwrap();
+        assert_eq!(error, "录制已取消。");
+        assert_eq!(attempts, 1);
+        assert_eq!(manager.status().state, "paused");
+        assert!(!manager.status().microphone_enabled);
+        assert_eq!(manager.segments, [PathBuf::from("saved-before-toggle.mp4")]);
+    }
+    #[test]
+    fn cancelling_during_microphone_recovery_does_not_try_another_capture() {
+        let mut manager = CaptureManager::default();
+        manager.state = "recording".into();
+        manager.options = Some(options());
+        manager
+            .segments
+            .push(PathBuf::from("saved-before-toggle.mp4"));
+        let cancelled = AtomicBool::new(false);
+        let mut attempts = 0;
+        let error = manager
+            .switch_microphone(
+                true,
+                Some("microphone".into()),
+                &cancelled,
+                |_, recovery| {
+                    attempts += 1;
+                    if recovery {
+                        cancelled.store(true, Ordering::SeqCst);
+                        check_cancelled(&cancelled)
+                    } else {
+                        Err("麦克风设备已断开".into())
+                    }
+                },
+            )
+            .err()
+            .unwrap();
+        assert!(error.contains("录制已取消"));
+        assert_eq!(attempts, 2);
+        assert_eq!(manager.status().state, "paused");
+        assert!(!manager.status().microphone_enabled);
+        assert_eq!(manager.segments.len(), 1);
     }
     #[test]
     fn selection_never_substitutes_another_window_or_screen() {
@@ -1312,6 +1771,129 @@ mod capture_tests {
         );
         stop_child(&mut failed, Duration::from_secs(1));
         assert!(failed.try_wait().unwrap().is_some());
+    }
+    #[test]
+    fn mixed_microphone_segments_keep_audio_and_silence_at_the_original_video_times() {
+        let runtime = Runtime::discover(None, None).expect("Media runtime required");
+        let root = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(root.path()).unwrap();
+        for initially_enabled in [false, true] {
+            let mut capture = CaptureManager::default();
+            capture.runtime = Some(runtime.clone());
+            capture.workspace = Some(tempfile::tempdir().unwrap());
+            capture.state = "paused".into();
+            for index in 0..4 {
+                let enabled = (index % 2 == 0) == initially_enabled;
+                let path = capture
+                    .workspace
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .join(format!("segment-{index}.mp4"));
+                let mut command = process(&runtime.encoder);
+                command.args([
+                    "-hide_banner",
+                    "-nostdin",
+                    "-y",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=c=red:s=160x120:r=25:d=0.8",
+                ]);
+                if enabled {
+                    command.args([
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "sine=frequency=440:sample_rate=48000:duration=0.8",
+                        "-c:a",
+                        "aac",
+                        "-ar",
+                        "48000",
+                        "-ac",
+                        "2",
+                    ]);
+                }
+                let result = command
+                    .args([
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "ultrafast",
+                        "-pix_fmt",
+                        "yuv420p",
+                    ])
+                    .arg(&path)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                capture.segments.push(path);
+            }
+            let asset = capture.stop(&store).unwrap().unwrap();
+            let info = recording_segment_info(&runtime, Path::new(&asset.native_path)).unwrap();
+            assert!(info.audio);
+            assert!(
+                (info.duration - 3.2).abs() < 0.05,
+                "Microphone changes must not stretch the video: {}",
+                info.duration
+            );
+            let decoded = process(&runtime.encoder)
+                .args(["-hide_banner", "-loglevel", "error", "-i"])
+                .arg(&asset.native_path)
+                .args(["-vn", "-ar", "48000", "-ac", "1", "-f", "f32le", "pipe:1"])
+                .output()
+                .unwrap();
+            assert!(
+                decoded.status.success(),
+                "{}",
+                String::from_utf8_lossy(&decoded.stderr)
+            );
+            let samples = decoded
+                .stdout
+                .chunks_exact(4)
+                .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+                .collect::<Vec<_>>();
+            assert!(samples.len() >= 3 * 48000);
+            for index in 0..4 {
+                let enabled = (index % 2 == 0) == initially_enabled;
+                let start = ((index as f64 * 0.8 + 0.2) * 48000.0) as usize;
+                let end = start + 4800;
+                let rms = (samples[start..end]
+                    .iter()
+                    .map(|sample| (*sample as f64).powi(2))
+                    .sum::<f64>()
+                    / (end - start) as f64)
+                    .sqrt();
+                assert!(if enabled { rms > 0.03 } else { rms < 0.0001 }, "Wrong audio after microphone change: initial={initially_enabled}, segment={index}, rms={rms}");
+            }
+            let probe = process(&runtime.probe)
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-count_frames",
+                    "-show_entries",
+                    "stream=nb_read_frames",
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(&asset.native_path)
+                .output()
+                .unwrap();
+            assert!(probe.status.success());
+            assert_eq!(
+                String::from_utf8_lossy(&probe.stdout).trim(),
+                "80",
+                "Every original video frame must survive audio normalization"
+            );
+        }
     }
     #[test]
     fn resized_recording_segments_have_fixed_pixels_and_merge_as_real_video() {

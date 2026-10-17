@@ -22,7 +22,7 @@ function complete(request, duration = 2.5) {
 function panel(overrides = {}, options = {}) {
   const source = readFileSync(new URL('../src/components/SpeechPanel.vue', import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
   const compiled = ts.transpileModule(`${source.replace(/^import .*$/gm, '')}\nreturn { generate, cancel, align, busy, error, notice, operationKind, generationLabel, voiceId, speed, alignText, previewUrl, previewVoice, previewVoiceId, previewState, player }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
-  const props = vue.shallowReactive({ project: fixture(), selectedClipId: '', active: true, ...options })
+  const props = vue.shallowReactive({ project: fixture(), active: true, ...options })
   const events = [], calls = [], unmount = []
   const injections = {
     ref: vue.ref, computed: vue.computed, watch: vue.watch, nextTick: vue.nextTick,
@@ -325,4 +325,37 @@ test('a hidden speech panel performs no runtime lookup and the browser never sta
   try { await settle(); assert.equal(lookups, 0) } finally { hidden.dispose() }
   const browser = panel({ isDesktop: () => false, beginSpeechJob: async () => { starts++; throw new Error('not available') } })
   try { await browser.state.generate(); assert.equal(starts, 0); assert.match(browser.state.error.value, /桌面端/) } finally { browser.dispose() }
+})
+
+test('explicit clip generation works while settings stay closed, loads defaults lazily and reuses current voice settings', async () => {
+  let lookups = 0
+  const harness = panel({ getSpeechStatus: async () => {
+    lookups++
+    return { ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }
+  } }, { active: false })
+  try {
+    await settle()
+    assert.equal(lookups, 0)
+    const clipId = harness.props.project.tracks.find(track => track.kind === 'text').clips[0].id
+    await harness.state.generate([clipId])
+    assert.equal(harness.props.active, false)
+    assert.equal(lookups, 1)
+    assert.equal(harness.state.error.value, '')
+    const first = harness.calls.find(call => call[0] === 'begin')[1]
+    assert.equal(first.voiceId, 'voice-1')
+    assert.equal(first.speed, 1)
+    assert.equal(harness.props.project.assets.length, 1)
+    harness.state.voiceId.value = 'voice-2'; harness.state.speed.value = 1.25
+    await harness.state.generate([clipId])
+    const latest = harness.calls.filter(call => call[0] === 'begin').at(-1)[1]
+    assert.equal(latest.voiceId, 'voice-2')
+    assert.equal(latest.speed, 1.25)
+    assert.equal(lookups, 1, 'the hidden controller keeps its loaded catalog and user settings')
+    assert.equal(harness.props.project.tracks.flatMap(track => track.clips).filter(clip => clip.speech?.textClipId === clipId).length, 1, 'regeneration replaces the linked clip')
+    assert.match(harness.state.notice.value, /已添加 1 段语音/)
+    harness.state.align([clipId])
+    assert.equal(harness.state.error.value, '')
+    assert.match(harness.state.notice.value, /文字起点和时长已对齐关联语音/)
+    assert.equal(harness.props.active, false)
+  } finally { harness.dispose() }
 })

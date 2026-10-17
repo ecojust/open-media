@@ -32,6 +32,7 @@ export interface BrowserCaptureSource {
 export interface BrowserCaptureSelection {
   region?: CaptureRegion
   outputSize?: CaptureOutputSize
+  microphone?: boolean
 }
 
 export interface BrowserCaptureSelectionRequest {
@@ -93,6 +94,8 @@ export interface BrowserCapture {
   readonly elapsed: number
   readonly muted: boolean
   readonly audioAvailable: boolean
+  readonly microphoneEnabled: boolean
+  setMicrophoneEnabled(enabled: boolean): Promise<void>
   setMuted(muted: boolean): void
   pause(): void
   resume(): void
@@ -151,6 +154,9 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
   const releaseStream = (stream: MediaStream) => stream.getTracks().forEach(track => track.stop())
   const screen = await (options.signal ? waitForCapture(screenRequest, options.signal, releaseStream) : screenRequest)
   let microphone: MediaStream | undefined
+  let microphoneNodes: MediaStreamAudioSourceNode[] = []
+  let microphonePending: AbortController | undefined
+  let silence: ConstantSourceNode | undefined
   let context: AudioContext | undefined
   let sourceVideo: HTMLVideoElement | undefined
   let renderTimer: ReturnType<typeof setInterval> | undefined
@@ -170,6 +176,11 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     if (renderFrame !== undefined) { sourceVideo?.cancelVideoFrameCallback(renderFrame); renderFrame = undefined }
   }
   const dispose = () => {
+    microphonePending?.abort(new DOMException('已取消麦克风请求。', 'AbortError'))
+    microphoneNodes.forEach(node => node.disconnect())
+    microphoneNodes = []
+    silence?.stop()
+    silence = undefined
     stopRendering()
     paintFinalFrame = undefined
     if (sourceVideo) { sourceVideo.pause(); sourceVideo.srcObject = null; sourceVideo.remove(); sourceVideo = undefined }
@@ -188,6 +199,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     const settings = videoTrack.getSettings()
     let region = options.region ? { ...options.region } : undefined
     let outputSize = options.outputSize ? { ...options.outputSize } : undefined
+    let microphoneSelected = options.microphone
     let transformsVideo = !!(region || outputSize)
     const source: BrowserCaptureSource = {
       type: settings.displaySurface === 'monitor' ? 'screen' : settings.displaySurface === 'window' ? 'window' : settings.displaySurface === 'browser' ? 'tab' : 'unknown',
@@ -244,6 +256,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       if (!selected) throw new DOMException('已取消录制来源选择。', 'AbortError')
       region = selected.region ? { ...selected.region } : undefined
       outputSize = selected.outputSize ? { ...selected.outputSize } : undefined
+      microphoneSelected = selected.microphone ?? microphoneSelected
       transformsVideo = !!(region || outputSize)
       updateSource()
     }
@@ -304,21 +317,42 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     } else if (sourceVideo) {
       sourceVideo.pause(); sourceVideo.srcObject = null; sourceVideo.remove(); sourceVideo = undefined
     }
-    if (options.microphone) {
+    if (microphoneSelected) {
       microphone = await waitForCapture(navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }), preparation.signal, releaseStream)
       microphone.getTracks().forEach(track => ownedTracks.add(track))
     }
     if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
     const tracks = [...outputVideoTracks]
-    const audioTracks = [...(options.systemAudio ? screen.getAudioTracks() : []), ...(microphone?.getAudioTracks() ?? [])]
-    if (audioTracks.length > 1) {
-      context = new AudioContext()
-      const destination = context.createMediaStreamDestination()
-      for (const track of audioTracks) context.createMediaStreamSource(new MediaStream([track])).connect(destination)
-      destination.stream.getTracks().forEach(track => ownedTracks.add(track))
-      tracks.push(...destination.stream.getAudioTracks())
-      await context.resume()
-    } else tracks.push(...audioTracks)
+    const sharedAudioTracks = options.systemAudio ? screen.getAudioTracks() : []
+    const audioTracks = () => [...sharedAudioTracks, ...(microphone?.getAudioTracks() ?? [])]
+    // Keep one audio track for the entire recording. A zero-amplitude source
+    // supplies timestamps while no device is enabled, without requesting one.
+    context = new AudioContext()
+    const destination = context.createMediaStreamDestination()
+    silence = context.createConstantSource()
+    silence.offset.value = 0
+    silence.connect(destination)
+    silence.start()
+    for (const track of sharedAudioTracks) context.createMediaStreamSource(new MediaStream([track])).connect(destination)
+    const attachMicrophone = (stream: MediaStream) => {
+      microphoneNodes.forEach(node => node.disconnect())
+      microphoneNodes = []
+      try {
+        for (const track of stream.getAudioTracks()) {
+          const node = context!.createMediaStreamSource(new MediaStream([track]))
+          microphoneNodes.push(node)
+          node.connect(destination)
+        }
+      } catch (error) {
+        microphoneNodes.forEach(node => node.disconnect())
+        microphoneNodes = []
+        throw error
+      }
+    }
+    if (microphone) attachMicrophone(microphone)
+    destination.stream.getTracks().forEach(track => ownedTracks.add(track))
+    tracks.push(...destination.stream.getAudioTracks())
+    await context.resume()
     for (let remaining = Math.max(0, Math.min(10, Math.floor(options.countdown ?? 0))); remaining > 0; remaining--) {
       if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
       options.onCountdown?.(remaining)
@@ -337,8 +371,61 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find(value => MediaRecorder.isTypeSupported(value))
     recorder = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 8_000_000 })
     let phase: CapturePhase = 'recording'
+    const hasStopped = () => phase === 'stopped'
     let muted = false
     const outputAudioTracks = stream.getAudioTracks()
+    const microphoneEnabled = () => phase !== 'stopped' && !!microphone?.getAudioTracks().some(track => track.readyState === 'live')
+    const audioAvailable = () => phase !== 'stopped' && audioTracks().some(track => track.readyState === 'live')
+    let microphoneQueue: Promise<void> = Promise.resolve()
+    let microphoneRevision = 0
+    let microphoneOperation: { enabled: boolean; promise: Promise<void> } | undefined
+    const setMicrophoneEnabled = (enabled: boolean): Promise<void> => {
+      if (microphoneOperation?.enabled === enabled) return microphoneOperation.promise
+      const revision = ++microphoneRevision
+      // An off request also cancels a permission dialog that has not resolved.
+      if (!enabled) microphonePending?.abort(new DOMException('已取消麦克风请求。', 'AbortError'))
+      const change = microphoneQueue.then(async () => {
+        if (revision !== microphoneRevision) return
+        if (hasStopped() || preparation.signal.aborted) throw new Error('录制已结束。')
+        if (enabled === microphoneEnabled()) return
+        if (!enabled) {
+          microphoneNodes.forEach(node => node.disconnect())
+          microphoneNodes = []
+          microphone?.getTracks().forEach(track => { track.stop(); ownedTracks.delete(track) })
+          microphone = undefined
+          return
+        }
+        const request = new AbortController()
+        microphonePending = request
+        const abort = () => request.abort(cancelledCapture(preparation.signal))
+        preparation.signal.addEventListener('abort', abort, { once: true })
+        try {
+          const acquired = await waitForCapture(navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }), request.signal, releaseStream)
+          if (hasStopped() || revision !== microphoneRevision || request.signal.aborted) {
+            releaseStream(acquired)
+            if (hasStopped()) throw new Error('录制已结束。')
+            return
+          }
+          if (!acquired.getAudioTracks().some(track => track.readyState === 'live')) {
+            releaseStream(acquired)
+            throw new Error('没有可用的麦克风音轨。')
+          }
+          try { attachMicrophone(acquired) }
+          catch (error) { releaseStream(acquired); throw error }
+          microphone = acquired
+          acquired.getTracks().forEach(track => { track.enabled = !muted; ownedTracks.add(track) })
+        } finally {
+          preparation.signal.removeEventListener('abort', abort)
+          if (microphonePending === request) microphonePending = undefined
+        }
+      })
+      const operation = { enabled, promise: change }
+      microphoneOperation = operation
+      const clearOperation = () => { if (microphoneOperation === operation) microphoneOperation = undefined }
+      void change.then(clearOperation, clearOperation)
+      microphoneQueue = change.catch(() => {})
+      return change
+    }
     let startedAt = performance.now()
     let accumulated = 0
     let bytes = 0
@@ -355,6 +442,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
         updateSource()
         accumulated = elapsed() * 1000
         phase = 'stopped'
+        microphonePending?.abort(new DOMException('录制已结束。', 'AbortError'))
         options.onPhase?.(phase)
         if (!transformFailure) paintFinalFrame?.()
         if (recorder.state !== 'inactive') recorder.stop()
@@ -404,12 +492,14 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       get phase() { return phase },
       get elapsed() { return elapsed() },
       get muted() { return muted },
-      get audioAvailable() { return phase !== 'stopped' && outputAudioTracks.some(track => track.readyState === 'live') },
+      get audioAvailable() { return audioAvailable() },
+      get microphoneEnabled() { return microphoneEnabled() },
+      setMicrophoneEnabled,
       setMuted(value) {
-        if (phase === 'stopped' || !outputAudioTracks.some(track => track.readyState === 'live')) return
+        if (!audioAvailable()) return
         // Disable the mixed output as well as every authorized source. Keep the
         // tracks alive so silent samples preserve timing and can be resumed.
-        for (const track of new Set([...audioTracks, ...outputAudioTracks])) track.enabled = !value
+        for (const track of new Set([...audioTracks(), ...outputAudioTracks])) track.enabled = !value
         muted = value
       },
       pause() {

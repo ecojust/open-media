@@ -22,13 +22,14 @@ export interface CaptureSelectionContext {
   displayId: string
   display: SelectionDisplay
   targets: SelectionTarget[]
-  preferences?: { purpose?: 'record' | 'screenshot'; mode?: CaptureSelectionMode; sourceId?: string; outputSize?: SelectionSize }
+  preferences?: { purpose?: 'record' | 'screenshot'; mode?: CaptureSelectionMode; sourceId?: string; outputSize?: SelectionSize; microphone?: boolean }
   availableModes?: CaptureSelectionMode[]
 }
 export interface CaptureSelection {
   sourceId: string
   region?: SelectionRect
   outputSize?: SelectionSize
+  microphone?: boolean
 }
 export type SelectionHandle = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
 export interface SelectionPoint { x: number; y: number }

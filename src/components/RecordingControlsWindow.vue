@@ -4,7 +4,7 @@ import RecordingToolbar from './RecordingToolbar.vue'
 import type { CaptureControlAction, CaptureControlsSnapshot } from '../core/capture-controls'
 import { captureControlsReady, onCaptureControlsState, requestCaptureControlAction } from '../native'
 
-const snapshot = ref<CaptureControlsSnapshot>({ phase: 'starting', elapsed: 0, muted: false, audioAvailable: false, busy: true })
+const snapshot = ref<CaptureControlsSnapshot>({ phase: 'starting', elapsed: 0, muted: false, audioAvailable: false, microphoneEnabled: false, busy: true })
 const receivedAt = ref(performance.now()), now = ref(receivedAt.value)
 const displayed = computed<CaptureControlsSnapshot>(() => ({ ...snapshot.value, elapsed: snapshot.value.elapsed + (snapshot.value.phase === 'recording' ? Math.max(0, now.value - receivedAt.value) / 1000 : 0) }))
 let disposed = false, unlisten: (() => void) | undefined
@@ -16,7 +16,7 @@ function receive(value: CaptureControlsSnapshot): void {
   snapshot.value = value
 }
 async function action(value: CaptureControlAction): Promise<void> {
-  if (snapshot.value.busy) return
+  if (snapshot.value.busy && !(value === 'stop' && snapshot.value.microphonePending)) return
   snapshot.value = { ...snapshot.value, busy: true }
   try { await requestCaptureControlAction(value) }
   catch (cause) { if (!disposed) snapshot.value = { ...snapshot.value, busy: false, error: String(cause) } }

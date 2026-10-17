@@ -8,7 +8,7 @@ import { acceptSpeechJobs, beginSpeechJob, cancelSpeechJob, discardSpeechJob, ge
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
 
-const props = defineProps<{ project: Project; selectedClipId: string; active: boolean; inDialog?: boolean }>()
+const props = defineProps<{ project: Project; active: boolean; inDialog?: boolean }>()
 const emit = defineEmits<{ change: [project: Project, label: string]; status: [message: string]; busy: [value: boolean] }>()
 const desktop = isDesktop()
 const status = ref<SpeechStatus>({ ready: false, voices: [] })
@@ -20,8 +20,6 @@ const previewState = computed(() => previewLoading.value ? 'loading' : previewPl
 const operationKind = ref<'all' | 'selected' | 'preview'>('all')
 const generationLabel = computed(() => cancelling.value ? '正在取消…' : finalizing.value ? '正在加入时间线…' : '正在生成…')
 const allPlan = computed(() => planSpeech(props.project))
-const selectedPlan = computed(() => planSpeech(props.project, props.selectedClipId ? [props.selectedClipId] : []))
-const selectedLinked = computed(() => props.project.tracks.some(track => track.clips.some(clip => clip.speech?.textClipId === props.selectedClipId)))
 let statusPromise: Promise<void> | undefined
 let disposed = false, previewJobId = ''
 let previewRevision = 0, previewIsBundled = false
@@ -89,7 +87,6 @@ async function playPreview(): Promise<void> {
     await audio.play()
     if (revision !== previewRevision || disposed) return
     previewLoading.value = false
-    notice.value = previewIsBundled ? '内置试听已就绪，未添加到时间线。' : '试听已就绪，未添加到时间线。'
   } catch { if (revision === previewRevision && !disposed) previewFailed() }
 }
 async function previewVoice(id: string): Promise<void> {
@@ -211,7 +208,7 @@ function align(clipIds?: string[]): void {
     emit('change', result.project, '文字已对齐语音')
     notice.value = `文字起点和时长已对齐关联语音。${result.overlaps.length ? '部分片段时间重叠，语音可能同时播放；请检查时间线。' : ''}`
     emit('status', notice.value)
-  } catch (cause) { error.value = errorText(cause) }
+  } catch (cause) { error.value = errorText(cause); emit('status', error.value) }
 }
 watch(() => props.active, active => {
   if (active && !status.value.ready) void loadStatus()
@@ -224,7 +221,7 @@ watch(speed, value => {
   else clearPreview()
 })
 onBeforeUnmount(() => { disposed = true; clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
-defineExpose({ generate, align, cancel })
+defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel, error, notice })
 </script>
 
 <template>
@@ -242,12 +239,11 @@ defineExpose({ generate, align, cancel })
       </fieldset>
       <div class="speech-actions" aria-live="polite">
         <button class="speech-primary" :disabled="busy || !status.ready || !allPlan.sources.length" :aria-busy="busy && operationKind === 'all'" data-testid="speech-generate-all" @click="generate()"><template v-if="busy && operationKind === 'all'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="audio" :size="14" />全部文字转语音 <span class="speech-count">{{ allPlan.sources.length }}</span></template></button>
-        <button :disabled="busy || !status.ready || !selectedPlan.sources.length" :aria-busy="busy && operationKind === 'selected'" data-testid="speech-generate-selected" @click="generate([selectedClipId])"><template v-if="busy && operationKind === 'selected'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="text" :size="14" />选中文字转语音</template></button>
         <div v-if="busy" class="speech-cancel-row"><span v-if="operationKind === 'preview'" role="status"><span class="speech-spinner" />{{ cancelling ? '正在取消…' : '正在准备试听…' }}</span><button :disabled="cancelling || finalizing" @click="cancel()"><Icon name="close" :size="13" />取消生成</button></div>
       </div>
       <audio v-if="previewUrl" ref="player" :src="previewUrl" hidden preload="auto" aria-label="声音试听音频" @playing="previewPlaying = true; previewLoading = false" @waiting="previewLoading = !player?.paused" @pause="previewPlaying = false; previewLoading = false" @ended="previewPlaying = false; previewLoading = false" @error="previewFailed" />
     </template>
-    <div class="speech-align"><button :disabled="busy || !selectedLinked" data-testid="speech-align-selected" @click="align([selectedClipId])"><Icon name="clock" :size="14" />选中文字对齐已有语音</button><button :disabled="busy || !project.tracks.some(track => track.clips.some(clip => clip.speech?.textClipId))" @click="align()">全部文字对齐已有语音</button></div>
+    <div class="speech-align"><button :disabled="busy || !project.tracks.some(track => track.clips.some(clip => clip.speech?.textClipId))" @click="align()"><Icon name="clock" :size="14" />全部文字对齐已有语音</button></div>
     <details v-if="allPlan.skipped.length" class="speech-skipped"><summary>{{ allPlan.skipped.length }} 段文字不可生成，将跳过</summary><ul><li v-for="item in allPlan.skipped" :key="item.clipId">{{ item.name }}：{{ item.reason }}</li></ul></details>
     <p v-if="error" class="speech-error" role="alert">{{ error }}</p><p v-if="notice" class="speech-notice" role="status">{{ notice }}</p>
   </section>

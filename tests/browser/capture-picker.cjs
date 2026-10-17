@@ -18,7 +18,7 @@ async function mount(page, baseURL, options = {}) {
         { id: 'screen:1', name: '主屏幕', kind: 'screen', rect: { x: 0, y: 0, width: 1280, height: 800 }, sourceWidth: 2560, sourceHeight: 1600 },
         { id: 'window:front', name: '资料窗口', kind: 'window', rect: { x: 300, y: 180, width: 600, height: 350 }, sourceWidth: 1200, sourceHeight: 700 },
         { id: 'window:back', name: '编辑窗口', kind: 'window', rect: { x: 100, y: 100, width: 900, height: 600 }, sourceWidth: 1800, sourceHeight: 1200 },
-      ], preferences: { mode: options.mode ?? 'region' },
+      ], preferences: { mode: options.mode ?? 'region', purpose: options.purpose, microphone: options.microphone },
     }
     if (options.windowOnly) { context.availableModes = ['window']; context.targets = [context.targets[1]]; context.preferences.mode = 'window' }
     window.pickerHarness = { confirmed: [], canceled: 0 }
@@ -60,6 +60,7 @@ async function main() {
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     await mount(page, baseURL)
+    assert.equal(await page.getByTestId('capture-picker-microphone').getAttribute('aria-pressed'), 'true')
     assert.equal(await page.getByTestId('capture-picker-confirm').isDisabled(), true)
     await drag(page, { x: 100, y: 100 }, { x: 500, y: 350 })
     assert.equal(await page.getByLabel('选区宽度').inputValue(), '800')
@@ -87,7 +88,7 @@ async function main() {
     fs.mkdirSync('test-results/browser', { recursive: true })
     await page.screenshot({ path: 'test-results/browser/capture-picker-region.png' })
     await page.getByTestId('capture-picker-confirm').click()
-    assert.deepEqual(await page.evaluate(() => window.pickerHarness.confirmed[0]), { sourceId: 'screen:1', region: { x: 301, y: 270, width: 640, height: 560 }, outputSize: { width: 640, height: 480 } })
+    assert.deepEqual(await page.evaluate(() => window.pickerHarness.confirmed[0]), { sourceId: 'screen:1', region: { x: 301, y: 270, width: 640, height: 560 }, outputSize: { width: 640, height: 480 }, microphone: true })
     console.log('PASS 实际拖拽、八手柄中的角点缩放、物理像素微调、选区尺寸与输出尺寸校验')
 
     await mount(page, baseURL, { mode: 'window' })
@@ -96,14 +97,33 @@ async function main() {
     assert.equal(await page.getByTestId('capture-picker-confirm').isDisabled(), true)
     await page.mouse.click(400, 240)
     assert.equal(await page.getByTestId('capture-picker-confirm').isDisabled(), false)
+    await page.getByTestId('capture-picker-microphone').click()
+    assert.equal(await page.getByTestId('capture-picker-microphone').getAttribute('aria-pressed'), 'false')
+    assert.match(await page.getByTestId('capture-picker-microphone').innerText(), /麦克风关/)
     await page.screenshot({ path: 'test-results/browser/capture-picker-window.png' })
     await page.getByTestId('capture-picker-confirm').click()
-    assert.deepEqual(await page.evaluate(() => window.pickerHarness.confirmed[0]), { sourceId: 'window:front', outputSize: undefined })
+    assert.deepEqual(await page.evaluate(() => window.pickerHarness.confirmed[0]), { sourceId: 'window:front', outputSize: undefined, microphone: false })
     await mount(page, baseURL, { mode: 'screen' })
     await page.getByTestId('capture-selection-stage').focus()
     await page.keyboard.press('Enter')
-    assert.deepEqual(await page.evaluate(() => window.pickerHarness.confirmed[0]), { sourceId: 'screen:1', outputSize: undefined })
+    assert.deepEqual(await page.evaluate(() => window.pickerHarness.confirmed[0]), { sourceId: 'screen:1', outputSize: undefined, microphone: true })
     console.log('PASS 窗口悬停高亮/点击锁定、层叠命中和屏幕快捷键确认')
+
+    await mount(page, baseURL, { mode: 'screen', microphone: false })
+    assert.equal(await page.getByTestId('capture-picker-microphone').getAttribute('aria-pressed'), 'false')
+    await page.getByTestId('picker-mode-window').click()
+    await page.getByTestId('picker-mode-screen').click()
+    assert.equal(await page.getByTestId('capture-picker-microphone').getAttribute('aria-pressed'), 'false')
+    await page.getByTestId('capture-picker-microphone').click()
+    await page.getByTestId('capture-picker-confirm').click()
+    assert.equal(await page.evaluate(() => window.pickerHarness.confirmed[0].microphone), true)
+
+    await mount(page, baseURL, { mode: 'screen', purpose: 'screenshot', microphone: true })
+    assert.equal(await page.getByTestId('capture-picker-microphone').count(), 0)
+    assert.equal(await page.getByLabel('输出尺寸').count(), 0)
+    await page.getByTestId('capture-picker-confirm').click()
+    assert.equal(await page.evaluate(() => Object.hasOwn(window.pickerHarness.confirmed[0], 'microphone')), false)
+    console.log('PASS 录制默认启用麦克风、选择面板可反复切换并返回选择，截屏不携带麦克风选项')
 
     await mount(page, baseURL, { embedded: true })
     const stage = await page.getByTestId('capture-selection-stage').boundingBox()
@@ -124,6 +144,26 @@ async function main() {
     assert.ok(toolbar.y + toolbar.height <= 700)
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 320)
     await page.screenshot({ path: 'test-results/browser/capture-picker-mobile.png' })
+    for (const viewport of [{ width: 320, height: 240 }, { width: 800, height: 300 }, { width: 1280, height: 300 }]) {
+      await page.setViewportSize(viewport)
+      await mount(page, baseURL, { embedded: true, mode: 'screen' })
+      await page.getByLabel('输出尺寸').selectOption('custom')
+      for (const id of ['capture-picker-microphone', 'capture-picker-cancel', 'capture-picker-confirm']) {
+        const bounds = await page.getByTestId(id).boundingBox()
+        assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= viewport.width && bounds.y + bounds.height <= viewport.height, `${id} remains reachable at ${viewport.width} × ${viewport.height}`)
+      }
+      assert.equal(await page.getByTestId('capture-picker-cancel').evaluate(element => element.closest('.selection-toolbar') !== null), true)
+      await page.getByTestId('capture-picker-cancel').click()
+      assert.deepEqual(await page.evaluate(() => ({ canceled: window.pickerHarness.canceled, confirmed: window.pickerHarness.confirmed.length })), { canceled: 1, confirmed: 0 })
+    }
+    const retina = await browser.newPage({ viewport: { width: 640, height: 360 }, deviceScaleFactor: 2 })
+    await mount(retina, baseURL, { mode: 'screen' })
+    const retinaCancel = await retina.getByTestId('capture-picker-cancel').boundingBox()
+    assert.ok(retinaCancel.x >= 0 && retinaCancel.y >= 0 && retinaCancel.x + retinaCancel.width <= 640 && retinaCancel.y + retinaCancel.height <= 360)
+    await retina.getByTestId('capture-picker-confirm').click()
+    assert.equal(await retina.evaluate(() => window.pickerHarness.confirmed[0].microphone), true)
+    await retina.close()
+    console.log('PASS 取消和麦克风与确认按钮同处选择面板，320px窄屏、短屏和2倍缩放均可操作')
     const nativePage = await browser.newPage({ viewport: { width: 1280, height: 800 } })
     nativePage.on('pageerror', error => errors.push(error.message))
     await nativePage.addInitScript(() => {

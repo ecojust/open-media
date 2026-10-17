@@ -17,7 +17,7 @@ const captureDevices = [{ id: 'screen:1', name: '屏幕一', kind: 'screen', wid
 
 function workspace(name, overrides = {}) {
   const script = readFileSync(new URL(`../src/components/${name}.vue`, import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1]
-  const exposed = name === 'RecorderWorkspace' ? 'phase, elapsed, error, countdown, begin, stop, pauseOrResume, toggleMuted, muted, audioAvailable, controlBusy, selection, pickerPreferences, actualSource, browserPicker, chooseBrowserSource' : 'exporting, error, jobId, exportGif, cancel'
+  const exposed = name === 'RecorderWorkspace' ? 'phase, elapsed, error, countdown, begin, stop, pauseOrResume, toggleMicrophone, microphone, microphoneEnabled, microphonePending, muted, audioAvailable, controlBusy, selection, pickerPreferences, actualSource, browserPicker, chooseBrowserSource' : 'exporting, error, jobId, exportGif, cancel'
   const compiled = ts.transpileModule(`${script.replace(/^import .*$/gm, '')}\nreturn { ${exposed} }`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
   const mounted = [], unmounted = [], deactivated = [], timers = new Map(), events = []
   let actionListener, unlistened = 0
@@ -26,7 +26,7 @@ function workspace(name, overrides = {}) {
     ref: vue.ref, shallowRef: vue.shallowRef, computed: vue.computed, nextTick: vue.nextTick, watch: vue.watch,
     onMounted: callback => mounted.push(callback), onBeforeUnmount: callback => unmounted.push(callback), onDeactivated: callback => deactivated.push(callback),
     onCaptureControlsAction: async callback => { actionListener = callback; return () => { unlistened++; actionListener = undefined } },
-    setCaptureMuted: async muted => ({ state: 'recording', elapsed: 1, segments: 0, audioAvailable: true, muted }), recordingClock,
+    setCaptureMicrophone: async enabled => ({ state: 'recording', elapsed: 1, segments: 0, audioAvailable: enabled, muted: !enabled, microphoneEnabled: enabled }), recordingClock,
     defineProps: () => ({ assets: [asset], native: true }), withDefaults: (props, defaults) => ({ ...defaults, ...props }), defineEmits: () => (...args) => events.push(args), defineExpose: () => {},
     window: { addEventListener() {}, removeEventListener() {} },
     setInterval: callback => { const id = nextTimer++; timers.set(id, callback); return id }, clearInterval: id => timers.delete(id),
@@ -414,36 +414,105 @@ test('floating recording actions pause, resume and stop through the same recorde
   assert.equal(calls.filter(call => call === 'stop').length, 1, '卸载后浮栏事件不再触发录制命令')
 })
 
-test('native microphone mute survives pause and resume without changing the recording phase', async () => {
-  let status = { state: 'recording', elapsed: 4.5, segments: 0, muted: false, audioAvailable: true }
-  const muted = []
+test('picker receives default enabled microphone and its disabled choice is honored', async () => {
+  let preferences, started
   const harness = workspace('RecorderWorkspace', {
+    pickCaptureSource: async (_id, value) => { preferences = value; return { sourceId: 'window:24', microphone: false } },
+    startCapture: async options => { started = options; return { state: 'recording', elapsed: 0, microphoneEnabled: options.microphone } },
+  })
+  try {
+    assert.equal(harness.state.microphone.value, true)
+    harness.state.countdown.value = 0
+    await harness.state.begin()
+    assert.equal(preferences.microphone, true, '初次选择范围默认开启麦克风')
+    assert.equal(started.microphone, false, '窗口选择中的关闭选择必须传到实际采集')
+    assert.equal(harness.state.microphoneEnabled.value, false)
+    assert.equal(harness.state.pickerPreferences.value.microphone, false)
+  } finally { harness.dispose() }
+})
+
+test('microphone can enable after a silent start and retains its choice across pause and resume', async () => {
+  let status = { state: 'recording', elapsed: 4.5, segments: 0, muted: true, audioAvailable: false, microphoneEnabled: false }
+  const changed = []
+  const harness = workspace('RecorderWorkspace', {
+    pickCaptureSource: async () => ({ sourceId: 'window:24', microphone: false }),
     startCapture: async () => ({ ...status }), getCaptureStatus: async () => ({ ...status }),
     pauseCapture: async () => { status = { ...status, state: 'paused', segments: 1 }; return { ...status } },
     resumeCapture: async () => { status = { ...status, state: 'recording' }; return { ...status } },
-    setCaptureMuted: async value => { muted.push(value); status = { ...status, muted: value }; return { ...status } },
+    setCaptureMicrophone: async (enabled, id) => { assert.match(id, /^[0-9a-f-]{36}$/); changed.push(enabled); status = { ...status, microphoneEnabled: enabled, muted: !enabled, audioAvailable: enabled }; return { ...status } },
   })
   try {
     await settle(); harness.state.countdown.value = 0; await harness.state.begin()
-    harness.action('toggle-mute'); await settle()
-    assert.equal(harness.state.muted.value, true)
+    assert.equal(harness.state.microphoneEnabled.value, false)
+    await harness.state.toggleMicrophone()
+    assert.equal(harness.state.microphoneEnabled.value, true)
     assert.equal(harness.state.phase.value, 'recording')
-    harness.action('pause'); await settle()
-    assert.equal(harness.state.muted.value, true)
+    await harness.state.pauseOrResume()
+    assert.equal(harness.state.microphoneEnabled.value, true)
     assert.equal(harness.state.phase.value, 'paused')
-    harness.action('resume'); await settle()
-    assert.equal(harness.state.muted.value, true)
-    assert.equal(harness.state.phase.value, 'recording')
-    harness.action('pause'); await settle()
-    harness.action('toggle-mute'); await settle()
-    assert.equal(harness.state.muted.value, false)
-    assert.equal(harness.state.phase.value, 'paused', '暂停时取消静音不能偷偷恢复录制')
+    await harness.state.pauseOrResume()
+    assert.equal(harness.state.microphoneEnabled.value, true)
+    await harness.state.pauseOrResume()
+    await harness.state.toggleMicrophone()
+    assert.equal(harness.state.microphoneEnabled.value, false)
+    assert.equal(harness.state.phase.value, 'paused', '暂停时关闭麦克风不能恢复录制')
     assert.equal(harness.state.elapsed.value, 4.5)
-    assert.deepEqual(muted, [true, false])
-    status.audioAvailable = false
-    harness.tick(); await settle()
-    harness.action('toggle-mute'); await settle()
-    assert.deepEqual(muted, [true, false], '未开启音频时忽略静音操作')
+    assert.deepEqual(changed, [true, false])
+  } finally { harness.dispose() }
+})
+
+test('rejected microphone enable queries native state and keeps silent video recording usable', async () => {
+  const status = { state: 'recording', elapsed: 6.5, segments: 0, microphoneEnabled: false, audioAvailable: false, muted: true }
+  let queries = 0
+  const harness = workspace('RecorderWorkspace', {
+    startCapture: async () => ({ ...status }),
+    getCaptureStatus: async () => { queries++; return { ...status } },
+    setCaptureMicrophone: async () => { throw new Error('麦克风权限未开启。') },
+  })
+  try {
+    harness.state.countdown.value = 0; await harness.state.begin()
+    await harness.state.toggleMicrophone()
+    assert.equal(queries, 1, '失败后使用原生真实状态恢复界面')
+    assert.equal(harness.state.phase.value, 'recording')
+    assert.equal(harness.state.microphoneEnabled.value, false)
+    assert.equal(harness.state.controlBusy.value, false)
+    assert.equal(harness.state.microphonePending.value, false)
+    assert.match(harness.state.error.value, /麦克风权限/)
+    await harness.state.stop()
+    assert.equal(harness.state.phase.value, 'idle')
+  } finally { harness.dispose() }
+})
+
+test('stop cancels pending microphone permission, ignores stale polling and saves only once', async () => {
+  const pending = deferred(), stale = deferred(), cancelled = [], calls = []
+  let microphoneId
+  const harness = workspace('RecorderWorkspace', {
+    startCapture: async () => ({ state: 'recording', elapsed: 3, microphoneEnabled: false, audioAvailable: false, muted: true }),
+    getCaptureStatus: () => stale.promise,
+    setCaptureMicrophone: async (_enabled, id) => { microphoneId = id; calls.push('microphone'); return pending.promise },
+    cancelCaptureStart: async id => { cancelled.push(id) },
+    stopCapture: async () => { calls.push('stop'); return asset },
+  })
+  try {
+    harness.state.countdown.value = 0; await harness.state.begin()
+    harness.tick()
+    const changing = harness.state.toggleMicrophone()
+    assert.equal(harness.state.microphonePending.value, true)
+    harness.action('toggle-microphone'); harness.action('pause')
+    const stopping = harness.state.stop()
+    harness.action('stop')
+    assert.deepEqual(cancelled, [microphoneId], '等待系统授权时停止必须取消该授权请求')
+    assert.deepEqual(calls, ['microphone'], '取消确认前不并发停止原生采集')
+    stale.resolve({ state: 'paused', elapsed: 99, microphoneEnabled: true, audioAvailable: true })
+    await settle()
+    assert.equal(harness.state.elapsed.value, 3)
+    assert.equal(harness.state.microphoneEnabled.value, false)
+    pending.reject(new Error('已取消麦克风。'))
+    await Promise.all([changing, stopping]); await settle()
+    assert.deepEqual(calls, ['microphone', 'stop'])
+    assert.equal(harness.state.phase.value, 'idle')
+    assert.equal(harness.state.error.value, '')
+    assert.deepEqual(harness.events.filter(event => event[0] === 'asset'), [['asset', asset]])
   } finally { harness.dispose() }
 })
 
@@ -454,14 +523,14 @@ test('pending native controls reject repeated actions and stale status updates',
     startCapture: async () => ({ state: 'recording', elapsed: 2, segments: 0, muted: false, audioAvailable: true }),
     getCaptureStatus: () => stale.promise,
     pauseCapture: async () => { pauses++; return pending.promise },
-    setCaptureMuted: async () => { muted++; return {} },
+    setCaptureMicrophone: async () => { muted++; return {} },
     stopCapture: async () => { stops++; return null },
   })
   try {
     await settle(); harness.state.countdown.value = 0; await harness.state.begin()
     harness.tick()
     harness.action('pause')
-    harness.action('pause'); harness.action('toggle-mute'); harness.action('stop')
+    harness.action('pause'); harness.action('toggle-microphone'); harness.action('stop')
     await harness.state.pauseOrResume()
     assert.equal(harness.state.controlBusy.value, true)
     assert.equal(pauses, 1); assert.equal(muted, 0); assert.equal(stops, 0)

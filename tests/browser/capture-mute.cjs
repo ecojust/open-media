@@ -112,6 +112,134 @@ async function browserRecording(directory) {
     }, source)
     assert.deepEqual(silentSource, { available: false, muted: false, phase: 'recording' })
     console.log('PASS recording without an authorized audio source keeps mute unavailable and never opens a microphone')
+    for (const sharedAudio of [false, true]) {
+      const dynamic = await page.evaluate(async ({ source, sharedAudio }) => {
+        const { startBrowserCapture } = await import(`data:text/javascript;base64,${btoa(unescape(encodeURIComponent(source)))}`)
+        const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+        const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90
+        const painter = canvas.getContext('2d')
+        let frame = 0
+        const render = setInterval(() => { painter.fillStyle = frame++ % 2 ? 'green' : 'blue'; painter.fillRect(0, 0, 160, 90) }, 50)
+        const screen = canvas.captureStream(20)
+        const contexts = []
+        const tone = frequency => {
+          const context = new AudioContext()
+          const oscillator = context.createOscillator(); oscillator.frequency.value = frequency
+          const gain = context.createGain(); gain.gain.value = 0.1
+          const destination = context.createMediaStreamDestination()
+          oscillator.connect(gain).connect(destination); oscillator.start()
+          contexts.push(context)
+          return destination.stream
+        }
+        const shared = sharedAudio ? tone(440).getAudioTracks()[0] : undefined
+        if (shared) screen.addTrack(shared)
+        let microphoneRequests = 0
+        let microphone
+        Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => screen })
+        Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { microphoneRequests++; return (microphone = tone(660)) } })
+        const capture = await startBrowserCapture({ fps: 20, microphone: true, systemAudio: sharedAudio, chooseSource: async () => ({ microphone: false }) })
+        const trackIds = capture.stream.getTracks().map(track => track.id)
+        const initial = { enabled: capture.microphoneEnabled, requests: microphoneRequests, available: capture.audioAvailable }
+        await sleep(1100)
+        capture.pause()
+        const pausedAt = capture.elapsed
+        await capture.setMicrophoneEnabled(true)
+        await sleep(150)
+        const paused = { enabled: capture.microphoneEnabled, phase: capture.phase, elapsed: capture.elapsed }
+        capture.resume()
+        const enableAt = capture.elapsed
+        await sleep(1100)
+        await capture.setMicrophoneEnabled(false)
+        const disableAt = capture.elapsed
+        const disabled = { enabled: capture.microphoneEnabled, available: capture.audioAvailable,
+          released: microphone.getTracks().every(track => track.readyState === 'ended'), sharedLive: !shared || shared.readyState === 'live' && shared.enabled }
+        const unchangedTracks = JSON.stringify(trackIds) === JSON.stringify(capture.stream.getTracks().map(track => track.id))
+        await sleep(1100)
+        const recording = await capture.stop()
+        const ended = screen.getTracks().every(track => track.readyState === 'ended')
+        clearInterval(render)
+        await Promise.all(contexts.map(context => context.close()))
+        return { initial, pausedAt, paused, enableAt, disableAt, disabled, unchangedTracks, ended, requests: microphoneRequests,
+          duration: recording.duration, bytes: Array.from(new Uint8Array(await recording.blob.arrayBuffer())) }
+      }, { source, sharedAudio })
+      assert.deepEqual(dynamic.initial, { enabled: false, requests: 0, available: sharedAudio }, 'picker can disable the initially selected microphone before any request')
+      assert.deepEqual(dynamic.paused, { enabled: true, phase: 'paused', elapsed: dynamic.pausedAt }, 'microphone can be enabled while paused without advancing elapsed time')
+      assert.deepEqual(dynamic.disabled, { enabled: false, available: sharedAudio, released: true, sharedLive: true }, 'turning off releases the microphone and preserves shared audio')
+      assert.equal(dynamic.requests, 1)
+      assert.equal(dynamic.unchangedTracks, true, 'dynamic microphone never changes encoder tracks')
+      assert.equal(dynamic.ended, true)
+      assert.ok(dynamic.duration > 3.1 && dynamic.duration < 4.2)
+      const file = join(directory, `dynamic-${sharedAudio ? 'shared' : 'silent'}.webm`)
+      writeFileSync(file, Buffer.from(dynamic.bytes))
+      const levels = [rms(file, 0.3, 0.7), rms(file, dynamic.enableAt + 0.35, dynamic.enableAt + 0.7), rms(file, dynamic.disableAt + 0.35, dynamic.disableAt + 0.7)]
+      if (sharedAudio) {
+        assert.ok(levels[0] > 0.03 && levels[2] > 0.03, JSON.stringify(levels))
+        assert.ok(Math.abs(levels[0] - levels[2]) < 0.015, 'shared audio level remains stable after microphone removal')
+        assert.ok(levels[1] > levels[0] * 1.25, JSON.stringify(levels))
+      } else {
+        assert.ok(levels[0] < 0.00001 && levels[2] < 0.00001, JSON.stringify(levels))
+        assert.ok(levels[1] > 0.03, JSON.stringify(levels))
+      }
+      const frames = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v', '-show_entries', 'frame=best_effort_timestamp_time', '-of', 'json', file], { encoding: 'utf8' })).frames
+      assert.ok(frames.length > 45, 'encoded video continues across microphone changes')
+      for (let i = 1; i < frames.length; i++) assert.ok(Number(frames[i].best_effort_timestamp_time) - Number(frames[i - 1].best_effort_timestamp_time) < 0.35, 'video has no microphone-related gap')
+      console.log(`PASS actual dynamic microphone recording (${sharedAudio ? 'shared audio preserved' : 'initial silence'}): picker override, paused enable, released device, stable encoder track`, levels)
+    }
+    const lifecycle = await page.evaluate(async source => {
+      const { startBrowserCapture } = await import(`data:text/javascript;base64,${btoa(unescape(encodeURIComponent(source)))}`)
+      const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+      const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90
+      const painter = canvas.getContext('2d'); let frame = 0
+      const render = setInterval(() => { painter.fillStyle = frame++ % 2 ? 'red' : 'blue'; painter.fillRect(0, 0, 160, 90) }, 50)
+      const screen = canvas.captureStream(20)
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => screen })
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { throw new DOMException('Denied', 'NotAllowedError') } })
+      const capture = await startBrowserCapture({ fps: 20, microphone: false, systemAudio: false })
+      const denied = await capture.setMicrophoneEnabled(true).then(() => '', error => error.name)
+      const afterDenied = { enabled: capture.microphoneEnabled, available: capture.audioAvailable, phase: capture.phase }
+      const context = new AudioContext()
+      const lateStreams = []
+      const deferred = () => { const destination = context.createMediaStreamDestination(); lateStreams.push(destination.stream); return destination.stream }
+      let grant
+      let requests = 0
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: () => { requests++; return new Promise(resolve => { grant = resolve }) } })
+      const pendingOff = capture.setMicrophoneEnabled(true).then(() => 'resolved', error => error.name)
+      await sleep(30)
+      await capture.setMicrophoneEnabled(false)
+      const offCancelled = await pendingOff
+      grant(deferred())
+      await sleep(30)
+      const afterOff = { enabled: capture.microphoneEnabled, phase: capture.phase, released: lateStreams[0].getTracks().every(track => track.readyState === 'ended') }
+      // A cancelled request does not poison the queue: a later enable can succeed.
+      const retry = capture.setMicrophoneEnabled(true)
+      await sleep(30)
+      const duplicate = capture.setMicrophoneEnabled(true)
+      const reusedRequest = retry === duplicate
+      grant(deferred()); await Promise.all([retry, duplicate])
+      const afterRetry = capture.microphoneEnabled
+      await capture.setMicrophoneEnabled(false)
+      const pendingStop = capture.setMicrophoneEnabled(true).then(() => 'resolved', error => error.name)
+      await sleep(100)
+      const recording = await capture.stop()
+      const stopCancelled = await pendingStop
+      grant(deferred())
+      await sleep(30)
+      const afterStop = { enabled: capture.microphoneEnabled, available: capture.audioAvailable, phase: capture.phase,
+        released: lateStreams.every(stream => stream.getTracks().every(track => track.readyState === 'ended')) }
+      clearInterval(render); await context.close()
+      return { denied, afterDenied, offCancelled, afterOff, afterRetry, reusedRequest, stopCancelled, afterStop, requests, recordedBytes: recording.blob.size }
+    }, source)
+    assert.equal(lifecycle.denied, 'NotAllowedError')
+    assert.deepEqual(lifecycle.afterDenied, { enabled: false, available: false, phase: 'recording' })
+    assert.equal(lifecycle.offCancelled, 'AbortError')
+    assert.deepEqual(lifecycle.afterOff, { enabled: false, phase: 'recording', released: true })
+    assert.equal(lifecycle.afterRetry, true)
+    assert.equal(lifecycle.reusedRequest, true, 'repeated enable reuses the pending permission request')
+    assert.equal(lifecycle.stopCancelled, 'AbortError')
+    assert.deepEqual(lifecycle.afterStop, { enabled: false, available: false, phase: 'stopped', released: true })
+    assert.equal(lifecycle.requests, 3)
+    assert.ok(lifecycle.recordedBytes > 0)
+    console.log('PASS denied microphone leaves video recording alive; off/stop cancel pending requests and release late devices; retry succeeds')
   } finally { await browser.close() }
 }
 

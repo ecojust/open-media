@@ -7,8 +7,9 @@ const props = defineProps<{ snapshot: CaptureControlsSnapshot }>()
 const emit = defineEmits<{ action: [action: CaptureControlAction] }>()
 const paused = computed(() => props.snapshot.phase === 'paused')
 const available = computed(() => ['recording', 'paused'].includes(props.snapshot.phase) && !props.snapshot.busy)
-const muted = computed(() => props.snapshot.muted || !props.snapshot.audioAvailable)
-const audioLabel = computed(() => !props.snapshot.audioAvailable ? '未开启录音' : props.snapshot.muted ? '恢复录音' : '静音，不录制声音')
+const muted = computed(() => !props.snapshot.microphoneEnabled)
+const stoppable = computed(() => ['recording', 'paused'].includes(props.snapshot.phase) && (!props.snapshot.busy || props.snapshot.microphonePending))
+const audioLabel = computed(() => props.snapshot.microphoneEnabled ? '关闭麦克风' : '开启麦克风')
 const status = computed(() => props.snapshot.error || (props.snapshot.busy ? '正在处理录制' : paused.value ? '录制已暂停' : props.snapshot.phase === 'recording' ? '正在录制' : '正在准备录制'))
 </script>
 
@@ -16,8 +17,8 @@ const status = computed(() => props.snapshot.error || (props.snapshot.busy ? '�
   <div class="recording-toolbar" :class="{ paused, muted }" role="group" aria-label="录制操作栏" data-testid="recording-toolbar">
     <span class="recording-clock" :title="status"><i :class="{ busy: snapshot.busy }" aria-hidden="true" /><span :aria-label="`已录制 ${recordingClock(snapshot.elapsed)}`">{{ recordingClock(snapshot.elapsed) }}</span></span>
     <button type="button" :disabled="!available" :aria-label="paused ? '继续录制' : '暂停录制'" :title="paused ? '继续录制' : '暂停录制'" @click="emit('action', paused ? 'resume' : 'pause')"><Icon :name="paused ? 'play' : 'pause'" :size="17" /></button>
-    <button type="button" class="mute-control" :disabled="!available || !snapshot.audioAvailable" :aria-label="audioLabel" :title="audioLabel" :aria-pressed="muted" @click="emit('action', 'toggle-mute')"><Icon :name="muted ? 'mic-off' : 'mic'" :size="17" /></button>
-    <button type="button" class="stop-control" :disabled="!available" aria-label="停止录制" title="停止录制并保存" @click="emit('action', 'stop')"><Icon name="stop" :size="17" /></button>
+    <button type="button" class="mute-control" :disabled="!available" :aria-label="audioLabel" :title="audioLabel" :aria-pressed="snapshot.microphoneEnabled" @click="emit('action', 'toggle-microphone')"><Icon :name="muted ? 'mic-off' : 'mic'" :size="17" /></button>
+    <button type="button" class="stop-control" :disabled="!stoppable" aria-label="停止录制" title="停止录制并保存" @click="emit('action', 'stop')"><Icon name="stop" :size="17" /></button>
     <span class="toolbar-status" role="status">{{ status }}</span>
   </div>
 </template>

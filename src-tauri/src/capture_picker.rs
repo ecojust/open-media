@@ -22,6 +22,8 @@ pub struct PickerPreferences {
     pub mode: PickerMode,
     pub source_id: Option<String>,
     pub output_size: Option<OutputSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -30,6 +32,8 @@ pub struct PickerSelection {
     pub source_id: String,
     pub region: Option<Region>,
     pub output_size: Option<OutputSize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone: Option<bool>,
     pub source_name: Option<String>,
     pub source_width: Option<u32>,
     pub source_height: Option<u32>,
@@ -65,6 +69,32 @@ pub struct PickerContext {
     pub display: PickerDisplay,
     pub targets: Vec<PickerTarget>,
     pub preferences: PickerPreferences,
+}
+
+fn normalized_preferences(mut preferences: PickerPreferences) -> PickerPreferences {
+    preferences.microphone = if preferences.purpose.as_deref() == Some("screenshot") {
+        None
+    } else {
+        Some(preferences.microphone.unwrap_or(true))
+    };
+    preferences
+}
+
+fn apply_audio_preference(
+    mut selection: PickerSelection,
+    preferences: &PickerPreferences,
+) -> PickerSelection {
+    selection.microphone = if preferences.purpose.as_deref() == Some("screenshot") {
+        None
+    } else {
+        Some(
+            selection
+                .microphone
+                .or(preferences.microphone)
+                .unwrap_or(true),
+        )
+    };
+    selection
 }
 
 fn valid_request_id(id: &str) -> bool {
@@ -156,7 +186,7 @@ fn make_context(
             pixel_height,
         },
         targets,
-        preferences: preferences.clone(),
+        preferences: normalized_preferences(preferences.clone()),
     })
 }
 
@@ -274,7 +304,7 @@ mod desktop {
                 }
                 inner.active = Some(Session {
                     request_id: request_id.clone(),
-                    preferences,
+                    preferences: normalized_preferences(preferences),
                     sources: vec![],
                     windows: HashMap::new(),
                     cancelled: cancelled.clone(),
@@ -582,7 +612,9 @@ mod desktop {
                     .ok_or("当前窗口没有此录制选择的访问权限。")?;
                 selection
                     .map(|selection| {
-                        validate_selection(selection, &window.display, &session.sources)
+                        validate_selection(selection, &window.display, &session.sources).map(
+                            |selection| apply_audio_preference(selection, &session.preferences),
+                        )
                     })
                     .transpose()?
             };
@@ -641,7 +673,8 @@ mod desktop {
             let Some(session) = session else { return };
             session.cancelled.store(true, Ordering::SeqCst);
             let restore_focus = !matches!(result, Ok(Some(_)));
-            let keep_hidden = !restore_focus && session.preferences.purpose.as_deref() == Some("screenshot");
+            let keep_hidden =
+                !restore_focus && session.preferences.purpose.as_deref() == Some("screenshot");
             let dispatch = app.clone();
             let app = app.clone();
             let sender = session.sender.clone();
@@ -821,6 +854,7 @@ mod tests {
             source_id: source_id.into(),
             region: None,
             output_size: None,
+            microphone: None,
             source_name: Some("untrusted name".into()),
             source_width: Some(1),
             source_height: Some(1),
@@ -944,5 +978,66 @@ mod tests {
             height: 720,
         });
         assert!(validate_selection(chosen, &display, &[display.clone()]).is_ok());
+    }
+
+    #[test]
+    fn microphone_defaults_on_and_preserves_an_explicit_choice() {
+        let legacy: PickerPreferences = serde_json::from_value(serde_json::json!({
+            "mode": "window"
+        }))
+        .unwrap();
+        assert_eq!(
+            normalized_preferences(legacy.clone()).microphone,
+            Some(true)
+        );
+        assert_eq!(
+            apply_audio_preference(selection("screen:1"), &legacy).microphone,
+            Some(true)
+        );
+        let disabled = PickerPreferences {
+            microphone: Some(false),
+            ..PickerPreferences::default()
+        };
+        assert_eq!(
+            normalized_preferences(disabled.clone()).microphone,
+            Some(false)
+        );
+        assert_eq!(
+            apply_audio_preference(selection("screen:1"), &disabled).microphone,
+            Some(false)
+        );
+        let mut enabled = selection("screen:1");
+        enabled.microphone = Some(true);
+        assert_eq!(
+            apply_audio_preference(enabled, &disabled).microphone,
+            Some(true)
+        );
+        let mut chosen = selection("screen:1");
+        chosen.microphone = Some(false);
+        assert_eq!(
+            apply_audio_preference(chosen, &legacy).microphone,
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn screenshots_never_return_a_microphone_preference() {
+        let preferences = PickerPreferences {
+            purpose: Some("screenshot".into()),
+            microphone: Some(true),
+            ..PickerPreferences::default()
+        };
+        let sanitized = normalized_preferences(preferences.clone());
+        assert!(serde_json::to_value(sanitized)
+            .unwrap()
+            .get("microphone")
+            .is_none());
+        let mut chosen = selection("screen:1");
+        chosen.microphone = Some(true);
+        let sanitized = apply_audio_preference(chosen, &preferences);
+        assert!(serde_json::to_value(sanitized)
+            .unwrap()
+            .get("microphone")
+            .is_none());
     }
 }
