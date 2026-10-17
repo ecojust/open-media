@@ -1,5 +1,6 @@
 import { validateImageCrop, type ImageCrop } from './image-crop.ts'
 import { encodeIcon, encodeStaticGif, encodeTiff, validateIconSizes } from './image-encoders.ts'
+import { drawImageAnnotations, validateImageAnnotations, type ImageAnnotation } from './image-annotations.ts'
 
 export { standardIconSizes, validateIconSizes } from './image-encoders.ts'
 export type ImageFormat = 'png' | 'jpeg' | 'webp' | 'bmp' | 'ico' | 'gif' | 'tiff' | 'avif'
@@ -37,6 +38,7 @@ export interface ImageConvertOptions {
   transparent: boolean
   crop?: ImageCrop
   iconSizes?: number[]
+  annotations?: ImageAnnotation[]
 }
 
 export interface ImageConversion {
@@ -135,6 +137,7 @@ export function encodeBitmap(pixels: Uint8ClampedArray, width: number, height: n
 
 export async function convertImage(source: string | Blob, options: ImageConvertOptions, signal?: AbortSignal): Promise<ImageConversion> {
   signal?.throwIfAborted()
+  const annotations = validateImageAnnotations(options.annotations)
   const ownedUrl = typeof source !== 'string'
   const url = ownedUrl ? URL.createObjectURL(source) : source
   const image = new Image()
@@ -160,10 +163,21 @@ export async function convertImage(source: string | Blob, options: ImageConvertO
     }
     context.imageSmoothingEnabled = true
     context.imageSmoothingQuality = 'high'
+    context.save()
     context.translate(canvas.width / 2, canvas.height / 2)
     context.rotate(options.rotation * Math.PI / 180)
     context.scale(options.flipX ? -1 : 1, options.flipY ? -1 : 1)
     context.drawImage(image, crop.x, crop.y, crop.width, crop.height, -dimensions.drawWidth / 2, -dimensions.drawHeight / 2, dimensions.drawWidth, dimensions.drawHeight)
+    if (annotations.length) {
+      context.translate(-dimensions.drawWidth / 2, -dimensions.drawHeight / 2)
+      context.scale(dimensions.drawWidth / crop.width, dimensions.drawHeight / crop.height)
+      context.translate(-crop.x, -crop.y)
+      context.beginPath()
+      context.rect(crop.x, crop.y, crop.width, crop.height)
+      context.clip()
+      drawImageAnnotations(context, annotations)
+    }
+    context.restore()
     signal?.throwIfAborted()
     let blob: Blob
     let previewBlob: Blob | undefined

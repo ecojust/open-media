@@ -136,10 +136,15 @@ test('绿幕水印持久化抠像参数，普通水印不带抠像配置', () =>
   assert.equal(clip.chromaKey.enabled, true)
   assert.equal(clip.chromaKey.color, '#00ff00')
   assert.ok(clip.chromaKey.similarity > 0)
+  assert.equal(Object.hasOwn(clip.chromaKey, 'spillSuppression'), false)
   const restored = validateProject(JSON.parse(JSON.stringify(result.project)), { trusted: true })
   assert.deepEqual(findClip(restored, result.clipId).clip.chromaKey, clip.chromaKey)
   const plain = addWatermark(createProject(), visual(), 1, { chromaKey: false })
   assert.equal(findClip(plain.project, plain.clipId).clip.chromaKey, undefined)
+  const suppressed = addWatermark(createProject(), visual(), 1, { chromaKey: true, spillSuppression: true })
+  assert.equal(findClip(suppressed.project, suppressed.clipId).clip.chromaKey.spillSuppression, true)
+  assert.equal(findClip(validateProject(suppressed.project), suppressed.clipId).clip.chromaKey.spillSuppression, true)
+  assert.throws(() => addWatermark(createProject(), visual(), 1, { chromaKey: true, spillSuppression: 'true' }), /溢色抑制/)
 })
 
 test('成功和失败均不更改输入，输出素材和轨道与输入互相隔离', () => {

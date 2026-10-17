@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createChromaKey, validateChromaKey, applyChromaKey, chromaKeyColor } from '../src/core/chroma-key.ts'
+import { createChromaKey, validateChromaKey, applyChromaKey, chromaKeyColor, chromaKeySpillChannel } from '../src/core/chroma-key.ts'
 import { createProject, createClip, createTextClip, validateProject } from '../src/core/project.ts'
 import { addAsset, addClip, updateClip, findClip, createHistory, commitHistory, undoHistory, redoHistory, splitClip, duplicateClip, moveClip } from '../src/core/timeline.ts'
 import { exportProjectFile, importProjectFile } from '../src/core/project-file.ts'
@@ -43,10 +43,33 @@ test('边缘柔化采用归一化 RGB 距离，零柔化是硬边，半透明源
 
 test('抠像参数严格校验，关闭仍拒绝无效颜色、范围和任意滤镜文本', () => {
   for (const value of [null, [], {}, true, 'green']) assert.throws(() => validateChromaKey(value), /抠像/)
-  for (const [field, values] of Object.entries({ enabled: [1, 'true', null], color: ['green', '#fff', '#12345678', '#00ff00;movie=x', null], similarity: [0, 1.1, Infinity, NaN, '0.2', null], blend: [-0.1, 1.1, '0.1', null], extra: [true] })) {
+  for (const [field, values] of Object.entries({ enabled: [1, 'true', null], spillSuppression: [1, 'true', null], color: ['green', '#fff', '#12345678', '#00ff00;movie=x', null], similarity: [0, 1.1, Infinity, NaN, '0.2', null], blend: [-0.1, 1.1, '0.1', null], extra: [true] })) {
     for (const value of values) assert.throws(() => validateChromaKey({ ...createChromaKey({ enabled: false }), [field]: value }), /抠像/)
   }
   assert.equal(validateChromaKey({ ...createChromaKey(), color: '#AABBCC' }).color, '#aabbcc')
+})
+
+test('可选去溢色只压指定通道到其他通道最大值，半透明掩码和未启用项目保持不变', () => {
+  const source = [85, 173, 35, 255, 55, 190, 29, 128, 42, 217, 208, 255, 255, 10, 30, 96, 0, 255, 0, 255, 144, 193, 72, 0]
+  const legacy = new Uint8ClampedArray(source), enabled = new Uint8ClampedArray(source)
+  applyChromaKey(legacy, createChromaKey())
+  applyChromaKey(enabled, createChromaKey({ spillSuppression: true }))
+  for (let index = 0; index < source.length; index += 4) {
+    assert.equal(enabled[index], source[index]); assert.equal(enabled[index + 2], source[index + 2])
+    assert.equal(enabled[index + 1], Math.min(source[index + 1], Math.max(source[index], source[index + 2])))
+    assert.equal(enabled[index + 3], legacy[index + 3], '去溢色不得改动既有透明度及抠像掩码')
+  }
+  assert.deepEqual([...enabled.slice(8, 11)], [42, 208, 208], '青色保留最大非键色通道，不能压成红蓝平均值')
+  for (const key of [createChromaKey({ spillSuppression: false }), createChromaKey()]) {
+    const actual = new Uint8ClampedArray(source); applyChromaKey(actual, key); assert.deepEqual(actual, legacy)
+  }
+  assert.equal(Object.hasOwn(createChromaKey(), 'spillSuppression'), false)
+  const disabled = new Uint8ClampedArray(source); applyChromaKey(disabled, createChromaKey({ enabled: false, spillSuppression: true })); assert.deepEqual([...disabled], source)
+  const blue = new Uint8ClampedArray([35, 85, 173, 255, 208, 42, 217, 128])
+  const blueLegacy = blue.slice(); applyChromaKey(blueLegacy, createChromaKey({ color: '#0000ff' }))
+  applyChromaKey(blue, createChromaKey({ color: '#0000ff', spillSuppression: true }))
+  assert.deepEqual([...blue], [35, 85, 85, blueLegacy[3], 208, 42, 208, blueLegacy[7]])
+  for (const color of ['#ff0000', '#808080', '#00ffff']) assert.equal(chromaKeySpillChannel(createChromaKey({ color })), undefined)
 })
 
 test('项目只允许视觉片段抠像，并在移至音轨时移除画面属性', () => {
@@ -71,7 +94,7 @@ test('项目只允许视觉片段抠像，并在移至音轨时移除画面属�
 test('抠像可撤销重做、分割复制、便携保存重开且不共享配置对象', async () => {
   const { project, clip, asset, blob, cleanup } = fixture()
   try {
-    const key = createChromaKey({ color: '#2244dd', similarity: 0.3, blend: 0.12 })
+    const key = createChromaKey({ color: '#2244dd', similarity: 0.3, blend: 0.12, spillSuppression: true })
     const changed = updateClip(project, clip.id, { chromaKey: key })
     const history = commitHistory(createHistory(project), changed)
     assert.equal(findClip(undoHistory(history).present, clip.id).clip.chromaKey, undefined)

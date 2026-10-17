@@ -10,6 +10,8 @@ pub mod clip_filters;
 pub mod chroma_key;
 pub mod preview;
 pub mod project_files;
+#[cfg(any(feature = "desktop", test))]
+pub mod image_clipboard;
 pub mod speech;
 #[cfg(any(feature = "desktop", test))]
 pub mod screenshot;
@@ -31,6 +33,7 @@ mod desktop {
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
         preview::{self, PreviewResult},
         project_files::{self, ProjectFile, ProjectFiles, ProjectTarget},
+        image_clipboard::{self, ImageClipboard},
         recording_controls::{ControlsAction, ControlsManager, ControlsSnapshot},
         speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
     };
@@ -518,6 +521,22 @@ mod desktop {
         .await
     }
     #[tauri::command]
+    pub async fn copy_image_to_clipboard(
+        request: tauri::ipc::Request<'_>,
+        window: tauri::WebviewWindow,
+        state: State<'_, ImageClipboard>,
+    ) -> engine::Result<()> {
+        image_clipboard::require_main_window(window.label())?;
+        let bytes = match request.body() {
+            tauri::ipc::InvokeBody::Raw(bytes) => bytes,
+            _ => return Err("图片复制需要二进制像素数据。".into()),
+        };
+        image_clipboard::validate_packet(bytes)?;
+        let packet = bytes.to_vec();
+        let state = state.inner().clone();
+        blocking(move || state.copy(packet)).await
+    }
+    #[tauri::command]
     pub async fn save_project_file(
         name: String,
         bytes: Vec<u8>,
@@ -591,6 +610,7 @@ mod desktop {
             .manage(Closing::default())
             .manage(CapturePicker::default())
             .manage(ProjectFiles::default())
+            .manage(ImageClipboard::default())
             .manage(ControlsManager::default())
             .setup(|app| {
                 app.manage(crate::screenshot_shortcut::ShortcutManager::new(app.handle().clone()));
@@ -672,6 +692,7 @@ mod desktop {
                 set_capture_microphone,
                 stop_capture,
                 save_bytes,
+                copy_image_to_clipboard,
                 save_project_file,
                 open_project_file,
                 close_native_window
@@ -692,6 +713,7 @@ mod desktop {
                 let state = handle.state::<MediaState>();
                 handle.state::<crate::screenshot_shortcut::ShortcutManager>().shutdown();
                 handle.state::<ControlsManager>().close(handle);
+                handle.state::<ImageClipboard>().shutdown();
                 state.capture_starts.cancel_all();
                 state.speech.shutdown();
                 state.jobs.shutdown();

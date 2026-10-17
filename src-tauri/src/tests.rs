@@ -300,6 +300,60 @@ fn chroma_key_graph_multiplies_original_alpha_and_rgb_distance_mask() {
 }
 
 #[test]
+fn spill_suppression_preserves_the_native_key_alpha_and_other_color_channels() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let pixels: Vec<u8> = [[85, 173, 35, 255], [55, 190, 29, 128], [42, 217, 208, 255], [255, 10, 30, 96], [0, 255, 0, 255], [35, 85, 173, 255], [208, 42, 217, 128], [144, 193, 72, 0]].into_iter().flatten().collect();
+    let source = temp.path().join("spill-input.raw");
+    fs::write(&source, &pixels).unwrap();
+    for (color, channel) in [("#00ff00", 1_usize), ("#0000ff", 2_usize)] {
+        let mut outputs = Vec::new();
+        for spill in [false, true] {
+            let filter = crate::chroma_key::filter_chain(&json!({"chromaKey":{"enabled":true,"color":color,"similarity":0.18,"blend":0.08,"spillSuppression":spill}}), true).unwrap().unwrap();
+            let mut graph = Vec::new();
+            let chain = crate::chroma_key::append_graph("[0:v]format=rgba".into(), &mut graph, 1, &filter);
+            graph.push(format!("{chain}[out]"));
+            let output = process(&rt.encoder).args(["-v", "error", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "4x2", "-i"]).arg(&source)
+                .args(["-filter_complex", &graph.join(";"), "-map", "[out]", "-frames:v", "1", "-filter_complex_threads", "1", "-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"]).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert_eq!(output.stdout.len(), pixels.len());
+            outputs.push(output.stdout);
+        }
+        for ((input, legacy), actual) in pixels.chunks_exact(4).zip(outputs[0].chunks_exact(4)).zip(outputs[1].chunks_exact(4)) {
+            assert_eq!(actual[3], legacy[3], "suppression must keep the exact key alpha");
+            for component in 0..3 {
+                let expected = if component == channel { input[component].min(input[0].max(input[if channel == 1 { 2 } else { 1 }])) } else { input[component] };
+                assert_eq!(actual[component], expected, "{color} input {input:?}, actual {actual:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn timeline_export_suppresses_green_glow_in_bundled_motion_without_weakening_legacy_key() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../public/watermarks/motion-farewell.mp4");
+    let store = MediaStore::new(temp.path()).unwrap();
+    let asset = store.import(&rt, &source, None).unwrap();
+    let mut counts = Vec::new();
+    for spill in [false, true] {
+        let keyed = json!({"id":"glow","assetId":asset.id,"start":0,"trimIn":0,"trimOut":0.5,"speed":1,"volume":0,"opacity":1,"x":0,"y":0,"width":320,"height":180,"rotation":0,"fit":"fill","fadeIn":0,"fadeOut":0,
+            "chromaKey":{"enabled":true,"color":"#00ff00","similarity":0.18,"blend":0.08,"spillSuppression":spill}});
+        let spec = json!({"kind":"timeline","project":{"title":"glow","width":320,"height":180,"background":"#242030","assets":[asset.clone()],"tracks":[{"kind":"video","muted":true,"clips":[keyed]}]},"config":{"format":"mp4","width":320,"height":180,"fps":20,"quality":"high"}});
+        let name = if spill { "glow-suppressed.mp4" } else { "glow-legacy.mp4" };
+        run(temp.path(), &rt, spec, name);
+        let output = process(&rt.encoder).args(["-v", "error", "-ss", "0.2", "-i"]).arg(temp.path().join(name)).args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout.len(), 320 * 180 * 3);
+        counts.push(output.stdout.chunks_exact(3).filter(|rgb| i16::from(rgb[1]) > i16::from(rgb[0]) + 25 && i16::from(rgb[1]) > i16::from(rgb[2]) + 25).count());
+        assert!(output.stdout.chunks_exact(3).filter(|rgb| rgb.iter().any(|channel| *channel > 100)).count() > 1000, "foreground artwork must remain visible");
+    }
+    assert!(counts[0] > 100, "the fixture must reproduce the green-edge defect: {counts:?}");
+    assert_eq!(counts[1], 0, "the rendered export must not retain strongly green edges: {counts:?}");
+}
+
+#[test]
 fn timeline_export_keys_images_and_video_before_filters_and_opacity() {
     let temp = tempfile::tempdir().unwrap();
     let rt = runtime();

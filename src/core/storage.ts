@@ -38,12 +38,27 @@ const blobKey = (projectId: string, assetId: string): string => `${projectId}:${
 export async function fetchAssetBlob(asset: MediaAsset, signal?: AbortSignal): Promise<Blob> {
   const url = asset.sourceUrl || asset.url
   if (!url) throw new Error(`素材“${asset.name}”不可读取，请重新导入。`)
-  let response: Response
-  try { response = await fetch(url, { signal }) } catch { throw new Error(`素材“${asset.name}”读取失败，请重新导入后再保存。`) }
-  if (!response.ok) throw new Error(`素材“${asset.name}”读取失败（${response.status}）。`)
-  const blob = await response.blob()
-  if (!blob.size) throw new Error(`素材“${asset.name}”为空，项目未保存。`)
-  return blob.type || !asset.mime ? blob : blob.slice(0, blob.size, asset.mime)
+  try {
+    const response = await fetch(url, { signal })
+    if (!response.ok) throw new Error(`素材“${asset.name}”读取失败（${response.status}）。`)
+    const blob = await response.blob()
+    if (!blob.size) throw new Error(`素材“${asset.name}”为空，项目未保存。`)
+    return blob.type || !asset.mime ? blob : blob.slice(0, blob.size, asset.mime)
+  } catch (cause) {
+    signal?.throwIfAborted()
+    throw new Error(`素材“${asset.name}”读取失败，请确认原文件仍可访问，或重新导入后再保存。`, { cause })
+  }
+}
+
+/** Read a saved copy without changing the active project or its object URLs. */
+export async function readStoredAssetBlob(projectId: string, assetId: string): Promise<Blob | undefined> {
+  if (!globalThis.indexedDB) return undefined
+  const db = await openDatabase()
+  try {
+    const reading = db.transaction('blobs', 'readonly')
+    const [value] = await Promise.all([request(reading.objectStore('blobs').get(blobKey(projectId, assetId))), completed(reading)])
+    return value instanceof Blob ? value : undefined
+  } finally { db.close() }
 }
 
 /** Media reads finish before a single atomic database write begins. */

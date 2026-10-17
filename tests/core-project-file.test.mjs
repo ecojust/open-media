@@ -1,9 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { zipSync, strToU8, unzipSync } from 'fflate'
+import { IDBFactory } from 'fake-indexeddb'
 import { createProject } from '../src/core/project.ts'
 import { addAsset } from '../src/core/timeline.ts'
 import { exportProjectFile, importProjectFile, MAX_PORTABLE_BYTES } from '../src/core/project-file.ts'
+import { saveProject } from '../src/core/storage.ts'
 
 function fixture() {
   const blob = new Blob(['media-test-bytes'], { type: 'video/webm' })
@@ -47,6 +49,54 @@ test('有预览代理时便携项目仍保存原始素材，移除所有本机UR
     assert.equal(await restored.blobs.get(asset.id).text(), await blob.text())
     restored.revoke()
   } finally { URL.revokeObjectURL(asset.url); URL.revokeObjectURL(previewUrl) }
+})
+
+test('缓存Blob后备文件失效时重新读取原件，恢复真实字节而不是预览代理', async () => {
+  const { project, blob, asset } = fixture()
+  const stale = new Blob(['unreadable cache'], { type: blob.type })
+  stale.arrayBuffer = async () => { throw new DOMException('The object can not be found here.', 'NotFoundError') }
+  const cached = new Map([[asset.id, stale]])
+  const previewUrl = URL.createObjectURL(new Blob(['preview'], { type: 'video/mp4' }))
+  project.assets[0].sourceUrl = asset.url
+  project.assets[0].url = previewUrl
+  try {
+    const exported = await exportProjectFile(project, { blobs: cached })
+    const entries = unzipSync(new Uint8Array(await exported.arrayBuffer()))
+    assert.deepEqual(entries[`media/${asset.id}`], new Uint8Array(await blob.arrayBuffer()))
+    assert.equal(await cached.get(asset.id).text(), await blob.text(), '修复缓存，连续保存不会继续读取失效对象')
+    assert.equal(project.assets[0].sourceUrl, asset.url, '保存不改写正在编辑的素材来源')
+  } finally { URL.revokeObjectURL(asset.url); URL.revokeObjectURL(previewUrl) }
+})
+
+test('原件和缓存都不可读时从本地草稿恢复素材并导出完整项目', async t => {
+  const previous = globalThis.indexedDB
+  globalThis.indexedDB = new IDBFactory()
+  t.after(() => { if (previous) globalThis.indexedDB = previous; else delete globalThis.indexedDB })
+  const { project, asset, blob } = fixture()
+  await saveProject(project, new Map([[asset.id, blob]]))
+  URL.revokeObjectURL(asset.url)
+  const stale = new Blob(['inaccessible'], { type: blob.type })
+  stale.arrayBuffer = async () => { throw new DOMException('The object can not be found here.', 'NotFoundError') }
+  const exported = await exportProjectFile(project, { blobs: new Map([[asset.id, stale]]) })
+  const restored = await importProjectFile(exported)
+  try { assert.equal(await restored.blobs.get(asset.id).text(), await blob.text()) }
+  finally { restored.revoke() }
+})
+
+test('没有可恢复字节时指出具体素材并停止打包，保留当前项目和缓存', async () => {
+  const { project, asset } = fixture()
+  URL.revokeObjectURL(asset.url)
+  const stale = new Blob(['inaccessible'])
+  stale.arrayBuffer = async () => { throw new DOMException('The object can not be found here.', 'NotFoundError') }
+  const cached = new Map([[asset.id, stale]])
+  const original = JSON.stringify(project)
+  await assert.rejects(exportProjectFile(project, { blobs: cached }), error => {
+    assert.match(error.message, /演示\.webm.*原件与本地副本均不可用/)
+    assert.doesNotMatch(error.message, /The object/)
+    return true
+  })
+  assert.equal(JSON.stringify(project), original)
+  assert.equal(cached.get(asset.id), stale)
 })
 
 test('素材读取失败不会保存缺素材项目，超大包与取消操作明确报错', async () => {

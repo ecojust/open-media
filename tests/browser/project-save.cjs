@@ -319,12 +319,93 @@ async function fallbackChecks(browser, url) {
   } finally { await context.close() }
 }
 
+async function missingBrowserTargetChecks(browser, url) {
+  const { page, context, errors } = await createPage(browser)
+  try {
+    await installBrowserPickers(page)
+    await page.goto(url)
+    await createProject(page)
+    await rename(page, '原保存位置失效')
+    const media = await addMedia(page)
+    await save(page)
+    inspectArchive(await readBrowserFile(page, 'browser-a.omedia'), '原保存位置失效', media)
+    const protectedBytes = Buffer.from('这个同目录文件不应被覆盖')
+    await page.evaluate(async bytes => {
+      const root = await navigator.storage.getDirectory()
+      const protectedFile = await root.getFileHandle('protected.omedia', { create: true })
+      const writer = await protectedFile.createWritable()
+      await writer.write(new Uint8Array(bytes)); await writer.close()
+      await root.removeEntry('browser-a.omedia')
+    }, [...protectedBytes])
+    await rename(page, '移除目标后的未保存修改')
+    await save(page, { result: false })
+    await expect(page.getByRole('alert')).toContainText('保存位置')
+    await expect(page.getByRole('alert')).toContainText('另存为')
+    await expect(page.getByRole('alert')).not.toContainText('NotFoundError')
+    await expect(page.locator('.project-title > i')).toHaveCount(1)
+    assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 1, '失效句柄不能悄悄更换保存位置')
+    assert.equal(await page.evaluate(async () => {
+      try { await (await navigator.storage.getDirectory()).getFileHandle('browser-a.omedia'); return true }
+      catch (error) { if (error.name === 'NotFoundError') return false; throw error }
+    }), false, '失效句柄保存失败时不能假称成功或自动重建旧文件')
+    assert.deepEqual(await readBrowserFile(page, 'protected.omedia'), protectedBytes)
+    await page.evaluate(() => { window.projectFileHarness.nextName = 'browser-recovered.omedia' })
+    await save(page, { saveAs: true })
+    inspectArchive(await readBrowserFile(page, 'browser-recovered.omedia'), '移除目标后的未保存修改', media)
+    assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 2)
+    await rename(page, '重新选择位置后正常覆盖')
+    await save(page)
+    inspectArchive(await readBrowserFile(page, 'browser-recovered.omedia'), '重新选择位置后正常覆盖', media)
+    assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 2)
+    assert.deepEqual(await readBrowserFile(page, 'protected.omedia'), protectedBytes)
+    assert.deepEqual(errors, [])
+    console.log('PASS 真实保存目标被删除后显示中文恢复指引、保留未保存状态；另存为完整保留素材字幕并恢复直接覆盖')
+  } finally { await context.close() }
+}
+
+async function missingCachedBlobChecks(browser, url) {
+  const { page, context, errors } = await createPage(browser)
+  try {
+    await page.route('**/__project_cached_blob__', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><title>项目素材恢复验证</title></head><body></body></html>' }))
+    await page.goto(`${url}/__project_cached_blob__`)
+    const result = await page.evaluate(async () => {
+      const { exportProjectFile } = await import('/src/core/project-file.ts')
+      const { createProject, createTextClip } = await import('/src/core/project.ts')
+      const { importMediaFile } = await import('/src/core/media-import.ts')
+      async function picture(color) {
+        const canvas = document.createElement('canvas'); canvas.width = 48; canvas.height = 32
+        const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, canvas.width, canvas.height)
+        return new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      }
+      const original = await picture('#dd3300'), preview = await picture('#0033dd')
+      const asset = await importMediaFile(new File([original], '原始素材.png', { type: 'image/png' }))
+      const originalUrl = asset.url, previewUrl = URL.createObjectURL(preview)
+      asset.sourceUrl = originalUrl; asset.url = previewUrl
+      const project = createProject('缓存失效后读取原件')
+      project.assets = [asset]
+      project.tracks.find(track => track.kind === 'text').clips = [createTextClip(project, { text: '导出必须保留原始素材' })]
+      const cached = new Blob([original], { type: 'image/png' })
+      let failedReads = 0
+      Object.defineProperty(cached, 'arrayBuffer', { value: async () => { failedReads++; throw new DOMException('The requested file could not be found.', 'NotFoundError') } })
+      try {
+        const archive = await exportProjectFile(project, { blobs: new Map([[asset.id, cached]]) })
+        return { archive: [...new Uint8Array(await archive.arrayBuffer())], original: [...new Uint8Array(await original.arrayBuffer())], preview: [...new Uint8Array(await preview.arrayBuffer())], failedReads }
+      } finally { URL.revokeObjectURL(originalUrl); URL.revokeObjectURL(previewUrl) }
+    })
+    assert.equal(result.failedReads, 1, '测试必须实际经历缓存 Blob 读取失败')
+    assert.notDeepEqual(result.original, result.preview, '原件与预览必须是不同实际内容')
+    inspectArchive(result.archive, '缓存失效后读取原件', { image: Buffer.from(result.original), subtitle: '导出必须保留原始素材' })
+    assert.deepEqual(errors, [])
+    console.log('PASS 缓存 Blob 读取失效后回源打包真实原件，未将不同的预览图片冒充原件')
+  } finally { await context.close() }
+}
+
 async function main() {
   await fs.mkdir(artifacts, { recursive: true })
   // Each run starts with fresh native targets; persistent user files are never involved.
   for (const entry of await fs.readdir(artifacts)) if (/^native-.*\.omedia$/.test(entry)) await fs.unlink(path.join(artifacts, entry))
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: { ignored: () => true } }, logLevel: 'error' })
   await server.listen()
   const url = `http://127.0.0.1:${server.httpServer.address().port}`
   let browser
@@ -333,6 +414,8 @@ async function main() {
     await nativeChecks(browser, url)
     await browserChecks(browser, url)
     await fallbackChecks(browser, url)
+    await missingBrowserTargetChecks(browser, url)
+    await missingCachedBlobChecks(browser, url)
   } finally { await browser?.close(); await server.close() }
 }
 

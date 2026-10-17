@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { createProject } from '../src/core/project.ts'
 import { addAsset } from '../src/core/timeline.ts'
-import { deleteProject, listProjects, loadProject, saveProject } from '../src/core/storage.ts'
+import { deleteProject, fetchAssetBlob, listProjects, loadProject, saveProject } from '../src/core/storage.ts'
 
 function fixture() {
   const blob = new Blob(['persisted-media'], { type: 'video/webm' })
@@ -111,4 +111,18 @@ test('原生素材仍使用临时URL时保存原件字节，恢复后要求重�
     assert.equal(await (await fetch(restored.project.assets[0].url)).text(), await blob.text())
     restored.revoke()
   } finally { URL.revokeObjectURL(asset.url) }
+})
+
+test('响应体读取时发生NotFoundError也能指出素材名称，不泄漏含糊英文', async t => {
+  const { asset } = fixture()
+  const originalFetch = globalThis.fetch
+  t.after(() => { globalThis.fetch = originalFetch; URL.revokeObjectURL(asset.url) })
+  const failure = new DOMException('The object can not be found here.', 'NotFoundError')
+  globalThis.fetch = async () => ({ ok: true, blob: async () => { throw failure } })
+  await assert.rejects(fetchAssetBlob(asset), error => {
+    assert.match(error.message, /本地\.webm.*读取失败/)
+    assert.doesNotMatch(error.message, /The object/)
+    assert.equal(error.cause, failure)
+    return true
+  })
 })

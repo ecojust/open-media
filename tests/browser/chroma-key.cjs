@@ -33,6 +33,18 @@ async function main() {
       const cpuPixels = read(cpu.render(source, 4, 2, 4, 2, filters, key))
       const keyedOnly = read(gpu.render(source, 4, 2, 4, 2, undefined, key))
       const disabled = read(cpu.render(source, 4, 2, 4, 2, undefined, { ...key, enabled: false }))
+      const spillCases = ['#00ff00', '#0000ff'].map(color => {
+        const sample = document.createElement('canvas'); sample.width = 4; sample.height = 2
+        const colors = [85, 173, 35, 255, 103, 191, 53, 128, 55, 190, 29, 255, 200, 120, 50, 64, 255, 255, 255, 255, 200, 40, 30, 255, 0, 255, 0, 255, 0, 0, 0, 0]
+        if (color === '#0000ff') for (let i = 0; i < colors.length; i += 4) [colors[i + 1], colors[i + 2]] = [colors[i + 2], colors[i + 1]]
+        sample.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(colors), 4, 2), 0, 0)
+        const settings = { ...key, color, spillSuppression: true }
+        const baseline = read(cpu.render(sample, 4, 2, 4, 2, undefined, { ...settings, spillSuppression: false }))
+        const cpuPixels = read(cpu.render(sample, 4, 2, 4, 2, undefined, settings))
+        const gpuPixels = read(gpu.render(sample, 4, 2, 4, 2, undefined, settings))
+        const restored = read(gpu.render(sample, 4, 2, 4, 2, undefined, { ...settings, spillSuppression: false }))
+        return { color, baseline, cpuPixels, gpuPixels, restored }
+      })
       const glCanvas = gpu.render(source, 4, 2, 4, 2, filters, key)
       const extension = glCanvas.getContext('webgl').getExtension('WEBGL_lose_context')
       const lost = new Promise(resolve => glCanvas.addEventListener('webglcontextlost', resolve, { once: true }))
@@ -85,7 +97,7 @@ async function main() {
       const encodedPixels = [[40, 24], [80, 64], [4, 4]].map(([x, y]) => pixel(decodeContext, x, y))
       document.body.append(decoded)
       URL.revokeObjectURL(asset.url); URL.revokeObjectURL(output.src)
-      return { gpuPixels, cpuPixels, keyedOnly, disabled, backend, recovered, recoveryBackend, beforeStart, previewPixels, encodedPixels, encodedBytes: [...new Uint8Array(await encoded.arrayBuffer())] }
+      return { gpuPixels, cpuPixels, keyedOnly, disabled, backend, recovered, recoveryBackend, spillCases, beforeStart, previewPixels, encodedPixels, encodedBytes: [...new Uint8Array(await encoded.arrayBuffer())] }
     })
     assert.equal(result.backend, 'webgl')
     assert.equal(result.recoveryBackend, 'cpu')
@@ -96,6 +108,24 @@ async function main() {
     assert.equal(result.keyedOnly[3], 0); assert.equal(result.keyedOnly[8], 255)
     assert.equal(result.disabled[3], 255); assert.equal(result.disabled[7], 128)
     console.log('PASS GPU/CPU 抠像一致，先抠除再调色，保留原有 alpha；关闭和 GPU 丢失降级有效')
+    for (const { color, baseline, cpuPixels, gpuPixels, restored } of result.spillCases) {
+      const keyedChannel = color === '#00ff00' ? 1 : 2, otherChannels = [0, 1, 2].filter(channel => channel !== keyedChannel)
+      let corrected = 0
+      for (let index = 0; index < baseline.length; index += 4) {
+        assert(Math.abs(cpuPixels[index + 3] - baseline[index + 3]) <= 1, `${color} 去溢色不得改变透明度`)
+        for (let channel = 0; channel < 4; channel++) {
+          assert(Math.abs(gpuPixels[index + channel] - cpuPixels[index + channel]) <= 5, `${color} 去溢色 GPU/CPU channel ${index + channel}`)
+          assert(Math.abs(restored[index + channel] - baseline[index + channel]) <= 5, `${color} 关闭去溢色应恢复原抠像颜色`)
+        }
+        if (baseline[index + 3] < 50) continue
+        for (const channel of otherChannels) assert(Math.abs(cpuPixels[index + channel] - baseline[index + channel]) <= 2, `${color} 去溢色须保留其余颜色通道`)
+        const expected = Math.min(baseline[index + keyedChannel], Math.max(...otherChannels.map(channel => baseline[index + channel])))
+        assert(Math.abs(cpuPixels[index + keyedChannel] - expected) <= 2, `${color} 应消除绿色或蓝色污染而不降低未污染颜色`)
+        if (baseline[index + keyedChannel] - cpuPixels[index + keyedChannel] > 20) corrected++
+      }
+      assert(corrected >= 2, `${color} 必须实际修正不透明与半透明污染像素`)
+    }
+    console.log('PASS 绿色/蓝色去溢色在 GPU 与 CPU 一致，实际修正边缘颜色且保留 alpha，其余通道与关闭后的颜色不变')
     assert.deepEqual(result.beforeStart, [0, 0, 255, 255])
     for (const pixels of [result.previewPixels, result.encodedPixels]) {
       for (const point of [pixels[0], pixels[2]]) assert(point[0] < 8 && point[1] < 8 && point[2] > 245, `绿幕应透出蓝色底板：${point}`)

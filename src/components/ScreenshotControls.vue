@@ -37,7 +37,7 @@ function keydown(event: KeyboardEvent): void {
 
 <template>
   <section class="screenshot-controls" data-testid="screenshot-controls" aria-label="截屏设置">
-    <p>选择范围后，自动打开图片转换并载入截屏。</p>
+    <p>选择范围后，自动复制截屏并载入图片编辑。</p>
     <div class="screenshot-shortcut-row">
       <span>快捷键</span>
       <button ref="editor" class="shortcut-editor" :class="{ listening: editing }" type="button" data-shortcut-editor data-testid="screenshot-shortcut" :disabled="locked || unavailable" :aria-label="editing ? '请按新的截屏快捷键，Esc 取消' : `修改截屏快捷键，当前${screenshotShortcutLabel(shortcut)}`" :aria-pressed="editing" @click="beginEdit" @keydown="keydown" @blur="editing = false">

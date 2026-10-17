@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, basename } from 'node:path'
-import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile } from '../src/core/browser-project-files.ts'
+import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, ProjectSaveLocationError } from '../src/core/browser-project-files.ts'
 
 function browser(t, api) {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'window')
@@ -176,4 +176,20 @@ test('关闭失败也会中止，且中止本身失败不会覆盖原始错误',
   assert.equal(entry.calls.aborts, 1)
   assert.equal(await readFile(entry.path, 'utf8'), 'original')
   await assert.rejects(readFile(`${entry.path}.pending`), { code: 'ENOENT' })
+})
+
+test('已删除或移动的保存句柄返回可恢复的中文错误，保留原异常供诊断', async t => {
+  const entry = await fileHandle(t, '位置失效.omedia', Buffer.from('original'))
+  const failure = new DOMException('The object can not be found here.', 'NotFoundError')
+  entry.handle.createWritable = async () => { throw failure }
+  await assert.rejects(writeBrowserProjectFile(entry.handle, new Blob(['replacement'])), error => {
+    assert(error instanceof ProjectSaveLocationError)
+    assert.match(error.message, /保存位置.*另存为/)
+    assert.doesNotMatch(error.message, /The object/)
+    assert.equal(error.cause, failure)
+    return true
+  })
+  assert.equal(await readFile(entry.path, 'utf8'), 'original')
+  entry.handle.requestPermission = async () => { throw failure }
+  await assert.rejects(prepareBrowserProjectSave('位置失效', entry.handle), ProjectSaveLocationError)
 })

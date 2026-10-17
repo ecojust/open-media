@@ -38,11 +38,11 @@ export function createProject(title = '未命名项目', options: Partial<Pick<P
 export function createClip(asset: MediaAsset, project: Pick<Project, 'width' | 'height'>, options: Partial<Clip> = {}): Clip {
   const duration = asset.kind === 'image' ? Math.max(5, asset.duration) : asset.duration
   if (!Number.isFinite(duration) || duration <= 0) throw new Error('素材时长无效，无法添加到时间线。')
-  return { id: newId('clip'), assetId: asset.id, name: asset.name, start: 0, trimIn: 0, trimOut: duration, speed: 1, volume: 1, opacity: 1, x: 0, y: 0, width: project.width, height: project.height, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, ...options }
+  return { id: newId('clip'), generatedAt: new Date().toISOString(), assetId: asset.id, name: asset.name, start: 0, trimIn: 0, trimOut: duration, speed: 1, volume: 1, opacity: 1, x: 0, y: 0, width: project.width, height: project.height, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, ...options }
 }
 
 export function createTextClip(project: Pick<Project, 'width' | 'height'>, options: Partial<Clip> = {}): Clip {
-  return { id: newId('clip'), name: '文本字幕', start: 0, trimIn: 0, trimOut: 5, speed: 1, volume: 0, opacity: 1, x: project.width * 0.1, y: project.height * 0.75, width: project.width * 0.8, height: project.height * 0.2, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, text: '双击编辑字幕', fontSize: 64, fontFamily: 'sans-serif', fontWeight: 600, color: '#ffffff', background: 'transparent', textAlign: 'center', ...options }
+  return { id: newId('clip'), generatedAt: new Date().toISOString(), name: '文本字幕', start: 0, trimIn: 0, trimOut: 5, speed: 1, volume: 0, opacity: 1, x: project.width * 0.1, y: project.height * 0.75, width: project.width * 0.8, height: project.height * 0.2, rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, text: '双击编辑字幕', fontSize: 64, fontFamily: 'sans-serif', fontWeight: 600, color: '#ffffff', background: 'transparent', textAlign: 'center', ...options }
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -77,9 +77,9 @@ function color(value: unknown, label: string): string {
   return result
 }
 
-function iso(value: unknown): string {
-  const result = text(value, '项目时间', 40)
-  if (!Number.isFinite(Date.parse(result))) throw new Error('项目时间无效。')
+function iso(value: unknown, label = '项目时间'): string {
+  const result = text(value, label, 40)
+  if (!Number.isFinite(Date.parse(result))) throw new Error(`${label}无效。`)
   return new Date(result).toISOString()
 }
 
@@ -128,6 +128,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     const clips = t.clips.map((item): Clip => {
       const c = record(item, '片段')
       const clip: Clip = { id: id(c.id), name: text(c.name, '片段名称', 1000), start: number(c.start, '片段开始时间', 0, MAX_PROJECT_DURATION), trimIn: number(c.trimIn, '片段源起点', 0, MAX_PROJECT_DURATION), trimOut: number(c.trimOut, '片段源终点', 0.001, MAX_PROJECT_DURATION), speed: number(c.speed, '播放速度', 0.1, 16), volume: number(c.volume, '音量', 0, 2), opacity: number(c.opacity, '不透明度', 0, 1), x: number(c.x, '横坐标', -65536, 65536), y: number(c.y, '纵坐标', -65536, 65536), width: number(c.width, '片段宽度', 1, 65536), height: number(c.height, '片段高度', 1, 65536), rotation: number(c.rotation, '旋转角度', -3600, 3600), fit: choice(c.fit, ['contain', 'cover', 'fill'] as const, '画面适配'), fadeIn: number(c.fadeIn ?? 0, '淡入时间', 0, MAX_PROJECT_DURATION), fadeOut: number(c.fadeOut ?? 0, '淡出时间', 0, MAX_PROJECT_DURATION) }
+      if (c.generatedAt !== undefined) clip.generatedAt = iso(c.generatedAt, '片段生成时间')
       const duration = (clip.trimOut - clip.trimIn) / clip.speed
       if (duration < 1 / 1000 || clip.start + duration > MAX_PROJECT_DURATION + 1e-6) throw new Error('片段时长无效或时间线超过 24 小时。')
       if (clip.fadeIn > duration + 1e-6 || clip.fadeOut > duration + 1e-6) throw new Error('淡入淡出时间不能超过片段时长。')

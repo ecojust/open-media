@@ -4,6 +4,17 @@ interface BrowserProjectWritable {
   abort(reason?: unknown): Promise<void>
 }
 
+export class ProjectSaveLocationError extends Error {
+  constructor(cause: unknown) {
+    super('原保存位置已失效，文件或所在目录可能已移动、删除。请再次点击“保存”或使用“另存为”重新选择位置；当前项目仍保留。', { cause })
+    this.name = 'ProjectSaveLocationError'
+  }
+}
+
+function saveLocationError(cause: unknown): unknown {
+  return !!cause && typeof cause === 'object' && 'name' in cause && cause.name === 'NotFoundError' ? new ProjectSaveLocationError(cause) : cause
+}
+
 export interface BrowserProjectFileHandle {
   readonly name: string
   getFile(): Promise<File>
@@ -58,11 +69,12 @@ export function prepareBrowserProjectSave(name: string, existing?: BrowserProjec
   if (existing) {
     try {
       const permission = existing.requestPermission?.({ mode: 'readwrite' })
-      return Promise.resolve(permission).then((state) => {
+      return Promise.resolve(permission).then(async (state) => {
         if (permission && state !== 'granted') throw new Error('未获得项目文件的写入权限，请允许访问后重试，或使用另存为选择其他位置。')
+        await existing.getFile()
         return existing
-      })
-    } catch (error) { return Promise.reject(error) }
+      }).catch(error => { throw saveLocationError(error) })
+    } catch (error) { return Promise.reject(saveLocationError(error)) }
   }
   const browser = pickers()
   if (typeof browser?.showSaveFilePicker !== 'function') return undefined
@@ -74,12 +86,13 @@ export function prepareBrowserProjectSave(name: string, existing?: BrowserProjec
 }
 
 export async function writeBrowserProjectFile(handle: BrowserProjectFileHandle, blob: Blob): Promise<void> {
-  const writable = await handle.createWritable()
+  let writable: BrowserProjectWritable | undefined
   try {
+    writable = await handle.createWritable()
     await writable.write(blob)
     await writable.close()
   } catch (error) {
-    try { await writable.abort(error) } catch { /* Preserve the original write or close failure. */ }
-    throw error
+    try { await writable?.abort(error) } catch { /* Preserve the original write or close failure. */ }
+    throw saveLocationError(error)
   }
 }

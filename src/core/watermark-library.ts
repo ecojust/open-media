@@ -1,5 +1,20 @@
 /** Original offline overlay materials bundled with the application. */
-export type WatermarkCategory = '互动贴纸' | '装饰动效' | '提示标注' | '字幕标签'
+import { EXPANDED_WATERMARK_MATERIALS } from './watermark-catalog-data.ts'
+
+export type WatermarkCategory = '互动贴纸' | '装饰动效' | '提示标注' | '字幕标签' | '可编辑文字'
+
+/** Text remains editable; measurements use the material's reference dimensions. */
+export interface WatermarkTextTemplate {
+  text: string
+  color: string
+  background: string
+  fontFamily: string
+  fontWeight: number
+  textAlign: 'left' | 'center' | 'right'
+  fontSize: number
+  width: number
+  height: number
+}
 
 export interface WatermarkMaterial {
   id: string
@@ -9,15 +24,18 @@ export interface WatermarkMaterial {
   url: string
   fallbackUrl?: string
   poster: string
-  kind: 'video' | 'image'
+  kind: 'video' | 'image' | 'text'
+  textTemplate?: WatermarkTextTemplate
   duration: number
   width: number
   height: number
   chromaKey?: boolean
+  /** Remove key-color spill from soft edges of selected bundled animations. */
+  spillSuppression?: boolean
   placement?: 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'bottom-center'
 }
 
-export const WATERMARK_CATEGORIES: WatermarkCategory[] = ['互动贴纸', '装饰动效', '提示标注', '字幕标签']
+export const WATERMARK_CATEGORIES: WatermarkCategory[] = ['互动贴纸', '装饰动效', '提示标注', '字幕标签', '可编辑文字']
 
 const definitions: Array<[string, string, WatermarkCategory, string[], WatermarkMaterial['placement']?]> = [
   ['thumb-pulse', '点赞鼓励', '互动贴纸', ['点赞', '鼓励', '弹跳'], 'bottom-right'],
@@ -40,7 +58,7 @@ const definitions: Array<[string, string, WatermarkCategory, string[], Watermark
   ['thanks-card', '感谢观看', '字幕标签', ['片尾', '感谢', '结束'], 'bottom-center'],
 ]
 
-export const WATERMARK_MATERIALS: WatermarkMaterial[] = definitions.map(([id, name, category, tags, placement]) => ({
+export const WATERMARK_MATERIALS: WatermarkMaterial[] = [...definitions.map(([id, name, category, tags, placement]): WatermarkMaterial => ({
   id,
   name,
   category,
@@ -54,4 +72,4 @@ export const WATERMARK_MATERIALS: WatermarkMaterial[] = definitions.map(([id, na
   height: 360,
   chromaKey: true,
   placement: placement ?? 'center',
-}))
+})), ...EXPANDED_WATERMARK_MATERIALS]

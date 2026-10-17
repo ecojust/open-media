@@ -1,11 +1,40 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const { chromium, expect } = require('@playwright/test')
+const { inspectClipboard } = require('./clipboard-helpers.cjs')
 
 async function installScreenshotSource(page) {
   await page.addInitScript(() => {
-    const state = { requests: [], tracks: [] }
+    const state = { requests: [], tracks: [], inConfirmation: false, requireConfirmation: false, confirmationWrites: 0 }
     window.screenshotHarness = state
+    // Require the write to start inside the actual confirm listener, not in a later task.
+    // The real Clipboard API still performs the write and supplies the PNG read back below.
+    const addListener = EventTarget.prototype.addEventListener, removeListener = EventTarget.prototype.removeEventListener
+    const clickListeners = new WeakMap()
+    EventTarget.prototype.addEventListener = function (type, listener, options) {
+      if (type !== 'click' || typeof listener !== 'function') return addListener.call(this, type, listener, options)
+      let wrapped = clickListeners.get(listener)
+      if (!wrapped) {
+        wrapped = function (event) {
+          const confirming = this instanceof Element && this.matches('[data-testid="capture-picker-confirm"]')
+          if (!confirming) return listener.call(this, event)
+          state.requireConfirmation = true
+          state.inConfirmation = true
+          try { return listener.call(this, event) } finally { state.inConfirmation = false }
+        }
+        clickListeners.set(listener, wrapped)
+      }
+      return addListener.call(this, type, wrapped, options)
+    }
+    EventTarget.prototype.removeEventListener = function (type, listener, options) {
+      return removeListener.call(this, type, type === 'click' && typeof listener === 'function' ? clickListeners.get(listener) ?? listener : listener, options)
+    }
+    const write = navigator.clipboard.write.bind(navigator.clipboard)
+    Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: items => {
+      if (state.requireConfirmation && !state.inConfirmation) throw new DOMException('图片复制必须在确认范围的同步事件中启动', 'NotAllowedError')
+      if (state.inConfirmation) { state.confirmationWrites++; state.requireConfirmation = false }
+      return write(items)
+    } })
     Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async options => {
       state.requests.push(options)
       const canvas = document.createElement('canvas')
@@ -35,23 +64,23 @@ async function drawRegion(page, x1, y1, x2, y2) {
 }
 async function inspectImage(page) {
   return page.getByTestId('convert-image-preview').evaluate(async image => {
-    await image.decode()
     const blob = await (await fetch(image.src)).blob()
+    const bitmap = await createImageBitmap(blob)
     const canvas = document.createElement('canvas')
-    canvas.width = image.naturalWidth; canvas.height = image.naturalHeight
-    const context = canvas.getContext('2d'); context.drawImage(image, 0, 0)
-    return { width: image.naturalWidth, height: image.naturalHeight, name: image.alt, header: Array.from(new Uint8Array(await blob.arrayBuffer())).slice(0, 8), pixel: Array.from(context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data) }
+    canvas.width = bitmap.width; canvas.height = bitmap.height
+    const context = canvas.getContext('2d'); context.drawImage(bitmap, 0, 0); bitmap.close()
+    return { width: canvas.width, height: canvas.height, name: image.alt, header: Array.from(new Uint8Array(await blob.arrayBuffer())).slice(0, 8), pixel: Array.from(context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data) }
   })
 }
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: { ignored: () => true } }, logLevel: 'error' })
   await server.listen()
   const baseURL = `http://127.0.0.1:${server.httpServer.address().port}`
   let browser
   try {
     browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || process.env.BROWSER_EXECUTABLE || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox', '--no-proxy-server', '--autoplay-policy=no-user-gesture-required'] })
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, permissions: ['clipboard-read', 'clipboard-write'] })
     page.setDefaultTimeout(15000)
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
@@ -101,10 +130,16 @@ async function main() {
     assert.equal(first.height, height)
     assert.deepEqual(first.header, [137, 80, 78, 71, 13, 10, 26, 10])
     assert.deepEqual(first.pixel, [17, 170, 68, 255], '选区应保留真实来源像素而非选择遮罩')
+    await expect(page.locator('.status-main')).toContainText('已复制')
+    const firstClipboard = await inspectClipboard(page)
+    assert.equal(firstClipboard.width, first.width)
+    assert.equal(firstClipboard.height, first.height)
+    assert.deepEqual(firstClipboard.pixels, [first.pixel])
+    assert.equal(await page.evaluate(() => window.screenshotHarness.confirmationWrites), 1, '截屏确认事件内必须同步调用 write，不能依赖预授权绕过用户激活')
     assert.equal(await page.locator('.convert-source input:checked').count(), 1)
     assert.equal(await page.locator('.convert-source').count(), 1)
     await page.screenshot({ path: '/tmp/open-media-screenshot-browser/image-imported.png', fullPage: true })
-    console.log('PASS 浏览器截屏生成真实 PNG、保留选区像素并自动载入图片转换')
+    console.log('PASS 浏览器截屏生成真实 PNG、自动复制到真实剪贴板并载入图片编辑，读回尺寸和像素与选区一致')
 
     await page.keyboard.press('Control+Shift+2')
     await expect(page.getByRole('dialog', { name: '选择截屏范围', exact: true })).toBeVisible()
@@ -118,6 +153,12 @@ async function main() {
     assert.deepEqual(second.header, first.header)
     assert.equal(await page.locator('.convert-source.active').count(), 1)
     assert.match(await page.locator('.convert-source.active .source-details small').innerText(), /320 × 180/)
+    await expect(page.locator('.status-main')).toContainText('已复制')
+    const secondClipboard = await inspectClipboard(page, [[40, 90], [280, 90]])
+    assert.equal(secondClipboard.width, 320)
+    assert.equal(secondClipboard.height, 180)
+    assert.deepEqual(secondClipboard.pixels, [[204, 34, 0, 255], [17, 170, 68, 255]])
+    assert.equal(await page.evaluate(() => window.screenshotHarness.confirmationWrites), 2)
     console.log('PASS 切换工作区后快捷键有效，新截屏精确选中且不会选中旧素材')
 
     await page.keyboard.press('Control+Shift+2')
@@ -128,7 +169,37 @@ async function main() {
     await expect(page.locator('.convert-source')).toHaveCount(2)
     assert.equal(await page.evaluate(() => window.screenshotHarness.tracks.every(track => track.readyState === 'ended')), true)
     assert.equal(await page.getByRole('alert').count(), 0)
-    console.log('PASS 取消截屏释放来源、不生成空白素材、不改变当前工作区')
+    assert.equal((await inspectClipboard(page)).digest, secondClipboard.digest, '取消不能覆盖已有剪贴板图片')
+    console.log('PASS 取消截屏释放来源、不生成空白素材、不改变当前工作区和已有剪贴板图片')
+
+    await page.evaluate(() => {
+      const write = navigator.clipboard.write.bind(navigator.clipboard)
+      Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: async () => {
+        Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: write })
+        throw new DOMException('Clipboard permission denied for test', 'NotAllowedError')
+      } })
+    })
+    await page.keyboard.press('Control+Shift+2')
+    await expect(page.getByRole('dialog', { name: '选择截屏范围', exact: true })).toBeVisible()
+    await drawRegion(page, .1, .2, .4, .8)
+    await page.getByTestId('capture-picker-confirm').click()
+    await expect(page.locator('.convert-source')).toHaveCount(3)
+    await expect(page.getByTestId('convert-image-preview')).toBeVisible()
+    await expect(page.locator('.status-main')).toContainText('复制')
+    await expect(page.locator('.status-main')).not.toContainText('已复制')
+    assert.equal((await inspectClipboard(page)).digest, secondClipboard.digest)
+    const retained = await inspectImage(page)
+    assert.deepEqual(retained.pixel, [204, 34, 0, 255])
+    await page.evaluate(() => { window.screenshotHarness.requireConfirmation = false })
+    await page.getByTestId('image-copy').click()
+    await expect(page.getByTestId('image-copy-status')).toHaveText('图片已复制')
+    const retried = await inspectClipboard(page)
+    assert.equal(retried.width, retained.width)
+    assert.equal(retried.height, retained.height)
+    assert.deepEqual(retried.pixels, [retained.pixel])
+    await expect(page.locator('.convert-source')).toHaveCount(3)
+    await expect(page.getByTestId('convert-result')).toHaveCount(0)
+    console.log('PASS 自动复制被拒绝仍保留截屏，手动重试写入真实剪贴板且不增加素材或转换任务')
 
     await page.getByTestId('nav-edit').click()
     await page.locator('.timeline-clip-tools').getByTitle('添加字幕', { exact: true }).click()

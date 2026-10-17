@@ -81,12 +81,14 @@ export function addClips(project: Project, trackId: string, clips: Clip[]): Proj
 }
 export function updateClip(project: Project, clipId: string, patch: Partial<Omit<Clip, 'id' | 'assetId'>>): Project {
   return edit(project, (copy) => {
-    const { clip } = requireClip(copy, clipId)
+    const { clip, track } = requireClip(copy, clipId)
+    const textChanged = track.kind === 'text' && patch.text !== undefined && patch.text !== clip.text
     const oldId = clip.id
     const oldAsset = clip.assetId
     Object.assign(clip, patch)
     clip.id = oldId
     clip.assetId = oldAsset
+    if (textChanged) clip.generatedAt = new Date().toISOString()
     const duration = clipDuration(clip)
     clip.fadeIn = Math.min(clip.fadeIn, duration)
     clip.fadeOut = Math.min(clip.fadeOut, duration)

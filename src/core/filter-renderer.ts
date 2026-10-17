@@ -1,5 +1,5 @@
 import { applyClipColorMatrix, getClipColorMatrix, isClipFilterIdentity, type ColorMatrix } from './clip-filters.ts'
-import { applyChromaKey, chromaKeyColor, isChromaKeyEnabled } from './chroma-key.ts'
+import { applyChromaKey, chromaKeyColor, chromaKeySpillChannel, isChromaKeyEnabled } from './chroma-key.ts'
 import type { ClipChromaKey, ClipFilters } from './types.ts'
 
 export interface ClipFilterRendererOptions { preferCpu?: boolean; maxPixels?: number; maxDimension?: number }
@@ -13,6 +13,7 @@ interface GlResources {
   sampler: WebGLUniformLocation
   keyColor: WebGLUniformLocation
   keySettings: WebGLUniformLocation
+  spillChannel: WebGLUniformLocation
 }
 
 const VERTEX_SHADER = `
@@ -31,16 +32,20 @@ uniform vec4 greenRow;
 uniform vec4 blueRow;
 uniform vec3 keyColor;
 uniform vec3 keySettings;
+uniform float spillChannel;
 void main() {
   vec4 source = texture2D(image, texCoord);
-  vec4 color = vec4(source.rgb, 1.0);
-  vec3 result = vec3(dot(redRow, color), dot(greenRow, color), dot(blueRow, color));
+  vec3 rgb = source.rgb;
   float alpha = source.a;
   if (keySettings.x > 0.5) {
     float distance = length(source.rgb - keyColor) / sqrt(3.0);
     float mask = keySettings.z > 0.0001 ? clamp((distance - keySettings.y) / keySettings.z, 0.0, 1.0) : float(distance > keySettings.y);
     alpha *= mask;
+    if (spillChannel > 1.5) rgb.b = min(rgb.b, max(rgb.r, rgb.g));
+    else if (spillChannel > 0.5) rgb.g = min(rgb.g, max(rgb.r, rgb.b));
   }
+  vec4 color = vec4(rgb, 1.0);
+  vec3 result = vec3(dot(redRow, color), dot(greenRow, color), dot(blueRow, color));
   gl_FragColor = vec4(clamp(result, 0.0, 1.0), alpha);
 }`
 
@@ -118,7 +123,7 @@ export class ClipFilterRenderer {
       if (!buffer || !texture) throw new Error('滤镜渲染内存不足。')
       const position = gl.getAttribLocation(program, 'position')
       if (position < 0) throw new Error('滤镜渲染坐标不可用。')
-      this.resources = { program, buffer, texture, position, rows: [uniform('redRow'), uniform('greenRow'), uniform('blueRow')], sampler: uniform('image'), keyColor: uniform('keyColor'), keySettings: uniform('keySettings') }
+      this.resources = { program, buffer, texture, position, rows: [uniform('redRow'), uniform('greenRow'), uniform('blueRow')], sampler: uniform('image'), keyColor: uniform('keyColor'), keySettings: uniform('keySettings'), spillChannel: uniform('spillChannel') }
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
       gl.bindTexture(gl.TEXTURE_2D, texture)
@@ -182,6 +187,8 @@ export class ClipFilterRenderer {
       for (let row = 0; row < 3; row++) gl.uniform4fv(resources.rows[row]!, new Float32Array(matrix.slice(row * 4, row * 4 + 4)))
       gl.uniform3fv(resources.keyColor, new Float32Array(chromaKey ? chromaKeyColor(chromaKey) : [0, 1, 0]))
       gl.uniform3f(resources.keySettings, isChromaKeyEnabled(chromaKey) ? 1 : 0, chromaKey?.similarity ?? 0.18, chromaKey?.blend ?? 0.08)
+      const spill = chromaKey?.spillSuppression ? chromaKeySpillChannel(chromaKey) : undefined
+      gl.uniform1f(resources.spillChannel, spill === 'green' ? 1 : spill === 'blue' ? 2 : 0)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
       if (gl.getError() !== gl.NO_ERROR || gl.isContextLost()) return
       this.lastBackend = 'webgl'

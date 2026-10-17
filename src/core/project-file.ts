@@ -1,7 +1,7 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { MAX_ASSETS, validateProject } from './project.ts'
-import { fetchAssetBlob } from './storage.ts'
-import type { ImportedProject, Project } from './types.ts'
+import { fetchAssetBlob, readStoredAssetBlob } from './storage.ts'
+import type { ImportedProject, MediaAsset, Project } from './types.ts'
 
 export const PROJECT_EXTENSION = '.omedia'
 export const MAX_PORTABLE_BYTES = 256 * 1024 * 1024
@@ -13,6 +13,34 @@ export interface ProjectExportOptions { blobs?: Map<string, Blob>; signal?: Abor
 
 function aborted(signal?: AbortSignal): void { if (signal?.aborted) throw new Error('操作已取消。') }
 
+async function readPortableAsset(projectId: string, asset: MediaAsset, options: ProjectExportOptions, remaining: number): Promise<Uint8Array> {
+  const cached = options.blobs?.get(asset.id)
+  const sources: (() => Promise<Blob | undefined>)[] = [
+    ...(cached ? [() => Promise.resolve(cached)] : []),
+    () => fetchAssetBlob(asset, options.signal),
+    () => readStoredAssetBlob(projectId, asset.id),
+  ]
+  let failure: unknown
+  for (const source of sources) {
+    aborted(options.signal)
+    let blob: Blob | undefined
+    try { blob = await source() } catch (cause) { failure = cause; continue }
+    if (!blob) continue
+    if (!blob.size) { failure = new Error('素材为空。'); continue }
+    if (blob.size > remaining) throw new Error('便携项目超过 256 MB 内存容量限制，请减少素材后重试。')
+    try {
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      aborted(options.signal)
+      if (bytes.byteLength !== blob.size) throw new Error('素材内容不完整。')
+      // Preserve a recovered copy so subsequent saves do not reuse an unreadable File/Blob.
+      if (cached && blob !== cached) options.blobs?.set(asset.id, new Blob([bytes.buffer as ArrayBuffer], { type: blob.type || asset.mime }))
+      return bytes
+    } catch (cause) { failure = cause }
+  }
+  aborted(options.signal)
+  throw new Error(`素材“${asset.name}”读取失败，原件与本地副本均不可用。请恢复原文件或重新导入后再保存；当前项目未被覆盖。`, { cause: failure })
+}
+
 export async function exportProjectFile(project: Project, options: ProjectExportOptions = {}): Promise<Blob> {
   const clean = validateProject(project, { trusted: true })
   const entries: Record<string, Uint8Array> = Object.create(null)
@@ -22,12 +50,10 @@ export async function exportProjectFile(project: Project, options: ProjectExport
   for (const [index, asset] of clean.assets.entries()) {
     aborted(options.signal)
     options.onProgress?.(index, clean.assets.length, asset.name)
-    const blob = options.blobs?.get(asset.id) ?? await fetchAssetBlob(asset, options.signal)
-    if (!blob.size) throw new Error(`素材“${asset.name}”为空，无法保存完整项目。`)
-    size += blob.size
-    if (size > MAX_PORTABLE_BYTES) throw new Error('便携项目超过 256 MB 内存容量限制，请减少素材后重试。')
-    entries[`media/${asset.id}`] = new Uint8Array(await blob.arrayBuffer())
-    asset.size = blob.size
+    const bytes = await readPortableAsset(clean.id, asset, options, MAX_PORTABLE_BYTES - size)
+    size += bytes.byteLength
+    entries[`media/${asset.id}`] = bytes
+    asset.size = bytes.byteLength
     asset.url = ''
     delete asset.sourceUrl
     delete asset.nativePath

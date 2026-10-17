@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "f5752db7e02f66afaf1588183780f92f87a8f86f133d99c9ff697dfeb93bc6a8",
-      "reviewMethod": "Source review: application version updated to 0.1.10 with microphone source, watermark, color-key and track reorder browser coverage. Dependency versions and original license files are unchanged."
+      "sha256": "a756b282b9381e8527d0a8114bcd897817ce44a2386b944be890790b65911522",
+      "reviewMethod": "Source-only review: application version updated to 0.1.11 with preview positioning, clipboard image, watermark catalog and image editing browser coverage. Dependency versions and original license files are unchanged."
     },
     {
       "path": "package-lock.json",
-      "sha256": "71383b35bfe4d3b93ce3b40a3f8e1403f9872a820688cb56c425aae58821925d",
-      "reviewMethod": "Source review: application version updated to 0.1.10 with microphone source, watermark, color-key and track reorder browser coverage. Dependency versions and original license files are unchanged."
+      "sha256": "25c5f86d467bf5bdd9790f539d16a895c99e6048cbaa3ac4f16632157319ea90",
+      "reviewMethod": "Source-only review: application version updated to 0.1.11 with preview positioning, clipboard image and watermark catalog browser coverage. Dependency versions and original license files are unchanged."
     },
     {
       "path": "vite.config.ts",

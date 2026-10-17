@@ -15,7 +15,9 @@ import AudioClipPlayer from './AudioClipPlayer.vue'
 import EditorVoiceRecorder from './EditorVoiceRecorder.vue'
 import WatermarkLibrary from './WatermarkLibrary.vue'
 import ChromaKeyPanel from './ChromaKeyPanel.vue'
-import { addWatermark } from '../core/watermark-track'
+import PreviewSelection from './PreviewSelection.vue'
+import type { PreviewPosition } from '../core/preview-position'
+import { addTextWatermark, addWatermark } from '../core/watermark-track'
 import type { WatermarkMaterial } from '../core/watermark-library'
 import { chooseWatermarkSource } from '../core/watermark-source'
 import { addRecordedAudio } from '../core/recording-track'
@@ -26,6 +28,7 @@ import type { RecordedMicrophoneAudio } from '../core/microphone-recording'
 const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean }>()
 const emit = defineEmits<{ change: [project: Project, label?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
+const previewSelection = ref<InstanceType<typeof PreviewSelection> | null>(null)
 const editorRoot = ref<HTMLElement | null>(null)
 const timelineRatio = ref(0.4), timelineHeight = ref(268)
 const timelineScroll = ref<HTMLElement | null>(null)
@@ -67,6 +70,17 @@ const workingProject = ref<Project | null>(null)
 const activeProject = computed(() => workingProject.value || props.project)
 const duration = computed(() => projectDuration(activeProject.value))
 const selected = computed(() => findClip(activeProject.value, selectedId.value))
+const generatedTimeFormat = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+const generatedDateFormat = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+const generatedTimes = computed(() => {
+  const labels = new Map<string, { short: string; full: string }>()
+  for (const track of activeProject.value.tracks) for (const clip of track.clips) {
+    if (!clip.generatedAt || labels.has(clip.generatedAt)) continue
+    const date = new Date(clip.generatedAt)
+    labels.set(clip.generatedAt, { short: generatedTimeFormat.format(date), full: `最近生成：${generatedDateFormat.format(date)}` })
+  }
+  return labels
+})
 const timelineSeconds = computed(() => Math.max(20, Math.ceil(duration.value + 10), recordingPlayback.value ? Math.ceil(playhead.value + 5) : 0))
 const timelineWidth = computed(() => Math.max(600, timelineSeconds.value * zoom.value))
 const tickStep = computed(() => zoom.value < 15 ? 10 : zoom.value < 30 ? 5 : zoom.value < 70 ? 2 : 1)
@@ -123,6 +137,7 @@ let playbackOffset = 0
 let playbackRequest = 0
 let playbackAbort: AbortController | undefined
 let gesture: { kind: 'move' | 'trim-start' | 'trim-end'; clipId: string; trackId: string; startX: number; startScroll: number; original: Clip; base: Project } | undefined
+let previewPositionGesture: { base: Project; clipId: string; original: Clip } | undefined
 let trackDrag: { trackId: string; pointerId: number; startY: number; x: number; y: number; moved: boolean; base: Project; handle: HTMLButtonElement } | undefined
 let trackScrollFrame = 0, trackScrollTime = 0
 let menuReturnFocus: HTMLElement | null = null
@@ -247,6 +262,7 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
   watermarkBusy.value = true; watermarkError.value = ''; emit('busy', true)
   const timeout = window.setTimeout(() => abort.abort(new Error('读取水印素材超时，请重试。')), 20000)
   let asset: MediaAsset | undefined
+  let focusTextId = ''
   const stale = () => {
     if (editorDestroyed || props.project.id !== projectId) return true
     if (abort.signal.aborted) throw abort.signal.reason
@@ -254,34 +270,40 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
   }
   try {
     const material = source instanceof File ? undefined : source
-    const desktop = isDesktop()
-    const materialUrl = material ? (desktop ? material.url : chooseWatermarkSource(material)) : ''
-    let blob: Blob
-    if (source instanceof File) blob = source
-    else {
-      const response = await fetch(materialUrl, { signal: abort.signal })
-      if (!response.ok) throw new Error('内置素材读取失败，请重新打开素材库。')
-      blob = await response.blob()
+    let result: ReturnType<typeof addWatermark>
+    if (material?.kind === 'text') {
+      result = addTextWatermark(props.project, material, start)
+    } else {
+      const desktop = isDesktop()
+      const materialUrl = material ? (desktop ? material.url : chooseWatermarkSource(material)) : ''
+      let blob: Blob
+      if (source instanceof File) blob = source
+      else {
+        const response = await fetch(materialUrl, { signal: abort.signal })
+        if (!response.ok) throw new Error('内置素材读取失败，请重新打开素材库。')
+        blob = await response.blob()
+      }
+      if (stale()) return
+      window.clearTimeout(timeout)
+      const extension = material?.kind === 'video' ? (materialUrl.endsWith('.webm') ? 'webm' : 'mp4') : 'png'
+      const name = material ? `${material.name}.${extension}` : (source as File).name
+      asset = desktop
+        ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
+        : await importMediaFile(new File([blob], name, { type: blob.type }))
+      if (stale()) return
+      result = addWatermark(props.project, asset, start, { placement: material?.placement ?? 'bottom-right', chromaKey: material?.chromaKey ?? removeGreen, spillSuppression: material?.spillSuppression })
+      emit('prepared-asset', asset, blob)
     }
-    if (stale()) return
-    window.clearTimeout(timeout)
-    const extension = material?.kind === 'video' ? (materialUrl.endsWith('.webm') ? 'webm' : 'mp4') : 'png'
-    const name = material ? `${material.name}.${extension}` : (source as File).name
-    asset = desktop
-      ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
-      : await importMediaFile(new File([blob], name, { type: blob.type }))
-    if (stale()) return
-    const result = addWatermark(props.project, asset, start, { placement: material?.placement ?? 'bottom-right', chromaKey: material?.chromaKey ?? removeGreen })
-    emit('prepared-asset', asset, blob)
-    emit('change', result.project, '添加水印素材')
+    emit('change', result.project, material?.kind === 'text' ? '添加可编辑文字水印' : '添加水印素材')
     await nextTick()
     if (stale()) return
-    if (!props.project.assets.some(item => item.id === asset!.id)) throw new Error('水印未能加入项目，请重试。')
+    if (!findClip(props.project, result.clipId)) throw new Error('水印未能加入项目，请重试。')
     selectedId.value = result.clipId; inspectorTab.value = 'properties'; playhead.value = start
     editorDialog.value = null
     await nextTick()
     preview?.seek(start, false)
     timelineScroll.value?.querySelector<HTMLElement>(`[data-clip-id="${result.clipId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    if (material?.kind === 'text') focusTextId = result.clipId
   } catch (cause) {
     const failure = abort.signal.aborted ? abort.signal.reason : cause
     if (!editorDestroyed && props.project.id === projectId) watermarkError.value = failure instanceof Error ? failure.message : String(failure)
@@ -289,6 +311,12 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
     window.clearTimeout(timeout)
     if (asset && !props.project.assets.some(item => item.id === asset!.id)) revokeMediaAsset(asset)
     if (watermarkAbort === abort) { watermarkAbort = undefined; watermarkBusy.value = false; emit('busy', editingBusy.value) }
+    if (focusTextId) {
+      await nextTick()
+      if (!editorDestroyed && props.project.id === projectId && selectedId.value === focusTextId && !modalOpen.value) {
+        editorRoot.value?.querySelector<HTMLTextAreaElement>('[data-testid="clip-text-content"]')?.focus({ preventScroll: true })
+      }
+    }
   }
 }
 async function generateTextSpeech(clipId: string): Promise<void> {
@@ -406,7 +434,7 @@ function trackHandleKeyboard(event: KeyboardEvent, track: Track): void {
   }
 }
 function startTrackDrag(event: PointerEvent, track: Track): void {
-  if (event.button !== 0 || !event.isPrimary || editingBusy.value || props.exportDisabled || track.locked || modalOpen.value || pendingTrackDelete.value || gesture || trackDrag || renamingTrackId.value || props.project.tracks.length < 2) return
+  if (event.button !== 0 || !event.isPrimary || editingBusy.value || props.exportDisabled || track.locked || modalOpen.value || pendingTrackDelete.value || gesture || previewPositionGesture || trackDrag || renamingTrackId.value || props.project.tracks.length < 2) return
   event.preventDefault(); event.stopPropagation()
   const handle = event.currentTarget as HTMLButtonElement
   handle.focus({ preventScroll: true })
@@ -535,8 +563,13 @@ function formatTime(value: number, frames = false): string {
   const remaining = Math.floor(seconds % 60).toString().padStart(2, '0')
   return frames ? `${minutes.toString().padStart(2, '0')}:${remaining}:${Math.floor((seconds % 1) * activeProject.value.fps).toString().padStart(2, '0')}` : `${minutes}:${remaining}`
 }
+function timelineClipTitle(clip: Clip): string {
+  const generated = clip.generatedAt ? generatedTimes.value.get(clip.generatedAt)?.full : undefined
+  return `${clip.name} · ${formatTime(clip.start)}—${formatTime(clipEnd(clip))}${generated ? `\n${generated}` : ''}`
+}
 function seek(time: number): void {
   if (editingBusy.value) return
+  cancelPreviewPosition()
   audioClipPlayer.value?.stop()
   if (preparingPlayback.value) pause()
   const end = duration.value || timelineSeconds.value
@@ -561,6 +594,7 @@ function pauseTimeline(): void {
 }
 async function togglePlay(): Promise<void> {
   if (editingBusy.value) return
+  cancelPreviewPosition()
   audioClipPlayer.value?.stop()
   if (playing.value || preparingPlayback.value) { pause(); return }
   if (!duration.value || !preview) return
@@ -648,6 +682,36 @@ function pictureInPicture(): void {
 function updateSelected(patch: Partial<Clip>, label = '调整片段'): void {
   if (selected.value) commit(() => updateClip(props.project, selectedId.value, patch), label)
 }
+function startPreviewPosition(): void {
+  pause(); closeMenus(); finishTrackRename(false)
+  workingProject.value = null; clearGesture(); cancelTrackDrag()
+  const current = findClip(props.project, selectedId.value)
+  if (!current || current.track.locked || editingBusy.value || props.exportDisabled) { previewSelection.value?.cancel(); return }
+  previewPositionGesture = { base: props.project, clipId: current.clip.id, original: current.clip }
+}
+function movePreviewPosition(position: PreviewPosition): void {
+  const drag = previewPositionGesture
+  if (!drag) return
+  if (drag.base !== props.project || editingBusy.value || props.exportDisabled) { cancelPreviewPosition(); return }
+  try { workingProject.value = updateClip(drag.base, drag.clipId, position) }
+  catch (cause) { cancelPreviewPosition(); message(cause) }
+}
+function endPreviewPosition(): void {
+  const drag = previewPositionGesture, project = workingProject.value
+  clearPreviewPosition()
+  if (!drag || !project || drag.base !== props.project || editingBusy.value || props.exportDisabled) return
+  const changed = findClip(project, drag.clipId)?.clip
+  if (changed && (changed.x !== drag.original.x || changed.y !== drag.original.y)) emit('change', project, '调整画面位置')
+}
+function clearPreviewPosition(): void {
+  if (previewPositionGesture) workingProject.value = null
+  previewPositionGesture = undefined
+}
+function cancelPreviewPosition(): void { previewSelection.value?.cancel(); clearPreviewPosition() }
+function nudgePreviewPosition(position: PreviewPosition): void {
+  if (props.exportDisabled || editingBusy.value) return
+  updateSelected(position, '微调画面位置')
+}
 function inspectorTabKeyboard(event: KeyboardEvent): void {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault(); event.stopPropagation()
@@ -733,7 +797,7 @@ function setPlayheadFromPointer(event: PointerEvent): void {
   seek((event.clientX - row.getBoundingClientRect().left) / zoom.value)
 }
 function startGesture(event: PointerEvent, clip: Clip, track: Track, kind: 'move' | 'trim-start' | 'trim-end'): void {
-  if (event.button !== 0 || editingBusy.value || trackDrag) return
+  if (event.button !== 0 || editingBusy.value || trackDrag || previewPositionGesture) return
   event.preventDefault(); event.stopPropagation()
   ;(event.currentTarget as HTMLElement).closest<HTMLButtonElement>('.timeline-clip')?.focus({ preventScroll: true })
   selectedId.value = clip.id
@@ -803,9 +867,10 @@ function endGesture(): void {
   clearGesture()
   if (project && !editingBusy.value) emit('change', project, label)
 }
-function cancelGesture(): void { workingProject.value = null; clearGesture(); cancelTrackDrag() }
+function cancelGesture(): void { cancelPreviewPosition(); workingProject.value = null; clearGesture(); cancelTrackDrag() }
 function fitTimeline(): void { zoom.value = Math.max(6, Math.min(160, ((timelineScroll.value?.clientWidth || 900) - 160) / Math.max(10, duration.value + 2))) }
 function keyboard(event: KeyboardEvent): void {
+  if (previewPositionGesture) { if (event.key === 'Escape') { event.preventDefault(); cancelPreviewPosition() }; return }
   if (trackDrag) { if (event.key === 'Escape') { event.preventDefault(); cancelTrackDrag() }; return }
   if (event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return
   if (event.key === 'Escape' && (clipMenu.value || trackMenu.value)) { event.preventDefault(); closeMenus(true); return }
@@ -831,6 +896,7 @@ watch(activeProject, project => {
   }
 }, { deep: true })
 watch(() => props.project, project => {
+  if (previewPositionGesture && project !== previewPositionGesture.base) cancelPreviewPosition()
   if (gesture && project !== gesture.base) cancelGesture()
   if (trackDrag && project !== trackDrag.base) cancelTrackDrag()
   if (pendingTrackDelete.value && project !== pendingTrackDelete.value.project) cancelTrackDelete()
@@ -838,8 +904,8 @@ watch(() => props.project, project => {
   if (trackMenu.value && !project.tracks.some(track => track.id === trackMenu.value?.trackId)) closeMenus()
 })
 watch(() => props.project.id, () => { cancelWatermarkImport(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
-watch([editingBusy, modalOpen, () => props.exportDisabled], values => { if (values.some(Boolean)) cancelTrackDrag() }, { flush: 'sync' })
-watch(selectedId, () => { clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
+watch([editingBusy, modalOpen, () => props.exportDisabled], values => { if (values.some(Boolean)) { cancelTrackDrag(); cancelPreviewPosition() } }, { flush: 'sync' })
+watch(selectedId, () => { cancelPreviewPosition(); clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
 onMounted(() => {
   if (canvas.value) {
     canvas.value.width = Math.min(1280, props.project.width)
@@ -890,7 +956,11 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
       <main class="preview-panel" :inert="speechBusy || undefined">
         <div class="preview-heading"><span class="preview-title">预览</span><span>{{ project.width }} × {{ project.height }} · {{ project.fps }} fps</span></div>
         <div class="preview-stage">
-          <div class="preview-frame" :style="{ aspectRatio: ratio }"><canvas ref="canvas" aria-label="视频合成预览" data-testid="video-preview" /><div v-if="!duration" class="preview-empty"><Icon name="video" :size="38" /><strong>你的故事，从这里开始</strong><span>将素材放入下方时间线</span></div></div>
+          <div class="preview-frame" :style="{ aspectRatio: ratio }">
+            <canvas ref="canvas" aria-label="视频合成预览" data-testid="video-preview" />
+            <PreviewSelection ref="previewSelection" :project="activeProject" :clip-id="selectedId" :time="playhead" :disabled="editingBusy || !!exportDisabled || modalOpen || playing || preparingPlayback || !!pendingTrackDelete" @start="startPreviewPosition" @move="movePreviewPosition" @finish="endPreviewPosition" @cancel="clearPreviewPosition" @nudge="nudgePreviewPosition" />
+            <div v-if="!duration" class="preview-empty"><Icon name="video" :size="38" /><strong>你的故事，从这里开始</strong><span>将素材放入下方时间线</span></div>
+          </div>
         </div>
         <div class="preview-playback">
           <span class="time-code">{{ formatTime(playhead, true) }}<em>/ {{ formatTime(duration, true) }}</em></span>
@@ -923,7 +993,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
           </div>
           <fieldset :disabled="selectedLocked || editingBusy">
             <ChromaKeyPanel v-if="selectedSupportsFilters" :value="selected.clip.chromaKey" :disabled="selectedLocked || editingBusy" @change="(chromaKey, label) => updateSelected({ chromaKey }, label)" />
-            <template v-if="selected.clip.text !== undefined"><h3>文本</h3><textarea :value="selected.clip.text" rows="3" aria-label="字幕内容" @change="updateSelected({ text: stringValue($event) }, '编辑字幕')" /><div class="property-grid"><label>字号<input type="number" min="4" max="2048" :value="selected.clip.fontSize" @change="updateSelected({ fontSize: numberValue($event) })" /></label><label>颜色<input type="color" :value="selected.clip.color" @change="updateSelected({ color: stringValue($event) })" /></label></div><label>字体<select :value="selected.clip.fontFamily" @change="updateSelected({ fontFamily: stringValue($event) })"><option value="sans-serif">无衬线</option><option value="serif">衬线</option><option value="monospace">等宽</option></select></label><label>文字底色<div class="text-background"><input type="color" :value="selected.clip.background === 'transparent' ? '#000000' : selected.clip.background" aria-label="文字底色" @change="updateSelected({ background: stringValue($event) })" /><button :class="{ active: selected.clip.background === 'transparent' }" @click="updateSelected({ background: 'transparent' })">透明</button></div></label><label>对齐<select :value="selected.clip.textAlign" @change="updateSelected({ textAlign: stringValue($event) as Clip['textAlign'] })"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><label>字重<select :value="selected.clip.fontWeight" @change="updateSelected({ fontWeight: numberValue($event) })"><option :value="400">常规</option><option :value="600">半粗</option><option :value="700">粗体</option></select></label></template>
+            <template v-if="selected.clip.text !== undefined"><h3>{{ selected.track.name === '文字水印轨道' ? '文字水印' : '文本' }}</h3><textarea :value="selected.clip.text" rows="3" :aria-label="selected.track.name === '文字水印轨道' ? '水印文字' : '字幕内容'" data-testid="clip-text-content" @change="updateSelected({ text: stringValue($event) }, selected.track.name === '文字水印轨道' ? '编辑文字水印' : '编辑字幕')" /><div class="property-grid"><label>字号<input type="number" min="4" max="2048" :value="selected.clip.fontSize" @change="updateSelected({ fontSize: numberValue($event) })" /></label><label>颜色<input type="color" :value="selected.clip.color" @change="updateSelected({ color: stringValue($event) })" /></label></div><label>字体<select :value="selected.clip.fontFamily" @change="updateSelected({ fontFamily: stringValue($event) })"><option value="sans-serif">无衬线</option><option value="serif">衬线</option><option value="monospace">等宽</option></select></label><label>文字底色<div class="text-background"><input type="color" :value="selected.clip.background === 'transparent' ? '#000000' : selected.clip.background" aria-label="文字底色" @change="updateSelected({ background: stringValue($event) })" /><button :class="{ active: selected.clip.background === 'transparent' }" @click="updateSelected({ background: 'transparent' })">透明</button></div></label><label>对齐<select :value="selected.clip.textAlign" @change="updateSelected({ textAlign: stringValue($event) as Clip['textAlign'] })"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><label>字重<select :value="selected.clip.fontWeight" @change="updateSelected({ fontWeight: numberValue($event) })"><option :value="400">常规</option><option :value="600">半粗</option><option :value="700">粗体</option></select></label></template>
             <h3>时间</h3><div class="property-grid"><label>开始 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.start.toFixed(3))" aria-label="片段开始时间" @change="updateSelected({ start: numberValue($event) })" /></label><label>时长 / 秒<input type="number" min="0.04" step="0.1" :value="Number(clipDuration(selected.clip).toFixed(3))" aria-label="片段时长" @change="updateSelected({ trimOut: selected!.clip.trimIn + numberValue($event) * selected!.clip.speed })" /></label><label>源起点 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.trimIn.toFixed(3))" @change="updateSelected({ trimIn: numberValue($event) })" /></label><label>源终点 / 秒<input type="number" min="0.001" step="0.1" :value="Number(selected.clip.trimOut.toFixed(3))" @change="updateSelected({ trimOut: numberValue($event) })" /></label></div>
             <label>播放速度<select :value="selected.clip.speed" aria-label="播放速度" @change="updateSelected({ speed: numberValue($event) })"><option v-for="speed in [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4, 8, 16]" :key="speed" :value="speed">{{ speed }}×</option></select></label>
             <template v-if="selected.track.kind !== 'text'"><h3>声音</h3><button v-if="selected.track.kind === 'video' && project.assets.find(asset => asset.id === selected!.clip.assetId)?.kind === 'video'" class="separate-audio" @click="separateAudio"><Icon name="audio" :size="13" />分离到音轨</button><label>音量 <output>{{ Math.round(selected.clip.volume * 100) }}%</output><input type="range" min="0" max="2" step="0.05" :value="selected.clip.volume" aria-label="音量" @change="updateSelected({ volume: numberValue($event) })" /></label></template>
@@ -964,8 +1034,11 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
             </div>
             <div class="track-lane" :data-track-id="track.id" :style="{ width: `${timelineWidth}px`, backgroundSize: `${zoom * tickStep}px 100%` }" @dragover.prevent @drop="onDrop($event, track)" @pointerdown="setPlayheadFromPointer">
               <span v-if="!track.clips.length" class="track-hint">{{ track.kind === 'text' ? '点击时间线工具栏「字幕」添加文字' : track.kind === 'audio' ? '拖入音乐或视频的声音' : '拖入视频或图片' }}</span>
-              <button v-for="clip in track.clips" :key="clip.id" class="timeline-clip" :class="[track.kind, { selected: selectedId === clip.id }]" :style="{ left: `${clip.start * zoom}px`, width: `${Math.max(10, clipDuration(clip) * zoom)}px` }" :title="`${clip.name} · ${formatTime(clip.start)}—${formatTime(clipEnd(clip))}`" :data-clip-id="clip.id" @pointerdown="startGesture($event, clip, track, 'move')" @click.stop="selectedId = clip.id" @contextmenu="openClipMenu($event, clip, track)">
-                <span class="trim-handle start" title="拖动裁剪开头" @pointerdown.stop="startGesture($event, clip, track, 'trim-start')" /><span class="clip-title"><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : 'video'" :size="12" />{{ clip.text ?? clip.name }}</span><span class="clip-detail">{{ clip.speed !== 1 ? `${clip.speed}× · ` : '' }}{{ clipDuration(clip).toFixed(1) }}s</span><span class="trim-handle end" title="拖动裁剪结尾" @pointerdown.stop="startGesture($event, clip, track, 'trim-end')" />
+              <button v-for="clip in track.clips" :key="clip.id" class="timeline-clip" :class="[track.kind, { selected: selectedId === clip.id }]" :style="{ left: `${clip.start * zoom}px`, width: `${Math.max(10, clipDuration(clip) * zoom)}px` }" :title="timelineClipTitle(clip)" :data-clip-id="clip.id" @pointerdown="startGesture($event, clip, track, 'move')" @click.stop="selectedId = clip.id" @contextmenu="openClipMenu($event, clip, track)">
+                <span class="trim-handle start" title="拖动裁剪开头" @pointerdown.stop="startGesture($event, clip, track, 'trim-start')" />
+                <span class="clip-title"><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : 'video'" :size="12" />{{ clip.text ?? clip.name }}</span>
+                <span class="clip-detail-row"><span class="clip-detail">{{ clip.speed !== 1 ? `${clip.speed}× · ` : '' }}{{ clipDuration(clip).toFixed(1) }}s</span><time v-if="clip.generatedAt" class="clip-generated-time" data-testid="clip-generated-time" :datetime="clip.generatedAt" :title="generatedTimes.get(clip.generatedAt)?.full">{{ generatedTimes.get(clip.generatedAt)?.short }}</time></span>
+                <span class="trim-handle end" title="拖动裁剪结尾" @pointerdown.stop="startGesture($event, clip, track, 'trim-end')" />
               </button>
               <div class="lane-playhead" :style="{ left: `${playhead * zoom}px` }" />
             </div>
@@ -1016,6 +1089,9 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
 </template>
 
 <style scoped>
+.clip-detail-row{display:flex;align-items:center;gap:6px;min-width:0;width:100%;margin-top:auto}
+.clip-detail-row .clip-detail{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clip-generated-time{flex:0 1 auto;min-width:0;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:8px/10px ui-monospace,monospace;opacity:.8}
 .track-name .track-drag-handle{flex:0 0 14px;width:14px;height:18px;min-height:18px;padding:0;margin-left:-5px;margin-right:-3px;color:var(--ed-muted);cursor:grab;touch-action:none}.track-name .track-drag-handle:active{cursor:grabbing}.track-name .track-drag-handle:disabled{cursor:not-allowed}.track-dragging>.track-label,.track-dragging>.track-lane{background-color:color-mix(in srgb,var(--ed-accent) 10%,var(--ed-panel))}.track-dragging .timeline-clip{opacity:.65}.sorting-tracks{cursor:grabbing;user-select:none}.sorting-tracks .track-lane{cursor:grabbing}.track-drop-indicator{position:absolute;left:0;right:0;height:3px;transform:translateY(-1px);background:var(--ed-accent);box-shadow:0 0 0 1px var(--ed-panel);z-index:5;pointer-events:none}.track-sort-announcement{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 
 .video-editor{--ed-bg:var(--ui-bg,#f5f6fa);--ed-panel:var(--ui-surface,#fff);--ed-border:var(--ui-line,#e3e6ed);--ed-text:var(--ui-text,#202638);--ed-muted:var(--ui-muted,#858b9a);--ed-accent:var(--ui-accent,#3267f6);height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;color:var(--ed-text);font-size:12px;background:var(--ed-bg)}

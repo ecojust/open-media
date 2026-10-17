@@ -8,7 +8,7 @@ const picker = shallowRef<{ context: CaptureSelectionContext; imageUrl: string }
 let finishChoice: ((selection: CaptureSelection | null) => void) | undefined
 let controller: AbortController | undefined
 let destroyed = false
-function chooseSource({ imageUrl, source, signal }: BrowserScreenshotSelectionRequest): Promise<CaptureSelection | null> {
+function chooseSource({ imageUrl, source, signal }: BrowserScreenshotSelectionRequest, onConfirm?: () => void): Promise<CaptureSelection | null> {
   const sourceId = 'screen:browser-screenshot'
   const { width, height } = source
   return new Promise(resolve => {
@@ -17,6 +17,7 @@ function chooseSource({ imageUrl, source, signal }: BrowserScreenshotSelectionRe
       picker.value = undefined
       finishChoice = undefined
       resolve(selection)
+      if (selection && !signal.aborted && !destroyed) onConfirm?.()
     }
     const abort = () => complete(null)
     finishChoice = complete
@@ -33,14 +34,15 @@ function chooseSource({ imageUrl, source, signal }: BrowserScreenshotSelectionRe
     }
   })
 }
-async function capture(signal?: AbortSignal): Promise<BrowserScreenshotResult> {
+async function capture(signal?: AbortSignal, onConfirm?: (content: Promise<Blob>) => void): Promise<BrowserScreenshotResult> {
   if (controller) throw new Error('已有截屏正在进行，请先完成或取消。')
   if (destroyed || signal?.aborted) throw new DOMException('已取消截屏。', 'AbortError')
   const abort = new AbortController()
   controller = abort
   const cancel = () => abort.abort()
   signal?.addEventListener('abort', cancel, { once: true })
-  try { return await takeBrowserScreenshot({ signal: abort.signal, chooseSource }) }
+  const result = takeBrowserScreenshot({ signal: abort.signal, chooseSource: request => chooseSource(request, () => onConfirm?.(result.then(value => value.blob))) })
+  try { return await result }
   finally {
     signal?.removeEventListener('abort', cancel)
     finishChoice?.(null)

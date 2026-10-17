@@ -43,11 +43,14 @@ export interface ClipChromaKey {
   color: string
   similarity: number
   blend: number
+  spillSuppression?: boolean
 }
 
 /** Source trims are measured in source seconds; start and fades use timeline seconds. */
 export interface Clip {
   id: string
+  /** Last creation or text-content generation time; absent in older documents. */
+  generatedAt?: string
   assetId?: string
   name: string
   start: number

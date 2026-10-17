@@ -11,12 +11,12 @@ const selection = { sourceId: 'screen:1', sourceName: '屏幕 1', sourceWidth: 1
 async function installNativeContract(page) {
   await page.addInitScript(() => {
     const callbacks = new Map(), listeners = new Map(), urls = new Map()
-    let callbackId = 0, listenerId = 0, assetId = 0
-    const state = { calls: [], shortcut: null, rejectShortcut: null, picker: null, capture: null, completed: [], unexpected: [] }
+    let callbackId = 0, listenerId = 0
+    const state = { calls: [], shortcut: null, rejectShortcut: null, rejectClipboard: false, picker: null, capture: null, completed: [], unexpected: [] }
     function asset(name, width, height, color) {
       const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
       const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, width, height)
-      const url = canvas.toDataURL('image/png'), id = `native-screenshot-fixture-${++assetId}`, nativePath = `/screenshot-fixture/${id}.png`
+      const url = canvas.toDataURL('image/png'), id = `native-screenshot-fixture-${crypto.randomUUID()}`, nativePath = `/screenshot-fixture/${id}.png`
       urls.set(nativePath, url)
       return { id, name, kind: 'image', nativePath, url: '', mime: 'image/png', width, height, duration: 0, size: Math.floor((url.length - url.indexOf(',') - 1) * 3 / 4) }
     }
@@ -38,6 +38,15 @@ async function installNativeContract(page) {
       unregisterCallback: id => callbacks.delete(id),
       convertFileSrc: path => { if (!urls.has(path)) throw new Error(`没有图片样本：${path}`); return urls.get(path) },
       invoke: async (command, args) => {
+        if (command === 'copy_image_to_clipboard') {
+          if (!(args instanceof Uint8Array)) throw new Error('图片剪贴板命令必须使用二进制消息')
+          const header = new DataView(args.buffer, args.byteOffset, args.byteLength)
+          const width = header.getUint32(0, true), height = header.getUint32(4, true)
+          if (args.byteLength !== 8 + width * height * 4) throw new Error('图片剪贴板消息尺寸与像素长度不一致')
+          state.calls.push({ command, args: { width, height, byteLength: args.byteLength, firstPixel: [...args.slice(8, 12)], lastPixel: [...args.slice(-4)] } })
+          if (state.rejectClipboard) throw new Error('无法访问系统剪贴板，请稍后重试。')
+          return null
+        }
         state.calls.push({ command, args })
         if (command === 'plugin:event|listen') { const id = ++listenerId; listeners.set(id, args); return id }
         if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null }
@@ -73,7 +82,7 @@ async function main() {
       assert(response.ok && (await response.text()).includes('/@vite/client'), '截屏契约验证需要当前源码的开发服务。')
     } else {
       const { createServer } = await import('vite')
-      server = await createServer({ root, server: { host: '127.0.0.1', port: 0, strictPort: false }, logLevel: 'error' })
+      server = await createServer({ root, server: { host: '127.0.0.1', port: 0, strictPort: false, watch: { ignored: () => true } }, logLevel: 'error' })
       await server.listen()
       url = `http://127.0.0.1:${server.httpServer.address().port}`
     }
@@ -119,7 +128,7 @@ async function main() {
       assert.equal((await calls(page, 'pick_capture_source')).length, 1, '截屏写入期间不能重复启动')
       await page.evaluate(() => window.screenshotHarness.finishCapture())
       await expect(page.getByTestId('convert-workspace')).toBeVisible()
-      await expect(page.locator('.convert-toolbar h1')).toHaveText('图片转换')
+      await expect(page.locator('.convert-toolbar h1')).toHaveText('图片编辑')
       await expect(page.locator('.convert-source')).toHaveCount(3)
       await expect(page.locator('.convert-source input:checked')).toHaveCount(1)
       await expect(page.getByRole('checkbox', { name: '选择 截屏-1.png', exact: true })).toBeChecked()
@@ -131,7 +140,9 @@ async function main() {
       const pixel = await preview.evaluate(image => { const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight; const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); return [...context.getImageData(0, 0, 1, 1).data] })
       assert.deepEqual(pixel, [26, 120, 188, 255])
       await expect.poll(async () => (await calls(page, 'show_main_window')).length).toBe(1)
-      await expect(page.locator('.status-main')).toContainText('截屏已载入图片转换')
+      await expect(page.locator('.status-main')).toContainText('已复制')
+      await expect.poll(async () => (await calls(page, 'copy_image_to_clipboard')).length).toBe(1)
+      assert.deepEqual((await calls(page, 'copy_image_to_clipboard'))[0].args, { width: 64, height: 40, byteLength: 8 + 64 * 40 * 4, firstPixel: [26, 120, 188, 255], lastPixel: [26, 120, 188, 255] })
     })
 
     await check('取消范围选择不创建素材并恢复主窗口，弹窗打开时忽略截屏事件', async () => {
@@ -140,6 +151,7 @@ async function main() {
       await page.evaluate(() => window.screenshotHarness.finishPicker(null))
       await expect(page.locator('.status-main')).toContainText('已取消截屏')
       assert.equal((await calls(page, 'capture_screenshot')).length, 1)
+      assert.equal((await calls(page, 'copy_image_to_clipboard')).length, 1, '取消截屏不能写入剪贴板')
       await expect.poll(async () => (await calls(page, 'show_main_window')).length).toBe(2)
       await expect(page.locator('.convert-source')).toHaveCount(3)
       await expect(page.getByTestId('convert-image-preview')).toHaveAttribute('alt', '截屏-1.png')
@@ -197,6 +209,75 @@ async function main() {
       await page.evaluate(() => window.screenshotHarness.finishPicker(null))
       await expect(page.locator('.status-main')).toContainText('已取消截屏')
       await expect(page.getByTestId('screenshot-settings-open')).toBeFocused()
+    })
+
+    await check('原生剪贴板写入失败保留截屏，可手动重试相同图片像素', async () => {
+      await page.evaluate(() => { window.screenshotHarness.rejectClipboard = true })
+      await emitScreenshot(page)
+      await expect.poll(() => page.evaluate(() => !!window.screenshotHarness.picker)).toBe(true)
+      await page.evaluate(selection => window.screenshotHarness.finishPicker(selection), selection)
+      await expect.poll(() => page.evaluate(() => !!window.screenshotHarness.capture)).toBe(true)
+      await page.evaluate(() => window.screenshotHarness.finishCapture())
+      await expect(page.getByTestId('convert-image-preview')).toBeVisible()
+      await expect(page.locator('.status-main')).toContainText('剪贴板')
+      await expect(page.locator('.status-main')).not.toContainText('已复制')
+      await expect.poll(async () => (await calls(page, 'copy_image_to_clipboard')).length).toBe(1)
+      const before = await page.locator('.convert-source').count()
+      await page.evaluate(() => { window.screenshotHarness.rejectClipboard = false })
+      await page.getByTestId('image-copy').click()
+      await expect(page.getByTestId('image-copy-status')).toHaveText('图片已复制')
+      const copies = await calls(page, 'copy_image_to_clipboard')
+      assert.equal(copies.length, 2)
+      assert.deepEqual(copies[1].args, copies[0].args)
+      await expect(page.locator('.convert-source')).toHaveCount(before)
+      await expect(page.getByTestId('convert-result')).toHaveCount(0)
+    })
+
+    await check('项目素材已满仍复制真实截屏像素，并明确区分复制成功与加入项目失败', async () => {
+      const fullProject = await page.evaluate(async () => {
+        const { createProject, MAX_ASSETS } = await import('/src/core/project.ts')
+        const { saveProject } = await import('/src/core/storage.ts')
+        const project = createProject('素材已满的截屏项目')
+        const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2
+        const url = canvas.toDataURL('image/png')
+        project.assets = Array.from({ length: MAX_ASSETS }, (_, index) => ({
+          id: `capacity-image-${index}`, name: `已有图片-${index}.png`, kind: 'image',
+          url, nativePath: `/screenshot-fixture/capacity-image-${index}.png`,
+          width: 2, height: 2, duration: 0, size: 100, mime: 'image/png',
+        }))
+        await saveProject(project)
+        localStorage.setItem('open-media:last-project', project.id)
+        return { id: project.id, count: MAX_ASSETS, assetIds: project.assets.map(asset => asset.id) }
+      })
+      await page.reload()
+      await expect(page.getByTestId('home-workspace')).toBeVisible()
+      await expect.poll(async () => (await calls(page, 'configure_screenshot_shortcut')).length).toBe(1)
+      await page.getByTestId('nav-record').click()
+      await expect(page.locator('.project-summary')).toContainText(`${fullProject.count} 个素材`)
+      await emitScreenshot(page)
+      await expect.poll(() => page.evaluate(() => !!window.screenshotHarness.picker)).toBe(true)
+      await page.evaluate(selection => window.screenshotHarness.finishPicker(selection), selection)
+      await expect.poll(() => page.evaluate(() => !!window.screenshotHarness.capture)).toBe(true)
+      await page.evaluate(() => window.screenshotHarness.finishCapture())
+      await expect.poll(async () => (await calls(page, 'copy_image_to_clipboard')).length).toBe(1)
+      assert.deepEqual((await calls(page, 'copy_image_to_clipboard'))[0].args, {
+        width: 64, height: 40, byteLength: 8 + 64 * 40 * 4,
+        firstPixel: [26, 120, 188, 255], lastPixel: [26, 120, 188, 255],
+      }, '达到项目容量不能阻断截屏的二进制剪贴板写入')
+      await expect(page.locator('.status-main')).toContainText('截屏已复制到剪贴板，但加入图片编辑失败')
+      await expect(page.locator('.app-error')).toContainText('素材列表无效或数量过多')
+      await expect(page.locator('.status-main')).not.toContainText('并载入图片编辑')
+      await expect(page.locator('.status-main')).not.toContainText('已载入图片编辑')
+      await expect(page.getByTestId('recorder-workspace')).toBeVisible()
+      await expect(page.getByTestId('convert-workspace')).toHaveCount(0)
+      await expect(page.locator('.project-summary')).toContainText(`${fullProject.count} 个素材`)
+      await expect.poll(async () => (await calls(page, 'show_main_window')).length).toBe(1)
+      const retainedAssetIds = await page.evaluate(async id => {
+        const { loadProject } = await import('/src/core/storage.ts')
+        const saved = await loadProject(id)
+        try { return saved.project.assets.map(asset => asset.id) } finally { saved.revoke() }
+      }, fullProject.id)
+      assert.deepEqual(retainedAssetIds, fullProject.assetIds, '满额截屏不能删除、替换或追加原项目素材')
     })
 
     assert.deepEqual(errors, [])

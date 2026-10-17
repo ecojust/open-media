@@ -54,6 +54,7 @@ const paths: Record<string, string> = {
   lock: 'M5 10h14v11H5zM8 10V6a4 4 0 0 1 8 0v4',
   unlock: 'M5 10h14v11H5zM8 10V6a4 4 0 0 1 8 0',
   text: 'M3 4h18M12 4v16M7 20h10M3 4v4M21 4v4',
+  pen: 'm15 3 6 6-12 12H3v-6zM12 6l6 6M3 21l6-6',
   move: 'M12 2v20M2 12h20M8 6l4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4M18 8l4 4-4 4',
   fit: 'M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M7 7h10v10H7z',
   maximize: 'M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5',

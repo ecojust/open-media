@@ -5,6 +5,7 @@ import HeaderControls from './components/HeaderControls.vue'
 import EditorDialog from './components/EditorDialog.vue'
 import ScreenshotPicker from './components/ScreenshotPicker.vue'
 import { DEFAULT_SCREENSHOT_SHORTCUT, matchesScreenshotShortcut, screenshotErrorMessage, screenshotShortcutValidationError } from './core/screenshot'
+import { copyImageToClipboard, imageClipboardError } from './core/image-clipboard'
 import { buildInfo } from './core/build-info'
 import VideoEditor from './components/VideoEditor.vue'
 import RecorderWorkspace from './components/RecorderWorkspace.vue'
@@ -16,7 +17,7 @@ import { cloneProject, createClip, createProject, createTrack, validateProject }
 import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, redoHistory, undoHistory } from './core/timeline.ts'
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
 import { exportProjectFile, importProjectFile } from './core/project-file.ts'
-import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, type BrowserProjectFileHandle } from './core/browser-project-files.ts'
+import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, ProjectSaveLocationError, type BrowserProjectFileHandle } from './core/browser-project-files.ts'
 import { downloadBlob, importMediaFile } from './core/media-import.ts'
 import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, saveProjectFile, type ProjectFileTarget, type MediaJob } from './native.ts'
 
@@ -26,7 +27,7 @@ const workspaces: { id: Workspace; title: string; icon: string; description: str
   { id: 'gif', title: '片段转 GIF', icon: 'gif', description: '截取多个精彩片段，生成循环动图', color: '#9161d1' },
   { id: 'edit', title: '视频剪辑', icon: 'scissors', description: '多轨剪辑、字幕与配乐，组合你的故事', color: '#2563eb' },
   { id: 'video', title: '视频转换', icon: 'convert', description: '转换视频格式、压缩体积与提取音频', color: '#dd9635' },
-  { id: 'image', title: '图片转换', icon: 'image', description: '批量转换格式，调整尺寸与画面', color: '#2a9d80' },
+  { id: 'image', title: '图片编辑', icon: 'image', description: '插入文字与自定义笔触，裁剪并导出图片', color: '#2a9d80' },
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
@@ -183,9 +184,14 @@ async function takeScreenshot(): Promise<void> {
   const abort = new AbortController()
   screenshotAbort = abort
   announce('请选择截屏范围，按 Esc 取消。')
+  let clipboardResult: Promise<{ copied: true } | { copied: false; cause: unknown }> | undefined
   try {
     let asset: MediaAsset
     let blob: Blob | undefined
+    const startClipboardCopy = (content: string | Blob | Promise<Blob>) => copyImageToClipboard(content, native, abort.signal).then(
+      () => ({ copied: true as const }),
+      (cause: unknown) => ({ copied: false as const, cause }),
+    )
     if (native) {
       const requestId = crypto.randomUUID()
       screenshotRequestId = requestId
@@ -201,11 +207,12 @@ async function takeScreenshot(): Promise<void> {
       asset = await captureScreenshot(selection)
     } else {
       if (!screenshotPicker.value) throw new Error('截屏界面尚未就绪，请重试。')
-      const result = await screenshotPicker.value.capture(abort.signal)
+      const result = await screenshotPicker.value.capture(abort.signal, content => { clipboardResult = startClipboardCopy(content) })
       blob = result.blob
       asset = await importMediaFile(new File([blob], result.name, { type: 'image/png' }))
     }
     if (destroyed) { if (asset.url.startsWith('blob:')) URL.revokeObjectURL(asset.url); return }
+    if (native) clipboardResult = startClipboardCopy(asset.url)
     if (targetProjectId !== project.value.id) throw new Error('截屏所属项目已改变，请重新截屏。')
     await acceptAssets([asset], blob ? new Map([[asset.id, blob]]) : undefined)
     if (!project.value.assets.some(item => item.id === asset.id)) throw new Error(error.value || '截屏未能加入项目，请重试。')
@@ -213,11 +220,20 @@ async function takeScreenshot(): Promise<void> {
     view.value = 'image'
     await nextTick()
     if (native) await showMainWindow()
-    announce('截屏已载入图片转换，可以调整格式和尺寸。')
+    const copied = await (clipboardResult ?? startClipboardCopy(blob ?? asset.url))
+    if (!destroyed && !abort.signal.aborted) {
+      if (copied.copied) announce('截屏已复制到剪贴板，并载入图片编辑。')
+      else if (!(copied.cause instanceof DOMException && copied.cause.name === 'AbortError')) announce(`截屏已载入图片编辑，自动复制未完成。${imageClipboardError(copied.cause)}`)
+    }
   } catch (cause) {
     const message = screenshotErrorMessage(cause)
-    if (message) { screenshotError.value = message; fail(message) }
-    else announce('已取消截屏。')
+    const copied = await clipboardResult
+    if (!destroyed) {
+      if (message) {
+        screenshotError.value = copied?.copied ? `截屏已复制到剪贴板，但加入图片编辑失败：${message}` : message
+        fail(screenshotError.value)
+      } else announce('已取消截屏。')
+    }
     if (native && !destroyed) await showMainWindow().catch(() => {})
   } finally { if (screenshotAbort === abort) screenshotAbort = undefined; screenshotRequestId = undefined; screenshotBusy.value = false }
 }
@@ -374,7 +390,11 @@ async function save(saveAs = false, closing = false): Promise<boolean> {
     await persist()
     announce(downloaded ? '已下载项目副本；当前浏览器不支持直接覆盖文件。' : `${saveAs ? '项目已另存为' : '项目已保存'}：${lastSaved.value}`)
     return true
-  } catch (cause) { fail(cause); return false } finally { busy.value = '' }
+  } catch (cause) {
+    if (!saveAs && cause instanceof ProjectSaveLocationError) browserProjectTarget = undefined
+    fail(cause)
+    return false
+  } finally { busy.value = '' }
 }
 async function rename() { renameValue.value = project.value.title; renaming.value = true; await nextTick(); renameInput.value?.focus(); renameInput.value?.select() }
 function finishRename() { if (!renaming.value) return; renaming.value = false; const title = renameValue.value.trim().slice(0, 300); if (title) commit({ ...project.value, title }, '项目已重命名') }

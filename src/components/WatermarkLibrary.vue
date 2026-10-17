@@ -10,14 +10,17 @@ const emit = defineEmits<{ select: [material: WatermarkMaterial]; 'import-local'
 const search = ref(''), category = ref('全部'), activePreviewId = ref(''), previewReady = ref(false), failedPreviewId = ref('')
 const scroller = ref<HTMLElement | null>(null)
 const categories = ['全部', ...WATERMARK_CATEGORIES]
-const visibleMaterials = computed(() => {
+const page = ref(1), pageSize = 24
+const categoryCounts = Object.fromEntries(categories.map(item => [item, item === '全部' ? WATERMARK_MATERIALS.length : WATERMARK_MATERIALS.filter(material => material.category === item).length]))
+const filteredMaterials = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
   return WATERMARK_MATERIALS.filter(material => (category.value === '全部' || material.category === category.value)
-    && (!query || [material.name, material.category, ...material.tags].join(' ').toLocaleLowerCase().includes(query)))
+    && (!query || [material.name, material.category, material.textTemplate?.text ?? '', ...material.tags].join(' ').toLocaleLowerCase().includes(query)))
 })
+const pageCount = computed(() => Math.max(1, Math.ceil(filteredMaterials.value.length / pageSize)))
+const visibleMaterials = computed(() => filteredMaterials.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 let video: HTMLVideoElement | null = null, previewCanvas: HTMLCanvasElement | null = null
 let frame = 0, generation = 0, lastFrame = 0
-const greenKey = createChromaKey()
 
 function bindCanvas(element: Element | ComponentPublicInstance | null): void {
   previewCanvas = element instanceof HTMLCanvasElement ? element : null
@@ -46,6 +49,7 @@ async function startPreview(material: WatermarkMaterial, explicit = false): Prom
   if (!explicit && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
   stopPreview()
   const token = generation
+  const greenKey = createChromaKey({ spillSuppression: material.spillSuppression })
   activePreviewId.value = material.id
   failedPreviewId.value = ''
   const media = document.createElement('video')
@@ -91,6 +95,7 @@ async function startPreview(material: WatermarkMaterial, explicit = false): Prom
   } catch { failedPreview(material.id, token) }
 }
 function togglePreview(material: WatermarkMaterial): void {
+  if (material.kind === 'text') { add(material); return }
   if (activePreviewId.value === material.id) stopPreview()
   else void startPreview(material, true)
 }
@@ -105,7 +110,9 @@ function add(material: WatermarkMaterial): void {
 }
 function importLocal(): void { if (!props.busy) { stopPreview(); emit('import-local') } }
 function visibilityChanged(): void { if (document.hidden) stopPreview() }
-watch([search, category], () => { stopPreview(); failedPreviewId.value = ''; if (scroller.value) scroller.value.scrollTop = 0 })
+function resetPagePreview(): void { stopPreview(); failedPreviewId.value = ''; if (scroller.value) scroller.value.scrollTop = 0 }
+watch([search, category], () => { page.value = 1; resetPagePreview() })
+watch(page, resetPagePreview)
 watch(() => props.busy, busy => { if (busy) stopPreview() })
 onMounted(() => document.addEventListener('visibilitychange', visibilityChanged))
 onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibilityChanged); stopPreview() })
@@ -114,21 +121,21 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
 <template>
   <section class="watermark-library" data-testid="watermark-library" aria-label="水印素材库" :aria-busy="busy">
     <div class="library-toolbar">
-      <label class="material-search"><Icon name="search" :size="16" /><input v-model="search" type="search" aria-label="搜索水印素材" placeholder="搜索贴纸、动画、标注…" autocomplete="off" :disabled="busy" data-testid="watermark-search" /></label>
+      <label class="material-search"><Icon name="search" :size="16" /><input v-model="search" type="search" aria-label="搜索水印素材" placeholder="搜索题材、动画、文字…" autocomplete="off" :disabled="busy" data-testid="watermark-search" /></label>
       <button type="button" class="import-local" :disabled="busy" data-testid="watermark-import-local" @click="importLocal"><Icon name="import" :size="15" /><span>导入素材</span></button>
     </div>
     <div class="material-categories" role="group" aria-label="水印素材分类">
-      <button v-for="item in categories" :key="item" type="button" :aria-pressed="category === item" :disabled="busy" :data-watermark-category="item" @click="category = item">{{ item }}</button>
+      <button v-for="item in categories" :key="item" type="button" :aria-pressed="category === item" :disabled="busy" :data-watermark-category="item" @click="category = item">{{ item }}<span class="category-count">{{ categoryCounts[item] }}</span></button>
     </div>
-    <div class="library-summary"><span>{{ visibleMaterials.length }} 个内置素材</span><span><Icon name="volume-off" :size="12" />悬停预览 · 从当前刻度添加</span></div>
+    <div class="library-summary"><span>{{ filteredMaterials.length }} 个{{ search.trim() ? '匹配' : '内置' }}素材</span><span><Icon name="volume-off" :size="12" />悬停预览 · 从当前刻度添加</span></div>
     <p v-if="error" class="library-error" role="alert" data-testid="watermark-error">{{ error }}</p>
     <div ref="scroller" class="material-scroller" data-testid="watermark-scroller" @scroll="stopPreview">
       <div v-if="visibleMaterials.length" class="material-grid">
         <article v-for="material in visibleMaterials" :key="material.id" class="material-card" :data-watermark-id="material.id">
-          <button type="button" class="material-preview" :class="{ previewing: activePreviewId === material.id, 'preview-ready': activePreviewId === material.id && previewReady }" :disabled="busy || material.kind !== 'video'" :aria-label="`${activePreviewId === material.id ? '停止预览' : '预览'} ${material.name}`" :aria-pressed="activePreviewId === material.id" @pointerenter="($event.pointerType === 'mouse') && startPreview(material)" @pointerleave="leavePreview(material.id)" @focus="focusPreview($event, material)" @blur="leavePreview(material.id)" @click="togglePreview(material)">
+          <button type="button" class="material-preview" :class="{ previewing: activePreviewId === material.id, 'preview-ready': activePreviewId === material.id && previewReady }" :disabled="busy || material.kind === 'image'" :aria-label="`${material.kind === 'text' ? '添加并编辑' : activePreviewId === material.id ? '停止预览' : '预览'} ${material.name}`" :aria-pressed="material.kind === 'video' ? activePreviewId === material.id : undefined" @pointerenter="($event.pointerType === 'mouse') && startPreview(material)" @pointerleave="leavePreview(material.id)" @focus="focusPreview($event, material)" @blur="leavePreview(material.id)" @click="togglePreview(material)">
             <img :src="material.poster" alt="" loading="lazy" draggable="false" />
             <canvas v-if="activePreviewId === material.id" :ref="bindCanvas" :class="{ ready: previewReady }" aria-hidden="true" />
-            <span class="material-type">{{ material.chromaKey ? '绿幕动效' : material.kind === 'video' ? '动画' : '贴纸' }}</span>
+            <span class="material-type" :class="{ editable: material.kind === 'text' }">{{ material.kind === 'text' ? '可编辑文字' : material.chromaKey ? '绿幕动效' : material.kind === 'video' ? '动画' : '贴纸' }}</span>
             <span v-if="material.kind === 'video'" class="preview-indicator" aria-hidden="true"><Icon :name="activePreviewId === material.id ? 'pause' : 'play'" :size="13" /></span>
             <span v-if="failedPreviewId === material.id" class="preview-unavailable">预览暂不可用</span>
           </button>
@@ -137,7 +144,12 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
       </div>
       <div v-else class="material-empty" role="status"><Icon name="search" :size="28" /><strong>没有找到匹配的素材</strong><span>试试其他关键词，或导入自己的图片、视频。</span><button type="button" :disabled="busy" @click="search = ''; category = '全部'">查看全部素材</button></div>
     </div>
-    <p class="library-note"><Icon name="layers" :size="14" /><span>素材会添加到独立水印轨道；添加后可调整位置、大小和时长。内置绿幕素材自动去除绿色背景。</span></p>
+    <nav v-if="pageCount > 1" class="material-pagination" aria-label="水印素材分页" data-testid="watermark-pagination">
+      <button type="button" :disabled="busy || page === 1" data-testid="watermark-previous-page" @click="page--">上一页</button>
+      <span role="status" aria-live="polite">第 {{ page }} / {{ pageCount }} 页 · 每页 {{ pageSize }} 个</span>
+      <button type="button" :disabled="busy || page === pageCount" data-testid="watermark-next-page" @click="page++">下一页</button>
+    </nav>
+    <p class="library-note"><Icon name="layers" :size="14" /><span>素材添加到独立水印轨道；可调整位置、大小和时长。文字水印添加后可在片段属性中直接改文案，绿幕素材自动去除绿色背景。</span></p>
   </section>
 </template>
 
@@ -154,6 +166,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
 .watermark-library .material-categories button{display:block;flex-shrink:0;min-height:29px;padding:4px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ed-muted);font-size:11px;line-height:19px;white-space:nowrap}
 .watermark-library .material-categories button:hover:not(:disabled){color:var(--ed-text);background:var(--ed-bg)}
 .watermark-library .material-categories button[aria-pressed=true]{border-color:color-mix(in srgb,var(--ed-accent) 20%,var(--ed-border));background:color-mix(in srgb,var(--ed-accent) 9%,var(--ed-panel));color:var(--ed-accent);font-weight:600}
+.category-count{display:inline-block;margin-left:5px;font-size:9px;font-variant-numeric:tabular-nums;opacity:.75}
 .library-summary{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px 12px;margin-bottom:10px;color:var(--ed-muted);font-size:10px}
 .library-summary>span:last-child{display:flex;align-items:center;gap:4px}
 .material-scroller{max-height:min(440px,calc(100dvh - 260px));min-height:110px;overflow:auto;overscroll-behavior:contain;padding:2px 4px 3px 2px;margin:-2px -4px -3px -2px;scrollbar-width:thin;scrollbar-color:var(--ed-border) transparent}
@@ -165,6 +178,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
 .material-preview canvas.ready{opacity:1}
 .material-preview.preview-ready img{opacity:0}
 .material-type{position:absolute;left:7px;top:7px;padding:2px 5px;border:1px solid #ffffff25;border-radius:4px;background:#202637d6;color:#fff;font-size:8px;line-height:12px;pointer-events:none}
+.material-type.editable{background:#17604ee8;border-color:#a0ebd67a}
 .preview-indicator{position:absolute;right:7px;bottom:7px;display:flex;align-items:center;justify-content:center;width:23px;height:23px;border:1px solid #ffffff60;border-radius:50%;background:#202637bb;color:#fff;pointer-events:none}
 .material-preview.previewing .preview-indicator{background:var(--ed-accent)}
 .preview-unavailable{position:absolute;bottom:6px;left:6px;padding:2px 5px;border-radius:4px;background:#202637e8;color:#fff;font-size:9px;line-height:14px;pointer-events:none}
@@ -175,6 +189,9 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
 .material-detail i{display:block;width:2px;height:2px;border-radius:50%;background:currentColor;opacity:.65}
 .watermark-library .material-add{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:27px;min-height:27px;padding:0;border:1px solid color-mix(in srgb,var(--ed-accent) 22%,var(--ed-border));border-radius:7px;background:color-mix(in srgb,var(--ed-accent) 8%,var(--ed-panel));color:var(--ed-accent)}
 .watermark-library .material-add:hover:not(:disabled){border-color:var(--ed-accent);background:var(--ed-accent);color:#fff}
+.material-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:12px;color:var(--ed-muted);font-size:10px;font-variant-numeric:tabular-nums}
+.watermark-library .material-pagination button{min-height:29px;padding:4px 10px;border:1px solid var(--ed-border);border-radius:6px;background:var(--ed-panel);color:var(--ed-text);font-size:11px}
+.watermark-library .material-pagination button:hover:not(:disabled){color:var(--ed-accent);border-color:var(--ed-accent)}
 .library-note{display:flex;align-items:flex-start;gap:7px;margin:13px 0 0;padding-top:11px;border-top:1px solid var(--ed-border);color:var(--ed-muted);font-size:10px;line-height:1.65}
 .library-note svg{flex-shrink:0;margin-top:1px;color:var(--ed-accent)}
 .library-error{padding:9px 11px;margin:0 0 10px;border:1px solid color-mix(in srgb,#d95751 30%,var(--ed-border));border-radius:7px;background:color-mix(in srgb,#d95751 8%,var(--ed-panel));color:color-mix(in srgb,#d95751 75%,var(--ed-text));font-size:11px;overflow-wrap:anywhere}

@@ -9,6 +9,8 @@ struct ChromaKey {
     color: String,
     similarity: f64,
     blend: f64,
+    #[serde(default)]
+    spill_suppression: bool,
 }
 
 pub(crate) fn filter_chain(clip: &Value, visual: bool) -> Result<Option<String>> {
@@ -38,10 +40,23 @@ pub(crate) fn filter_chain(clip: &Value, visual: bool) -> Result<Option<String>>
         return Ok(None);
     }
     // RGB distance is sqrt((dr² + dg² + db²) / 3) / 255, shared with preview.
-    Ok(Some(format!(
+    let mut filter = format!(
         "colorkey=color=0x{}:similarity={:.12}:blend={:.12}",
         &key.color[1..], key.similarity, key.blend
-    )))
+    );
+    if key.spill_suppression {
+        let red = u8::from_str_radix(&key.color[1..3], 16).unwrap();
+        let green = u8::from_str_radix(&key.color[3..5], 16).unwrap();
+        let blue = u8::from_str_radix(&key.color[5..7], 16).unwrap();
+        // Cap the keyed channel at the larger remaining channel, matching preview.
+        // The key mask stays unchanged and is still multiplied by source alpha below.
+        if green > red && green > blue {
+            filter.push_str(",geq=r='r(X,Y)':g='min(g(X,Y),max(r(X,Y),b(X,Y)))':b='b(X,Y)':a='alpha(X,Y)',format=rgba");
+        } else if blue > red && blue > green {
+            filter.push_str(",geq=r='r(X,Y)':g='g(X,Y)':b='min(b(X,Y),max(r(X,Y),g(X,Y)))':a='alpha(X,Y)',format=rgba");
+        }
+    }
+    Ok(Some(filter))
 }
 
 pub(crate) fn append_graph(
@@ -93,6 +108,8 @@ mod tests {
             ("similarity", json!(1.01)),
             ("blend", json!(-0.1)),
             ("blend", json!(1.01)),
+            ("spillSuppression", json!(1)),
+            ("spillSuppression", json!(null)),
             ("color", json!("#0f0")),
             ("color", json!("#00gg00")),
             ("color", json!("#00ff00,split")),
@@ -105,5 +122,23 @@ mod tests {
             assert!(filter_chain(&json!({"chromaKey":key}), true).is_err(), "{field}");
         }
         assert!(filter_chain(&json!({"chromaKey":enabled()}), false).is_err());
+    }
+
+    #[test]
+    fn optional_spill_suppression_only_caps_green_or_blue() {
+        for (color, expected) in [("#00ff00", "g='min(g(X,Y),max(r(X,Y),b(X,Y)))'"), ("#0000ff", "b='min(b(X,Y),max(r(X,Y),g(X,Y)))'")] {
+            let key = json!({"enabled":true,"color":color,"similarity":0.18,"blend":0.08,"spillSuppression":true});
+            let filter = filter_chain(&json!({"chromaKey":key}), true).unwrap().unwrap();
+            assert!(filter.contains(expected));
+            assert!(filter.contains("a='alpha(X,Y)'"));
+        }
+        for color in ["#ff0000", "#808080", "#00ffff"] {
+            let key = json!({"enabled":true,"color":color,"similarity":0.18,"blend":0.08,"spillSuppression":true});
+            assert!(!filter_chain(&json!({"chromaKey":key}), true).unwrap().unwrap().contains("geq="));
+        }
+        let legacy = filter_chain(&json!({"chromaKey":enabled()}), true).unwrap();
+        let mut disabled = enabled();
+        disabled["spillSuppression"] = json!(false);
+        assert_eq!(filter_chain(&json!({"chromaKey":disabled}), true).unwrap(), legacy);
     }
 }

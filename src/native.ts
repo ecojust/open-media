@@ -100,6 +100,22 @@ export async function onCaptureControlsAction(handler: (action: CaptureControlAc
 }
 export async function stopCapture(): Promise<MediaAsset | null> { const asset = await call<MediaAsset | null>('stop_capture'); return asset ? assetUrl(asset) : null }
 export async function saveBytes(name: string, bytes: Uint8Array): Promise<string | null> { return call('save_bytes', { name, bytes: Array.from(bytes) }) }
+export async function writeClipboardImage(width: number, height: number, rgba: Uint8ClampedArray, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
+  if (!isDesktop()) throw new Error('此操作需要桌面端。')
+  if (![width, height].every(value => Number.isSafeInteger(value) && value > 0)) throw new Error('剪贴板图片尺寸或像素数据无效。')
+  if (width * height > 40_000_000) throw new Error('复制图片最多支持 4000 万像素，请减小尺寸后重试。')
+  if (rgba.length !== width * height * 4) throw new Error('剪贴板图片尺寸或像素数据无效。')
+  // Binary IPC avoids expanding a full-resolution screenshot into a large JSON array.
+  const packet = new Uint8Array(8 + rgba.byteLength)
+  const header = new DataView(packet.buffer)
+  header.setUint32(0, width, true)
+  header.setUint32(4, height, true)
+  packet.set(rgba, 8)
+  const { invoke } = await import('@tauri-apps/api/core')
+  signal?.throwIfAborted()
+  return invoke('copy_image_to_clipboard', packet)
+}
 export interface ProjectFileTarget { name: string; path: string; token: string }
 export async function saveProjectFile(name: string, bytes: Uint8Array, token?: string): Promise<ProjectFileTarget | null> { return call('save_project_file', { name, bytes: Array.from(bytes), token: token ?? null }) }
 export async function openProjectFile(): Promise<(ProjectFileTarget & { bytes: number[] }) | null> { return call('open_project_file') }

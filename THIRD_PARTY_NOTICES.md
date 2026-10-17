@@ -36,6 +36,7 @@ See [docs/SPEECH_RUNTIME.md](docs/SPEECH_RUNTIME.md) and [licenses/speech-runtim
 | serde, serde_json | MIT OR Apache-2.0 | Original upstream license texts retained in `licenses/application/` |
 | tempfile | MIT OR Apache-2.0 | Copyright (c) 2015 Steven Allen |
 | getrandom | MIT OR Apache-2.0 | Copyright (c) 2018-2026 The rust-random Project Developers; Copyright (c) 2014 The Rust Project Developers |
+| arboard | MIT OR Apache-2.0 | Copyright 2022 The Arboard contributors; original notices and image clipboard dependencies retained in `licenses/application/cargo/` |
 
 The exact dependency graph and versions are retained in `package-lock.json` and `src-tauri/Cargo.lock`. The installation's `licenses/application/cargo/manifest.json` inventories every locked registry package, including indirect, build-only and platform-specific dependencies. Original license, copyright and notice texts are retained alongside it, with exact source archive checksums and upstream provenance for notices omitted from published packages. Each package entry provides a source URL for the listed version.
 

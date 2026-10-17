@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "sourceLock": "src-tauri/Cargo.lock",
-  "sourceLockSha256": "3452a66fbe2b2284b575b14df2eb7fc3194b86395e38679d848ce482dd5bf364",
+  "sourceLockSha256": "aece5b52fdd08507274091fc1aba633dc08181a767caedaec145ad5863094781",
   "coverage": "All registry packages in the locked dependency graph, including build-only and platform-specific packages. The inventory may exceed the dependencies present in an individual installer.",
   "originalTextPolicy": "Original license, copyright and notice bytes are retained without modification. Identical texts share one stored copy. Supplemental upstream sources are recorded where published package archives omit their notices.",
   "packages": [
@@ -214,6 +214,38 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/anyhow/1.0.104/download",
             "archiveSha256": "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+          }
+        }
+      ]
+    },
+    {
+      "name": "arboard",
+      "version": "3.6.1",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [],
+      "source": "https://crates.io/api/v1/crates/arboard/3.6.1/download",
+      "archiveSha256": "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf",
+      "notices": [
+        {
+          "file": "../Apache-2.0.txt",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "bytes": 10174,
+          "originalPath": "LICENSE-APACHE.txt",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/arboard/3.6.1/download",
+            "archiveSha256": "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
+          }
+        },
+        {
+          "file": "texts/f35468024534e0f4f16bb94cd0e88c87fbd1314f919c2645a07d350fb77b40c0.txt",
+          "sha256": "f35468024534e0f4f16bb94cd0e88c87fbd1314f919c2645a07d350fb77b40c0",
+          "bytes": 1081,
+          "originalPath": "LICENSE-MIT.txt",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/arboard/3.6.1/download",
+            "archiveSha256": "0348a1c054491f4bfe6ab86a7b6ab1e44e45d899005de92f58b3df180b36ddaf"
           }
         }
       ]
@@ -894,6 +926,38 @@
       ]
     },
     {
+      "name": "byteorder-lite",
+      "version": "0.1.0",
+      "declaredLicense": "Unlicense OR MIT",
+      "authors": [],
+      "source": "https://crates.io/api/v1/crates/byteorder-lite/0.1.0/download",
+      "archiveSha256": "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495",
+      "notices": [
+        {
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "bytes": 1081,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/byteorder-lite/0.1.0/download",
+            "archiveSha256": "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
+          }
+        },
+        {
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "bytes": 1211,
+          "originalPath": "UNLICENSE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/byteorder-lite/0.1.0/download",
+            "archiveSha256": "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
+          }
+        }
+      ]
+    },
+    {
       "name": "bytes",
       "version": "1.12.1",
       "declaredLicense": "MIT",
@@ -1258,6 +1322,41 @@
       ]
     },
     {
+      "name": "clipboard-win",
+      "version": "5.4.1",
+      "declaredLicense": "BSL-1.0",
+      "authors": [
+        "Douman <douman@gmx.se>"
+      ],
+      "source": "https://crates.io/api/v1/crates/clipboard-win/5.4.1/download",
+      "archiveSha256": "bde03770d3df201d4fb868f2c9c59e66a3e4e2bd06692a0fe701e7103c7e84d4",
+      "notices": [
+        {
+          "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "bytes": 1338,
+          "originalPath": "LICENSE",
+          "origin": {
+            "kind": "upstream-supplement",
+            "source": "upstream-exact-commit",
+            "url": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342/LICENSE",
+            "commit": "3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342"
+          }
+        }
+      ],
+      "supplementalProvenance": {
+        "notes": [
+          "The published crate excludes its original LICENSE file; the unchanged BSL-1.0 text is retained from the exact upstream commit recorded in .cargo_vcs_info.json."
+        ],
+        "commit": "3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342",
+        "sourceComparison": {
+          "method": "Git blob SHA-1 matched against exact upstream commit tree",
+          "verifiedRustSourceFiles": 12,
+          "result": "All packaged Rust source files match the upstream commit."
+        }
+      }
+    },
+    {
       "name": "combine",
       "version": "4.6.9",
       "declaredLicense": "MIT",
@@ -1602,6 +1701,29 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/crossbeam-utils/0.8.23/download",
             "archiveSha256": "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
+          }
+        }
+      ]
+    },
+    {
+      "name": "crunchy",
+      "version": "0.2.4",
+      "declaredLicense": "MIT",
+      "authors": [
+        "Eira Fransham <jackefransham@gmail.com>"
+      ],
+      "source": "https://crates.io/api/v1/crates/crunchy/0.2.4/download",
+      "archiveSha256": "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5",
+      "notices": [
+        {
+          "file": "texts/3eab77734a181b2a2e8418af9004f960f715f04aac4d76a26cf774f63a7b13d1.txt",
+          "sha256": "3eab77734a181b2a2e8418af9004f960f715f04aac4d76a26cf774f63a7b13d1",
+          "bytes": 1082,
+          "originalPath": "LICENSE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/crunchy/0.2.4/download",
+            "archiveSha256": "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
           }
         }
       ]
@@ -2616,6 +2738,29 @@
       ]
     },
     {
+      "name": "error-code",
+      "version": "3.4.0",
+      "declaredLicense": "BSL-1.0",
+      "authors": [
+        "Douman <douman@gmx.se>"
+      ],
+      "source": "https://crates.io/api/v1/crates/error-code/3.4.0/download",
+      "archiveSha256": "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7",
+      "notices": [
+        {
+          "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "bytes": 1338,
+          "originalPath": "LICENSE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/error-code/3.4.0/download",
+            "archiveSha256": "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
+          }
+        }
+      ]
+    },
+    {
       "name": "fastrand",
       "version": "2.5.0",
       "declaredLicense": "Apache-2.0 OR MIT",
@@ -2645,6 +2790,29 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/fastrand/2.5.0/download",
             "archiveSha256": "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
+          }
+        }
+      ]
+    },
+    {
+      "name": "fax",
+      "version": "0.2.7",
+      "declaredLicense": "MIT",
+      "authors": [
+        "Sebastian K <s3bk@protonmail.com>"
+      ],
+      "source": "https://crates.io/api/v1/crates/fax/0.2.7/download",
+      "archiveSha256": "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a",
+      "notices": [
+        {
+          "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+          "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+          "bytes": 1075,
+          "originalPath": "LICENSE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/fax/0.2.7/download",
+            "archiveSha256": "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
           }
         }
       ]
@@ -3452,6 +3620,29 @@
       ]
     },
     {
+      "name": "gethostname",
+      "version": "1.1.0",
+      "declaredLicense": "Apache-2.0",
+      "authors": [
+        "Sebastian Wiesner <sebastian@swsnr.de>"
+      ],
+      "source": "https://crates.io/api/v1/crates/gethostname/1.1.0/download",
+      "archiveSha256": "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8",
+      "notices": [
+        {
+          "file": "../tempfile-LICENSE-APACHE.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "originalPath": "LICENSE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/gethostname/1.1.0/download",
+            "archiveSha256": "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
+          }
+        }
+      ]
+    },
+    {
       "name": "getrandom",
       "version": "0.3.4",
       "declaredLicense": "MIT OR Apache-2.0",
@@ -3811,6 +4002,40 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/gtk3-macros/0.18.2/download",
             "archiveSha256": "52ff3c5b21f14f0736fed6dcfc0bfb4225ebf5725f3c0209edeec181e4d73e9d"
+          }
+        }
+      ]
+    },
+    {
+      "name": "half",
+      "version": "2.7.1",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Kathryn Long <squeeself@gmail.com>"
+      ],
+      "source": "https://crates.io/api/v1/crates/half/2.7.1/download",
+      "archiveSha256": "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b",
+      "notices": [
+        {
+          "file": "texts/a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9.txt",
+          "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "bytes": 10173,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/half/2.7.1/download",
+            "archiveSha256": "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
+          }
+        },
+        {
+          "file": "texts/508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1.txt",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "bytes": 1036,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/half/2.7.1/download",
+            "archiveSha256": "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
           }
         }
       ]
@@ -4545,6 +4770,40 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/idna_adapter/1.2.2/download",
             "archiveSha256": "cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714"
+          }
+        }
+      ]
+    },
+    {
+      "name": "image",
+      "version": "0.25.10",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The image-rs Developers"
+      ],
+      "source": "https://crates.io/api/v1/crates/image/0.25.10/download",
+      "archiveSha256": "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104",
+      "notices": [
+        {
+          "file": "../Apache-2.0.txt",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "bytes": 10174,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/image/0.25.10/download",
+            "archiveSha256": "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
+          }
+        },
+        {
+          "file": "texts/c77a4cf9da729987d0fe7ccd811e3bd27393914ddf3d23467c18cc22954513b3.txt",
+          "sha256": "c77a4cf9da729987d0fe7ccd811e3bd27393914ddf3d23467c18cc22954513b3",
+          "bytes": 1036,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/image/0.25.10/download",
+            "archiveSha256": "85ab80394333c02fe689eaf900ab500fbd0c2213da414687ebf995a65d5a6104"
           }
         }
       ]
@@ -5871,6 +6130,40 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/mio/1.2.4/download",
             "archiveSha256": "1788edb87fdc09c7e26304471e2f5be8cdefb1b6930d6e3985fc02ff53bf86ee"
+          }
+        }
+      ]
+    },
+    {
+      "name": "moxcms",
+      "version": "0.8.1",
+      "declaredLicense": "BSD-3-Clause OR Apache-2.0",
+      "authors": [
+        "Radzivon Bartoshyk"
+      ],
+      "source": "https://crates.io/api/v1/crates/moxcms/0.8.1/download",
+      "archiveSha256": "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b",
+      "notices": [
+        {
+          "file": "texts/90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5.txt",
+          "sha256": "90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5",
+          "bytes": 11348,
+          "originalPath": "LICENSE-APACHE.md",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/moxcms/0.8.1/download",
+            "archiveSha256": "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
+          }
+        },
+        {
+          "file": "texts/2aa92cada6431e75615e3fe6cb1a9082c98f777d48ae1c087c0da0e37f7b8bff.txt",
+          "sha256": "2aa92cada6431e75615e3fe6cb1a9082c98f777d48ae1c087c0da0e37f7b8bff",
+          "bytes": 1506,
+          "originalPath": "LICENSE.md",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/moxcms/0.8.1/download",
+            "archiveSha256": "bb85c154ba489f01b25c0d36ae69a87e4a1c73a72631fc6c0eb6dde34a73e44b"
           }
         }
       ]
@@ -7897,6 +8190,75 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/proc-macro2/1.0.107/download",
             "archiveSha256": "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
+          }
+        }
+      ]
+    },
+    {
+      "name": "pxfm",
+      "version": "0.1.30",
+      "declaredLicense": "BSD-3-Clause OR Apache-2.0",
+      "authors": [
+        "Radzivon Bartoshyk"
+      ],
+      "source": "https://crates.io/api/v1/crates/pxfm/0.1.30/download",
+      "archiveSha256": "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea",
+      "notices": [
+        {
+          "file": "texts/90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5.txt",
+          "sha256": "90bf2d659c43045111b65c733ab2a6d4cbcb422a098368c8c58a9ba3db4ed0c5",
+          "bytes": 11348,
+          "originalPath": "LICENSE-APACHE.md",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/pxfm/0.1.30/download",
+            "archiveSha256": "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+          }
+        },
+        {
+          "file": "texts/2aa92cada6431e75615e3fe6cb1a9082c98f777d48ae1c087c0da0e37f7b8bff.txt",
+          "sha256": "2aa92cada6431e75615e3fe6cb1a9082c98f777d48ae1c087c0da0e37f7b8bff",
+          "bytes": 1506,
+          "originalPath": "LICENSE.md",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/pxfm/0.1.30/download",
+            "archiveSha256": "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+          }
+        }
+      ]
+    },
+    {
+      "name": "quick-error",
+      "version": "2.0.1",
+      "declaredLicense": "MIT/Apache-2.0",
+      "authors": [
+        "Paul Colomiets <paul@colomiets.name>",
+        "Colin Kiegel <kiegel@gmx.de>"
+      ],
+      "source": "https://crates.io/api/v1/crates/quick-error/2.0.1/download",
+      "archiveSha256": "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3",
+      "notices": [
+        {
+          "file": "texts/c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08.txt",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/quick-error/2.0.1/download",
+            "archiveSha256": "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
+          }
+        },
+        {
+          "file": "texts/058f01fe181608d027fcde7e528fc03ea3cf90f30903c407644b0a9bbc54f500.txt",
+          "sha256": "058f01fe181608d027fcde7e528fc03ea3cf90f30903c407644b0a9bbc54f500",
+          "bytes": 1070,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/quick-error/2.0.1/download",
+            "archiveSha256": "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
           }
         }
       ]
@@ -10604,6 +10966,29 @@
       ]
     },
     {
+      "name": "tiff",
+      "version": "0.11.3",
+      "declaredLicense": "MIT",
+      "authors": [
+        "The image-rs Developers"
+      ],
+      "source": "https://crates.io/api/v1/crates/tiff/0.11.3/download",
+      "archiveSha256": "b63feaf3343d35b6ca4d50483f94843803b0f51634937cc2ec519fc32232bc52",
+      "notices": [
+        {
+          "file": "texts/20c097d0de27e2adc179140a3d542091951a030699c7e1c78655f2a2d08d4e3e.txt",
+          "sha256": "20c097d0de27e2adc179140a3d542091951a030699c7e1c78655f2a2d08d4e3e",
+          "bytes": 1073,
+          "originalPath": "LICENSE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/tiff/0.11.3/download",
+            "archiveSha256": "b63feaf3343d35b6ca4d50483f94843803b0f51634937cc2ec519fc32232bc52"
+          }
+        }
+      ]
+    },
+    {
       "name": "time",
       "version": "0.3.55",
       "declaredLicense": "MIT OR Apache-2.0",
@@ -12326,6 +12711,40 @@
       }
     },
     {
+      "name": "weezl",
+      "version": "0.1.12",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The image-rs Developers"
+      ],
+      "source": "https://crates.io/api/v1/crates/weezl/0.1.12/download",
+      "archiveSha256": "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88",
+      "notices": [
+        {
+          "file": "texts/769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb.txt",
+          "sha256": "769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb",
+          "bytes": 10846,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/weezl/0.1.12/download",
+            "archiveSha256": "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+          }
+        },
+        {
+          "file": "texts/573f5227db835cd30bbdd3aed3f82615f80119a4d5c82b4daf642dbfe2b6afde.txt",
+          "sha256": "573f5227db835cd30bbdd3aed3f82615f80119a4d5c82b4daf642dbfe2b6afde",
+          "bytes": 1080,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/weezl/0.1.12/download",
+            "archiveSha256": "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+          }
+        }
+      ]
+    },
+    {
       "name": "winapi",
       "version": "0.3.9",
       "declaredLicense": "MIT/Apache-2.0",
@@ -13820,6 +14239,78 @@
       ]
     },
     {
+      "name": "x11rb",
+      "version": "0.13.2",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Uli Schlachter <psychon@znc.in>",
+        "Eduardo Sánchez Muñoz <eduardosm-dev@e64.io>",
+        "notgull <jtnunley01@gmail.com>"
+      ],
+      "source": "https://crates.io/api/v1/crates/x11rb/0.13.2/download",
+      "archiveSha256": "9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414",
+      "notices": [
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/x11rb/0.13.2/download",
+            "archiveSha256": "9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414"
+          }
+        },
+        {
+          "file": "texts/a72561f47c1f665535930f606739d9098a6186802d5e2e8ec491faf00f4add5b.txt",
+          "sha256": "a72561f47c1f665535930f606739d9098a6186802d5e2e8ec491faf00f4add5b",
+          "bytes": 1058,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/x11rb/0.13.2/download",
+            "archiveSha256": "9993aa5be5a26815fe2c3eacfc1fde061fc1a1f094bf1ad2a18bf9c495dd7414"
+          }
+        }
+      ]
+    },
+    {
+      "name": "x11rb-protocol",
+      "version": "0.13.2",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Uli Schlachter <psychon@znc.in>",
+        "Eduardo Sánchez Muñoz <eduardosm-dev@e64.io>",
+        "notgull <jtnunley01@gmail.com>"
+      ],
+      "source": "https://crates.io/api/v1/crates/x11rb-protocol/0.13.2/download",
+      "archiveSha256": "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd",
+      "notices": [
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "bytes": 11358,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/x11rb-protocol/0.13.2/download",
+            "archiveSha256": "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+          }
+        },
+        {
+          "file": "texts/a72561f47c1f665535930f606739d9098a6186802d5e2e8ec491faf00f4add5b.txt",
+          "sha256": "a72561f47c1f665535930f606739d9098a6186802d5e2e8ec491faf00f4add5b",
+          "bytes": 1058,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/x11rb-protocol/0.13.2/download",
+            "archiveSha256": "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
+          }
+        }
+      ]
+    },
+    {
       "name": "yoke",
       "version": "0.8.3",
       "declaredLicense": "Unicode-3.0",
@@ -13861,6 +14352,92 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/yoke-derive/0.8.4/download",
             "archiveSha256": "ec8ebde2db3681e8c9980cc27822030e68752690ddfa9473e739aeb4dbde6d71"
+          }
+        }
+      ]
+    },
+    {
+      "name": "zerocopy",
+      "version": "0.8.63",
+      "declaredLicense": "BSD-2-Clause OR Apache-2.0 OR MIT",
+      "authors": [],
+      "source": "https://crates.io/api/v1/crates/zerocopy/0.8.63/download",
+      "archiveSha256": "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8",
+      "notices": [
+        {
+          "file": "texts/9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3.txt",
+          "sha256": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3",
+          "bytes": 11350,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zerocopy/0.8.63/download",
+            "archiveSha256": "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
+          }
+        },
+        {
+          "file": "texts/83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32.txt",
+          "sha256": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32",
+          "bytes": 1275,
+          "originalPath": "LICENSE-BSD",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zerocopy/0.8.63/download",
+            "archiveSha256": "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
+          }
+        },
+        {
+          "file": "texts/1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df.txt",
+          "sha256": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df",
+          "bytes": 1060,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zerocopy/0.8.63/download",
+            "archiveSha256": "e5fe1f8f1b06191a00962174c61aa5005e0bb391a6d80d07e24d115c01a92ed8"
+          }
+        }
+      ]
+    },
+    {
+      "name": "zerocopy-derive",
+      "version": "0.8.63",
+      "declaredLicense": "BSD-2-Clause OR Apache-2.0 OR MIT",
+      "authors": [],
+      "source": "https://crates.io/api/v1/crates/zerocopy-derive/0.8.63/download",
+      "archiveSha256": "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f",
+      "notices": [
+        {
+          "file": "texts/9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3.txt",
+          "sha256": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3",
+          "bytes": 11350,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zerocopy-derive/0.8.63/download",
+            "archiveSha256": "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
+          }
+        },
+        {
+          "file": "texts/83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32.txt",
+          "sha256": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32",
+          "bytes": 1275,
+          "originalPath": "LICENSE-BSD",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zerocopy-derive/0.8.63/download",
+            "archiveSha256": "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
+          }
+        },
+        {
+          "file": "texts/1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df.txt",
+          "sha256": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df",
+          "bytes": 1060,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zerocopy-derive/0.8.63/download",
+            "archiveSha256": "863ad3ac83293fb4d740aedbfdc9240dd8d1a50c1099acd76ce80ce7c7230c7f"
           }
         }
       ]
@@ -14020,6 +14597,94 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/zmij/1.0.23/download",
             "archiveSha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+          }
+        }
+      ]
+    },
+    {
+      "name": "zune-core",
+      "version": "0.5.3",
+      "declaredLicense": "MIT OR Apache-2.0 OR Zlib",
+      "authors": [],
+      "source": "https://crates.io/api/v1/crates/zune-core/0.5.3/download",
+      "archiveSha256": "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b",
+      "notices": [
+        {
+          "file": "texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "bytes": 11357,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zune-core/0.5.3/download",
+            "archiveSha256": "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+          }
+        },
+        {
+          "file": "texts/d30047bca3b516639339a3c279bb84c3483124fb5a9dafe3c75056a85090e745.txt",
+          "sha256": "d30047bca3b516639339a3c279bb84c3483124fb5a9dafe3c75056a85090e745",
+          "bytes": 1073,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zune-core/0.5.3/download",
+            "archiveSha256": "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+          }
+        },
+        {
+          "file": "texts/d201d14804d3bcd3b944147173175e4abfbd838b7c8069b6bd3452496bf13e6c.txt",
+          "sha256": "d201d14804d3bcd3b944147173175e4abfbd838b7c8069b6bd3452496bf13e6c",
+          "bytes": 859,
+          "originalPath": "LICENSE-ZLIB",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zune-core/0.5.3/download",
+            "archiveSha256": "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+          }
+        }
+      ]
+    },
+    {
+      "name": "zune-jpeg",
+      "version": "0.5.15",
+      "declaredLicense": "MIT OR Apache-2.0 OR Zlib",
+      "authors": [
+        "caleb <etemesicaleb@gmail.com>"
+      ],
+      "source": "https://crates.io/api/v1/crates/zune-jpeg/0.5.15/download",
+      "archiveSha256": "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296",
+      "notices": [
+        {
+          "file": "texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "bytes": 11357,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zune-jpeg/0.5.15/download",
+            "archiveSha256": "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+          }
+        },
+        {
+          "file": "texts/d30047bca3b516639339a3c279bb84c3483124fb5a9dafe3c75056a85090e745.txt",
+          "sha256": "d30047bca3b516639339a3c279bb84c3483124fb5a9dafe3c75056a85090e745",
+          "bytes": 1073,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zune-jpeg/0.5.15/download",
+            "archiveSha256": "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+          }
+        },
+        {
+          "file": "texts/d201d14804d3bcd3b944147173175e4abfbd838b7c8069b6bd3452496bf13e6c.txt",
+          "sha256": "d201d14804d3bcd3b944147173175e4abfbd838b7c8069b6bd3452496bf13e6c",
+          "bytes": 859,
+          "originalPath": "LICENSE-ZLIB",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zune-jpeg/0.5.15/download",
+            "archiveSha256": "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
           }
         }
       ]
