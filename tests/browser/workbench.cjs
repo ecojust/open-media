@@ -293,6 +293,11 @@ async function main() {
       paint(); window.capturePaintTimer = setInterval(paint, 50)
       window.captureStream = canvas.captureStream(15)
       Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => window.captureStream })
+      const audio = new AudioContext(), tone = audio.createOscillator(), output = audio.createMediaStreamDestination()
+      const gain = audio.createGain(); gain.gain.value = 0.1
+      tone.connect(gain).connect(output); tone.start()
+      window.captureAudioContext = audio; window.captureMicrophoneStream = output.stream; window.captureMicrophoneRequests = 0
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { window.captureMicrophoneRequests++; return output.stream } })
       const original = Blob.prototype.arrayBuffer
       window.releaseBufferReads = () => { window.holdBufferReads = false; window.bufferWaiters.splice(0).forEach(resolve => resolve()) }
       window.bufferWaiters = []
@@ -301,8 +306,10 @@ async function main() {
     await page.getByTestId('nav-record').click()
     await page.getByLabel('开始倒计时').selectOption('0')
     await page.getByTestId('record-start').click()
+    await expect(page.getByTestId('capture-picker-microphone')).toHaveAttribute('aria-pressed', 'true')
     await page.getByTestId('capture-picker-confirm').click()
     await expect(page.getByTestId('recording-source')).toBeVisible()
+    assert.equal(await page.evaluate(() => window.captureMicrophoneRequests), 1)
     await expect(page.getByTestId('record-stop')).toBeVisible()
     await page.waitForTimeout(400)
     await page.getByTestId('nav-edit').click()
@@ -324,7 +331,8 @@ async function main() {
     await download
     await expect(page.locator('.project-summary')).toContainText('3 个素材', { timeout: 20000 })
     assert.equal(await page.evaluate(() => window.captureStream.getTracks().every(track => track.readyState === 'ended')), true)
-    await page.evaluate(() => clearInterval(window.capturePaintTimer))
+    assert.equal(await page.evaluate(() => window.captureMicrophoneStream.getTracks().every(track => track.readyState === 'ended')), true)
+    await page.evaluate(async () => { clearInterval(window.capturePaintTimer); await window.captureAudioContext.close() })
     await page.getByTestId('nav-edit').click()
     await expect(page.locator('.asset-card')).toHaveCount(3)
     await waitSaved()
