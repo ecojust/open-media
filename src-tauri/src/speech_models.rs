@@ -665,6 +665,9 @@ fn update(downloads: &Mutex<Downloads>, id: &str, generation: u64, state: State,
             if !entry.cancelled.load(Ordering::SeqCst) {
                 entry.state = state;
                 entry.downloaded = downloaded;
+                if state != State::Downloading {
+                    entry.download_source = None;
+                }
             }
         }
     }
@@ -684,6 +687,7 @@ fn finished(
             .get_mut(id)
             .filter(|entry| entry.generation == generation)
         {
+            entry.download_source = None;
             if entry.cancelled.load(Ordering::SeqCst) {
                 entry.state = State::NotDownloaded;
                 entry.downloaded = 0;
@@ -780,6 +784,7 @@ impl SpeechModels {
                 .get_mut(&package.id)
                 .ok_or("音色配置不存在。")?;
             entry.state = State::Verifying;
+            entry.download_source = None;
             entry.downloaded = package.download_size
                 + package
                     .runtime
@@ -951,6 +956,7 @@ impl SpeechModels {
             entry.state = State::Downloading;
             entry.downloaded = 0;
             entry.error = None;
+            entry.download_source = None;
             entry.runtime = None;
             entry.stamps.clear();
             entry.cancelled = cancelled.clone();
@@ -1006,6 +1012,7 @@ impl SpeechModels {
             entry.state = State::NotDownloaded;
             entry.downloaded = 0;
             entry.error = None;
+            entry.download_source = None;
         }
         Ok(())
     }
@@ -1327,14 +1334,11 @@ fn reuse_installed_file(
 }
 
 fn update_source(downloads: &Mutex<Downloads>, id: &str, generation: u64, source: &str) {
-    if source.is_empty() {
-        return;
-    }
     if let Ok(mut state) = downloads.lock() {
         if let Some(entry) = state.entries.get_mut(id).filter(|entry| {
             entry.generation == generation && !entry.cancelled.load(Ordering::SeqCst)
         }) {
-            entry.download_source = Some(source.to_owned());
+            entry.download_source = (!source.is_empty()).then(|| source.to_owned());
         }
     }
 }
@@ -1412,6 +1416,7 @@ fn download_package(
         completed = runtime.archive.size;
     }
     for file in &package.files {
+        update_source(downloads, &package.id, generation, "");
         let destination = staging.path().join(&file.path);
         if file.embedded.is_none()
             && reuse_installed_file(&installed, file, &destination, cancelled)?
@@ -1968,6 +1973,42 @@ mod tests {
         assert_eq!(state.entries["model"].downloaded, 25);
         assert_eq!(state.workers, 1);
         assert!(state.entries["model"].error.is_none());
+    }
+
+    #[test]
+    fn download_source_tracks_only_the_current_network_operation() {
+        let downloads = Mutex::new(Downloads {
+            entries: HashMap::from([(
+                "model".into(),
+                Entry {
+                    state: State::Downloading,
+                    generation: 2,
+                    ..Entry::default()
+                },
+            )]),
+            ..Downloads::default()
+        });
+        let source = || downloads.lock().unwrap().entries["model"].download_source.clone();
+        update_source(&downloads, "model", 2, "https://modelscope.cn");
+        update_source(&downloads, "model", 1, "https://huggingface.co");
+        assert_eq!(source().as_deref(), Some("https://modelscope.cn"));
+
+        // Local cache and installed-file reuse must not claim a network source.
+        update_source(&downloads, "model", 2, "");
+        assert!(source().is_none());
+        update_source(&downloads, "model", 2, "https://hf-mirror.com");
+        update(&downloads, "model", 2, State::Verifying, 100);
+        assert!(source().is_none());
+
+        update(&downloads, "model", 2, State::Downloading, 0);
+        update_source(&downloads, "model", 2, "https://modelscope.cn");
+        finished(&downloads, "model", 2, Err("network unavailable".into()), 100);
+        assert!(source().is_none());
+
+        let cancelled = downloads.lock().unwrap().entries["model"].cancelled.clone();
+        cancelled.store(true, Ordering::SeqCst);
+        update_source(&downloads, "model", 2, "https://huggingface.co");
+        assert!(source().is_none());
     }
 
     #[test]

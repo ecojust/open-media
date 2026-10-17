@@ -135,14 +135,18 @@ def runtime_platforms(source):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--runtime-metadata', type=Path, help='Verified release metadata JSON or a directory of platform metadata.')
+    parser.add_argument('--runtime-metadata', type=Path,
+                        default=ROOT / 'test/optional-speech-runtime/runtime-metadata.json',
+                        help='Verified release metadata JSON or a directory of platform metadata.')
+    parser.add_argument('--models-only', action='store_true',
+                        help='Bootstrap model records before the first runtime build; not an application-ready catalogue.')
     parser.add_argument('--output', type=Path, default=ROOT / 'src-tauri/resources/speech-models.json')
     args = parser.parse_args()
     for model, name in [('f5-v1-base-fp32', 'f5'), ('qwen3-tts-1.7b-serena', 'qwen3')]:
         data = (ROOT / f'scripts/optional-speech-runner/config/{model}.json').read_bytes()
         (ASSETS / f'{name}-runner-config.json').write_bytes(data)
     catalogue = dict(schema=2, models=build_models(), runtimes=[])
-    if args.runtime_metadata:
+    if not args.models_only:
         platforms = runtime_platforms(args.runtime_metadata)
         catalogue['runtimes'] = [dict(id='python-cpu-v1', version=1, platforms=platforms)]
     args.output.write_text(json.dumps(catalogue, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')

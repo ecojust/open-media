@@ -11,6 +11,14 @@ on:
         description: Exact reviewed source commit SHA from that run
         type: string
         required: true
+      windows_run_id:
+        description: Optional successful Windows recovery run, using the same runtime source
+        type: string
+        default: ''
+      expected_windows_head:
+        description: Exact reviewed application integration commit from the Windows recovery
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -31,6 +39,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SOURCE_RUN_ID: ${{ inputs.run_id }}
       EXPECTED_HEAD: ${{ inputs.expected_head }}
+      WINDOWS_RUN_ID: ${{ inputs.windows_run_id }}
+      EXPECTED_WINDOWS_HEAD: ${{ inputs.expected_windows_head }}
       PYTHONUTF8: '1'
     steps:
       - name: Verify the reviewed source run and all three platforms
@@ -47,14 +57,31 @@ jobs:
           def api(path):
               return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/{path}']))
           source = api(f'actions/runs/{run_id}')
-          assert source['status'] == 'completed' and source['conclusion'] == 'success', 'The source workflow has not passed'
+          recovery_id, recovery_head = os.environ.get('WINDOWS_RUN_ID', ''), os.environ.get('EXPECTED_WINDOWS_HEAD', '')
+          if recovery_id or recovery_head:
+              assert re.fullmatch(r'[1-9][0-9]{0,19}', recovery_id) and re.fullmatch(r'[0-9a-f]{40}', recovery_head), 'Incomplete Windows recovery identity'
+          assert source['status'] == 'completed', 'The original workflow is still running'
+          assert source['conclusion'] == 'success' or (recovery_id and source['conclusion'] == 'failure'), 'Unexpected original workflow result'
           assert source['head_sha'] == expected, 'The source revision differs from the reviewed revision'
           assert source['repository']['full_name'] == repo and source['head_repository']['full_name'] == repo, 'Unexpected source repository'
           workflow = api(f"actions/workflows/{source['workflow_id']}")
           assert workflow['path'] == '.github/workflows/optional-speech-runtime.yml', 'Unexpected build workflow'
           jobs = api(f'actions/runs/{run_id}/jobs?per_page=100')['jobs']
+          artifacts = api(f'actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
+          recovery = recovery_jobs = recovery_artifacts = None
+          if recovery_id:
+              recovery = api(f'actions/runs/{recovery_id}')
+              assert recovery['status'] == 'completed' and recovery['conclusion'] == 'success', 'Windows recovery has not passed'
+              assert recovery['head_sha'] == recovery_head, 'Windows application source differs from review'
+              assert recovery['repository']['full_name'] == repo and recovery['head_repository']['full_name'] == repo
+              recovery_workflow = api(f"actions/workflows/{recovery['workflow_id']}")
+              assert recovery_workflow['path'] == '.github/workflows/recover-speech-runtime-windows.yml'
+              recovery_jobs = api(f'actions/runs/{recovery_id}/jobs?per_page=100')['jobs']
+              recovery_artifacts = api(f'actions/runs/{recovery_id}/artifacts?per_page=100')['artifacts']
           for platform in ('macos-arm64', 'macos-x64', 'windows-x64'):
-              candidates = [job for job in jobs if job['name'] == f'Runtime and real speech — {platform}']
+              selected_jobs = recovery_jobs if recovery_id and platform == 'windows-x64' else jobs
+              selected_artifacts = recovery_artifacts if recovery_id and platform == 'windows-x64' else artifacts
+              candidates = [job for job in selected_jobs if job['name'] == f'Runtime and real speech — {platform}']
               assert len(candidates) == 1 and candidates[0]['conclusion'] == 'success', f'{platform} validation did not pass'
               completed = {step['name']: step for step in candidates[0]['steps']}
               for required in ('Verify native optional speech and Chinese normalization',
@@ -62,16 +89,21 @@ jobs:
                                'Verify application command and audio import with downloaded models',
                                'Verify runtime remains unchanged after application inference'):
                   assert completed.get(required, {}).get('conclusion') == 'success', f'{platform}: missing successful {required}'
-          artifacts = api(f'actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
-          for platform in ('macos-arm64', 'macos-x64', 'windows-x64'):
-              candidates = [a for a in artifacts if a['name'] == f'speech-runtime-python-cpu-v1-{platform}']
+              if recovery_id and platform == 'windows-x64':
+                  for required in ('Verify and record the two independent source revisions', 'Attach successful application validation provenance'):
+                      assert completed.get(required, {}).get('conclusion') == 'success', f'Missing recovery provenance: {required}'
+              candidates = [a for a in selected_artifacts if a['name'] == f'speech-runtime-python-cpu-v1-{platform}']
               assert len(candidates) == 1 and not candidates[0]['expired'], f'Missing immutable artifact for {platform}'
           Path('source-evidence').mkdir()
           Path('source-evidence/build-run.json').write_text(json.dumps(source, indent=2) + '\n')
           Path('source-evidence/build-jobs.json').write_text(json.dumps(jobs, indent=2) + '\n')
           Path('source-evidence/build-artifacts.json').write_text(json.dumps(artifacts, indent=2) + '\n')
+          if recovery_id:
+              Path('source-evidence/windows-recovery-run.json').write_text(json.dumps(recovery, indent=2) + '\n')
+              Path('source-evidence/windows-recovery-jobs.json').write_text(json.dumps(recovery_jobs, indent=2) + '\n')
+              Path('source-evidence/windows-recovery-artifacts.json').write_text(json.dumps(recovery_artifacts, indent=2) + '\n')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write(f'head={expected}\nrun_id={run_id}\n')
+              out.write(f'head={expected}\nrun_id={run_id}\nwindows_run_id={recovery_id or run_id}\n')
           PY
       - uses: actions/checkout@v4
         with:
@@ -81,8 +113,14 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.source.outputs.run_id }}
-          pattern: speech-runtime-python-cpu-v1-*
+          pattern: speech-runtime-python-cpu-v1-macos-*
           path: runtime-artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.source.outputs.windows_run_id }}
+          name: speech-runtime-python-cpu-v1-windows-x64
+          path: runtime-artifacts/speech-runtime-python-cpu-v1-windows-x64
       - name: Recheck every runtime byte and the source-bound model assets
         shell: bash
         run: |
@@ -101,6 +139,16 @@ jobs:
               item = json.loads((folder / 'runtime-metadata.json').read_text())
               assert item['platform'] == platform and item['id'] == 'python-cpu-v1' and item['version'] == 1
               assert item['validated'] is True and item['sourceCommit'] == os.environ['EXPECTED_HEAD']
+              if platform == 'windows-x64' and os.environ.get('WINDOWS_RUN_ID'):
+                  evidence = json.loads((folder / 'runtime-validation-source.json').read_text())
+                  assert evidence['schema'] == 1 and evidence['platform'] == platform
+                  assert evidence['runtimeSourceCommit'] == item['sourceCommit']
+                  assert evidence['applicationSourceCommit'] == item['applicationSourceCommit'] == os.environ['EXPECTED_WINDOWS_HEAD']
+                  assert str(evidence['workflowRunId']) == str(item['applicationValidationRunId']) == os.environ['WINDOWS_RUN_ID']
+                  (release / 'windows-validation-source.json').write_text(json.dumps(evidence, indent=2) + '\n')
+              else:
+                  item['applicationSourceCommit'] = item['sourceCommit']
+                  item['applicationValidationRunId'] = os.environ['SOURCE_RUN_ID']
               assert set(item['validatedModels']) == {'f5-v1-base-fp32', 'qwen3-tts-1.7b-serena'}
               assert item['filename'] == f'speech-runtime-python-cpu-v1-{platform}.zip'
               assert item['url'] == f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/speech-runtime-v1/{item['filename']}"

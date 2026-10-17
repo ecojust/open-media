@@ -1,0 +1,65 @@
+[
+  {
+    "bytes": 13800,
+    "error": null,
+    "label": "modelscope",
+    "origin": "https://modelscope.cn",
+    "passed": true,
+    "seconds": 1.406412387,
+    "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+  },
+  {
+    "bytes": 13800,
+    "error": null,
+    "label": "huggingface",
+    "origin": "https://huggingface.co",
+    "passed": true,
+    "seconds": 0.188542416,
+    "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+  },
+  {
+    "bytes": 13800,
+    "error": null,
+    "label": "hf-mirror",
+    "origin": "https://hf-mirror.com",
+    "passed": true,
+    "seconds": 0.716195643,
+    "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+  },
+  {
+    "bytes": 869,
+    "error": null,
+    "label": "github",
+    "origin": "https://github.com",
+    "passed": true,
+    "seconds": 0.297161132,
+    "sha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25"
+  },
+  {
+    "bytes": 869,
+    "error": null,
+    "label": "ghfast",
+    "origin": "https://ghfast.top",
+    "passed": true,
+    "seconds": 0.952828225,
+    "sha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25"
+  },
+  {
+    "bytes": 869,
+    "error": null,
+    "label": "ghproxy",
+    "origin": "https://ghproxy.net",
+    "passed": true,
+    "seconds": 0.801639892,
+    "sha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25"
+  },
+  {
+    "bytes": 869,
+    "error": null,
+    "label": "gh-proxy",
+    "origin": "https://gh-proxy.com",
+    "passed": true,
+    "seconds": 0.374949884,
+    "sha256": "4676f6f763093940c100081a714f009086e79b0f22304a748a471ff0df1abc25"
+  }
+]

@@ -175,6 +175,63 @@ fn relative_path(root: &Path, relative: &str, directory: bool) -> Result<PathBuf
     Ok(resolved)
 }
 
+// Some Python model loaders join subpaths with forward slashes, which Windows
+// does not normalize inside a verbatim path. Keep validation paths canonical,
+// but pass an equivalent ordinary path when it retains Win32 path semantics.
+#[cfg(any(windows, test))]
+fn ordinary_windows_python_path(path: &str) -> Option<String> {
+    let extended = path.strip_prefix(r"\\?\")?;
+    let ordinary = if let Some(unc) = extended.strip_prefix(r"UNC\") {
+        let mut components = unc.split('\\');
+        if components.next()?.is_empty() || components.next()?.is_empty() {
+            return None;
+        }
+        format!(r"\\{unc}")
+    } else if extended.as_bytes().first()?.is_ascii_alphabetic()
+        && extended.as_bytes().get(1..3) == Some(b":\\")
+    {
+        extended.to_owned()
+    } else {
+        return None;
+    };
+    // Preserve genuine extended paths, device names and components whose
+    // interpretation would change after removing the prefix.
+    if ordinary.encode_utf16().count() >= 260
+        || ordinary.split('\\').any(|component| {
+            if component.ends_with(['.', ' ']) {
+                return true;
+            }
+            let stem = component
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .to_ascii_uppercase();
+            matches!(
+                stem.as_str(),
+                "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+            ) || ["COM", "LPT"].iter().any(|prefix| {
+                stem.strip_prefix(prefix).is_some_and(|suffix| {
+                    matches!(
+                        suffix,
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    )
+                })
+            })
+        })
+    {
+        return None;
+    }
+    Some(ordinary)
+}
+
+fn python_process_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(ordinary) = path.to_str().and_then(ordinary_windows_python_path) {
+        return PathBuf::from(ordinary);
+    }
+    path.to_owned()
+}
+
 impl SpeechRuntime {
     fn discover(resource: &Path) -> Result<Self> {
         let mut roots = Vec::new();
@@ -271,14 +328,23 @@ impl SpeechRuntime {
             .iter()
             .find(|voice| voice.id == request.voice_id)
             .ok_or("所选音色不可用，请重新选择。")?;
-        let mut command = Command::new(&self.executable);
+        let python = matches!(self.model.kind, ModelKind::F5 | ModelKind::Qwen3);
+        let mut command = Command::new(if python {
+            python_process_path(&self.executable)
+        } else {
+            self.executable.clone()
+        });
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        command.current_dir(&self.root);
-        if matches!(self.model.kind, ModelKind::F5 | ModelKind::Qwen3) {
+        command.current_dir(if python {
+            python_process_path(&self.root)
+        } else {
+            self.root.clone()
+        });
+        if python {
             let script = self
                 .script
                 .as_ref()
@@ -286,13 +352,13 @@ impl SpeechRuntime {
             command
                 .arg("-I")
                 .arg("-B")
-                .arg(script)
+                .arg(python_process_path(script))
                 .arg("--config")
-                .arg(self.root.join(&self.model.config))
+                .arg(python_process_path(&self.root.join(&self.model.config)))
                 .arg("--text-file")
-                .arg(text_file)
+                .arg(python_process_path(text_file))
                 .arg("--output-filename")
-                .arg(output)
+                .arg(python_process_path(output))
                 .arg("--speed")
                 .arg(request.speed.to_string())
                 .env("HF_HUB_OFFLINE", "1")
@@ -1234,6 +1300,88 @@ mod tests {
             assert!(args.iter().any(|arg| arg == expected), "{expected}");
         }
         assert!(!args.iter().any(|arg| arg.starts_with("--matcha-")));
+    }
+
+    #[test]
+    fn python_windows_paths_preserve_unc_unicode_and_extended_semantics() {
+        for (extended, ordinary) in [
+            (
+                r"\\?\D:\配音 路径\models\runner-config.json",
+                r"D:\配音 路径\models\runner-config.json",
+            ),
+            (
+                r"\\?\UNC\server\share\音色\config.json",
+                r"\\server\share\音色\config.json",
+            ),
+        ] {
+            assert_eq!(
+                ordinary_windows_python_path(extended).as_deref(),
+                Some(ordinary)
+            );
+        }
+        for unchanged in [
+            r"C:\普通路径\config.json",
+            r"\\server\share\config.json",
+            r"\\?\Volume{123}\config.json",
+            r"\\.\C:\config.json",
+            r"\\?\UNC\server",
+            r"\\?\C:relative\config.json",
+            r"\\?\C:\name.\config.json",
+            r"\\?\C:\name \config.json",
+            r"\\?\C:\NUL\config.json",
+            r"\\?\C:\COM1.txt\config.json",
+            r"\\?\C:\LPT¹\config.json",
+        ] {
+            assert!(
+                ordinary_windows_python_path(unchanged).is_none(),
+                "{unchanged}"
+            );
+        }
+        let long = format!(r"\\?\C:\{}\config.json", "目录".repeat(125));
+        assert!(ordinary_windows_python_path(&long).is_none());
+        // Count UTF-16 code units rather than bytes or Unicode scalar values.
+        let supplementary = format!(r"\\?\C:\{}\config.json", "𐐀".repeat(125));
+        assert!(ordinary_windows_python_path(&supplementary).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn downloaded_python_command_removes_safe_windows_verbatim_prefixes() {
+        let root = fixture();
+        let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        runtime.model.kind = ModelKind::Qwen3;
+        runtime.model.config = "runner-config.json".into();
+        runtime.root = PathBuf::from(r"\\?\C:\Users\测试 用户\models\qwen3");
+        runtime.executable = PathBuf::from(r"\\?\C:\Users\测试 用户\runtime\python\python.exe");
+        runtime.script = Some(PathBuf::from(
+            r"\\?\C:\Users\测试 用户\runtime\runner\tts.py",
+        ));
+        let command = runtime
+            .command(
+                &request("测试路径"),
+                Path::new(r"\\?\UNC\server\share\字幕 文本.txt"),
+                Path::new(r"\\?\C:\Users\测试 用户\生成 音频.wav"),
+            )
+            .unwrap();
+        assert_eq!(
+            command.get_program(),
+            r"C:\Users\测试 用户\runtime\python\python.exe"
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new(r"C:\Users\测试 用户\models\qwen3"))
+        );
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args[2], r"C:\Users\测试 用户\runtime\runner\tts.py");
+        assert_eq!(
+            args[4],
+            r"C:\Users\测试 用户\models\qwen3\runner-config.json"
+        );
+        assert_eq!(args[6], r"\\server\share\字幕 文本.txt");
+        assert_eq!(args[8], r"C:\Users\测试 用户\生成 音频.wav");
     }
 
     #[test]
