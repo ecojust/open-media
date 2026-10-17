@@ -203,7 +203,7 @@ jobs:
           test "$RESULT_BRANCH" = "research/tts-outputs-$MODEL-$SOURCE_RUN"
           test "$(git branch --show-current)" = "$RESULT_BRANCH"
           destination="test/chinese-tts-benchmark/incoming/$MODEL/$SOURCE_RUN"
-          git add -- "$destination"
+          git add -f -- "$destination"
           if ! git diff --cached --quiet; then
             git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m '保存中文配音对比生成资料 [skip ci]'
           fi
