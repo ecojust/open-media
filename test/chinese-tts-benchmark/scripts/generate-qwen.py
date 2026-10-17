@@ -31,6 +31,22 @@ MODEL_FILES = [
 ]
 
 
+def notice(message):
+    # Escape workflow command characters without changing model inputs.
+    escaped = str(message).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+    print(f'::notice::{escaped}', flush=True)
+
+
+def cpu_flags():
+    path = Path('/proc/cpuinfo')
+    if not path.is_file():
+        return []
+    for line in path.read_text().splitlines():
+        if line.startswith('flags') or line.startswith('Features'):
+            return line.split(':', 1)[1].strip().split()
+    return []
+
+
 def atomic_json(path, data):
     temp = path.with_suffix(path.suffix + '.tmp')
     temp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
@@ -87,12 +103,22 @@ def main():
     parser.add_argument('--model-dir', type=Path, required=True)
     parser.add_argument('--threads', type=int, default=4)
     parser.add_argument('--limit', type=int, default=10)
+    parser.add_argument('--start', type=int, default=1, help='One-based first corpus sample')
+    parser.add_argument('--dtype', choices=('auto', 'bfloat16', 'float32'), default='auto')
     parser.add_argument('--download-only', action='store_true')
     args = parser.parse_args()
     output = args.output
+    if args.start < 1 or args.limit < 1 or args.start + args.limit - 1 > 10:
+        raise ValueError('Requested corpus range must be within 01..10')
+    flags = cpu_flags()
+    native_bf16 = bool({'avx512_bf16', 'amx_bf16'} & set(flags))
+    dtype = ('bfloat16' if native_bf16 else 'float32') if args.dtype == 'auto' else args.dtype
+    notice(f'Preparing samples {args.start:02d}..{args.start + args.limit - 1:02d}; CPU BF16 instructions={native_bf16}; dtype={dtype}')
     for directory in ('wav', 'audio', 'licenses'):
         (output / directory).mkdir(parents=True, exist_ok=True)
+    notice('Downloading and verifying 11 required model files (4,520,159,586 bytes)')
     files = prepare_model(args.model_dir)
+    notice('Model download and integrity verification complete: 4,520,159,586 bytes')
     for url, name in [
         (f'https://huggingface.co/{REPO}/raw/{REVISION}/README.md', 'MODEL_CARD.md'),
         (f'https://raw.githubusercontent.com/QwenLM/Qwen3-TTS/{SOURCE_REVISION}/LICENSE', 'LICENSE'),
@@ -105,7 +131,7 @@ def main():
         source=dict(repository=f'https://huggingface.co/{REPO}', revision=REVISION,
                     implementation='qwen-tts==0.1.1', files=files),
         license=dict(spdx='Apache-2.0', path='licenses/LICENSE', model_card='licenses/MODEL_CARD.md'),
-        settings=dict(device='cpu', dtype='bfloat16', attention='sdpa', threads=args.threads,
+        settings=dict(device='cpu', dtype=dtype, dtype_selection=args.dtype, attention='sdpa', threads=args.threads,
                       language='Chinese', speaker='Serena',
                       instruct='用自然流畅的标准普通话朗读，语气温和，语速适中。',
                       non_streaming_mode=True, do_sample=True, temperature=0.9, top_p=1.0,
@@ -115,7 +141,9 @@ def main():
                       text_normalization='none; original corpus text is passed unchanged',
                       postprocessing='none; original PCM WAV and MP3 encoding only'),
         environment=dict(python=platform.python_version(), platform=platform.platform(),
-                         processor=platform.processor(), logical_cpu_count=os.cpu_count()),
+                         processor=platform.processor(), logical_cpu_count=os.cpu_count(),
+                         cpu_flags=flags, native_bf16=native_bf16),
+        corpus_range=dict(start=args.start, count=args.limit),
         samples=[], peak_rss_bytes=None,
     )
     atomic_json(output / 'manifest.json', manifest)
@@ -138,15 +166,17 @@ def main():
     }
     started = time.perf_counter()
     model = Qwen3TTSModel.from_pretrained(str(args.model_dir.resolve()), device_map='cpu',
-                                        dtype=torch.bfloat16, attn_implementation='sdpa', local_files_only=True)
+                                        dtype=getattr(torch, dtype), attn_implementation='sdpa', local_files_only=True,
+                                        low_cpu_mem_usage=True)
     manifest['model_load_seconds'] = time.perf_counter() - started
-    print(f'Model loaded in {manifest["model_load_seconds"]:.2f}s; speakers={model.get_supported_speakers()}', flush=True)
+    notice(f'Model loaded in {manifest["model_load_seconds"]:.2f}s; dtype={dtype}; peak RSS={resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024:,} bytes; speakers={model.get_supported_speakers()}')
     corpus = json.loads(args.corpus.read_text())
     if isinstance(corpus, dict):
         corpus = corpus.get('samples', corpus.get('corpus', corpus.get('items', [])))
-    if not corpus or len(corpus) < args.limit:
+    if not corpus or len(corpus) < args.start + args.limit - 1:
         raise ValueError('Corpus does not contain the requested sample count')
-    for index, item in enumerate(corpus[:args.limit]):
+    for index in range(args.start - 1, args.start - 1 + args.limit):
+        item = corpus[index]
         identifier = str(item['id']).zfill(2)
         text = item.get('texts', {}).get('zh', item.get('text', item.get('zh')))
         if not text:
@@ -157,7 +187,7 @@ def main():
         seed = settings['seed_base'] + index
         torch.manual_seed(seed)
         np.random.seed(seed)
-        print(f'Generating {identifier}: {text}', flush=True)
+        notice(f'Generating sample {identifier}; dtype={dtype}; seed={seed}; text={text}')
         generation_started = time.perf_counter()
         with torch.inference_mode():
             waves, sample_rate = model.generate_custom_voice(
@@ -185,17 +215,20 @@ def main():
                       wav=f'wav/{identifier}.wav', mp3=f'audio/{identifier}.mp3',
                       generation_seconds=generation_seconds, audio_seconds=len(wave) / sample_rate,
                       sample_rate=sample_rate, frames=len(wave), seed=seed, peak=peak, rms=rms,
+                      runtime_dtype=dtype, inference_threads=args.threads,
+                      peak_rss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024,
                       samples_at_or_above_full_scale=int(np.count_nonzero(np.abs(wave) >= 1)),
                       wav_sha256=sha256(wav), mp3_sha256=sha256(mp3))
         manifest['samples'].append(sample)
         manifest['peak_rss_bytes'] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
         atomic_json(output / 'manifest.json', manifest)
         print(json.dumps(sample, ensure_ascii=False), flush=True)
+        notice(f'Completed sample {identifier}: audio={sample["audio_seconds"]:.3f}s, generation={generation_seconds:.3f}s, dtype={dtype}, peak RSS={manifest["peak_rss_bytes"]:,} bytes')
     manifest['complete'] = len(manifest['samples']) == args.limit
     manifest['total_generation_seconds'] = sum(item['generation_seconds'] for item in manifest['samples'])
     manifest['total_audio_seconds'] = sum(item['audio_seconds'] for item in manifest['samples'])
     atomic_json(output / 'manifest.json', manifest)
-    print(f'COMPLETE {len(manifest["samples"])} samples; peak RSS {manifest["peak_rss_bytes"]:,} bytes', flush=True)
+    notice(f'COMPLETE {len(manifest["samples"])} samples; peak RSS {manifest["peak_rss_bytes"]:,} bytes')
 
 
 if __name__ == '__main__':
