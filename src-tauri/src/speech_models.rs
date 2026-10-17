@@ -370,6 +370,49 @@ fn hash_file(path: &Path, file: &ModelFile, cancelled: &AtomicBool) -> Result<Fi
     })
 }
 
+#[cfg(any(windows, test))]
+fn windows_engine_path(value: &str) -> Result<String> {
+    // The speech engine appends forward slashes to resource directories. Windows
+    // extended paths do not accept that separator, while ordinary paths do.
+    let value = if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+        format!("//{unc}")
+    } else if let Some(drive) = value.strip_prefix(r"\\?\") {
+        let bytes = drive.as_bytes();
+        if bytes.len() < 3
+            || !bytes[0].is_ascii_alphabetic()
+            || bytes[1] != b':'
+            || bytes[2] != b'\\'
+        {
+            return Err("语音资源所在的 Windows 路径类型不受支持。".into());
+        }
+        drive.to_owned()
+    } else {
+        value.to_owned()
+    };
+    Ok(value.replace('\\', "/"))
+}
+
+fn engine_resource_path(path: &Path) -> Result<String> {
+    let value = path.to_str().ok_or("语音资源路径无法转换为有效文本。")?;
+    #[cfg(windows)]
+    {
+        let value = windows_engine_path(value)?;
+        // Normalize only the external argument after boundary/link checks, and
+        // confirm the engine will still open the exact resource we validated.
+        let resolved = Path::new(&value)
+            .canonicalize()
+            .map_err(|_| "语音资源路径无法交给本地语音引擎，请检查应用安装路径。")?;
+        if resolved != path {
+            return Err("语音资源路径转换后不一致，已停止加载。".into());
+        }
+        Ok(value)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(value.to_owned())
+    }
+}
+
 fn resolve_runtime(
     package: &Package,
     root: &Path,
@@ -383,7 +426,7 @@ fn resolve_runtime(
         if let Some(shared) = value.strip_prefix("@bundled/") {
             let path = checked_path(&bundled.root, shared, directory)?;
             // Lists of lexicons and rules use commas as separators in the native engine.
-            Ok(path.to_string_lossy().into_owned())
+            engine_resource_path(&path)
         } else {
             checked_path(root, value, directory)?;
             // Relative paths also work when the user's data directory contains commas.
@@ -1073,6 +1116,52 @@ mod tests {
         assert!(catalog
             .iter()
             .any(|package| package.model.kind == ModelKind::Kokoro));
+    }
+
+    #[test]
+    fn windows_engine_paths_preserve_drive_unc_unicode_and_spaces() {
+        for (input, expected) in [
+            (
+                r"\\?\D:\应用 资源\speech\model\espeak-ng-data",
+                "D:/应用 资源/speech/model/espeak-ng-data",
+            ),
+            (
+                r"\\?\UNC\server\共享 资源\speech\model\number-zh.fst",
+                "//server/共享 资源/speech/model/number-zh.fst",
+            ),
+            (
+                r"C:\应用 资源\speech\model\date-zh.fst",
+                "C:/应用 资源/speech/model/date-zh.fst",
+            ),
+            (r"\\server\共享 资源\tokens.txt", "//server/共享 资源/tokens.txt"),
+        ] {
+            assert_eq!(windows_engine_path(input).unwrap(), expected);
+        }
+        assert!(windows_engine_path(r"\\?\Volume{unknown}\speech").is_err());
+        assert!(windows_engine_path(r"\\?\relative\speech").is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shared_windows_resources_remain_readable_after_engine_path_conversion() {
+        let root = tempfile::Builder::new()
+            .prefix("共享语音 资源-")
+            .tempdir()
+            .unwrap();
+        fs::create_dir_all(root.path().join("model/espeak-ng-data")).unwrap();
+        fs::write(root.path().join("model/espeak-ng-data/phontab"), b"phonemes").unwrap();
+        fs::write(root.path().join("model/number-zh.fst"), b"rules").unwrap();
+        for (relative, directory) in [("model/espeak-ng-data", true), ("model/number-zh.fst", false)] {
+            let validated = checked_path(root.path(), relative, directory).unwrap();
+            let argument = engine_resource_path(&validated).unwrap();
+            assert!(!argument.starts_with(r"\\?\"));
+            assert_eq!(Path::new(&argument).canonicalize().unwrap(), validated);
+            if directory {
+                assert_eq!(fs::read(format!("{argument}/phontab")).unwrap(), b"phonemes");
+            } else {
+                assert_eq!(fs::read(argument).unwrap(), b"rules");
+            }
+        }
     }
 
     fn fixture_package(root: &Path) -> (Package, SpeechRuntime) {
