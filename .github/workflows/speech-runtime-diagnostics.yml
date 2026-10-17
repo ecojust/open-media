@@ -49,7 +49,7 @@ jobs:
               with urllib.request.urlopen(metadata_request, timeout=60) as metadata_response:
                   metadata = json.load(metadata_response)
               target_platform = next((p for p in ('windows-x64', 'macos-x64', 'macos-arm64') if p in metadata['name']), None)
-              if target_platform:
+              if target_platform and metadata.get('status') == 'completed':
                   with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as outputs:
                       outputs.write(f"run_id={int(metadata['run_id'])}\n")
                       outputs.write(f"artifact_name=speech-runtime-evidence-{target_platform}-{int(metadata['run_id'])}\n")
@@ -77,6 +77,15 @@ jobs:
           output.mkdir()
           (output / f'job-{job}.log').write_text(text, encoding='utf-8')
           lines = text.splitlines()
+          progress = [line[:800] for line in lines if any(marker in line for marker in (
+              'Downloading ', 'Download ', 'Running:', 'Still running ', 'stage=',
+              'progress=', 'sample=', '::error', '##[error]'))]
+          progress = redact('\n'.join(progress[-18:]))
+          for start in range(0, len(progress), 2500):
+              escaped = progress[start:start + 2500].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::warning title=Latest speech progress {job}, part {start // 2500 + 1}::{escaped}')
+          if metadata.get('status') != 'completed':
+              raise SystemExit(0)
           indices = set()
           for i, line in enumerate(lines):
               if any(word in line for word in ['Traceback (most recent call last)', 'UnicodeEncodeError', 'RuntimeError:', 'ValueError:', 'Error:', 'error:', 'FAILED', 'Process completed with exit code']):
