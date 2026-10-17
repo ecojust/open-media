@@ -8,3 +8,4 @@ test/chinese-tts-benchmark/licenses/** -whitespace
 test/chinese-tts-benchmark/provenance/** -whitespace
 test/chinese-tts-benchmark/scripts/f5-licenses/** -whitespace
 scripts/optional-speech-assets/** -text
+scripts/optional-speech-runtime-licenses/** -text -whitespace

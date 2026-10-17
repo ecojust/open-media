@@ -206,6 +206,82 @@ def audit_macos(root: Path, report: Path) -> None:
             raise ValueError(f"Runtime library has an invalid existing signature: {entry['path']}")
 
 
+def complete_windows_runtime(root: Path, report: Path) -> None:
+    """Ensure native inference does not borrow an installed C++ redistributable."""
+    if os.name != "nt":
+        return
+    dumpbin = shutil.which("dumpbin.exe")
+    if not dumpbin:
+        raise ValueError("The native dependency inspector is unavailable")
+    crt_name = re.compile(r"^(?:msvcp140(?:_[a-z0-9]+)?|vcruntime140(?:_[a-z0-9]+)?|concrt140|vcomp140)\.dll$", re.I)
+    dependencies = []
+    required = set()
+
+    def inspect(path: Path) -> None:
+        result = subprocess.run([dumpbin, "/nologo", "/dependents", str(path)], capture_output=True,
+                                text=True, encoding="utf-8", errors="replace")
+        if result.returncode:
+            raise ValueError(f"Cannot inspect native dependencies of {path.name}: {(result.stdout + result.stderr)[-2000:]}")
+        names = re.findall(r"^\s+([a-zA-Z0-9_.-]+\.dll)\s*$", result.stdout, re.M)
+        dependencies.append({"path": path.relative_to(root).as_posix(), "dependencies": names})
+        required.update(name.lower() for name in names if crt_name.fullmatch(name))
+
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and path.suffix.lower() in (".dll", ".pyd", ".exe"):
+            with path.open("rb") as stream:
+                if stream.read(2) == b"MZ":
+                    inspect(path)
+    redist_roots = []
+    if value := os.environ.get("VCToolsRedistDir"):
+        redist_roots.append(Path(value))
+    if value := os.environ.get("VSINSTALLDIR"):
+        redist_roots += sorted((Path(value) / "VC/Redist/MSVC").glob("*"), reverse=True)
+    candidates = {}
+    for directory in redist_roots:
+        for pattern in ("x64/Microsoft.VC*.CRT/*.dll", "x64/Microsoft.VC*.OpenMP/*.dll"):
+            for path in directory.glob(pattern):
+                candidates.setdefault(path.name.lower(), path)
+    bundled = {path.name.lower(): path for path in root.rglob("*") if path.is_file() and crt_name.fullmatch(path.name)}
+    records = []
+    completed = set()
+    while missing := required - completed:
+        for name in sorted(missing):
+            target = root / "python" / name
+            if target.is_file():
+                origin = {"kind": "bundled", "path": target.relative_to(root).as_posix()}
+            elif name in bundled:
+                source = bundled[name]
+                shutil.copy2(source, target)
+                origin = {"kind": "bundled", "path": source.relative_to(root).as_posix()}
+            elif name in candidates:
+                source = candidates[name]
+                shutil.copy2(source, target)
+                origin = {"kind": "Microsoft Visual C++ redistributable", "path": str(source),
+                          "toolsetVersion": os.environ.get("VCToolsVersion")}
+            else:
+                raise ValueError(f"Native inference requires a missing redistributable DLL: {name}")
+            quoted = str(target).replace("'", "''")
+            version = subprocess.check_output(["powershell.exe", "-NoProfile", "-Command",
+                      f"(Get-Item -LiteralPath '{quoted}').VersionInfo.FileVersion"], text=True).strip()
+            records.append({"path": target.relative_to(root).as_posix(), "size": target.stat().st_size,
+                            "sha256": sha256(target), "fileVersion": version, "origin": origin})
+            completed.add(name)
+            inspect(target)
+    if not required:
+        raise ValueError("Native runtime dependency inspection found no C++ runtime imports")
+    license_root = SCRIPT / "optional-speech-runtime-licenses"
+    license_records = json.loads((license_root / "sources.json").read_text(encoding="utf-8"))
+    for record in license_records["files"]:
+        source = license_root / relative(record["path"])
+        if not checked_file(source, record["size"], record["sha256"]):
+            raise ValueError(f"Redistributable license source changed: {source.name}")
+    shutil.copytree(license_root, root / "licenses/windows-runtime")
+    data = {"schema": 1, "requiredRuntimeDLLs": sorted(required), "files": records, "nativeDependencies": dependencies,
+            "licenseSources": license_records["files"], "hostSystem32CRTUsedAsPackageSource": False}
+    write_json(report, data)
+    write_json(root / "licenses/windows-runtime/native-dependencies.json", data)
+
+
 def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
     archive = args.work / "downloads" / f"python-{args.platform}.tar.gz"
     download(spec, archive)
@@ -247,6 +323,7 @@ def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
         if path.is_dir():
             shutil.rmtree(path)
     flatten_links(root)
+    complete_windows_runtime(root, logs / "windows-native-audit.json")
     audit_macos(root, logs / "macos-native-audit.json")
     write_json(root / "runtime-info.json", {"schema": 1, "id": lock["id"], "version": lock["version"],
                "platform": args.platform, "pythonVersion": lock["pythonVersion"], "torchVersion": spec["torch"],
