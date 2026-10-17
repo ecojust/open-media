@@ -97,6 +97,7 @@ function moveHistory(direction: 'undo' | 'redo') {
 function toggleAutosave() { if (switching.value || booting.value) return; autoSave.value = !autoSave.value; draftGeneration++; clearTimeout(draftTimer); try { localStorage.setItem('open-media:autosave', String(autoSave.value)) } catch {} ; if (autoSave.value) void persist() }
 function setTheme(value: 'light' | 'dark' | 'system') { theme.value = value; try { localStorage.setItem('open-media:theme', value) } catch {} }
 function rememberAsset(asset: MediaAsset) { if (asset.url.startsWith('blob:')) ownedUrls.add(asset.url) }
+function rememberRecordedAsset(asset: MediaAsset, blob: Blob) { rememberAsset(asset); blobs.set(asset.id, blob) }
 async function acceptAssets(assets: MediaAsset[], assetBlobs?: Map<string, Blob>) {
   if (!assets.length) return
   for (const asset of assets) { rememberAsset(asset); if (assetBlobs?.has(asset.id)) blobs.set(asset.id, assetBlobs.get(asset.id)!) }
@@ -383,7 +384,7 @@ async function nativeClose() {
   if (allowClose || switching.value || question.value) return
   if (busy.value || booting.value) { fail('请等待当前操作完成，再关闭应用。'); return }
   if (screenshotBusy.value) { fail('请先完成或取消截屏，再关闭应用。'); return }
-  if (speechWorking.value) { view.value = 'edit'; fail('请先完成或取消文字配音，再关闭应用。'); return }
+  if (speechWorking.value) { view.value = 'edit'; fail('请先结束录音或完成、取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
   if (browserExporting.value || runningJobs.value) { jobsOpen.value = native; fail('请等待导出完成，或先取消正在处理的任务。'); return }
   if (pendingMedia.value || imageConverting.value || videoConverting.value || gifConverting.value) { fail('请先完成或取消素材导入及媒体转换，再关闭应用。'); return }
@@ -490,7 +491,7 @@ onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screensh
           <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
-        <VideoEditor v-if="!booting && view==='edit'" :project="project" :export-disabled="!!busy || switching || booting" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
+        <VideoEditor v-if="!booting && view==='edit'" :project="project" :export-disabled="!!busy || switching || booting" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting" @recorded-asset="rememberRecordedAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
         <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>

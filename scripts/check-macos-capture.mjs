@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { verifyMacOSPermissions } from './check-macos-permissions.mjs';
 
 const mode = process.argv[2];
 assert.ok(['baseline', 'installed', 'with-border', 'without-border'].includes(mode), 'Choose baseline, installed, with-border or without-border.');
@@ -76,6 +77,7 @@ try {
     } else {
       assert.equal(existsSync(captureLibrary), false, 'The installed app must not contain the former capture dynamic library.');
       assert.doesNotMatch(report.dependencies, /libopen_media_capture/, 'Recording must not load a separate application capture library.');
+      report.permissions = verifyMacOSPermissions(application);
     }
     report.identity = identity(run(executable, ['--open-media-capture', '--self-test']));
     report.outcome = 'passed';

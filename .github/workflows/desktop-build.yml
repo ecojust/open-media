@@ -315,7 +315,8 @@ jobs:
             exit 1
           fi
           codesign --verify --deep --strict "$application"
-          "$executable" --open-media-capture --self-test 2>&1 | tee .media-runtime/logs/capture-helper.log
+          node scripts/check-macos-permissions.mjs "$application" 2>&1 | tee .media-runtime/logs/capture-helper.log
+          "$executable" --open-media-capture --self-test 2>&1 | tee -a .media-runtime/logs/capture-helper.log
           node --input-type=module - <<'NODE' 2>&1 | tee -a .media-runtime/logs/capture-helper.log
           import assert from 'node:assert/strict'
           import { readFileSync } from 'node:fs'

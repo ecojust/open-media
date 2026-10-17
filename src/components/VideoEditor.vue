@@ -12,9 +12,14 @@ import EditorDialog from './EditorDialog.vue'
 import TimelineDivider from './TimelineDivider.vue'
 import ClipFilterPanel from './ClipFilterPanel.vue'
 import AudioClipPlayer from './AudioClipPlayer.vue'
+import EditorVoiceRecorder from './EditorVoiceRecorder.vue'
+import { addRecordedAudio } from '../core/recording-track'
+import { importMediaFile, revokeMediaAsset } from '../core/media-import'
+import { importBlobAsset, isDesktop } from '../native'
+import type { RecordedMicrophoneAudio } from '../core/microphone-recording'
 
-const props = defineProps<{ project: Project; exportDisabled?: boolean }>()
-const emit = defineEmits<{ change: [project: Project, label?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean] }>()
+const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean }>()
+const emit = defineEmits<{ change: [project: Project, label?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; 'recorded-asset': [asset: MediaAsset, blob: Blob] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const editorRoot = ref<HTMLElement | null>(null)
 const timelineRatio = ref(0.4), timelineHeight = ref(268)
@@ -34,7 +39,8 @@ const modalOpen = computed(() => editorDialog.value !== null)
 const dialogReturnFocus = ref<HTMLElement | null>(null)
 const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
 const audioClipPlayer = ref<InstanceType<typeof AudioClipPlayer> | null>(null)
-const speechBusy = ref(false)
+const speechBusy = ref(false), recordingBusy = ref(false)
+const editingBusy = computed(() => speechBusy.value || recordingBusy.value)
 const clipSpeechTargetId = ref(''), clipSpeechError = ref(''), clipSpeechNotice = ref('')
 const selectedSpeechBusy = computed(() => speechBusy.value && clipSpeechTargetId.value === selectedId.value && editorDialog.value !== 'speech')
 const clipMenu = ref<{ x: number; y: number; clipId: string } | null>(null)
@@ -95,6 +101,8 @@ const selectedSupportsFilters = computed(() => {
   return asset?.kind === 'video' || asset?.kind === 'image'
 })
 watch(selectedSupportsFilters, supported => { if (!supported) inspectorTab.value = 'properties' })
+let editorDestroyed = false
+const recordedAssets = new Map<RecordedMicrophoneAudio, MediaAsset>()
 let preview: TimelinePreview | undefined
 let frame = 0
 let resizeObserver: ResizeObserver | undefined
@@ -108,24 +116,59 @@ let deleteReturnFocus: HTMLElement | null = null
 
 function message(error: unknown): void { emit('status', error instanceof Error ? error.message : String(error)) }
 function commit(action: () => Project, label: string): boolean {
-  if (speechBusy.value) return false
+  if (editingBusy.value) return false
   try { emit('change', action(), label); return true } catch (error) { message(error); return false }
 }
 function setSpeechBusy(value: boolean): void {
   speechBusy.value = value
   if (value) { pause(); cancelGesture(); closeMenus(); finishTrackRename(false); cancelTrackDelete() }
-  emit('busy', value)
+  emit('busy', editingBusy.value)
+}
+function setRecordingBusy(value: boolean): void {
+  recordingBusy.value = value
+  if (value) { pause(); cancelGesture(); closeMenus(); finishTrackRename(false); cancelTrackDelete() }
+  emit('busy', editingBusy.value)
+}
+function releaseRecordingAsset(audio: RecordedMicrophoneAudio): void {
+  const asset = recordedAssets.get(audio)
+  recordedAssets.delete(audio)
+  if (asset && !props.project.assets.some(item => item.id === asset.id)) revokeMediaAsset(asset)
+}
+async function saveRecording(audio: RecordedMicrophoneAudio, start: number, projectId: string): Promise<void> {
+  if (editorDestroyed || props.project.id !== projectId) throw new Error('录音所属项目已切换，请先保存录音文件。')
+  let asset = recordedAssets.get(audio)
+  try {
+    if (!asset) {
+      asset = isDesktop()
+        ? await importBlobAsset(new Uint8Array(await audio.blob.arrayBuffer()), audio.name)
+        : await importMediaFile(new File([audio.blob], audio.name, { type: audio.blob.type }))
+      recordedAssets.set(audio, asset)
+    }
+    if (editorDestroyed || props.project.id !== projectId) throw new Error('录音所属项目已切换，请先保存录音文件。')
+    const result = addRecordedAudio(props.project, asset, start)
+    emit('recorded-asset', asset, audio.blob)
+    emit('change', result.project, '录音已添加到配音轨道')
+    selectedId.value = result.clipId
+    inspectorTab.value = 'properties'
+    playhead.value = start
+    await nextTick()
+    if (editorDestroyed || props.project.id !== projectId || !props.project.assets.some(item => item.id === asset!.id)) throw new Error('录音未能加入当前项目，请重试或先保存录音文件。')
+    timelineScroll.value?.querySelector<HTMLElement>(`[data-clip-id="${result.clipId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  } catch (cause) {
+    if (editorDestroyed || props.project.id !== projectId) releaseRecordingAsset(audio)
+    throw cause
+  }
 }
 function openEditorDialog(kind: 'speech' | 'project'): void {
-  if (speechBusy.value) return
+  if (editingBusy.value) return
   const focused = document.activeElement
   dialogReturnFocus.value = focused instanceof HTMLElement && !focused.closest('.clip-context-menu') ? focused : menuReturnFocus
   pause(); cancelGesture(); closeMenus(); finishTrackRename(); editorDialog.value = kind
 }
 function openSpeech(): void { openEditorDialog('speech') }
-function closeEditorDialog(): void { if (!speechBusy.value) editorDialog.value = null }
+function closeEditorDialog(): void { if (!editingBusy.value) editorDialog.value = null }
 async function generateTextSpeech(clipId: string): Promise<void> {
-  if (speechBusy.value) return
+  if (editingBusy.value) return
   closeMenus(); selectedId.value = clipId
   clipSpeechTargetId.value = clipId; clipSpeechError.value = ''; clipSpeechNotice.value = ''
   const panel = speechPanel.value
@@ -136,7 +179,7 @@ async function generateTextSpeech(clipId: string): Promise<void> {
   }
 }
 function alignTextSpeech(clipId: string): void {
-  if (speechBusy.value) return
+  if (editingBusy.value) return
   closeMenus(); selectedId.value = clipId
   clipSpeechTargetId.value = clipId; clipSpeechError.value = ''; clipSpeechNotice.value = ''
   const panel = speechPanel.value
@@ -145,7 +188,7 @@ function alignTextSpeech(clipId: string): void {
   clipSpeechError.value = panel.error; clipSpeechNotice.value = panel.notice
 }
 function openClipMenu(event: MouseEvent, clip: Clip, track: Track): void {
-  if (speechBusy.value || pendingTrackDelete.value) return
+  if (editingBusy.value || pendingTrackDelete.value) return
   event.preventDefault(); event.stopPropagation()
   pause(); cancelGesture(); closeMenus(); selectedId.value = clip.id
   menuReturnFocus = event.currentTarget as HTMLElement
@@ -154,7 +197,7 @@ function openClipMenu(event: MouseEvent, clip: Clip, track: Track): void {
   void positionMenu()
 }
 function openTrackMenu(event: MouseEvent, track: Track): void {
-  if (speechBusy.value || pendingTrackDelete.value) return
+  if (editingBusy.value || pendingTrackDelete.value) return
   event.preventDefault(); event.stopPropagation()
   pause(); cancelGesture(); closeMenus()
   menuReturnFocus = event.currentTarget as HTMLElement
@@ -187,7 +230,7 @@ function outsideMenus(event: PointerEvent): void {
 }
 function menuAction(action: () => void): void {
   action(); closeMenus()
-  if (!renamingTrackId.value && !pendingTrackDelete.value && !speechBusy.value && !modalOpen.value) restoreMenuFocus()
+  if (!renamingTrackId.value && !pendingTrackDelete.value && !editingBusy.value && !modalOpen.value) restoreMenuFocus()
 }
 function menuKeyboard(event: KeyboardEvent): void {
   event.stopPropagation()
@@ -200,7 +243,7 @@ function menuKeyboard(event: KeyboardEvent): void {
   buttons[next]?.focus()
 }
 function startTrackRename(track: Track): void {
-  if (speechBusy.value || track.locked) return
+  if (editingBusy.value || track.locked) return
   closeMenus(); renamingTrackId.value = track.id; trackName.value = track.name
   void nextTick(() => { const input = document.querySelector<HTMLInputElement>('.track-rename-input'); input?.focus(); input?.select() })
 }
@@ -208,16 +251,16 @@ function finishTrackRename(save = true): void {
   const id = renamingTrackId.value, name = trackName.value.trim()
   renamingTrackId.value = ''
   const track = props.project.tracks.find(item => item.id === id)
-  if (!save || !track || track.locked || speechBusy.value) return
+  if (!save || !track || track.locked || editingBusy.value) return
   if (!name) { emit('status', '轨道名称不能为空。'); return }
   if (name !== track.name) commit(() => setTrack(props.project, id, { name }), '重命名轨道')
 }
 function changeTrackOrder(track: Track, delta: number): void {
-  if (speechBusy.value || track.locked) return
+  if (editingBusy.value || track.locked) return
   commit(() => reorderTrack(props.project, track.id, props.project.tracks.findIndex(item => item.id === track.id) + delta), '调整轨道层级')
 }
 function requestTrackDelete(track: Track): void {
-  if (speechBusy.value || track.locked) return
+  if (editingBusy.value || track.locked) return
   if (!track.clips.length) { commit(() => removeTrack(props.project, track.id), '删除空轨道'); return }
   pause(); cancelGesture()
   deleteReturnFocus = menuReturnFocus
@@ -232,7 +275,7 @@ function cancelTrackDelete(): void {
 }
 function confirmTrackDelete(): void {
   const pending = pendingTrackDelete.value, track = deletingTrack.value
-  if (!pending || !track || speechBusy.value || track.locked || pending.project !== props.project) { cancelTrackDelete(); return }
+  if (!pending || !track || editingBusy.value || track.locked || pending.project !== props.project) { cancelTrackDelete(); return }
   try {
     const next = removeTrack(props.project, track.id)
     if (commit(() => next, '删除轨道及片段')) { if (track.clips.some(clip => clip.id === selectedId.value)) selectedId.value = ''; cancelTrackDelete() }
@@ -254,9 +297,11 @@ function formatTime(value: number, frames = false): string {
   return frames ? `${minutes.toString().padStart(2, '0')}:${remaining}:${Math.floor((seconds % 1) * activeProject.value.fps).toString().padStart(2, '0')}` : `${minutes}:${remaining}`
 }
 function seek(time: number): void {
+  if (editingBusy.value) return
   audioClipPlayer.value?.stop()
   if (preparingPlayback.value) pause()
-  playhead.value = Math.max(0, Math.min(duration.value || timelineSeconds.value, frameTime(time)))
+  const end = duration.value || timelineSeconds.value
+  playhead.value = Math.max(0, time >= end ? end : Math.min(end, frameTime(time)))
   playbackStarted = performance.now()
   playbackOffset = playhead.value
   preview?.seek(playhead.value, playing.value)
@@ -275,6 +320,7 @@ function pauseTimeline(): void {
   preview?.pause()
 }
 async function togglePlay(): Promise<void> {
+  if (editingBusy.value) return
   audioClipPlayer.value?.stop()
   if (playing.value || preparingPlayback.value) { pause(); return }
   if (!duration.value || !preview) return
@@ -373,7 +419,7 @@ function stringValue(event: Event): string { return (event.target as HTMLInputEl
 function frameTime(value: number): number { return Math.round(value * props.project.fps) / props.project.fps }
 function canTrim(side: 'start' | 'end'): boolean {
   const current = selected.value
-  if (!current || current.track.locked || speechBusy.value) return false
+  if (!current || current.track.locked || editingBusy.value) return false
   const time = frameTime(playhead.value), start = current.clip.start, end = clipEnd(current.clip)
   return side === 'start' ? time > start + 1e-7 && end - time >= 1 / props.project.fps - 1e-7 : time < end - 1e-7 && time - start >= 1 / props.project.fps - 1e-7
 }
@@ -384,7 +430,7 @@ function trimSelected(side: 'start' | 'end'): void {
 function splitSelected(): void { if (canSplit.value) { pause(); commit(() => splitClip(props.project, selectedId.value, frameTime(playhead.value)), '分割片段') } }
 function duplicateSelected(): void { if (selected.value) commit(() => duplicateClip(props.project, selectedId.value), '复制片段') }
 function deleteSelected(closeGap = false): void {
-  if (!selected.value || selectedLocked.value || speechBusy.value) return
+  if (!selected.value || selectedLocked.value || editingBusy.value) return
   pause()
   try {
     const next = closeGap ? deleteClipAndCloseGap(props.project, selectedId.value) : deleteClip(props.project, selectedId.value)
@@ -397,7 +443,7 @@ function positionsChanged(before: Project, after: Project): boolean {
   return after.tracks.some(track => track.clips.some(clip => Math.abs((positions.get(clip.id) ?? clip.start) - clip.start) > 1e-7))
 }
 function closeGaps(): void {
-  if (speechBusy.value) return
+  if (editingBusy.value) return
   pause(); cancelGesture()
   try {
     const next = closeTimelineGaps(props.project)
@@ -431,7 +477,7 @@ function onAssetDrag(event: DragEvent, asset: MediaAsset): void {
 }
 function onDrop(event: DragEvent, track: Track): void {
   event.preventDefault()
-  if (speechBusy.value || track.locked || pendingTrackDelete.value) return
+  if (editingBusy.value || track.locked || pendingTrackDelete.value) return
   const assetId = event.dataTransfer?.getData('application/x-open-media-asset')
   const asset = props.project.assets.find(item => item.id === assetId)
   if (asset) {
@@ -441,12 +487,12 @@ function onDrop(event: DragEvent, track: Track): void {
   } else if (event.dataTransfer?.files.length) emit('import', [...event.dataTransfer.files])
 }
 function setPlayheadFromPointer(event: PointerEvent): void {
-  if (event.button !== 0 || speechBusy.value || pendingTrackDelete.value || (event.target as HTMLElement).closest('.timeline-clip')) return
+  if (event.button !== 0 || editingBusy.value || pendingTrackDelete.value || (event.target as HTMLElement).closest('.timeline-clip')) return
   const row = event.currentTarget as HTMLElement
   seek((event.clientX - row.getBoundingClientRect().left) / zoom.value)
 }
 function startGesture(event: PointerEvent, clip: Clip, track: Track, kind: 'move' | 'trim-start' | 'trim-end'): void {
-  if (event.button !== 0 || speechBusy.value) return
+  if (event.button !== 0 || editingBusy.value) return
   event.preventDefault(); event.stopPropagation()
   ;(event.currentTarget as HTMLElement).closest<HTMLButtonElement>('.timeline-clip')?.focus({ preventScroll: true })
   selectedId.value = clip.id
@@ -514,14 +560,14 @@ function endGesture(): void {
   const label = gesture?.kind === 'move' ? '移动片段' : '裁剪片段'
   workingProject.value = null
   clearGesture()
-  if (project && !speechBusy.value) emit('change', project, label)
+  if (project && !editingBusy.value) emit('change', project, label)
 }
 function cancelGesture(): void { workingProject.value = null; clearGesture() }
 function fitTimeline(): void { zoom.value = Math.max(6, Math.min(160, ((timelineScroll.value?.clientWidth || 900) - 160) / Math.max(10, duration.value + 2))) }
 function keyboard(event: KeyboardEvent): void {
   if (event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return
   if (event.key === 'Escape' && (clipMenu.value || trackMenu.value)) { event.preventDefault(); closeMenus(true); return }
-  if (speechBusy.value || pendingTrackDelete.value || modalOpen.value) return
+  if (editingBusy.value || pendingTrackDelete.value || modalOpen.value) return
   const element = event.target as HTMLElement
   if (element.closest('input,textarea,select,[contenteditable="true"],dialog,[role="dialog"],.speech-panel,.clip-context-menu,.audio-clip-player')) return
   if (event.code === 'Space') { event.preventDefault(); void togglePlay() }
@@ -562,24 +608,24 @@ onMounted(() => {
   window.addEventListener('resize', closeMenusOnResize)
 })
 function closeMenusOnResize(): void { closeMenus() }
-onBeforeUnmount(() => { pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
+onBeforeUnmount(() => { editorDestroyed = true; pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
 defineExpose({ getCanvas: () => canvas.value, pause, seek })
 </script>
 
 <template>
   <section ref="editorRoot" class="video-editor" data-testid="video-editor" :inert="pendingTrackDelete ? true : undefined">
-    <div class="editor-tools" :inert="speechBusy || undefined">
+    <div class="editor-tools" :inert="editingBusy || undefined">
       <div class="tool-group">
         <button class="editor-primary" title="导入素材" aria-label="导入素材" @click="emit('import')"><Icon name="import" :size="16" /><span>导入素材</span></button>
         <button title="文字转语音" aria-label="文字转语音" :class="{ 'editor-primary': editorDialog === 'speech' }" @click="openSpeech"><Icon name="audio" :size="16" /><span>配音</span></button>
       </div>
       <div class="editor-output-actions">
-        <button class="project-settings-button" title="项目设置" aria-label="项目设置" aria-haspopup="dialog" :disabled="speechBusy" @click="openEditorDialog('project')"><Icon name="settings" :size="18" /></button>
-        <button class="editor-export" data-testid="export-project" :disabled="!duration || exportDisabled || speechBusy" @click="pause(); emit('export')"><Icon name="export" :size="16" />导出视频</button>
+        <button class="project-settings-button" title="项目设置" aria-label="项目设置" aria-haspopup="dialog" :disabled="editingBusy" @click="openEditorDialog('project')"><Icon name="settings" :size="18" /></button>
+        <button class="editor-export" data-testid="export-project" :disabled="!duration || exportDisabled || editingBusy" @click="pause(); emit('export')"><Icon name="export" :size="16" />导出视频</button>
       </div>
     </div>
     <div class="editor-main">
-      <aside class="asset-panel" :inert="speechBusy || undefined">
+      <aside class="asset-panel" :inert="editingBusy || undefined">
         <header><strong>项目素材</strong><span class="count">{{ project.assets.length }}</span><button title="导入素材" @click="emit('import')"><Icon name="plus" :size="16" /></button></header>
         <div class="asset-search"><input v-model="search" aria-label="搜索素材" placeholder="搜索素材" /></div>
         <div class="asset-filters" aria-label="素材类型"><button v-for="filter in [{ key: 'all', label: '全部' }, { key: 'video', label: '视频' }, { key: 'audio', label: '音频' }, { key: 'image', label: '图片' }]" :key="filter.key" :class="{ active: assetFilter === filter.key }" @click="assetFilter = filter.key">{{ filter.label }}</button></div>
@@ -597,9 +643,18 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
         <div class="preview-stage">
           <div class="preview-frame" :style="{ aspectRatio: ratio }"><canvas ref="canvas" aria-label="视频合成预览" data-testid="video-preview" /><div v-if="!duration" class="preview-empty"><Icon name="video" :size="38" /><strong>你的故事，从这里开始</strong><span>将素材放入下方时间线</span></div></div>
         </div>
-        <div class="preview-playback"><span class="time-code">{{ formatTime(playhead, true) }}<em>/ {{ formatTime(duration, true) }}</em></span><div class="play-controls"><button title="回到开头" @click="seek(0)"><Icon name="skip-back" :size="17" /></button><button class="play-button" :disabled="!duration" :title="preparingPlayback ? '正在准备播放，点击取消' : playing ? '暂停（空格）' : '播放（空格）'" :aria-busy="preparingPlayback" data-testid="preview-play" @click="togglePlay"><Icon :name="preparingPlayback ? 'clock' : playing ? 'pause' : 'play'" :size="20" /></button><button title="跳到结尾" @click="seek(duration)"><Icon name="skip-forward" :size="17" /></button></div><span class="preview-scale">适应窗口</span></div>
+        <div class="preview-playback">
+          <span class="time-code">{{ formatTime(playhead, true) }}<em>/ {{ formatTime(duration, true) }}</em></span>
+          <div class="play-controls">
+            <button title="回到开头" :disabled="editingBusy" @click="seek(0)"><Icon name="skip-back" :size="17" /></button>
+            <button class="play-button" :disabled="!duration || editingBusy" :title="preparingPlayback ? '正在准备播放，点击取消' : playing ? '暂停（空格）' : '播放（空格）'" :aria-busy="preparingPlayback" data-testid="preview-play" @click="togglePlay"><Icon :name="preparingPlayback ? 'clock' : playing ? 'pause' : 'play'" :size="20" /></button>
+            <EditorVoiceRecorder :project-id="project.id" :start="playhead" :disabled="speechBusy || !!exportDisabled || !!recordingDisabled" :save="saveRecording" @busy="setRecordingBusy" @release="releaseRecordingAsset" @status="emit('status', $event)" />
+            <button title="跳到结尾" :disabled="editingBusy" @click="seek(duration)"><Icon name="skip-forward" :size="17" /></button>
+          </div>
+          <span class="preview-scale">适应窗口</span>
+        </div>
       </main>
-      <aside class="property-panel" :inert="speechBusy && !selectedSpeechBusy || undefined">
+      <aside class="property-panel" :inert="editingBusy && !selectedSpeechBusy || undefined">
         <header class="property-heading">
           <div v-if="selectedSupportsFilters" class="property-tabs" role="tablist" aria-label="片段设置" @keydown="inspectorTabKeyboard">
             <button id="clip-properties-tab" type="button" role="tab" :aria-selected="inspectorTab === 'properties'" aria-controls="clip-properties-panel" :tabindex="inspectorTab === 'properties' ? 0 : -1" @click="inspectorTab = 'properties'"><Icon name="sliders" :size="14" />属性</button>
@@ -610,14 +665,14 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
         <div v-if="selected" class="property-content">
           <div class="selected-heading"><Icon :name="selected.track.kind === 'text' ? 'text' : selected.track.kind === 'audio' ? 'audio' : 'video'" :size="16" /><strong>{{ selected.clip.name }}</strong><span v-if="selectedLocked">已锁定</span></div>
           <section v-show="inspectorTab === 'properties'" id="clip-properties-panel" :role="selectedSupportsFilters ? 'tabpanel' : undefined" :aria-labelledby="selectedSupportsFilters ? 'clip-properties-tab' : undefined" :tabindex="selectedSupportsFilters ? 0 : undefined">
-          <AudioClipPlayer v-if="selectedSupportsAudioPlayback" :key="`${project.id}:${selected.clip.id}`" ref="audioClipPlayer" :project="activeProject" :clip="selected.clip" :disabled="speechBusy || modalOpen || !!exportDisabled" @play-request="pauseTimeline" @status="message" />
+          <AudioClipPlayer v-if="selectedSupportsAudioPlayback" :key="`${project.id}:${selected.clip.id}`" ref="audioClipPlayer" :project="activeProject" :clip="selected.clip" :disabled="editingBusy || modalOpen || !!exportDisabled" @play-request="pauseTimeline" @status="message" />
           <div v-if="selected.track.kind === 'text'" class="clip-speech-actions">
-            <button class="selected-speech" :disabled="speechBusy || !selectedSpeechPlan.sources.length" :title="selectedSpeechPlan.skipped[0]?.reason" :aria-busy="selectedSpeechBusy" data-testid="speech-generate-selected" @click="generateTextSpeech(selected.clip.id)"><template v-if="selectedSpeechBusy"><span class="clip-speech-spinner" />{{ speechPanel?.generationLabel || '正在生成…' }}</template><template v-else><Icon name="audio" :size="13" />文字转语音</template></button>
-            <button :disabled="speechBusy || !!selectedSpeechAlignmentError" :title="selectedSpeechAlignmentError || '按关联语音的起点和时长对齐文字'" data-testid="speech-align-selected" @click="alignTextSpeech(selected.clip.id)"><Icon name="clock" :size="13" />对齐语音</button>
+            <button class="selected-speech" :disabled="editingBusy || !selectedSpeechPlan.sources.length" :title="selectedSpeechPlan.skipped[0]?.reason" :aria-busy="selectedSpeechBusy" data-testid="speech-generate-selected" @click="generateTextSpeech(selected.clip.id)"><template v-if="selectedSpeechBusy"><span class="clip-speech-spinner" />{{ speechPanel?.generationLabel || '正在生成…' }}</template><template v-else><Icon name="audio" :size="13" />文字转语音</template></button>
+            <button :disabled="editingBusy || !!selectedSpeechAlignmentError" :title="selectedSpeechAlignmentError || '按关联语音的起点和时长对齐文字'" data-testid="speech-align-selected" @click="alignTextSpeech(selected.clip.id)"><Icon name="clock" :size="13" />对齐语音</button>
             <button v-if="selectedSpeechBusy" class="clip-speech-cancel" :disabled="speechPanel?.cancelling || speechPanel?.finalizing" @click="speechPanel?.cancel()"><Icon name="close" :size="13" />取消生成</button>
             <p v-if="clipSpeechError" class="clip-speech-error" role="alert">{{ clipSpeechError }}</p><p v-else-if="clipSpeechNotice" class="clip-speech-notice" role="status">{{ clipSpeechNotice }}</p>
           </div>
-          <fieldset :disabled="selectedLocked || speechBusy">
+          <fieldset :disabled="selectedLocked || editingBusy">
             <template v-if="selected.clip.text !== undefined"><h3>文本</h3><textarea :value="selected.clip.text" rows="3" aria-label="字幕内容" @change="updateSelected({ text: stringValue($event) }, '编辑字幕')" /><div class="property-grid"><label>字号<input type="number" min="4" max="2048" :value="selected.clip.fontSize" @change="updateSelected({ fontSize: numberValue($event) })" /></label><label>颜色<input type="color" :value="selected.clip.color" @change="updateSelected({ color: stringValue($event) })" /></label></div><label>字体<select :value="selected.clip.fontFamily" @change="updateSelected({ fontFamily: stringValue($event) })"><option value="sans-serif">无衬线</option><option value="serif">衬线</option><option value="monospace">等宽</option></select></label><label>文字底色<div class="text-background"><input type="color" :value="selected.clip.background === 'transparent' ? '#000000' : selected.clip.background" aria-label="文字底色" @change="updateSelected({ background: stringValue($event) })" /><button :class="{ active: selected.clip.background === 'transparent' }" @click="updateSelected({ background: 'transparent' })">透明</button></div></label><label>对齐<select :value="selected.clip.textAlign" @change="updateSelected({ textAlign: stringValue($event) as Clip['textAlign'] })"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><label>字重<select :value="selected.clip.fontWeight" @change="updateSelected({ fontWeight: numberValue($event) })"><option :value="400">常规</option><option :value="600">半粗</option><option :value="700">粗体</option></select></label></template>
             <h3>时间</h3><div class="property-grid"><label>开始 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.start.toFixed(3))" aria-label="片段开始时间" @change="updateSelected({ start: numberValue($event) })" /></label><label>时长 / 秒<input type="number" min="0.04" step="0.1" :value="Number(clipDuration(selected.clip).toFixed(3))" aria-label="片段时长" @change="updateSelected({ trimOut: selected!.clip.trimIn + numberValue($event) * selected!.clip.speed })" /></label><label>源起点 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.trimIn.toFixed(3))" @change="updateSelected({ trimIn: numberValue($event) })" /></label><label>源终点 / 秒<input type="number" min="0.001" step="0.1" :value="Number(selected.clip.trimOut.toFixed(3))" @change="updateSelected({ trimOut: numberValue($event) })" /></label></div>
             <label>播放速度<select :value="selected.clip.speed" aria-label="播放速度" @change="updateSelected({ speed: numberValue($event) })"><option v-for="speed in [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4, 8, 16]" :key="speed" :value="speed">{{ speed }}×</option></select></label>
@@ -633,8 +688,8 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
         <div v-else class="property-empty"><Icon name="settings" :size="28" /><strong>选择一个片段</strong><span>调整画面、速度、声音<br />或添加淡入淡出</span></div>
       </aside>
     </div>
-    <TimelineDivider :target="editorRoot" v-model="timelineRatio" :disabled="speechBusy || modalOpen || !!pendingTrackDelete" @size="timelineHeight = $event" />
-    <section id="editor-timeline" class="timeline-panel" :style="{ height: `${timelineHeight}px` }" aria-label="多轨时间线" :inert="speechBusy || undefined">
+    <TimelineDivider :target="editorRoot" v-model="timelineRatio" :disabled="editingBusy || modalOpen || !!pendingTrackDelete" @size="timelineHeight = $event" />
+    <section id="editor-timeline" class="timeline-panel" :style="{ height: `${timelineHeight}px` }" aria-label="多轨时间线" :inert="editingBusy || undefined">
       <div class="timeline-toolbar" role="group" aria-label="时间线工具">
         <div class="track-add"><span>时间线</span><button title="添加视频轨道" @click="addTimelineTrack('video')"><Icon name="video" :size="14" /><Icon name="plus" :size="11" /></button><button title="添加音频轨道" @click="addTimelineTrack('audio')"><Icon name="audio" :size="14" /><Icon name="plus" :size="11" /></button><button title="添加字幕轨道" @click="addTimelineTrack('text')"><Icon name="text" :size="14" /><Icon name="plus" :size="11" /></button></div>
         <div class="timeline-clip-tools" role="group" aria-label="片段剪辑">
@@ -669,7 +724,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
       </div>
       <footer class="timeline-footer"><span>空格播放 · S 分割 · Q / W 裁剪 · Shift 临时关闭吸附 · 右键更多</span><span>{{ activeProject.tracks.reduce((sum, track) => sum + track.clips.length, 0) }} 个片段 · {{ formatTime(duration) }}</span></footer>
     </section>
-    <EditorDialog :open="editorDialog === 'speech'" title="文字转语音" icon="audio" wide :busy="speechBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+    <EditorDialog :open="editorDialog === 'speech'" title="文字转语音" icon="audio" wide :busy="editingBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <SpeechPanel ref="speechPanel" :active="editorDialog === 'speech'" in-dialog :project="project" @change="(next, label) => emit('change', next, label)" @status="emit('status', $event)" @busy="setSpeechBusy" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'project'" title="项目设置" icon="settings" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
@@ -682,23 +737,23 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
     </EditorDialog>
     <Teleport to="body">
       <div v-if="clipMenu && selected" ref="menuElement" class="clip-context-menu" role="menu" tabindex="-1" :aria-label="selected.track.kind === 'text' ? '文字片段操作' : '片段操作'" :style="{ left: `${clipMenu.x}px`, top: `${clipMenu.y}px` }" @keydown="menuKeyboard">
-        <template v-if="selected.track.kind === 'text'"><button role="menuitem" :disabled="speechBusy || !selectedSpeechPlan.sources.length" @click="generateTextSpeech(clipMenu.clipId)"><Icon name="audio" :size="14" />文字转语音</button><button role="menuitem" :disabled="speechBusy || !!selectedSpeechAlignmentError" @click="menuAction(() => alignTextSpeech(selectedId))"><Icon name="clock" :size="14" />文字对齐已有语音</button><hr /></template>
+        <template v-if="selected.track.kind === 'text'"><button role="menuitem" :disabled="editingBusy || !selectedSpeechPlan.sources.length" @click="generateTextSpeech(clipMenu.clipId)"><Icon name="audio" :size="14" />文字转语音</button><button role="menuitem" :disabled="editingBusy || !!selectedSpeechAlignmentError" @click="menuAction(() => alignTextSpeech(selectedId))"><Icon name="clock" :size="14" />文字对齐已有语音</button><hr /></template>
         <button role="menuitem" :disabled="!canSplit" @click="menuAction(splitSelected)"><Icon name="scissors" :size="14" /><span>在播放头处分割</span><kbd>S</kbd></button>
         <button role="menuitem" :disabled="!canTrimStart" @click="menuAction(() => trimSelected('start'))"><Icon name="mark-in" :size="14" /><span>裁掉播放头左侧</span><kbd>Q</kbd></button>
         <button role="menuitem" :disabled="!canTrimEnd" @click="menuAction(() => trimSelected('end'))"><Icon name="mark-out" :size="14" /><span>裁掉播放头右侧</span><kbd>W</kbd></button>
-        <button v-if="selectedVideo" role="menuitem" :disabled="selectedLocked || speechBusy" @click="menuAction(separateAudio)"><Icon name="audio" :size="14" />分离到音轨</button>
-        <button v-if="selected.track.kind === 'video'" role="menuitem" :disabled="selectedLocked || speechBusy" @click="menuAction(pictureInPicture)"><Icon name="video" :size="14" />设为画中画</button>
-        <hr /><button role="menuitem" :disabled="selectedLocked || speechBusy" @click="menuAction(duplicateSelected)"><Icon name="copy" :size="14" />复制片段</button>
-        <button role="menuitem" :disabled="selectedLocked || speechBusy" @click="menuAction(() => deleteSelected())"><Icon name="trash" :size="14" /><span>删除片段</span><kbd>Delete</kbd></button>
-        <button role="menuitem" :disabled="selectedLocked || speechBusy" title="仅接拢此片段原范围内的全轨公共空隙" @click="menuAction(() => deleteSelected(true))"><Icon name="close-gap" :size="14" /><span>删除并接拢空隙</span><kbd>Shift Del</kbd></button>
+        <button v-if="selectedVideo" role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(separateAudio)"><Icon name="audio" :size="14" />分离到音轨</button>
+        <button v-if="selected.track.kind === 'video'" role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(pictureInPicture)"><Icon name="video" :size="14" />设为画中画</button>
+        <hr /><button role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(duplicateSelected)"><Icon name="copy" :size="14" />复制片段</button>
+        <button role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(() => deleteSelected())"><Icon name="trash" :size="14" /><span>删除片段</span><kbd>Delete</kbd></button>
+        <button role="menuitem" :disabled="selectedLocked || editingBusy" title="仅接拢此片段原范围内的全轨公共空隙" @click="menuAction(() => deleteSelected(true))"><Icon name="close-gap" :size="14" /><span>删除并接拢空隙</span><kbd>Shift Del</kbd></button>
       </div>
       <div v-if="trackMenu && menuTrack" ref="menuElement" class="clip-context-menu" role="menu" tabindex="-1" aria-label="轨道操作" :style="{ left: `${trackMenu.x}px`, top: `${trackMenu.y}px` }" @keydown="menuKeyboard">
-        <button role="menuitem" :disabled="menuTrack.locked || speechBusy" @click="menuAction(() => startTrackRename(menuTrack!))"><Icon name="text" :size="14" />重命名轨道</button>
-        <button role="menuitem" :disabled="menuTrack.locked || speechBusy || menuTrackIndex <= 0" @click="menuAction(() => changeTrackOrder(menuTrack!, -1))"><Icon name="chevron-up" :size="14" />轨道上移一层</button>
-        <button role="menuitem" :disabled="menuTrack.locked || speechBusy || menuTrackIndex >= project.tracks.length - 1" @click="menuAction(() => changeTrackOrder(menuTrack!, 1))"><Icon name="chevron-down" :size="14" />轨道下移一层</button>
-        <hr /><button role="menuitem" :disabled="menuTrack.locked || speechBusy" @click="menuAction(() => requestTrackDelete(menuTrack!))"><Icon name="trash" :size="14" />删除轨道<span v-if="!menuTrack.clips.length" class="menu-detail">空轨道</span></button>
+        <button role="menuitem" :disabled="menuTrack.locked || editingBusy" @click="menuAction(() => startTrackRename(menuTrack!))"><Icon name="text" :size="14" />重命名轨道</button>
+        <button role="menuitem" :disabled="menuTrack.locked || editingBusy || menuTrackIndex <= 0" @click="menuAction(() => changeTrackOrder(menuTrack!, -1))"><Icon name="chevron-up" :size="14" />轨道上移一层</button>
+        <button role="menuitem" :disabled="menuTrack.locked || editingBusy || menuTrackIndex >= project.tracks.length - 1" @click="menuAction(() => changeTrackOrder(menuTrack!, 1))"><Icon name="chevron-down" :size="14" />轨道下移一层</button>
+        <hr /><button role="menuitem" :disabled="menuTrack.locked || editingBusy" @click="menuAction(() => requestTrackDelete(menuTrack!))"><Icon name="trash" :size="14" />删除轨道<span v-if="!menuTrack.clips.length" class="menu-detail">空轨道</span></button>
       </div>
-      <div v-if="pendingTrackDelete && deletingTrack" class="track-delete-backdrop" @pointerdown.self="cancelTrackDelete"><section ref="deleteTrackDialog" class="track-delete-dialog" role="dialog" aria-label="删除轨道" aria-modal="true" tabindex="-1" @keydown="deleteDialogKeyboard"><h2>删除轨道</h2><p>“{{ deletingTrack.name }}”包含 {{ deletingTrack.clips.length }} 个片段。删除后可撤销恢复，素材库中的原文件会保留。</p><p v-if="deletingTrack.kind === 'text'" class="dialog-note">对应配音会保留为独立音频，不再关联此轨道的文字。</p><p v-if="deleteTrackError" class="dialog-error" role="alert">{{ deleteTrackError }}</p><footer><button data-cancel-track @click="cancelTrackDelete">取消</button><button class="confirm-delete" :disabled="speechBusy || deletingTrack.locked" @click="confirmTrackDelete"><Icon name="trash" :size="14" />删除轨道</button></footer></section></div>
+      <div v-if="pendingTrackDelete && deletingTrack" class="track-delete-backdrop" @pointerdown.self="cancelTrackDelete"><section ref="deleteTrackDialog" class="track-delete-dialog" role="dialog" aria-label="删除轨道" aria-modal="true" tabindex="-1" @keydown="deleteDialogKeyboard"><h2>删除轨道</h2><p>“{{ deletingTrack.name }}”包含 {{ deletingTrack.clips.length }} 个片段。删除后可撤销恢复，素材库中的原文件会保留。</p><p v-if="deletingTrack.kind === 'text'" class="dialog-note">对应配音会保留为独立音频，不再关联此轨道的文字。</p><p v-if="deleteTrackError" class="dialog-error" role="alert">{{ deleteTrackError }}</p><footer><button data-cancel-track @click="cancelTrackDelete">取消</button><button class="confirm-delete" :disabled="editingBusy || deletingTrack.locked" @click="confirmTrackDelete"><Icon name="trash" :size="14" />删除轨道</button></footer></section></div>
     </Teleport>
   </section>
 </template>
