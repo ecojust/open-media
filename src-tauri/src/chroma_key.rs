@@ -50,10 +50,11 @@ pub(crate) fn filter_chain(clip: &Value, visual: bool) -> Result<Option<String>>
         let blue = u8::from_str_radix(&key.color[5..7], 16).unwrap();
         // Cap the keyed channel at the larger remaining channel, matching preview.
         // The key mask stays unchanged and is still multiplied by source alpha below.
+        // Nearest sampling preserves boundary pixels on older filter runtimes.
         if green > red && green > blue {
-            filter.push_str(",geq=r='r(X,Y)':g='min(g(X,Y),max(r(X,Y),b(X,Y)))':b='b(X,Y)':a='alpha(X,Y)',format=rgba");
+            filter.push_str(",geq=r='r(X,Y)':g='min(g(X,Y),max(r(X,Y),b(X,Y)))':b='b(X,Y)':a='alpha(X,Y)':interpolation=nearest,format=rgba");
         } else if blue > red && blue > green {
-            filter.push_str(",geq=r='r(X,Y)':g='g(X,Y)':b='min(b(X,Y),max(r(X,Y),g(X,Y)))':a='alpha(X,Y)',format=rgba");
+            filter.push_str(",geq=r='r(X,Y)':g='g(X,Y)':b='min(b(X,Y),max(r(X,Y),g(X,Y)))':a='alpha(X,Y)':interpolation=nearest,format=rgba");
         }
     }
     Ok(Some(filter))
@@ -131,6 +132,7 @@ mod tests {
             let filter = filter_chain(&json!({"chromaKey":key}), true).unwrap().unwrap();
             assert!(filter.contains(expected));
             assert!(filter.contains("a='alpha(X,Y)'"));
+            assert!(filter.contains(":interpolation=nearest"));
         }
         for color in ["#ff0000", "#808080", "#00ffff"] {
             let key = json!({"enabled":true,"color":color,"similarity":0.18,"blend":0.08,"spillSuppression":true});
