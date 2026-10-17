@@ -15,6 +15,7 @@ import ExportPanel from './components/ExportPanel.vue'
 import type { ImportedProject, MediaAsset, Project, ProjectHistory, ProjectSummary } from './core/types.ts'
 import { stampNewAssets } from './core/asset-times.ts'
 import { cloneProject, createClip, createProject, createTrack, validateProject } from './core/project.ts'
+import { adoptFirstVideoSize } from './core/project-size.ts'
 import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, redoHistory, undoHistory } from './core/timeline.ts'
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
 import { exportProjectFile, importProjectFile } from './core/project-file.ts'
@@ -134,7 +135,7 @@ function rememberEditorAsset(asset: MediaAsset, blob: Blob) { rememberAsset(asse
 async function acceptAssets(assets: MediaAsset[], assetBlobs?: Map<string, Blob>) {
   if (!assets.length) return
   for (const asset of assets) { rememberAsset(asset); if (assetBlobs?.has(asset.id)) blobs.set(asset.id, assetBlobs.get(asset.id)!) }
-  commit(addAssets(project.value, assets), `已导入 ${assets.length} 个素材`)
+  commit(adoptFirstVideoSize(addAssets(project.value, assets), assets), `已导入 ${assets.length} 个素材`)
 }
 async function acceptAsset(asset: MediaAsset) { try { await acceptAssets([asset]); announce('录制已加入素材库，可前往视频剪辑继续编辑。') } catch (cause) { fail(cause) } }
 async function importFiles(files?: File[]) {

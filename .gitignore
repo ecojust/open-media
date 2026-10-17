@@ -17,3 +17,5 @@ src-tauri/resources/capture/libopen_media_capture.dylib
 src-tauri/resources/speech/*
 !src-tauri/resources/speech/README.txt
 !src-tauri/resources/speech/README.md
+__pycache__/
+*.pyc

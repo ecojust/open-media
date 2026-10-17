@@ -1,95 +1,377 @@
 {
-  "schema": 1,
+  "schema": 2,
   "models": [
     {
-      "id": "multivoice-zh-en-v1",
+      "id": "zipvoice-distill-fp32",
       "version": 1,
-      "license": "Apache-2.0",
-      "modelSize": 176178663,
-      "downloadSize": 176178663,
+      "license": "CC-BY-NC",
+      "usageNote": "模型权重限非商业用途；固定合成参考音色。",
+      "modelSize": 551216898,
+      "downloadSize": 549327724,
       "voices": [
         {
-          "id": "zm_013",
-          "name": "沉稳男声",
+          "id": "zipvoice_zh_female",
+          "name": "ZipVoice Distill FP32",
           "language": "zh-CN",
-          "gender": "male",
-          "speakerId": 62
-        },
-        {
-          "id": "zf_038",
-          "name": "明亮女声",
-          "language": "zh-CN",
-          "gender": "female",
-          "speakerId": 23
-        },
-        {
-          "id": "af_maple",
-          "name": "英文女声",
-          "language": "en-US",
           "gender": "female",
           "speakerId": 0
         }
       ],
       "files": [
         {
-          "path": "model.int8.onnx",
-          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/model.int8.onnx",
-          "size": 114299010,
-          "sha256": "bda15858163726a492d02a9a727bc263551b86ac77f90812c4b30ff41d380e26"
+          "path": "encoder.onnx",
+          "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ftext_encoder.onnx",
+          "size": 17633735,
+          "sha256": "495eca2d5f8a911f5c361bcce5bd55cdd2508ccdd26ce3e9bf1d3c29eb974861",
+          "mirrors": [
+            "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/text_encoder.onnx",
+            "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/text_encoder.onnx"
+          ]
         },
         {
-          "path": "voices.bin",
-          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/voices.bin",
-          "size": 53790720,
-          "sha256": "e64a5a581d8c2a350d848f51c3121657cd83aa07ed6109172177345874a7244c"
+          "path": "decoder.onnx",
+          "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ffm_decoder.onnx",
+          "size": 477534010,
+          "sha256": "4510d4f5f049f14ef80207fca695e13c820e2cea61635f402954950bc62b1e3c",
+          "mirrors": [
+            "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/fm_decoder.onnx",
+            "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/fm_decoder.onnx"
+          ]
         },
         {
           "path": "tokens.txt",
-          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/tokens.txt",
-          "size": 1111,
-          "sha256": "931ab2df2400cd65d580a22402024c2347ced8ae9ea300e545144b1aacc48e14"
+          "url": "https://modelscope.cn/api/v1/models/k2-fsa/ZipVoice/repo?Revision=f5804d50a404da3c1fbb1208cd0f3e5abdbd9c5b&FilePath=zipvoice_distill%2Ftokens.txt",
+          "size": 2570,
+          "sha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda",
+          "mirrors": [
+            "https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/tokens.txt",
+            "https://hf-mirror.com/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/tokens.txt"
+          ]
         },
         {
-          "path": "lexicon-us-en.txt",
-          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/lexicon-us-en.txt",
-          "size": 5956885,
-          "sha256": "7daaab53a181be9885b853a8582bf1838186317e5dadacbcef9c426d6fa0da14"
+          "path": "vocos_24khz.onnx",
+          "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+          "size": 54157409,
+          "sha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+            "https://ghproxy.net/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx",
+            "https://gh-proxy.com/https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx"
+          ]
         },
         {
-          "path": "lexicon-zh.txt",
-          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/lexicon-zh.txt",
-          "size": 2119465,
-          "sha256": "11111d8cd695fba2ace1367a1d0a708b586e6ef5c1f9be91da5d7eef129b651c"
+          "path": "lexicon.txt",
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-lexicon.txt",
+          "embedded": "zipvoice-lexicon.txt",
+          "size": 1727147,
+          "sha256": "c94b049d970e971acdc2a7e5e7b23ca594222a9d640e417c711f2ad1e7bb7d46"
         },
         {
-          "path": "LICENSE",
-          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/LICENSE",
-          "size": 11358,
-          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          "path": "reference.wav",
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.wav",
+          "embedded": "zipvoice-reference.wav",
+          "size": 161952,
+          "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
         },
         {
-          "path": "README.md",
-          "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_1/resolve/155831f1b4ba23b1f5c058be6a61df90cefb2a37/README.md",
-          "size": 114,
-          "sha256": "e2d39356ea4d67ac15c39a7e5a238ea12b0f6fb8a55bb0c87bc2f659eb1cf7ac"
+          "path": "reference.txt",
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.txt",
+          "embedded": "zipvoice-reference.txt",
+          "size": 75,
+          "sha256": "3167ae2c4779efd4d7608ce400cb7b4de76c925a9ecab9c32eee0e1cfe391f13"
         }
       ],
       "model": {
-        "kind": "kokoro",
-        "file": "model.int8.onnx",
-        "voices": "voices.bin",
+        "kind": "zipvoice",
+        "encoder": "encoder.onnx",
+        "decoder": "decoder.onnx",
         "tokens": "tokens.txt",
+        "vocoder": "vocos_24khz.onnx",
         "dataDir": "@bundled/model/espeak-ng-data",
         "lexicons": [
-          "lexicon-us-en.txt",
-          "lexicon-zh.txt"
+          "lexicon.txt"
         ],
-        "ruleFsts": [
-          "@bundled/model/date-zh.fst",
-          "@bundled/model/number-zh.fst",
-          "@bundled/model/phone-zh.fst"
-        ],
+        "referenceAudio": "reference.wav",
+        "referenceText": "reference.txt",
         "sampleRate": 24000
+      }
+    },
+    {
+      "id": "f5-v1-base-fp32",
+      "version": 1,
+      "license": "CC-BY-NC-4.0",
+      "usageNote": "模型权重限非商业用途；固定合成参考音色。",
+      "modelSize": 1403235624,
+      "downloadSize": 1402816013,
+      "voices": [
+        {
+          "id": "f5_zh_female",
+          "name": "F5-TTS v1 Base FP32",
+          "language": "zh-CN",
+          "gender": "female",
+          "speakerId": 0
+        }
+      ],
+      "files": [
+        {
+          "path": "model_1250000.safetensors",
+          "url": "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&FilePath=F5TTS_v1_Base%2Fmodel_1250000.safetensors",
+          "size": 1348435761,
+          "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38",
+          "mirrors": [
+            "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors",
+            "https://hf-mirror.com/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/model_1250000.safetensors"
+          ]
+        },
+        {
+          "path": "vocab.txt",
+          "url": "https://modelscope.cn/api/v1/models/AI-ModelScope/F5-TTS/repo?Revision=de616f8be9ce6388c7e862a75c665de9da9a3ef8&FilePath=F5TTS_v1_Base%2Fvocab.txt",
+          "size": 13800,
+          "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c",
+          "mirrors": [
+            "https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt",
+            "https://hf-mirror.com/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/vocab.txt"
+          ]
+        },
+        {
+          "path": "vocos/pytorch_model.bin",
+          "url": "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&FilePath=pytorch_model.bin",
+          "size": 54365991,
+          "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a",
+          "mirrors": [
+            "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin",
+            "https://hf-mirror.com/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/pytorch_model.bin"
+          ]
+        },
+        {
+          "path": "vocos/config.yaml",
+          "url": "https://modelscope.cn/api/v1/models/pengzhendong/vocos-mel-24khz/repo?Revision=8dde403ededa9c617f8b312c61027c8a9a7a3ae2&FilePath=config.yaml",
+          "size": 461,
+          "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc",
+          "mirrors": [
+            "https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml",
+            "https://hf-mirror.com/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/config.yaml"
+          ]
+        },
+        {
+          "path": "reference.wav",
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.wav",
+          "embedded": "f5-reference.wav",
+          "size": 419088,
+          "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+        },
+        {
+          "path": "reference.txt",
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.txt",
+          "embedded": "f5-reference.txt",
+          "size": 123,
+          "sha256": "0c8221e15bba82653eee30e99b7c675bfbb7a8e1dbc0f70f40c320e2159ed890"
+        },
+        {
+          "path": "runner-config.json",
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-runner-config.json",
+          "embedded": "f5-runner-config.json",
+          "size": 400,
+          "sha256": "73e3fe772676ab9b1b1df0c426a610abf35713cda88b2c0354c131f30776f619"
+        }
+      ],
+      "model": {
+        "kind": "f5",
+        "config": "runner-config.json",
+        "sampleRate": 24000
+      },
+      "runtimeId": "python-cpu-v1"
+    },
+    {
+      "id": "qwen3-tts-1.7b-serena",
+      "version": 1,
+      "license": "Apache-2.0",
+      "usageNote": "中文 Serena；CPU 离线合成，建议至少 16 GB 内存。",
+      "modelSize": 4520159845,
+      "downloadSize": 4520159586,
+      "voices": [
+        {
+          "id": "qwen3_serena",
+          "name": "Qwen3-TTS 1.7B BF16 · Serena",
+          "language": "zh-CN",
+          "gender": "female",
+          "speakerId": 0
+        }
+      ],
+      "files": [
+        {
+          "path": "config.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=config.json",
+          "size": 4908,
+          "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/config.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/config.json"
+          ]
+        },
+        {
+          "path": "generation_config.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=generation_config.json",
+          "size": 245,
+          "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/generation_config.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/generation_config.json"
+          ]
+        },
+        {
+          "path": "merges.txt",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=merges.txt",
+          "size": 1671839,
+          "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/merges.txt",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/merges.txt"
+          ]
+        },
+        {
+          "path": "model.safetensors",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=model.safetensors",
+          "size": 3833402552,
+          "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/model.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/model.safetensors"
+          ]
+        },
+        {
+          "path": "preprocessor_config.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=preprocessor_config.json",
+          "size": 127,
+          "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/preprocessor_config.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/preprocessor_config.json"
+          ]
+        },
+        {
+          "path": "speech_tokenizer/config.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fconfig.json",
+          "size": 2336,
+          "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/config.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/config.json"
+          ]
+        },
+        {
+          "path": "speech_tokenizer/configuration.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fconfiguration.json",
+          "size": 76,
+          "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/configuration.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/configuration.json"
+          ]
+        },
+        {
+          "path": "speech_tokenizer/model.safetensors",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fmodel.safetensors",
+          "size": 682293092,
+          "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/model.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/model.safetensors"
+          ]
+        },
+        {
+          "path": "speech_tokenizer/preprocessor_config.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=speech_tokenizer%2Fpreprocessor_config.json",
+          "size": 234,
+          "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/preprocessor_config.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/speech_tokenizer/preprocessor_config.json"
+          ]
+        },
+        {
+          "path": "tokenizer_config.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=tokenizer_config.json",
+          "size": 7344,
+          "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/tokenizer_config.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/tokenizer_config.json"
+          ]
+        },
+        {
+          "path": "vocab.json",
+          "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/repo?Revision=ae999bce1d1356e93686274865bc72744daab1a5&FilePath=vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "mirrors": [
+            "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/vocab.json",
+            "https://hf-mirror.com/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/resolve/0c0e3051f131929182e2c023b9537f8b1c68adfe/vocab.json"
+          ]
+        },
+        {
+          "path": "runner-config.json",
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/qwen3-runner-config.json",
+          "embedded": "qwen3-runner-config.json",
+          "size": 259,
+          "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28"
+        }
+      ],
+      "model": {
+        "kind": "qwen3",
+        "config": "runner-config.json",
+        "sampleRate": 24000
+      },
+      "runtimeId": "python-cpu-v1"
+    }
+  ],
+  "runtimes": [
+    {
+      "id": "python-cpu-v1",
+      "version": 1,
+      "platforms": {
+        "macos-arm64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-arm64.zip",
+          "size": 229466785,
+          "unpackedSize": 833310647,
+          "sha256": "22108ab339e20b53c16791e9cb406db1876a81a2c7eb98ef586179710bebb9bc",
+          "manifestSha256": "4d90803b3879d4864f7fa34d4c8144fb1557cff521ea99c0ab08bc3ef58c236c",
+          "executable": "python/bin/python3",
+          "script": "runner/tts.py",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-arm64.zip",
+            "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-arm64.zip",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-arm64.zip"
+          ]
+        },
+        "macos-x64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-x64.zip",
+          "size": 335981482,
+          "unpackedSize": 1212713611,
+          "sha256": "bbcb0d5083a434e935ce569d7024de67fd29468a5e79b7ba86f6044230f20b37",
+          "manifestSha256": "7c450d4cb79023e56db45bd52437a22f77f8351fcd237f6d1357e0c85b02fa93",
+          "executable": "python/bin/python3",
+          "script": "runner/tts.py",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-x64.zip",
+            "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-x64.zip",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-x64.zip"
+          ]
+        },
+        "windows-x64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-windows-x64.zip",
+          "size": 291456476,
+          "unpackedSize": 985590814,
+          "sha256": "70b222267052d3abe205e3a0b4f1ab8653af078b721824a7e645531bc7e07705",
+          "manifestSha256": "4d52a3022502a39a2c76ec286ad44468a54717d8f4fe6e84563497745f4138b8",
+          "executable": "python/python.exe",
+          "script": "runner/tts.py",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-windows-x64.zip",
+            "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-windows-x64.zip",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-windows-x64.zip"
+          ]
+        }
       }
     }
   ]

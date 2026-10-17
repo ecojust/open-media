@@ -1,5 +1,6 @@
 import type { Clip, MediaAsset } from './types.ts'
 import { clipDuration } from './timeline.ts'
+import { audioSourceTime } from './audio-loop.ts'
 
 function cancelled(): DOMException { return new DOMException('片段试听已取消', 'AbortError') }
 
@@ -30,12 +31,19 @@ export class ClipAudioPlayer {
   private active = false
   private disposed = false
   private completed = false
+  private readonly loops: boolean
+  // A looping decoder resets currentTime at each source boundary. Keep the
+  // audition clock on the audio thread and freeze it while the decoder waits.
+  private mediaElapsed = 0
+  private mediaStarted = 0
+  private mediaClockRunning = false
 
   constructor(asset: MediaAsset, clip: Clip, callbacks: { ended: () => void; error: (message: string) => void }) {
     this.asset = { ...asset }
     this.bufferEligible = asset.kind === 'audio' && clip.speed === 1 && asset.size > 0 && asset.size <= MAX_BUFFERED_BYTES && asset.duration <= MAX_BUFFERED_SECONDS
     this.clip = { ...clip }
     this.duration = clipDuration(clip)
+    this.loops = clip.trimOut > asset.duration + 1e-6
     this.callbacks = callbacks
   }
 
@@ -44,6 +52,7 @@ export class ClipAudioPlayer {
     this.media = document.createElement('audio')
     this.media.crossOrigin = 'anonymous'
     this.media.preload = 'auto'
+    this.media.loop = this.loops
     this.media.addEventListener('playing', this.onPlaying)
     this.media.addEventListener('waiting', this.onWaiting)
     this.media.addEventListener('ended', this.onEnded)
@@ -56,7 +65,9 @@ export class ClipAudioPlayer {
     if (this.completed) return this.duration
     const elapsed = this.buffer
       ? this.bufferOffset + (this.active && this.context ? this.context.currentTime - this.bufferStarted : 0)
-      : ((this.media?.currentTime ?? this.clip.trimIn) - this.clip.trimIn) / this.clip.speed
+      : this.loops
+        ? this.mediaElapsed + (this.active && this.mediaClockRunning && this.context ? this.context.currentTime - this.mediaStarted : 0)
+        : ((this.media?.currentTime ?? this.clip.trimIn) - this.clip.trimIn) / this.clip.speed
     return Math.max(0, Math.min(this.duration, elapsed))
   }
 
@@ -117,6 +128,10 @@ export class ClipAudioPlayer {
 
   private onPlaying = (): void => {
     if (!this.active || this.disposed) return
+    if (this.loops && !this.mediaClockRunning) {
+      this.mediaStarted = this.context!.currentTime
+      this.mediaClockRunning = true
+    }
     this.scheduleEnvelope(this.elapsed)
     this.scheduleBoundary()
   }
@@ -125,12 +140,17 @@ export class ClipAudioPlayer {
     window.clearTimeout(this.boundaryTimer)
     this.boundaryTimer = window.setTimeout(() => {
       if (!this.active || this.disposed) return
-      if (this.media && (this.media.currentTime >= this.clip.trimOut - 0.002 || this.media.ended)) this.finish()
+      if (this.elapsed >= this.duration - 0.002 || (this.media?.ended && !this.loops)) this.finish()
       else this.scheduleBoundary()
     }, Math.max(10, (this.duration - this.elapsed) * 1000))
   }
 
-  private onWaiting = (): void => { if (this.active) this.silence() }
+  private onWaiting = (): void => {
+    if (!this.active) return
+    this.mediaElapsed = this.elapsed
+    this.mediaClockRunning = false
+    this.silence()
+  }
   private onEnded = (): void => { if (this.active) this.finish() }
   private onError = (): void => {
     if (!this.active || this.disposed) return
@@ -207,10 +227,14 @@ export class ClipAudioPlayer {
     const context = this.context!, buffer = this.buffer!
     this.bufferOffset = Math.max(0, Math.min(this.duration, elapsed))
     if (this.bufferOffset >= this.duration) { this.finish(); return }
-    const offset = this.clip.trimIn + this.bufferOffset
+    const sourceTime = this.clip.trimIn + this.bufferOffset
+    const offset = this.loops ? audioSourceTime(sourceTime, buffer.duration) : sourceTime
     if (offset >= buffer.duration) throw new Error('音频裁剪位置超出素材时长')
     const source = context.createBufferSource()
     source.buffer = buffer
+    source.loop = this.loops
+    source.loopStart = 0
+    source.loopEnd = buffer.duration
     source.connect(this.gain!)
     source.onended = () => { if (this.active && this.bufferSource === source) this.finish() }
     this.bufferSource = source
@@ -252,7 +276,10 @@ export class ClipAudioPlayer {
       await this.waitForReady(pending.signal)
       check()
       if (media.playbackRate !== this.clip.speed) media.playbackRate = this.clip.speed
-      const target = this.clip.trimIn + Math.max(0, Math.min(this.duration, elapsed)) * this.clip.speed
+      this.mediaElapsed = Math.max(0, Math.min(this.duration, elapsed))
+      if (this.mediaElapsed >= this.duration) { this.finish(); return }
+      const sourceTime = this.clip.trimIn + this.mediaElapsed * this.clip.speed
+      const target = this.loops ? audioSourceTime(sourceTime, Number.isFinite(media.duration) ? media.duration : this.asset.duration) : sourceTime
       if (Number.isFinite(media.duration) && target >= media.duration) throw new Error('音频裁剪位置超出素材时长')
       if (Math.abs(media.currentTime - target) > 0.002) {
         media.currentTime = target
@@ -286,6 +313,8 @@ export class ClipAudioPlayer {
 
   pause(): void {
     if (this.buffer && this.active) this.bufferOffset = this.elapsed
+    else if (this.loops && this.active) this.mediaElapsed = this.elapsed
+    this.mediaClockRunning = false
     this.active = false
     if (this.bufferSource) {
       this.bufferSource.onended = null

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "sourceLock": "src-tauri/Cargo.lock",
-  "sourceLockSha256": "63f28d6fffee7b57d3b2dbd5da1410fbda2c7acbe00dc7c6d3fada6e289d5f62",
+  "sourceLockSha256": "455633952217a98980976b825ac352e000dbe1b97960768fc5252f6691a2d848",
   "coverage": "All registry packages in the locked dependency graph, including build-only and platform-specific packages. The inventory may exceed the dependencies present in an individual installer.",
   "originalTextPolicy": "Original license, copyright and notice bytes are retained without modification. Identical texts share one stored copy. Supplemental upstream sources are recorded where published package archives omit their notices.",
   "packages": [
@@ -214,6 +214,45 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/anyhow/1.0.104/download",
             "archiveSha256": "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+          }
+        }
+      ]
+    },
+    {
+      "name": "arbitrary",
+      "version": "1.5.0",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The Rust-Fuzz Project Developers",
+        "Nick Fitzgerald <fitzgen@gmail.com>",
+        "Manish Goregaokar <manishsmail@gmail.com>",
+        "Simonas Kazlauskas <arbitrary@kazlauskas.me>",
+        "Brian L. Troutwine <brian@troutwine.us>",
+        "Corey Farwell <coreyf@rwell.org>"
+      ],
+      "source": "https://crates.io/api/v1/crates/arbitrary/1.5.0/download",
+      "archiveSha256": "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed",
+      "notices": [
+        {
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/arbitrary/1.5.0/download",
+            "archiveSha256": "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
+          }
+        },
+        {
+          "file": "texts/15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c.txt",
+          "sha256": "15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c",
+          "bytes": 1074,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/arbitrary/1.5.0/download",
+            "archiveSha256": "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
           }
         }
       ]
@@ -2077,6 +2116,44 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/deranged/0.5.9/download",
             "archiveSha256": "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
+          }
+        }
+      ]
+    },
+    {
+      "name": "derive_arbitrary",
+      "version": "1.5.0",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "The Rust-Fuzz Project Developers",
+        "Nick Fitzgerald <fitzgen@gmail.com>",
+        "Manish Goregaokar <manishsmail@gmail.com>",
+        "Andre Bogus <bogusandre@gmail.com>",
+        "Corey Farwell <coreyf@rwell.org>"
+      ],
+      "source": "https://crates.io/api/v1/crates/derive_arbitrary/1.5.0/download",
+      "archiveSha256": "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac",
+      "notices": [
+        {
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/derive_arbitrary/1.5.0/download",
+            "archiveSha256": "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
+          }
+        },
+        {
+          "file": "texts/15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c.txt",
+          "sha256": "15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c",
+          "bytes": 1074,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/derive_arbitrary/1.5.0/download",
+            "archiveSha256": "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
           }
         }
       ]
@@ -15667,6 +15744,32 @@
       ]
     },
     {
+      "name": "zip",
+      "version": "2.4.2",
+      "declaredLicense": "MIT",
+      "authors": [
+        "Mathijs van de Nes <git@mathijs.vd-nes.nl>",
+        "Marli Frost <marli@frost.red>",
+        "Ryan Levick <ryan.levick@gmail.com>",
+        "Chris Hennick <hennickc@amazon.com>"
+      ],
+      "source": "https://crates.io/api/v1/crates/zip/2.4.2/download",
+      "archiveSha256": "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50",
+      "notices": [
+        {
+          "file": "texts/04dc52136d82400b11df5f474949863a70a5d05d2278dec45b99c479494450a6.txt",
+          "sha256": "04dc52136d82400b11df5f474949863a70a5d05d2278dec45b99c479494450a6",
+          "bytes": 1217,
+          "originalPath": "LICENSE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zip/2.4.2/download",
+            "archiveSha256": "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+          }
+        }
+      ]
+    },
+    {
       "name": "zlib-rs",
       "version": "0.6.8",
       "declaredLicense": "Zlib",
@@ -15706,6 +15809,27 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/zmij/1.0.23/download",
             "archiveSha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+          }
+        }
+      ]
+    },
+    {
+      "name": "zopfli",
+      "version": "0.8.4",
+      "declaredLicense": "Apache-2.0",
+      "authors": [],
+      "source": "https://crates.io/api/v1/crates/zopfli/0.8.4/download",
+      "archiveSha256": "aaf7fc5d30c28483d93805c4a5e12b05bbb52407fa67c5f8bd552374cd01fb11",
+      "notices": [
+        {
+          "file": "texts/018b1cb87efdf7a04c2fcc13d57ed63f62149113fb207b27ea13430d64f13513.txt",
+          "sha256": "018b1cb87efdf7a04c2fcc13d57ed63f62149113fb207b27ea13430d64f13513",
+          "bytes": 11341,
+          "originalPath": "COPYING",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/zopfli/0.8.4/download",
+            "archiveSha256": "aaf7fc5d30c28483d93805c4a5e12b05bbb52407fa67c5f8bd552374cd01fb11"
           }
         }
       ]

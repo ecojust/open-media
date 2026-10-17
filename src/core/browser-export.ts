@@ -43,7 +43,11 @@ export async function exportTimelineWebM(project: Project, options: BrowserVideo
     const audioStream = await preview.enableAudio(false)
     await preview.playReady(0)
     stream = canvas.captureStream(fps)
-    for (const track of audioStream.getAudioTracks()) stream.addTrack(track)
+    const audibleAssetIds = new Set(project.assets.filter(asset => asset.kind === 'audio' || asset.kind === 'video').map(asset => asset.id))
+    const hasAudibleMedia = project.tracks.some(track => !track.muted && track.kind !== 'text'
+      && track.clips.some(clip => clip.volume > 0 && !!clip.assetId && audibleAssetIds.has(clip.assetId)))
+    // An unconnected audio destination produces no packets and can stall video-only recordings.
+    if (hasAudibleMedia) for (const track of audioStream.getAudioTracks()) stream.addTrack(track)
     recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: options.videoBitsPerSecond || 8_000_000, audioBitsPerSecond: 192_000 })
     const chunks: BlobPart[] = []
     const recording = recorder

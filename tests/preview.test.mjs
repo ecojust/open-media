@@ -36,3 +36,20 @@ test('没有浏览器编码能力时明确拒绝导出，不返回伪造文件',
   assert.equal(browserVideoExportSupported(), false)
   await assert.rejects(() => exportTimelineWebM({}), /不支持视频导出/)
 })
+
+test('字幕纵向对齐定位整个多行文本块，保留空行、换行间距和原有居中位置', () => {
+  const clip = createTextClip({ width: 320, height: 240 }, { width: 120, height: 200, text: '第一行\n\n末行', fontSize: 20 })
+  const positions = {}
+  for (const alignment of ['top', 'middle', 'bottom', undefined]) {
+    const calls = []
+    const context = { measureText: text => ({ width: text.length * 20 }), fillText: (...args) => calls.push(args) }
+    drawTextClip(context, { ...clip, textVerticalAlign: alignment })
+    positions[String(alignment)] = calls.map(([, , y]) => y)
+    assert.deepEqual(calls.map(([text]) => text), ['第一行', '', '末行'])
+    assert.equal(context.textBaseline, 'middle')
+  }
+  assert.deepEqual(positions.top, [22, 49, 76])
+  assert.deepEqual(positions.middle, [73, 100, 127])
+  assert.deepEqual(positions.bottom, [124, 151, 178])
+  assert.deepEqual(positions.undefined, positions.middle, '旧字幕未设置纵向对齐时不应改变画面')
+})

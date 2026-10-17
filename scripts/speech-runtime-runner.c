@@ -46,7 +46,8 @@ int main(int argc, char **argv) {
   SherpaOnnxGenerationConfig generation = {0};
   const char *matcha_model = option(argc, argv, "--matcha-acoustic-model");
   const char *kokoro_model = option(argc, argv, "--kokoro-model");
-  if ((!matcha_model && !kokoro_model) || (matcha_model && kokoro_model)) {
+  const char *zipvoice_encoder = option(argc, argv, "--zipvoice-encoder");
+  if ((!!matcha_model + !!kokoro_model + !!zipvoice_encoder) != 1) {
     fprintf(stderr, "Select exactly one speech model.\n"); return 2;
   }
   cfg.model.matcha.acoustic_model = matcha_model;
@@ -62,7 +63,18 @@ int main(int argc, char **argv) {
   cfg.model.kokoro.data_dir = option(argc, argv, "--kokoro-data-dir");
   cfg.model.kokoro.lexicon = option(argc, argv, "--kokoro-lexicon");
   cfg.model.kokoro.length_scale = 1.0f;
-  cfg.model.num_threads = 2;
+  cfg.model.zipvoice.encoder = zipvoice_encoder;
+  cfg.model.zipvoice.decoder = option(argc, argv, "--zipvoice-decoder");
+  cfg.model.zipvoice.vocoder = option(argc, argv, "--zipvoice-vocoder");
+  cfg.model.zipvoice.tokens = option(argc, argv, "--zipvoice-tokens");
+  cfg.model.zipvoice.data_dir = option(argc, argv, "--zipvoice-data-dir");
+  cfg.model.zipvoice.lexicon = option(argc, argv, "--zipvoice-lexicon");
+  /* Preserve the FP32 comparison's reference conditioning and integration. */
+  cfg.model.zipvoice.feat_scale = 0.1f;
+  cfg.model.zipvoice.t_shift = 0.5f;
+  cfg.model.zipvoice.target_rms = 0.1f;
+  cfg.model.zipvoice.guidance_scale = 1.0f;
+  cfg.model.num_threads = zipvoice_encoder ? 1 : 2;
   cfg.model.provider = "cpu";
   cfg.max_num_sentences = 1;
   /* Keep the synthesis parameters used by the evaluated single-voice model. */
@@ -73,17 +85,25 @@ int main(int argc, char **argv) {
   const char *speed = option(argc, argv, "--speed");
   const char *debug = option(argc, argv, "--debug");
   const char *sample_rate = option(argc, argv, "--sample-rate");
+  const char *reference_audio = option(argc, argv, "--reference-audio");
+  const char *reference_text_file = option(argc, argv, "--reference-text-file");
+  const char *num_steps = option(argc, argv, "--num-steps");
   int expected_sample_rate = sample_rate ? atoi(sample_rate) : (matcha_model ? 16000 : 24000);
   cfg.model.debug = debug && !strcmp(debug, "true");
   generation.sid = speaker ? atoi(speaker) : 0;
   generation.speed = speed ? (float)atof(speed) : 1.0f;
   generation.silence_scale = cfg.silence_scale;
+  generation.num_steps = zipvoice_encoder ? 8 : 0;
   if (!output ||
       (matcha_model && (!cfg.model.matcha.vocoder || !cfg.model.matcha.tokens ||
         !cfg.model.matcha.data_dir || !cfg.model.matcha.lexicon)) ||
       (kokoro_model && (!cfg.model.kokoro.voices || !cfg.model.kokoro.tokens ||
         !cfg.model.kokoro.data_dir || !cfg.model.kokoro.lexicon)) ||
-      !cfg.rule_fsts ||
+      (zipvoice_encoder && (!cfg.model.zipvoice.decoder || !cfg.model.zipvoice.vocoder ||
+        !cfg.model.zipvoice.tokens || !cfg.model.zipvoice.data_dir ||
+        !cfg.model.zipvoice.lexicon || !reference_audio || !reference_text_file ||
+        (num_steps && strcmp(num_steps, "8")))) ||
+      (!zipvoice_encoder && !cfg.rule_fsts) ||
       (expected_sample_rate != 16000 && expected_sample_rate != 22050 &&
        expected_sample_rate != 24000 && expected_sample_rate != 44100 && expected_sample_rate != 48000) ||
       !isfinite(generation.speed) || generation.speed < 0.5f || generation.speed > 2.0f) {
@@ -91,12 +111,35 @@ int main(int argc, char **argv) {
   }
   char *text = read_text(option(argc, argv, "--text-file"));
   if (!text) { fprintf(stderr, "Cannot read UTF-8 speech text file.\n"); return 2; }
+  char *reference_text = NULL;
+  const SherpaOnnxWave *reference_wave = NULL;
+  if (zipvoice_encoder) {
+    reference_text = read_text(reference_text_file);
+    reference_wave = SherpaOnnxReadWave(reference_audio);
+    if (!reference_text || !reference_wave || reference_wave->sample_rate <= 0 ||
+        reference_wave->num_samples <= 0 ||
+        (int64_t)reference_wave->num_samples > (int64_t)reference_wave->sample_rate * 30) {
+      free(text); free(reference_text);
+      if (reference_wave) SherpaOnnxFreeWave(reference_wave);
+      fprintf(stderr, "Cannot read the installed voice reference.\n"); return 2;
+    }
+    generation.reference_text = reference_text;
+    generation.reference_audio = reference_wave->samples;
+    generation.reference_audio_len = reference_wave->num_samples;
+    generation.reference_sample_rate = reference_wave->sample_rate;
+  }
   puts("stage=loading"); fflush(stdout);
   const SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&cfg);
-  if (!tts) { free(text); fprintf(stderr, "Cannot load bundled speech model.\n"); return 3; }
+  if (!tts) {
+    free(text); free(reference_text);
+    if (reference_wave) SherpaOnnxFreeWave(reference_wave);
+    fprintf(stderr, "Cannot load installed speech model.\n"); return 3;
+  }
   int32_t speakers = SherpaOnnxOfflineTtsNumSpeakers(tts);
   if (generation.sid < 0 || generation.sid >= speakers) {
-    free(text); SherpaOnnxDestroyOfflineTts(tts);
+    free(text); free(reference_text);
+    if (reference_wave) SherpaOnnxFreeWave(reference_wave);
+    SherpaOnnxDestroyOfflineTts(tts);
     fprintf(stderr, "Unknown voice.\n"); return 2;
   }
   printf("stage=generating, speakers=%d, text_bytes=%zu\n", speakers, strlen(text));
@@ -104,6 +147,8 @@ int main(int argc, char **argv) {
   const SherpaOnnxGeneratedAudio *audio = SherpaOnnxOfflineTtsGenerateWithConfig(
       tts, text, &generation, progress, NULL);
   free(text);
+  free(reference_text);
+  if (reference_wave) SherpaOnnxFreeWave(reference_wave);
   int ok = audio && audio->n > 0 && audio->sample_rate == expected_sample_rate &&
       SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, output);
   if (audio) SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);

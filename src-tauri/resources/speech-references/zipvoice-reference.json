@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source": "test/chinese-tts-benchmark/provenance/zipvoice/reference/matcha-reference.wav",
+  "voice": "matcha_zh_en_female",
+  "synthetic": true,
+  "sampleRate": 16000,
+  "seconds": 5.059625,
+  "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec",
+  "text": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
+  "normalizer": {
+    "upstream": "cn2an",
+    "version": "0.5.23",
+    "function": "transform(text, \"an2cn\")",
+    "nativeImplementation": "src-tauri/src/speech_chinese.rs",
+    "fixtures": 1538
+  }
+}

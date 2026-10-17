@@ -1,0 +1,213 @@
+name: Optional speech runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish verified runtime components as a separate prerelease
+        type: boolean
+        default: false
+  push:
+    branches: ['work/optional-speech-runtime-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optional-speech-runtime-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    name: Runtime and real speech — ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+          - platform: macos-x64
+            runner: macos-15-intel
+          - platform: windows-x64
+            runner: windows-2022
+    env:
+      PYTHONUNBUFFERED: '1'
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PIP_NO_CACHE_DIR: '1'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Select the native Windows linker
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import os, shutil
+          from pathlib import Path
+          compiler = shutil.which('cl.exe')
+          if not compiler:
+              raise RuntimeError('The native Windows compiler is unavailable')
+          linker = Path(compiler).with_name('link.exe')
+          if not linker.is_file():
+              raise RuntimeError('The native Windows linker is unavailable')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as target:
+              target.write(f'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={linker}\n')
+      - name: Build a self-contained interpreter and inference runtime
+        shell: bash
+        run: |
+          python scripts/optional-speech-runtime-build.py \
+            --platform '${{ matrix.platform }}' \
+            --work "$RUNNER_TEMP/optional-speech-runtime" \
+            --output artifacts/optional-speech-runtime \
+            --phase build
+      - name: Verify native optional speech and Chinese normalization
+        id: native-speech
+        continue-on-error: true
+        shell: bash
+        run: |
+          python scripts/optional-speech-zip-smoke.py \
+            --catalog src-tauri/resources/speech-models.json \
+            --output artifacts/optional-speech-runtime/validation/native \
+            --speech-directory "$RUNNER_TEMP/optional-native-speech" \
+            --prepare
+      - name: Verify real models, integrity, relocated paths and offline inference
+        shell: bash
+        run: |
+          python scripts/optional-speech-runtime-build.py \
+            --platform '${{ matrix.platform }}' \
+            --work "$RUNNER_TEMP/optional-speech-runtime" \
+            --output artifacts/optional-speech-runtime \
+            --phase validate
+      - name: Verify application command and audio import with downloaded models
+        shell: bash
+        run: |
+          set -o pipefail
+          export OPEN_MEDIA_TEST_RUNTIME_ROOT="$RUNNER_TEMP/optional-speech-runtime/移动验证 中文 空格/runtime"
+          export OPEN_MEDIA_TEST_RUNTIME_METADATA="$GITHUB_WORKSPACE/artifacts/optional-speech-runtime/runtime-metadata.json"
+          for engine in f5 qwen3; do
+            if [[ "$engine" == f5 ]]; then
+              model=f5-v1-base-fp32
+            else
+              model=qwen3-tts-1.7b-serena
+            fi
+            export OPEN_MEDIA_TEST_ENGINE="$engine"
+            export OPEN_MEDIA_TEST_MODEL_ROOT="$RUNNER_TEMP/optional-speech-runtime/移动验证 中文 空格/models/$model"
+            cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib \
+              real_portable_runtime_command_and_audio_round_trip -- --ignored --nocapture \
+              2>&1 | tee "artifacts/optional-speech-runtime/logs/application-$engine.log"
+          done
+      - name: Verify runtime remains unchanged after application inference
+        shell: bash
+        run: |
+          python scripts/optional-speech-runtime-build.py \
+            --platform '${{ matrix.platform }}' \
+            --work "$RUNNER_TEMP/optional-speech-runtime" \
+            --output artifacts/optional-speech-runtime \
+            --phase integrity
+      - name: Require every speech engine validation to pass
+        if: steps.native-speech.outcome != 'success'
+        shell: bash
+        run: |
+          echo 'Native speech validation failed. Runtime publication is blocked.' >&2
+          exit 1
+      - name: Report failure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          for path in sorted(Path('artifacts/optional-speech-runtime').rglob('*.log')):
+              text = path.read_text(encoding='utf-8', errors='replace')[-6000:]
+              text = re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', text)
+              text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::warning title={path.name}::{text}')
+          PY
+      - name: Preserve build logs and real audio validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-runtime-evidence-${{ matrix.platform }}-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            artifacts/optional-speech-runtime/logs/
+            artifacts/optional-speech-runtime/validation/**/*.log
+            artifacts/optional-speech-runtime/validation/**/*.json
+            artifacts/optional-speech-runtime/validation/**/*.wav
+            artifacts/optional-speech-runtime/validation.json
+      - name: Upload verified portable runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-runtime-python-cpu-v1-${{ matrix.platform }}
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            artifacts/optional-speech-runtime/*.zip
+            artifacts/optional-speech-runtime/runtime-metadata.json
+            artifacts/optional-speech-runtime/SHA256SUMS.txt
+
+  publish:
+    name: Publish runtime components only
+    needs: runtime
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: speech-runtime-python-cpu-v1-*
+          path: runtime-artifacts
+      - name: Verify platform artifacts and prepare release manifest
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('runtime-artifacts')
+          manifests = []
+          for platform in ['macos-arm64', 'macos-x64', 'windows-x64']:
+              folder = root / f'speech-runtime-python-cpu-v1-{platform}'
+              item = json.loads((folder / 'runtime-metadata.json').read_text())
+              path = folder / item['filename']
+              assert item['platform'] == platform and item['validated'] is True
+              assert set(item['validatedModels']) == {'f5-v1-base-fp32', 'qwen3-tts-1.7b-serena'}
+              assert path.stat().st_size == item['size']
+              with path.open('rb') as f:
+                  assert hashlib.file_digest(f, 'sha256').hexdigest() == item['sha256']
+              manifests.append(item)
+          (root / 'runtime-metadata.json').write_text(json.dumps(manifests, indent=2) + '\n')
+          (root / 'SHA256SUMS.txt').write_text(''.join(f"{m['sha256']}  {m['filename']}\n" for m in manifests))
+          (root / 'notes.md').write_text('这是可选离线配音所需的独立运行组件，供应用按需下载，不是应用安装包。\n\n包含三个桌面平台的运行环境，已完成真实语音合成、文件完整性、中文路径和断网运行验证。\n')
+          PY
+      - name: Publish immutable runtime prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view speech-runtime-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'The runtime tag already exists. Refusing to overwrite immutable component checksums.' >&2
+            exit 1
+          fi
+          gh release create speech-runtime-v1 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title '可选配音运行组件 v1' \
+            --notes-file runtime-artifacts/notes.md \
+            runtime-artifacts/*/*.zip runtime-artifacts/runtime-metadata.json runtime-artifacts/SHA256SUMS.txt \
+            scripts/optional-speech-assets/*

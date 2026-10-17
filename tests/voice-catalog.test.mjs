@@ -57,3 +57,22 @@ test('未知声音保留自身语言性别，不套用旧模型或中英女声�
   assert.match(voiceTypeLabel(other), /法语/)
   assert.deepEqual(compactVoiceCatalog([other, english]), [other, english])
 })
+
+
+test('three optional Chinese models keep distinct cards, voice IDs and portraits', () => {
+  const optional = [
+    { id: 'zipvoice_zh_female', name: 'ZipVoice Distill FP32', language: 'zh-CN', gender: 'female' },
+    { id: 'f5_zh_female', name: 'F5-TTS v1 Base FP32', language: 'zh-CN', gender: 'female' },
+    { id: 'qwen3_serena', name: 'Qwen3-TTS 1.7B BF16 · Serena', language: 'zh-CN', gender: 'female' },
+  ]
+  const catalog = [...voices, ...optional]
+  assert.deepEqual(compactVoiceCatalog(catalog), catalog)
+  assert.deepEqual(compactVoiceCatalog(catalog, 'f5_zh_female'), catalog)
+  assert.equal(new Set(catalog.map(voice => voiceStyle(voice).portrait)).size, 4)
+  for (const voice of optional) {
+    assert.equal(voiceCategory(voice), 'zh-female')
+    assert.equal(voiceTypeLabel(voice), '中文 · 女声')
+    assert.ok(voiceSearchText(voice).includes(voice.name.toLowerCase()))
+    assert.equal(voiceStyle({ ...voice, gender: 'male' }).id, 'natural', 'do not assign female profiles to a different voice')
+  }
+})

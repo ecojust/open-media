@@ -22,8 +22,16 @@ python3 scripts/generate-voice-previews.py --wav-dir /tmp/open-media-bundled-pre
 
 清单记录声音 ID、说话人编号、时长、大小、原始及解码峰值、WAV/MP3 校验和，以及声学模型、声码器、C API 库、公共头文件、生成脚本和声音目录的校验和。不同 CPU 或编码器版本可能影响输出字节，更新资源时应重新核对清单。
 
-## 可选声音试听
+## 可选声音
 
-`optional-manifest.json` 记录沉稳男声 `zm_013`、明亮女声 `zf_038` 和英文女声 `af_maple` 的真实录音。三段 MP3 合计 177,408 字节，即使尚未下载模型也能本地试听；点击喇叭不会开始下载。它们来自 `src-tauri/resources/speech-models.json` 中固定的模型及说话人编号，使用既有 1.13.8 运行库、内置中英模型的共享文本处理数据、语速 1、静音比例 1、24 kHz 单声道生成，输出为 64 kbps MP3。
+三种下载声音分别使用对应模型在正式中文对比语料中的第 01 段：**这是一款全程由AI接管并生成的软件**。音频逐字节复制自 `test/chinese-tts-benchmark/audio/`，没有重新合成、替换说话人或改变语速。三段 MP3 共 212,292 字节，未下载模型时也可直接试听。
 
-重建时按可选模型目录中的 `model` 字段传入独立进程的 `--kokoro-model`、`--kokoro-voices`、`--kokoro-tokens`、`--kokoro-data-dir`、`--kokoro-lexicon`、`--tts-rule-fsts`，使用对应 `speakerId`、`--sample-rate=24000`、`--speed=1` 及本地 UTF-8 文案文件。中英文固定文案记录在清单的 `texts` 中。随后按上面的 MP3 格式编码，核对声音编号、音频内容、时长与哈希，再更新试听清单。共享文本数据的摘要按相对文件路径排序后，由 `(路径, SHA256)` 列表的紧凑 JSON 计算。
+| 声音 ID | 模型 | 原始试听目录 |
+| --- | --- | --- |
+| `zipvoice_zh_female` | ZipVoice Distill FP32 | `zipvoice-distill-fp32-zh-frontend/01.mp3` |
+| `f5_zh_female` | F5-TTS v1 Base FP32 | `f5-v1-base-fp32/01.mp3` |
+| `qwen3_serena` | Qwen3-TTS 1.7B BF16 · Serena | `qwen3-tts-1.7b-serena/01.mp3` |
+
+`optional-manifest.json` 逐条记录合成设置、参考音频信息、原始 WAV 与 MP3 的 SHA-256、时长以及来源清单路径；`licenses/` 保留模型和推理代码原始许可。ZipVoice、F5 的音色使用已有合成参考语音，Qwen3 使用官方 Serena 说话人。模型权重许可分别为 CC-BY-NC、CC-BY-NC-4.0、Apache-2.0，推理代码与声码器的许可另行保留。
+
+固定试听只验证音色文件可以播放。模型和当前平台运行组件均安装、校验通过之后，才会解锁文本合成，播放试听不会开始模型下载。

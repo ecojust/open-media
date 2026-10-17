@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "cbb2601a21a45a9fdf57eaa10f293a81951469d9cc379a59137f31d4a8e4eb5c",
-      "reviewMethod": "Application version updated to 0.1.12 and browser regression coverage expanded. Dependency versions and original license files are unchanged. Production frontend build verified."
+      "sha256": "cab0d1c27eb02cf46eebe42d30966f0591fbd097379487c8d2a573229210a10c",
+      "reviewMethod": "Application version updated to 0.1.13 with editor and voice download regression coverage. Dependency versions and original license texts are unchanged; type checking, unit tests and the production frontend build passed."
     },
     {
       "path": "package-lock.json",
-      "sha256": "c9809b1d80c28b101e25198265025f98667cb521577d80687077ce079a5a628d",
-      "reviewMethod": "Application version updated to 0.1.12 and browser regression coverage expanded. Dependency versions and original license files are unchanged. Production frontend build verified."
+      "sha256": "5291ec078030f3555f9774f953c550e70a2ef41bacfd8c4976c58712f2e7bba1",
+      "reviewMethod": "Application version updated to 0.1.13 with editor and voice download regression coverage. Dependency versions and original license texts are unchanged; type checking, unit tests and the production frontend build passed."
     },
     {
       "path": "vite.config.ts",

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "files": [
+    {
+      "path": "MICROSOFT-VC-RUNTIME-LICENSE.docx",
+      "url": "https://visualstudio.microsoft.com/wp-content/uploads/2021/09/Visual-C-Runtime-2015-2022-License-1.docx",
+      "size": 39644,
+      "sha256": "f1e3d56ceb2ad68aae0711b910375009e651ac5530fa0760f0dea6e81e54fae1"
+    },
+    {
+      "path": "MICROSOFT-REDISTRIBUTION.html",
+      "url": "https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution",
+      "size": 62616,
+      "sha256": "22c07c097c3eaf8ec93a841b760e25ad75a40718f3ccc3d2f83cd8eeef68a324"
+    },
+    {
+      "path": "MICROSOFT-VC-RUNTIME-LICENSE.txt",
+      "derivedFrom": "MICROSOFT-VC-RUNTIME-LICENSE.docx",
+      "operation": "Paragraph text extraction only",
+      "size": 6590,
+      "sha256": "ed875263593823eb4b685cd543eda0ab075a6f57a76f7718908f2237466c442f"
+    }
+  ]
+}

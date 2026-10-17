@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "engine": "f5",
+  "dtype": "float32",
+  "model": "model_1250000.safetensors",
+  "vocabulary": "vocab.txt",
+  "vocoderConfig": "vocos/config.yaml",
+  "vocoderModel": "vocos/pytorch_model.bin",
+  "referenceAudio": "reference.wav",
+  "referenceText": "reference.txt",
+  "sampleRate": 24000,
+  "steps": 32,
+  "cfgStrength": 2.0,
+  "swaySamplingCoefficient": -1.0,
+  "seed": 20261117
+}

@@ -1,0 +1,15 @@
+{
+  "name": "cn2an",
+  "version": "0.5.23",
+  "license": "MIT",
+  "source": "https://files.pythonhosted.org/packages/02/5c/03f0cb3d31c132e09f5523c76e963436fcd13c0318428021bd210f7bb216/cn2an-0.5.23-py3-none-any.whl",
+  "archiveSha256": "b19ab3c53676765c038ccdab51f69b7efa4f0b888139c34088935769241f1cbf",
+  "archiveBytes": 224934,
+  "licenseArchivePath": "cn2an-0.5.23.dist-info/LICENSE",
+  "licenseSha256": "b18d8d4ad8bc57e00ae80d08d9da80a32176f031062f87c739ea7557c1b5d759",
+  "role": "Native Chinese number normalization compatibility implementation; upstream behavior provides the independent expected fixtures.",
+  "fixtureSource": "tests/fixtures/speech-chinese-normalizer.tsv",
+  "fixtureMetadata": "tests/fixtures/speech-chinese-normalizer.json",
+  "fixtureCount": 1538,
+  "fixtureSha256": "0caeb017db77192225e2b2b93d8c567b9c24cd0cc14a6b394ab35f48f6ddb4ac"
+}

@@ -65,13 +65,14 @@ export interface VoiceStyle {
 export function voiceStyle(voice: SpeechVoice): VoiceStyle {
   const category = voiceCategory(voice)
   const profile = VOICE_PROFILES[voice.id]
-  const optionalStyles: Record<string, { category: VoiceCategoryId; style: VoiceStyleId }> = {
-    zm_013: { category: 'zh-male', style: 'deep' },
-    zf_038: { category: 'zh-female', style: 'bright' },
-    af_maple: { category: 'en-female', style: 'natural' },
+  const optionalStyles: Record<string, VoiceStyle> = {
+    zipvoice_zh_female: { id: 'natural', label: '自然', portrait: 4 },
+    f5_zh_female: { id: 'natural', label: '自然', portrait: 5 },
+    qwen3_serena: { id: 'gentle', label: '温柔', portrait: 6 },
   }
   const optional = optionalStyles[voice.id]
-  const id = profile && profile.category === category ? profile.style : optional?.category === category ? optional.style : 'natural'
+  if (optional && category === 'zh-female') return optional
+  const id = profile && profile.category === category ? profile.style : 'natural'
   if (category === 'zh-en-female') return { id: 'gentle', label: '温柔', portrait: 7 }
   if (category === 'zh-male') {
     if (id === 'deep') return { id, label: '低沉', portrait: 1 }

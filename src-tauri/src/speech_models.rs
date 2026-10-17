@@ -17,14 +17,21 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+#[path = "speech_runtime_packages.rs"]
+mod runtime_packages;
+
 const CANCELLED: &str = "音色下载已取消。";
 const BUFFER_BYTES: usize = 128 * 1024;
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ModelFile {
     path: String,
     url: String,
+    #[serde(default)]
+    mirrors: Vec<String>,
+    #[serde(default)]
+    embedded: Option<String>,
     size: u64,
     sha256: String,
 }
@@ -39,12 +46,22 @@ struct Package {
     files: Vec<ModelFile>,
     voices: Vec<SpeechVoice>,
     model: Model,
+    #[serde(default)]
+    runtime_id: String,
+    #[serde(default)]
+    license: String,
+    #[serde(default)]
+    usage_note: String,
+    #[serde(skip)]
+    runtime: Option<runtime_packages::SelectedRuntime>,
 }
 
 #[derive(Deserialize)]
 struct Catalog {
     schema: u32,
     models: Vec<Package>,
+    #[serde(default)]
+    runtimes: Vec<runtime_packages::RuntimeDefinition>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -77,12 +94,15 @@ struct FileStamp {
     path: PathBuf,
     size: u64,
     modified: Option<SystemTime>,
+    // Full runtime trees are checked at startup and before synthesis, not on every UI poll.
+    defer_display_check: bool,
 }
 
 struct Entry {
     state: State,
     downloaded: u64,
     error: Option<String>,
+    download_source: Option<String>,
     cancelled: Arc<AtomicBool>,
     runtime: Option<SpeechRuntime>,
     stamps: Vec<FileStamp>,
@@ -96,6 +116,7 @@ impl Default for Entry {
             state: State::NotDownloaded,
             downloaded: 0,
             error: None,
+            download_source: None,
             cancelled: Arc::new(AtomicBool::new(false)),
             runtime: None,
             stamps: Vec::new(),
@@ -107,6 +128,7 @@ impl Default for Entry {
 #[derive(Default)]
 struct Downloads {
     entries: HashMap<String, Entry>,
+    runtime_stamps: HashMap<String, Vec<FileStamp>>,
     closing: bool,
     workers: usize,
 }
@@ -132,14 +154,50 @@ pub(crate) struct SpeechModels {
 fn valid_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
+        && !value.starts_with('.')
+        && !value.ends_with('.')
+        && !value.contains("..")
+        && safe_relative(value)
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
 fn safe_relative(value: &str) -> bool {
     !value.is_empty()
-        && !value.contains([',', '\\', ':'])
+        && !value.contains([',', '\\', ':', '<', '>', '"', '|', '?', '*'])
+        && !value.chars().any(char::is_control)
+        && value.split('/').all(|part| {
+            if part.is_empty() || matches!(part, "." | "..") || part.ends_with(['.', ' ']) {
+                return false;
+            }
+            let stem = part.split('.').next().unwrap_or("").to_ascii_uppercase();
+            !matches!(
+                stem.as_str(),
+                "CON"
+                    | "PRN"
+                    | "AUX"
+                    | "NUL"
+                    | "COM1"
+                    | "COM2"
+                    | "COM3"
+                    | "COM4"
+                    | "COM5"
+                    | "COM6"
+                    | "COM7"
+                    | "COM8"
+                    | "COM9"
+                    | "LPT1"
+                    | "LPT2"
+                    | "LPT3"
+                    | "LPT4"
+                    | "LPT5"
+                    | "LPT6"
+                    | "LPT7"
+                    | "LPT8"
+                    | "LPT9"
+            )
+        })
         && Path::new(value)
             .components()
             .all(|part| matches!(part, Component::Normal(_)))
@@ -161,19 +219,25 @@ fn allowed_url(url: &reqwest::Url) -> bool {
             | "github.com"
             | "raw.githubusercontent.com"
             | "release-assets.githubusercontent.com"
+            | "modelscope.cn"
+            | "hf-mirror.com"
+            | "ghfast.top"
+            | "ghproxy.net"
+            | "gh-proxy.com"
     ) || host.ends_with(".huggingface.co")
         || host.ends_with(".hf.co")
         || host.ends_with(".xethub.hf.co")
 }
 
 fn load_catalog(text: &str) -> Result<Vec<Package>> {
-    let catalog: Catalog = serde_json::from_str(text).map_err(|_| "可下载音色清单无效。")?;
-    if catalog.schema != 1 || catalog.models.len() > 16 {
+    let mut catalog: Catalog = serde_json::from_str(text).map_err(|_| "可下载音色清单无效。")?;
+    if !matches!(catalog.schema, 1 | 2) || catalog.models.len() > 16 {
         return Err("可下载音色清单版本不受支持。".into());
     }
+    runtime_packages::validate(&catalog.runtimes)?;
     let mut ids = HashSet::new();
     let mut voice_ids = HashSet::new();
-    for package in &catalog.models {
+    for package in &mut catalog.models {
         if !valid_id(&package.id)
             || !ids.insert(&package.id)
             || package.version == 0
@@ -184,8 +248,15 @@ fn load_catalog(text: &str) -> Result<Vec<Package>> {
         {
             return Err("可下载音色配置无效。".into());
         }
+        package.runtime = runtime_packages::select(&package.runtime_id, &catalog.runtimes)?;
+        if matches!(package.model.kind, ModelKind::F5 | ModelKind::Qwen3)
+            != !package.runtime_id.is_empty()
+        {
+            return Err("音色运行环境与模型类型不一致。".into());
+        }
         let mut paths = HashSet::new();
         let mut total = 0_u64;
+        let mut download_total = 0_u64;
         for file in &package.files {
             let url = reqwest::Url::parse(&file.url).map_err(|_| "音色下载地址无效。")?;
             if !allowed_url(&url)
@@ -197,11 +268,38 @@ fn load_catalog(text: &str) -> Result<Vec<Package>> {
             {
                 return Err("音色文件校验配置无效。".into());
             }
+            if file.mirrors.len() > 8
+                || file.mirrors.iter().any(|source| {
+                    reqwest::Url::parse(source).map_or(true, |url| !allowed_url(&url))
+                })
+            {
+                return Err("音色备用下载地址无效。".into());
+            }
+            if let Some(name) = &file.embedded {
+                let bytes = embedded_file(name).ok_or("音色内置配置不存在。")?;
+                if bytes.len() as u64 != file.size
+                    || format!("{:x}", Sha256::digest(bytes)) != file.sha256.to_lowercase()
+                {
+                    return Err("音色内置配置与校验清单不一致。".into());
+                }
+            } else {
+                download_total = download_total
+                    .checked_add(file.size)
+                    .ok_or("音色下载大小无效。")?;
+            }
             total = total.checked_add(file.size).ok_or("音色资源大小无效。")?;
         }
-        if total != package.model_size || total != package.download_size {
+        if total != package.model_size || download_total != package.download_size {
             return Err("音色资源大小与清单不一致。".into());
         }
+        total
+            .checked_add(
+                package
+                    .runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.archive.size),
+            )
+            .ok_or("音色资源与运行环境的总大小无效。")?;
         for voice in &package.voices {
             if !valid_id(&voice.id)
                 || !voice_ids.insert(&voice.id)
@@ -222,11 +320,19 @@ fn load_catalog(text: &str) -> Result<Vec<Package>> {
         {
             return Err("可下载音色模型配置无效。".into());
         }
-        let mut required = vec![model.file.as_str(), model.tokens.as_str()];
-        required.push(match model.kind {
-            ModelKind::Matcha => &model.vocoder,
-            ModelKind::Kokoro => &model.voices,
-        });
+        let mut required: Vec<&str> = match model.kind {
+            ModelKind::Matcha => vec![&model.file, &model.tokens, &model.vocoder],
+            ModelKind::Kokoro => vec![&model.file, &model.tokens, &model.voices],
+            ModelKind::Zipvoice => vec![
+                &model.encoder,
+                &model.decoder,
+                &model.tokens,
+                &model.vocoder,
+                &model.reference_audio,
+                &model.reference_text,
+            ],
+            ModelKind::F5 | ModelKind::Qwen3 => vec![&model.config],
+        };
         required.extend(model.lexicons.iter().map(String::as_str));
         required.extend(model.rule_fsts.iter().map(String::as_str));
         for path in required {
@@ -367,6 +473,7 @@ fn hash_file(path: &Path, file: &ModelFile, cancelled: &AtomicBool) -> Result<Fi
         path: path.into(),
         size: after.len(),
         modified: after.modified().ok(),
+        defer_display_check: false,
     })
 }
 
@@ -416,7 +523,7 @@ fn engine_resource_path(path: &Path) -> Result<String> {
 fn resolve_runtime(
     package: &Package,
     root: &Path,
-    bundled: &SpeechRuntime,
+    bundled: Option<&SpeechRuntime>,
 ) -> Result<SpeechRuntime> {
     let mut model = package.model.clone();
     let resolve = |value: &str, directory: bool| -> Result<String> {
@@ -424,6 +531,7 @@ fn resolve_runtime(
             return Ok(String::new());
         }
         if let Some(shared) = value.strip_prefix("@bundled/") {
+            let bundled = bundled.ok_or("此音色需要内置语音资源，请重新安装完整安装包。")?;
             let path = checked_path(&bundled.root, shared, directory)?;
             // Lists of lexicons and rules use commas as separators in the native engine.
             engine_resource_path(&path)
@@ -437,6 +545,11 @@ fn resolve_runtime(
     model.vocoder = resolve(&model.vocoder, false)?;
     model.voices = resolve(&model.voices, false)?;
     model.tokens = resolve(&model.tokens, false)?;
+    model.encoder = resolve(&model.encoder, false)?;
+    model.decoder = resolve(&model.decoder, false)?;
+    model.reference_audio = resolve(&model.reference_audio, false)?;
+    model.reference_text = resolve(&model.reference_text, false)?;
+    model.config = resolve(&model.config, false)?;
     model.data_dir = resolve(&model.data_dir, true)?;
     model.lexicons = model
         .lexicons
@@ -456,9 +569,28 @@ fn resolve_runtime(
     {
         return Err("应用安装路径含有逗号，无法读取共享语音规则，请移至不含逗号的目录。".into());
     }
+    let (executable, script) = if let Some(runtime) = &package.runtime {
+        let store = root.parent().ok_or("音色模型目录无效。")?;
+        let runtime_root = runtime_packages::path(store, runtime);
+        (
+            checked_path(&runtime_root, &runtime.archive.executable, false)?,
+            Some(checked_path(&runtime_root, &runtime.archive.script, false)?),
+        )
+    } else if package.runtime_id.is_empty() {
+        (
+            bundled
+                .ok_or("内置语音引擎不可用，请重新安装完整安装包。")?
+                .executable
+                .clone(),
+            None,
+        )
+    } else {
+        return Err("当前系统暂不支持此音色的运行环境。".into());
+    };
     Ok(SpeechRuntime {
         root: root.canonicalize().map_err(|e| e.to_string())?,
-        executable: bundled.executable.clone(),
+        executable,
+        script,
         model,
         voices: package.voices.clone(),
     })
@@ -467,7 +599,7 @@ fn resolve_runtime(
 fn verify_package(
     package: &Package,
     root: &Path,
-    bundled: &SpeechRuntime,
+    bundled: Option<&SpeechRuntime>,
     cancelled: &AtomicBool,
 ) -> Result<(SpeechRuntime, Vec<FileStamp>)> {
     let metadata = fs::symlink_metadata(root).map_err(|_| "音色模型不存在，请先下载。")?;
@@ -478,6 +610,14 @@ fn verify_package(
     for file in &package.files {
         let path = checked_path(root, &file.path, false)?;
         stamps.push(hash_file(&path, file, cancelled)?);
+    }
+    if let Some(runtime) = &package.runtime {
+        let store = root.parent().ok_or("音色模型目录无效。")?;
+        stamps.extend(runtime_packages::verify(
+            &runtime_packages::path(store, runtime),
+            runtime,
+            cancelled,
+        )?);
     }
     check_cancelled(cancelled)?;
     Ok((resolve_runtime(package, root, bundled)?, stamps))
@@ -493,6 +633,21 @@ fn stamps_unchanged(stamps: &[FileStamp]) -> bool {
                     && metadata.modified().ok() == stamp.modified
             })
         })
+}
+
+fn display_stamps_unchanged(stamps: &[FileStamp]) -> bool {
+    !stamps.is_empty()
+        && stamps
+            .iter()
+            .filter(|stamp| !stamp.defer_display_check)
+            .all(|stamp| {
+                fs::symlink_metadata(&stamp.path).is_ok_and(|metadata| {
+                    metadata.is_file()
+                        && !metadata.file_type().is_symlink()
+                        && metadata.len() == stamp.size
+                        && metadata.modified().ok() == stamp.modified
+                })
+            })
 }
 
 fn stop(downloads: &Mutex<Downloads>) {
@@ -514,6 +669,9 @@ fn update(downloads: &Mutex<Downloads>, id: &str, generation: u64, state: State,
             if !entry.cancelled.load(Ordering::SeqCst) {
                 entry.state = state;
                 entry.downloaded = downloaded;
+                if state != State::Downloading {
+                    entry.download_source = None;
+                }
             }
         }
     }
@@ -533,6 +691,7 @@ fn finished(
             .get_mut(id)
             .filter(|entry| entry.generation == generation)
         {
+            entry.download_source = None;
             if entry.cancelled.load(Ordering::SeqCst) {
                 entry.state = State::NotDownloaded;
                 entry.downloaded = 0;
@@ -563,6 +722,14 @@ fn finished(
 impl SpeechModels {
     pub fn new(app_data: &Path, bundled: Result<SpeechRuntime>) -> Result<Self> {
         let catalog = load_catalog(include_str!("../resources/speech-models.json"))?;
+        Self::with_catalog(app_data, bundled, catalog)
+    }
+
+    fn with_catalog(
+        app_data: &Path,
+        bundled: Result<SpeechRuntime>,
+        catalog: Vec<Package>,
+    ) -> Result<Self> {
         let root = app_data.join("speech-models");
         fs::create_dir_all(&root).map_err(|e| format!("无法创建音色目录：{e}"))?;
         let root = root.canonicalize().map_err(|e| e.to_string())?;
@@ -621,7 +788,12 @@ impl SpeechModels {
                 .get_mut(&package.id)
                 .ok_or("音色配置不存在。")?;
             entry.state = State::Verifying;
-            entry.downloaded = package.download_size;
+            entry.download_source = None;
+            entry.downloaded = package.download_size
+                + package
+                    .runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.archive.size);
             entry.cancelled = cancelled.clone();
             entry.generation += 1;
             let generation = entry.generation;
@@ -633,12 +805,15 @@ impl SpeechModels {
         let bundled = self.bundled.clone();
         let downloads = self.owner.downloads.clone();
         let id = package.id.clone();
-        let total = package.download_size;
+        let total = package.download_size
+            + package
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.archive.size);
         let spawned = thread::Builder::new()
             .name("voice-model-verify".into())
             .spawn(move || {
-                let result = bundled
-                    .and_then(|bundled| verify_package(&package, &root, &bundled, &cancelled));
+                let result = verify_package(&package, &root, bundled.as_ref().ok(), &cancelled);
                 finished(&downloads, &package.id, generation, result, total);
             });
         if let Err(error) = spawned {
@@ -657,12 +832,24 @@ impl SpeechModels {
         let Ok(mut downloads) = self.owner.downloads.lock() else {
             return Vec::new();
         };
+        let ready_runtimes: HashSet<_> = downloads
+            .runtime_stamps
+            .iter()
+            .filter_map(|(id, stamps)| display_stamps_unchanged(stamps).then_some(id.clone()))
+            .chain(self.catalog.iter().filter_map(|package| {
+                let entry = downloads.entries.get(&package.id)?;
+                (entry.state == State::Ready
+                    && !package.runtime_id.is_empty()
+                    && display_stamps_unchanged(&entry.stamps))
+                .then_some(package.runtime_id.clone())
+            }))
+            .collect();
         let mut voices = Vec::new();
         for package in self.catalog.iter() {
             let Some(entry) = downloads.entries.get_mut(&package.id) else {
                 continue;
             };
-            if entry.state == State::Ready && !stamps_unchanged(&entry.stamps) {
+            if entry.state == State::Ready && !display_stamps_unchanged(&entry.stamps) {
                 entry.state = State::Failed;
                 entry.error = Some("已下载的音色文件缺失或已更改，请重新下载。".into());
                 entry.runtime = None;
@@ -671,10 +858,39 @@ impl SpeechModels {
                 let mut voice = voice.clone();
                 voice.model_id = Some(package.id.clone());
                 voice.model_size = Some(package.model_size);
-                voice.download_size = Some(package.download_size);
+                let runtime_size = package
+                    .runtime
+                    .as_ref()
+                    .map_or(0, |runtime| runtime.archive.size);
+                voice.download_size = Some(package.download_size + runtime_size);
+                voice.runtime_size = Some(runtime_size);
+                voice.runtime_status = if package.runtime_id.is_empty() {
+                    None
+                } else if ready_runtimes.contains(&package.runtime_id) {
+                    Some("ready".into())
+                } else {
+                    Some(entry.state.name().into())
+                };
+                voice.runtime_error = if package.runtime_id.is_empty()
+                    || ready_runtimes.contains(&package.runtime_id)
+                {
+                    None
+                } else {
+                    entry.error.clone()
+                };
+                voice.license = (!package.license.is_empty()).then(|| package.license.clone());
+                voice.usage_note =
+                    (!package.usage_note.is_empty()).then(|| package.usage_note.clone());
                 voice.status = Some(entry.state.name().into());
                 voice.downloaded_bytes = Some(entry.downloaded);
                 voice.error = entry.error.clone();
+                voice.download_sources = Some(download_sources(package));
+                voice.download_source = entry.download_source.clone();
+                if !package.runtime_id.is_empty() && package.runtime.is_none() {
+                    voice.status = Some("unsupported".into());
+                    voice.runtime_status = Some("unsupported".into());
+                    voice.error = Some("此音色尚无适合当前系统的运行环境。".into());
+                }
                 voices.push(voice);
             }
         }
@@ -713,7 +929,13 @@ impl SpeechModels {
 
     pub fn begin(&self, id: &str) -> Result<()> {
         let package = self.package(id)?;
-        let bundled = self.bundled.clone()?;
+        if !package.runtime_id.is_empty() && package.runtime.is_none() {
+            return Err("此音色尚无适合当前系统的运行环境。".into());
+        }
+        if package.runtime_id.is_empty() {
+            self.bundled.as_ref().map_err(Clone::clone)?;
+        }
+        let bundled = self.bundled.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let generation = {
             let mut downloads = self
@@ -738,6 +960,7 @@ impl SpeechModels {
             entry.state = State::Downloading;
             entry.downloaded = 0;
             entry.error = None;
+            entry.download_source = None;
             entry.runtime = None;
             entry.stamps.clear();
             entry.cancelled = cancelled.clone();
@@ -748,12 +971,21 @@ impl SpeechModels {
         let root = self.root.clone();
         let downloads = self.owner.downloads.clone();
         let id = package.id.clone();
-        let total = package.download_size;
+        let total = package.download_size
+            + package
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.archive.size);
         let spawned = thread::Builder::new()
             .name("voice-model-download".into())
             .spawn(move || {
                 let result = download_package(
-                    &package, &root, &bundled, &cancelled, &downloads, generation,
+                    &package,
+                    &root,
+                    bundled.as_ref().ok(),
+                    &cancelled,
+                    &downloads,
+                    generation,
                 );
                 finished(&downloads, &package.id, generation, result, total);
             });
@@ -784,6 +1016,7 @@ impl SpeechModels {
             entry.state = State::NotDownloaded;
             entry.downloaded = 0;
             entry.error = None;
+            entry.download_source = None;
         }
         Ok(())
     }
@@ -818,10 +1051,306 @@ fn remove_package(path: &Path) -> Result<()> {
     .map_err(|error| format!("无法清理音色临时文件：{error}"))
 }
 
+fn embedded_file(name: &str) -> Option<&'static [u8]> {
+    match name {
+        "zipvoice-reference.wav" => Some(include_bytes!(
+            "../../scripts/optional-speech-assets/zipvoice-reference.wav"
+        )),
+        "zipvoice-reference.txt" => Some(include_bytes!(
+            "../../scripts/optional-speech-assets/zipvoice-reference.txt"
+        )),
+        "zipvoice-lexicon.txt" => Some(include_bytes!(
+            "../../scripts/optional-speech-assets/zipvoice-lexicon.txt"
+        )),
+        "f5-reference.wav" => Some(include_bytes!(
+            "../../scripts/optional-speech-assets/f5-reference.wav"
+        )),
+        "f5-reference.txt" => Some(include_bytes!(
+            "../../scripts/optional-speech-assets/f5-reference.txt"
+        )),
+        "f5-runner-config.json" => Some(include_bytes!(
+            "../../scripts/optional-speech-assets/f5-runner-config.json"
+        )),
+        "qwen3-runner-config.json" => Some(include_bytes!(
+            "../../scripts/optional-speech-assets/qwen3-runner-config.json"
+        )),
+        _ => None,
+    }
+}
+
+fn source_origin(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .map(|url| url.origin().ascii_serialization())
+        .unwrap_or_default()
+}
+
+fn download_sources(package: &Package) -> Vec<String> {
+    let mut sources = Vec::new();
+    for file in package.files.iter().filter(|file| file.embedded.is_none()) {
+        for url in std::iter::once(&file.url).chain(&file.mirrors) {
+            let source = source_origin(url);
+            if !source.is_empty() && !sources.contains(&source) {
+                sources.push(source);
+            }
+        }
+    }
+    if let Some(runtime) = &package.runtime {
+        for url in std::iter::once(&runtime.archive.url).chain(&runtime.archive.mirrors) {
+            let source = source_origin(url);
+            if !source.is_empty() && !sources.contains(&source) {
+                sources.push(source);
+            }
+        }
+    }
+    sources
+}
+
+fn download_file(
+    client: &reqwest::blocking::Client,
+    file: &ModelFile,
+    destination: &Path,
+    cancelled: &AtomicBool,
+    mut progress: impl FnMut(u64, &str),
+) -> Result<()> {
+    check_cancelled(cancelled)?;
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("无法创建音色文件目录：{e}"))?;
+    }
+    if let Some(name) = &file.embedded {
+        let data = embedded_file(name).ok_or("音色内置配置不存在。")?;
+        if data.len() as u64 != file.size
+            || format!("{:x}", Sha256::digest(data)) != file.sha256.to_lowercase()
+        {
+            return Err("音色内置配置校验失败。".into());
+        }
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)
+            .map_err(|e| format!("无法写入音色配置：{e}"))?;
+        output
+            .write_all(data)
+            .and_then(|_| output.sync_all())
+            .map_err(|e| format!("无法写入音色配置：{e}"))?;
+        check_cancelled(cancelled)?;
+        return Ok(());
+    }
+    let mut failures = Vec::new();
+    for url in std::iter::once(&file.url).chain(&file.mirrors) {
+        check_cancelled(cancelled)?;
+        let origin = source_origin(url);
+        progress(0, &origin);
+        let mut created = false;
+        let attempt = (|| {
+            let mut response = client
+                .get(url)
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
+                .send()
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        "连接超时".to_owned()
+                    } else {
+                        "连接失败".to_owned()
+                    }
+                })?;
+            if !response.status().is_success() {
+                return Err(format!("HTTP {}", response.status().as_u16()));
+            }
+            if response
+                .content_length()
+                .is_some_and(|size| size != file.size)
+            {
+                return Err("文件大小不符".into());
+            }
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(destination)
+                .map_err(|e| format!("本地文件写入失败：{e}"))?;
+            created = true;
+            let mut hasher = Sha256::new();
+            let mut buffer = vec![0_u8; BUFFER_BYTES];
+            let mut received = 0_u64;
+            loop {
+                check_cancelled(cancelled)?;
+                let count = response
+                    .read(&mut buffer)
+                    .map_err(|_| "读取中断或超时".to_owned())?;
+                if count == 0 {
+                    break;
+                }
+                received = received
+                    .checked_add(count as u64)
+                    .ok_or("文件超出声明大小")?;
+                if received > file.size {
+                    return Err("文件超出声明大小".into());
+                }
+                output
+                    .write_all(&buffer[..count])
+                    .map_err(|e| format!("本地文件写入失败：{e}"))?;
+                hasher.update(&buffer[..count]);
+                progress(received, &origin);
+            }
+            if received != file.size
+                || format!("{:x}", hasher.finalize()) != file.sha256.to_lowercase()
+            {
+                return Err("文件完整性校验失败".into());
+            }
+            output
+                .sync_all()
+                .map_err(|e| format!("本地文件写入失败：{e}"))?;
+            Ok(())
+        })();
+        match attempt {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                // Never retain an unverified partial file when changing download source.
+                if created && destination.exists() {
+                    fs::remove_file(destination)
+                        .map_err(|e| format!("无法清理音色下载临时文件：{e}"))?;
+                }
+                check_cancelled(cancelled)?;
+                if error.starts_with("本地文件写入失败") {
+                    return Err(error);
+                }
+                failures.push(format!("{origin}：{error}"));
+            }
+        }
+    }
+    Err(format!(
+        "音色文件 {} 的下载来源均未成功，请稍后重试。\n{}",
+        file.path,
+        failures.join("\n")
+    ))
+}
+
+fn download_cached_file(
+    client: &reqwest::blocking::Client,
+    file: &ModelFile,
+    destination: &Path,
+    root: &Path,
+    cancelled: &AtomicBool,
+    mut progress: impl FnMut(u64, &str),
+) -> Result<()> {
+    if file.embedded.is_some() {
+        return download_file(client, file, destination, cancelled, progress);
+    }
+    check_cancelled(cancelled)?;
+    let cache_root = root.join(".verified-files");
+    if let Ok(metadata) = fs::symlink_metadata(&cache_root) {
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Err("音色缓存目录无效。".into());
+        }
+    } else {
+        fs::create_dir(&cache_root).map_err(|e| format!("无法创建已验证音色缓存：{e}"))?;
+    }
+    let cache = cache_root.join(file.sha256.to_lowercase());
+    if let Ok(metadata) = fs::symlink_metadata(&cache) {
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err("音色缓存文件类型无效。".into());
+        }
+        if hash_file(&cache, file, cancelled).is_ok() {
+            check_cancelled(cancelled)?;
+            if let Some(parent) = destination.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            if fs::hard_link(&cache, destination).is_err() {
+                let mut input = File::open(&cache).map_err(|e| e.to_string())?;
+                let mut output = OpenOptions::new()
+                    .create_new(true)
+                    .write(true)
+                    .open(destination)
+                    .map_err(|e| e.to_string())?;
+                let mut buffer = vec![0_u8; BUFFER_BYTES];
+                loop {
+                    check_cancelled(cancelled)?;
+                    let count = input.read(&mut buffer).map_err(|e| e.to_string())?;
+                    if count == 0 {
+                        break;
+                    }
+                    output
+                        .write_all(&buffer[..count])
+                        .map_err(|e| e.to_string())?;
+                }
+                output.sync_all().map_err(|e| e.to_string())?;
+                hash_file(destination, file, cancelled)?;
+            }
+            progress(file.size, "");
+            return Ok(());
+        }
+        check_cancelled(cancelled)?;
+        fs::remove_file(&cache).map_err(|e| format!("无法清理已损坏的音色缓存：{e}"))?;
+    }
+    download_file(client, file, destination, cancelled, &mut progress)?;
+    check_cancelled(cancelled)?;
+    // The cache points only to a complete, hash-verified file. Hard links keep a
+    // successfully installed model and its retry cache from occupying two copies.
+    // If this filesystem lacks hard links, generation still works without caching.
+    let _ = fs::hard_link(destination, &cache);
+    Ok(())
+}
+
+fn reuse_installed_file(
+    installed: &Path,
+    file: &ModelFile,
+    destination: &Path,
+    cancelled: &AtomicBool,
+) -> Result<bool> {
+    check_cancelled(cancelled)?;
+    if !fs::symlink_metadata(installed)
+        .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+    {
+        return Ok(false);
+    }
+    let Ok(source) = checked_path(installed, &file.path, false) else {
+        return Ok(false);
+    };
+    if hash_file(&source, file, cancelled).is_err() {
+        check_cancelled(cancelled)?;
+        return Ok(false);
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    if fs::hard_link(&source, destination).is_err() {
+        let mut input = File::open(&source).map_err(|e| e.to_string())?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)
+            .map_err(|e| e.to_string())?;
+        let mut buffer = vec![0_u8; BUFFER_BYTES];
+        loop {
+            check_cancelled(cancelled)?;
+            let count = input.read(&mut buffer).map_err(|e| e.to_string())?;
+            if count == 0 {
+                break;
+            }
+            output
+                .write_all(&buffer[..count])
+                .map_err(|e| e.to_string())?;
+        }
+        output.sync_all().map_err(|e| e.to_string())?;
+        hash_file(destination, file, cancelled)?;
+    }
+    check_cancelled(cancelled)?;
+    Ok(true)
+}
+
+fn update_source(downloads: &Mutex<Downloads>, id: &str, generation: u64, source: &str) {
+    if let Ok(mut state) = downloads.lock() {
+        if let Some(entry) = state.entries.get_mut(id).filter(|entry| {
+            entry.generation == generation && !entry.cancelled.load(Ordering::SeqCst)
+        }) {
+            entry.download_source = (!source.is_empty()).then(|| source.to_owned());
+        }
+    }
+}
+
 fn download_package(
     package: &Package,
     root: &Path,
-    bundled: &SpeechRuntime,
+    bundled: Option<&SpeechRuntime>,
     cancelled: &AtomicBool,
     downloads: &Mutex<Downloads>,
     generation: u64,
@@ -869,66 +1398,63 @@ fn download_package(
         .build()
         .map_err(|e| format!("无法建立音色下载连接：{e}"))?;
     let mut completed = 0_u64;
+    if let Some(runtime) = &package.runtime {
+        let runtime_stamps =
+            runtime_packages::install(root, runtime, cancelled, |file, destination| {
+                download_file(&client, file, destination, cancelled, |received, source| {
+                    update_source(downloads, &package.id, generation, source);
+                    update(
+                        downloads,
+                        &package.id,
+                        generation,
+                        State::Downloading,
+                        received,
+                    );
+                })
+            })?;
+        if let Ok(mut state) = downloads.lock() {
+            state
+                .runtime_stamps
+                .insert(package.runtime_id.clone(), runtime_stamps);
+        }
+        completed = runtime.archive.size;
+    }
     for file in &package.files {
-        check_cancelled(cancelled)?;
-        let mut response = client
-            .get(&file.url)
-            .header(reqwest::header::ACCEPT_ENCODING, "identity")
-            .send()
-            .and_then(reqwest::blocking::Response::error_for_status)
-            .map_err(|e| format!("下载音色失败，请检查网络后重试：{e}"))?;
-        if response
-            .content_length()
-            .is_some_and(|size| size != file.size)
-        {
-            return Err(format!("音色下载文件大小不符：{}。", file.path));
-        }
+        update_source(downloads, &package.id, generation, "");
         let destination = staging.path().join(&file.path);
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("无法创建音色文件目录：{e}"))?;
-        }
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&destination)
-            .map_err(|e| format!("无法保存音色文件，请检查可用磁盘空间：{e}"))?;
-        let mut hasher = Sha256::new();
-        let mut buffer = vec![0_u8; BUFFER_BYTES];
-        let mut received = 0_u64;
-        loop {
-            check_cancelled(cancelled)?;
-            let count = response
-                .read(&mut buffer)
-                .map_err(|e| format!("音色下载中断，请重试：{e}"))?;
-            if count == 0 {
-                break;
-            }
-            received = received
-                .checked_add(count as u64)
-                .ok_or("音色文件超出声明大小，已停止下载。")?;
-            if received > file.size {
-                return Err("音色文件超出声明大小，已停止下载。".into());
-            }
-            output
-                .write_all(&buffer[..count])
-                .map_err(|e| format!("无法保存音色文件，请检查可用磁盘空间：{e}"))?;
-            hasher.update(&buffer[..count]);
+        if file.embedded.is_none()
+            && reuse_installed_file(&installed, file, &destination, cancelled)?
+        {
+            completed += file.size;
             update(
                 downloads,
                 &package.id,
                 generation,
                 State::Downloading,
-                completed + received,
+                completed,
             );
+            continue;
         }
-        if received != file.size || format!("{:x}", hasher.finalize()) != file.sha256.to_lowercase()
-        {
-            return Err(format!("音色文件校验失败：{}。请重新下载。", file.path));
+        download_cached_file(
+            &client,
+            file,
+            &destination,
+            root,
+            cancelled,
+            |received, source| {
+                update_source(downloads, &package.id, generation, source);
+                update(
+                    downloads,
+                    &package.id,
+                    generation,
+                    State::Downloading,
+                    completed + received,
+                );
+            },
+        )?;
+        if file.embedded.is_none() {
+            completed += file.size;
         }
-        output
-            .sync_all()
-            .map_err(|e| format!("无法完成音色文件写入：{e}"))?;
-        completed += received;
     }
     update(
         downloads,
@@ -937,7 +1463,8 @@ fn download_package(
         State::Verifying,
         completed,
     );
-    verify_package(package, staging.path(), bundled, cancelled)?;
+    let (_, mut stamps) = verify_package(package, staging.path(), bundled, cancelled)?;
+    let staging_root = staging.path().canonicalize().map_err(|e| e.to_string())?;
     check_cancelled(cancelled)?;
     // Hold the state lock around the commit so cancellation cannot race the final rename.
     let mut downloads = downloads.lock().map_err(|_| "音色状态不可用。")?;
@@ -954,28 +1481,102 @@ fn download_package(
     fs::rename(staging.path(), &installed).map_err(|e| format!("无法安装已下载音色：{e}"))?;
     // The verified file content is unchanged after the atomic rename.
     let runtime = resolve_runtime(package, &installed, bundled)?;
-    let stamps = package
-        .files
-        .iter()
-        .map(|file| {
-            let path = checked_path(&installed, &file.path, false)?;
-            let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
-            Ok(FileStamp {
-                path,
-                size: metadata.len(),
-                modified: metadata.modified().ok(),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let installed_root = installed.canonicalize().map_err(|e| e.to_string())?;
+    for stamp in &mut stamps {
+        if let Ok(relative) = stamp.path.strip_prefix(&staging_root) {
+            stamp.path = installed_root.join(relative);
+        }
+    }
     if let Some(entry) = downloads.entries.get_mut(&package.id) {
         entry.state = State::Ready;
-        entry.downloaded = package.download_size;
+        entry.downloaded = package.download_size
+            + package
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.archive.size);
         entry.error = None;
         entry.runtime = Some(runtime.clone());
         entry.stamps = stamps.clone();
     }
     drop(downloads);
+    // Completed installations own the file links; remove retry links so removing
+    // a model later cannot leave gigabytes hidden in the completed-file cache.
+    for file in package.files.iter().filter(|file| file.embedded.is_none()) {
+        let _ = fs::remove_file(
+            root.join(".verified-files")
+                .join(file.sha256.to_lowercase()),
+        );
+    }
     Ok((runtime, stamps))
+}
+
+/// Exercise the application's strict runtime validator against real CI artifacts.
+/// The expected checksums come from the builder's artifact metadata, never from
+/// a newly computed hash of the tree being tested.
+#[cfg(test)]
+pub(crate) fn verify_portable_runtime_for_integration(
+    runtime_root: &Path,
+    metadata_path: &Path,
+    model_id: &str,
+) -> Result<(PathBuf, PathBuf)> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Metadata {
+        id: String,
+        version: u32,
+        platform: String,
+        filename: String,
+        validated: bool,
+        validated_models: Vec<String>,
+        #[serde(flatten)]
+        archive: runtime_packages::RuntimeArchive,
+    }
+    let bytes = fs::read(metadata_path).map_err(|e| format!("无法读取真实运行包元数据：{e}"))?;
+    if bytes.len() > 1024 * 1024 {
+        return Err("运行包测试元数据过大。".into());
+    }
+    let metadata: Metadata =
+        serde_json::from_slice(&bytes).map_err(|e| format!("真实运行包元数据无效：{e}"))?;
+    if metadata.platform != runtime_packages::platform()
+        || !metadata.validated
+        || !metadata
+            .validated_models
+            .iter()
+            .any(|value| value == model_id)
+        || !safe_relative(&metadata.filename)
+    {
+        return Err("运行包元数据未验证当前平台和所选模型。".into());
+    }
+    let definition = runtime_packages::RuntimeDefinition {
+        id: metadata.id.clone(),
+        version: metadata.version,
+        platforms: HashMap::from([(metadata.platform.clone(), metadata.archive.clone())]),
+    };
+    runtime_packages::validate(std::slice::from_ref(&definition))?;
+    let selected =
+        runtime_packages::select(&metadata.id, &[definition])?.ok_or("运行包没有当前平台配置。")?;
+    let cancelled = AtomicBool::new(false);
+    let archive_root = metadata_path.parent().ok_or("运行包元数据目录无效。")?;
+    let archive = checked_path(archive_root, &metadata.filename, false)?;
+    hash_file(
+        &archive,
+        &ModelFile {
+            path: metadata.filename,
+            size: metadata.archive.size,
+            sha256: metadata.archive.sha256,
+            ..ModelFile::default()
+        },
+        &cancelled,
+    )?;
+    let stamps = runtime_packages::verify(runtime_root, &selected, &cancelled)?;
+    if !stamps_unchanged(&stamps) {
+        return Err("运行包在校验期间发生变化。".into());
+    }
+    eprintln!("application runtime verification: {} files verified against actual artifact metadata on {}", stamps.len(), metadata.platform);
+    Ok((
+        checked_path(runtime_root, &selected.archive.executable, false)?,
+        checked_path(runtime_root, &selected.archive.script, false)?,
+    ))
 }
 
 #[cfg(test)]
@@ -1000,12 +1601,45 @@ mod tests {
     fn catalog_rejects_untrusted_urls_paths_sizes_and_missing_dependencies() {
         let original = catalog();
         assert!(load_catalog(&original.to_string()).is_ok());
+        for id in [
+            ".",
+            "..",
+            ".voice",
+            "voice.",
+            "voice..model",
+            "../voice",
+            "a/voice",
+            "a\\voice",
+            "C:voice",
+            "CON.foo",
+            "NUL.1",
+            "COM1.x",
+            "LPT9.model",
+        ] {
+            let mut changed = original.clone();
+            changed["models"][0]["id"] = json!(id);
+            assert!(
+                load_catalog(&changed.to_string()).is_err(),
+                "Accepted unsafe model ID: {id}"
+            );
+        }
+        let mut versioned = original.clone();
+        versioned["models"][0]["id"] = json!("qwen3-tts-1.7b-serena");
+        assert_eq!(
+            load_catalog(&versioned.to_string()).unwrap()[0].id,
+            "qwen3-tts-1.7b-serena"
+        );
         for path in [
             "../model.onnx",
             "/model.onnx",
             "a\\model.onnx",
             "C:model.onnx",
             "a,b.onnx",
+            "a/./model.onnx",
+            "a//model.onnx",
+            "a/model.onnx.",
+            "CON.onnx",
+            "model\n.onnx",
         ] {
             let mut changed = original.clone();
             changed["models"][0]["files"][0]["path"] = json!(path);
@@ -1048,15 +1682,278 @@ mod tests {
     }
 
     #[test]
+    fn portable_models_require_valid_platform_runtime_metadata() {
+        let mut value = catalog();
+        value["schema"] = json!(2);
+        value["models"][0]["runtimeId"] = json!("python-cpu-v1");
+        value["models"][0]["model"] = json!({"kind":"f5","config":"model.onnx","sampleRate":24000});
+        assert!(load_catalog(&value.to_string()).is_err());
+        value["runtimes"] = json!([{"id":"python-cpu-v1","version":1,"platforms": {
+            "macos-arm64": {"url":"https://github.com/ecojust/open-media/releases/download/runtime/runtime.zip","size":100,"unpackedSize":200,"sha256":"a".repeat(64),"manifestSha256":"b".repeat(64),"executable":"python/bin/python3","script":"runner/tts.py"}
+        }}]);
+        let packages = load_catalog(&value.to_string()).unwrap();
+        assert_eq!(
+            packages[0].runtime.is_some(),
+            runtime_packages::platform() == "macos-arm64"
+        );
+        value["runtimes"][0]["platforms"]["macos-arm64"]["mirrors"] =
+            json!(["http://ghfast.top/unsafe"]);
+        assert!(load_catalog(&value.to_string()).is_err());
+        value["runtimes"][0]["platforms"]["macos-arm64"]["mirrors"] =
+            json!(["https://ghfast.top/https://github.com/ecojust/open-media/runtime.zip"]);
+        assert!(load_catalog(&value.to_string()).is_ok());
+    }
+
+    #[test]
     fn catalog_rejects_total_size_overflow() {
         let mut value = catalog();
         value["models"][0]["files"][0]["size"] = json!(u64::MAX);
         value["models"][0]["modelSize"] = json!(u64::MAX);
         value["models"][0]["downloadSize"] = json!(u64::MAX);
+        assert!(load_catalog(&value.to_string()).is_err());
+    }
+
+    fn test_client() -> reqwest::blocking::Client {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap()
+    }
+
+    fn http_sources(bodies: Vec<Vec<u8>>) -> (Vec<String>, thread::JoinHandle<()>) {
+        use std::net::TcpListener;
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap();
+        let urls = (0..bodies.len())
+            .map(|index| format!("http://{address}/{index}"))
+            .collect();
+        let worker = thread::spawn(move || {
+            for body in bodies {
+                let (mut connection, _) = server.accept().unwrap();
+                let mut request = [0_u8; 4096];
+                connection.read(&mut request).unwrap();
+                write!(
+                    connection,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
+                connection.write_all(&body).unwrap();
+            }
+        });
+        (urls, worker)
+    }
+
+    #[test]
+    fn mirror_fallback_discards_bad_bytes_and_only_retries_current_file() {
+        let (urls, worker) = http_sources(vec![b"wrong".to_vec(), b"valid".to_vec()]);
+        let directory = tempfile::tempdir().unwrap();
+        let previous = directory.path().join("previous.onnx");
+        fs::write(&previous, b"already verified").unwrap();
+        let output = directory.path().join("model.onnx");
+        let file = ModelFile {
+            path: "model.onnx".into(),
+            url: urls[0].clone(),
+            mirrors: vec![urls[1].clone()],
+            size: 5,
+            sha256: format!("{:x}", Sha256::digest(b"valid")),
+            ..ModelFile::default()
+        };
+        let mut restarts = 0;
+        download_file(
+            &test_client(),
+            &file,
+            &output,
+            &AtomicBool::new(false),
+            |bytes, _| {
+                if bytes == 0 {
+                    restarts += 1;
+                }
+            },
+        )
+        .unwrap();
+        worker.join().unwrap();
+        assert_eq!(restarts, 2);
+        assert_eq!(fs::read(output).unwrap(), b"valid");
+        assert_eq!(fs::read(previous).unwrap(), b"already verified");
+    }
+
+    #[test]
+    fn completed_file_cache_survives_failed_package_attempt_without_network_retry() {
+        let (urls, worker) = http_sources(vec![b"verified weights".to_vec()]);
+        let root = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir_in(root.path()).unwrap();
+        let file = ModelFile {
+            path: "model.onnx".into(),
+            url: urls[0].clone(),
+            size: 16,
+            sha256: format!("{:x}", Sha256::digest(b"verified weights")),
+            ..ModelFile::default()
+        };
+        let client = test_client();
+        download_cached_file(
+            &client,
+            &file,
+            &first.path().join("model.onnx"),
+            root.path(),
+            &AtomicBool::new(false),
+            |_, _| {},
+        )
+        .unwrap();
+        worker.join().unwrap();
+        drop(first);
+        let second = tempfile::tempdir_in(root.path()).unwrap();
+        let output = second.path().join("model.onnx");
+        let mut bytes = 0;
+        download_cached_file(
+            &client,
+            &file,
+            &output,
+            root.path(),
+            &AtomicBool::new(false),
+            |count, origin| {
+                bytes = count;
+                assert!(origin.is_empty());
+            },
+        )
+        .unwrap();
+        assert_eq!(bytes, 16);
+        assert_eq!(fs::read(output).unwrap(), b"verified weights");
+    }
+
+    #[test]
+    fn stalled_source_falls_back_without_whole_download_deadline() {
+        use std::net::TcpListener;
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || {
+            let (mut first, _) = server.accept().unwrap();
+            let mut request = [0; 4096];
+            first.read(&mut request).unwrap();
+            first
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\na")
+                .unwrap();
+            let (mut second, _) = server.accept().unwrap();
+            second.read(&mut request).unwrap();
+            second
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvalid",
+                )
+                .unwrap();
+        });
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let file = ModelFile {
+            path: "model.onnx".into(),
+            url: format!("http://{address}/stall"),
+            mirrors: vec![format!("http://{address}/fallback")],
+            size: 5,
+            sha256: format!("{:x}", Sha256::digest(b"valid")),
+            ..ModelFile::default()
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("model.onnx");
+        download_file(&client, &file, &output, &AtomicBool::new(false), |_, _| {}).unwrap();
+        worker.join().unwrap();
+        assert_eq!(fs::read(output).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn repairing_runtime_reuses_valid_installed_weights_but_rejects_corruption() {
+        let directory = tempfile::tempdir().unwrap();
+        let installed = directory.path().join("installed");
+        fs::create_dir(&installed).unwrap();
+        fs::write(installed.join("model.onnx"), b"verified weights").unwrap();
+        let file = ModelFile {
+            path: "model.onnx".into(),
+            size: 16,
+            sha256: format!("{:x}", Sha256::digest(b"verified weights")),
+            ..ModelFile::default()
+        };
+        let first = directory.path().join("staging/model.onnx");
+        assert!(reuse_installed_file(&installed, &file, &first, &AtomicBool::new(false)).unwrap());
+        assert_eq!(fs::read(&first).unwrap(), b"verified weights");
         assert_eq!(
-            load_catalog(&value.to_string()).err().unwrap(),
-            "音色资源大小无效。"
+            fs::read(installed.join("model.onnx")).unwrap(),
+            b"verified weights"
         );
+        fs::write(installed.join("model.onnx"), b"corrupt").unwrap();
+        let second = directory.path().join("new-staging/model.onnx");
+        assert!(
+            !reuse_installed_file(&installed, &file, &second, &AtomicBool::new(false)).unwrap()
+        );
+        assert!(!second.exists());
+        assert_eq!(
+            reuse_installed_file(&installed, &file, &second, &AtomicBool::new(true)).unwrap_err(),
+            CANCELLED
+        );
+    }
+
+    #[test]
+    fn cancellation_does_not_try_next_mirror_or_leave_partial_download() {
+        let (urls, worker) = http_sources(vec![b"valid".to_vec()]);
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("model.onnx");
+        let file = ModelFile {
+            path: "model.onnx".into(),
+            url: urls[0].clone(),
+            mirrors: vec!["http://127.0.0.1:1/never-requested".into()],
+            size: 5,
+            sha256: format!("{:x}", Sha256::digest(b"valid")),
+            ..ModelFile::default()
+        };
+        let cancelled = AtomicBool::new(false);
+        let mut sources = 0;
+        let result = download_file(&test_client(), &file, &output, &cancelled, |bytes, _| {
+            if bytes == 0 {
+                sources += 1;
+            } else {
+                cancelled.store(true, Ordering::SeqCst);
+            }
+        });
+        worker.join().unwrap();
+        assert_eq!(result.unwrap_err(), CANCELLED);
+        assert_eq!(sources, 1);
+        assert!(!output.exists());
+    }
+
+    #[test]
+    fn embedded_resources_are_hashed_and_excluded_from_download_total_and_sources() {
+        let name = "f5-reference.txt";
+        let data = embedded_file(name).unwrap();
+        let file = ModelFile {
+            path: "reference.txt".into(),
+            url: "https://github.com/local-configuration".into(),
+            size: data.len() as u64,
+            sha256: format!("{:x}", Sha256::digest(data)),
+            embedded: Some(name.into()),
+            ..ModelFile::default()
+        };
+        let mut value = catalog();
+        value["models"][0]["files"].as_array_mut().unwrap().push(json!({"path":file.path,"url":file.url,"size":file.size,"sha256":file.sha256,"embedded":name}));
+        value["models"][0]["modelSize"] = json!(12 + file.size);
+        let package = load_catalog(&value.to_string()).unwrap().remove(0);
+        assert_eq!(package.download_size, 12);
+        assert_eq!(download_sources(&package), ["https://huggingface.co"]);
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("reference.txt");
+        download_file(
+            &test_client(),
+            &file,
+            &output,
+            &AtomicBool::new(false),
+            |_, _| panic!("embedded resources must never report network bytes"),
+        )
+        .unwrap();
+        assert_eq!(fs::read(output).unwrap(), data);
+        value["models"][0]["files"][3]["sha256"] = json!("0".repeat(64));
+        assert!(load_catalog(&value.to_string()).is_err());
     }
 
     #[test]
@@ -1070,6 +1967,7 @@ mod tests {
             url: String::new(),
             size: data.len() as u64,
             sha256: format!("{:x}", Sha256::digest(data)),
+            ..ModelFile::default()
         };
         let cancelled = AtomicBool::new(false);
         let stamp = hash_file(&path, &file, &cancelled).unwrap();
@@ -1110,12 +2008,71 @@ mod tests {
     }
 
     #[test]
-    fn real_catalog_is_consistent_and_shares_models_between_voices() {
+    fn download_source_tracks_only_the_current_network_operation() {
+        let downloads = Mutex::new(Downloads {
+            entries: HashMap::from([(
+                "model".into(),
+                Entry {
+                    state: State::Downloading,
+                    generation: 2,
+                    ..Entry::default()
+                },
+            )]),
+            ..Downloads::default()
+        });
+        let source = || {
+            downloads.lock().unwrap().entries["model"]
+                .download_source
+                .clone()
+        };
+        update_source(&downloads, "model", 2, "https://modelscope.cn");
+        update_source(&downloads, "model", 1, "https://huggingface.co");
+        assert_eq!(source().as_deref(), Some("https://modelscope.cn"));
+
+        // Local cache and installed-file reuse must not claim a network source.
+        update_source(&downloads, "model", 2, "");
+        assert!(source().is_none());
+        update_source(&downloads, "model", 2, "https://hf-mirror.com");
+        update(&downloads, "model", 2, State::Verifying, 100);
+        assert!(source().is_none());
+
+        update(&downloads, "model", 2, State::Downloading, 0);
+        update_source(&downloads, "model", 2, "https://modelscope.cn");
+        finished(
+            &downloads,
+            "model",
+            2,
+            Err("network unavailable".into()),
+            100,
+        );
+        assert!(source().is_none());
+
+        let cancelled = downloads.lock().unwrap().entries["model"].cancelled.clone();
+        cancelled.store(true, Ordering::SeqCst);
+        update_source(&downloads, "model", 2, "https://huggingface.co");
+        assert!(source().is_none());
+    }
+
+    #[test]
+    fn real_catalog_has_three_requested_models_and_one_voice_each() {
         let catalog = load_catalog(include_str!("../resources/speech-models.json")).unwrap();
-        assert!(catalog.iter().any(|package| package.voices.len() > 1));
-        assert!(catalog
+        assert_eq!(catalog.len(), 3);
+        assert!(catalog.iter().all(|package| package.voices.len() == 1));
+        for kind in [ModelKind::Zipvoice, ModelKind::F5, ModelKind::Qwen3] {
+            assert_eq!(
+                catalog
+                    .iter()
+                    .filter(|package| package.model.kind == kind)
+                    .count(),
+                1
+            );
+        }
+        for package in catalog
             .iter()
-            .any(|package| package.model.kind == ModelKind::Kokoro));
+            .filter(|package| package.model.kind != ModelKind::Zipvoice)
+        {
+            assert_eq!(package.runtime_id, "python-cpu-v1");
+        }
     }
 
     #[test]
@@ -1133,7 +2090,10 @@ mod tests {
                 r"C:\应用 资源\speech\model\date-zh.fst",
                 "C:/应用 资源/speech/model/date-zh.fst",
             ),
-            (r"\\server\共享 资源\tokens.txt", "//server/共享 资源/tokens.txt"),
+            (
+                r"\\server\共享 资源\tokens.txt",
+                "//server/共享 资源/tokens.txt",
+            ),
         ] {
             assert_eq!(windows_engine_path(input).unwrap(), expected);
         }
@@ -1149,15 +2109,25 @@ mod tests {
             .tempdir()
             .unwrap();
         fs::create_dir_all(root.path().join("model/espeak-ng-data")).unwrap();
-        fs::write(root.path().join("model/espeak-ng-data/phontab"), b"phonemes").unwrap();
+        fs::write(
+            root.path().join("model/espeak-ng-data/phontab"),
+            b"phonemes",
+        )
+        .unwrap();
         fs::write(root.path().join("model/number-zh.fst"), b"rules").unwrap();
-        for (relative, directory) in [("model/espeak-ng-data", true), ("model/number-zh.fst", false)] {
+        for (relative, directory) in [
+            ("model/espeak-ng-data", true),
+            ("model/number-zh.fst", false),
+        ] {
             let validated = checked_path(root.path(), relative, directory).unwrap();
             let argument = engine_resource_path(&validated).unwrap();
             assert!(!argument.starts_with(r"\\?\"));
             assert_eq!(Path::new(&argument).canonicalize().unwrap(), validated);
             if directory {
-                assert_eq!(fs::read(format!("{argument}/phontab")).unwrap(), b"phonemes");
+                assert_eq!(
+                    fs::read(format!("{argument}/phontab")).unwrap(),
+                    b"phonemes"
+                );
             } else {
                 assert_eq!(fs::read(argument).unwrap(), b"rules");
             }
@@ -1187,6 +2157,7 @@ mod tests {
         let bundled = SpeechRuntime {
             root: bundled_root,
             executable: root.join("not-executed"),
+            script: None,
             model: package.model.clone(),
             voices: Vec::new(),
         };
@@ -1220,12 +2191,13 @@ mod tests {
         let (runtime, stamps) = verify_package(
             &package,
             &package_path(root.path(), &package),
-            &bundled,
+            Some(&bundled),
             &cancelled,
         )
         .unwrap();
-        assert!(Path::new(&runtime.model.data_dir)
-            .ends_with(Path::new("model").join("espeak-ng-data")));
+        assert!(
+            Path::new(&runtime.model.data_dir).ends_with(Path::new("model").join("espeak-ng-data"))
+        );
         assert_eq!(runtime.model.file, "model.onnx");
         assert_eq!(runtime.model.sample_rate, 24000);
         finished(
@@ -1250,6 +2222,59 @@ mod tests {
     }
 
     #[test]
+    fn successful_install_relocates_verified_paths_without_stale_staging_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut package, bundled) = fixture_package(root.path());
+        remove_package(&package_path(root.path(), &package)).unwrap();
+        let bytes = embedded_file("f5-reference.txt").unwrap();
+        for file in &mut package.files {
+            file.embedded = Some("f5-reference.txt".into());
+            file.size = bytes.len() as u64;
+            file.sha256 = format!("{:x}", Sha256::digest(bytes));
+        }
+        package.model_size = bytes.len() as u64 * package.files.len() as u64;
+        package.download_size = 0;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let downloads = Mutex::new(Downloads {
+            entries: HashMap::from([(
+                package.id.clone(),
+                Entry {
+                    state: State::Downloading,
+                    cancelled: cancelled.clone(),
+                    ..Entry::default()
+                },
+            )]),
+            ..Downloads::default()
+        });
+        let (runtime, stamps) = download_package(
+            &package,
+            root.path(),
+            Some(&bundled),
+            &cancelled,
+            &downloads,
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            runtime.root,
+            package_path(root.path(), &package).canonicalize().unwrap()
+        );
+        assert!(stamps_unchanged(&stamps));
+        assert!(stamps
+            .iter()
+            .all(|stamp| stamp.path.starts_with(&runtime.root)));
+        assert_eq!(
+            downloads.lock().unwrap().entries[&package.id].state.name(),
+            "ready"
+        );
+        assert!(!fs::read_dir(root.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".download-")));
+    }
+
+    #[test]
     fn cancelled_or_shutdown_download_cannot_mark_voice_ready() {
         let root = tempfile::tempdir().unwrap();
         let (package, bundled) = fixture_package(root.path());
@@ -1265,12 +2290,13 @@ mod tests {
             )]),
             workers: 1,
             closing: false,
+            runtime_stamps: HashMap::new(),
         };
         let state = Mutex::new(state);
         let verified = verify_package(
             &package,
             &package_path(root.path(), &package),
-            &bundled,
+            Some(&bundled),
             &cancelled,
         )
         .unwrap();
@@ -1312,13 +2338,21 @@ mod tests {
         let staging = root.join(".download-active");
         fs::create_dir_all(&staging).unwrap();
         fs::write(staging.join("partial-model.onnx"), b"still downloading").unwrap();
-        let manager =
-            SpeechModels::new(data.path(), Err("test bundle unavailable".into())).unwrap();
+        let manager = SpeechModels::with_catalog(
+            data.path(),
+            Err("test bundle unavailable".into()),
+            load_catalog(&catalog().to_string()).unwrap(),
+        )
+        .unwrap();
         assert!(staging.join("partial-model.onnx").is_file());
         drop(manager);
         drop(held);
-        let _manager =
-            SpeechModels::new(data.path(), Err("test bundle unavailable".into())).unwrap();
+        let _manager = SpeechModels::with_catalog(
+            data.path(),
+            Err("test bundle unavailable".into()),
+            load_catalog(&catalog().to_string()).unwrap(),
+        )
+        .unwrap();
         assert!(!staging.exists());
     }
 

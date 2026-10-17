@@ -38,6 +38,20 @@ pub struct SpeechVoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub download_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_sources: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub downloaded_bytes: Option<u64>,
@@ -82,18 +96,33 @@ pub struct SpeechJob {
 pub(crate) enum ModelKind {
     Matcha,
     Kokoro,
+    Zipvoice,
+    F5,
+    Qwen3,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Model {
     pub kind: ModelKind,
+    #[serde(default)]
     pub file: String,
     #[serde(default)]
     pub vocoder: String,
     #[serde(default)]
     pub voices: String,
+    #[serde(default)]
     pub tokens: String,
+    #[serde(default)]
+    pub encoder: String,
+    #[serde(default)]
+    pub decoder: String,
+    #[serde(default)]
+    pub reference_audio: String,
+    #[serde(default)]
+    pub reference_text: String,
+    #[serde(default)]
+    pub config: String,
     #[serde(default)]
     pub data_dir: String,
     #[serde(default)]
@@ -115,6 +144,7 @@ struct Manifest {
 pub(crate) struct SpeechRuntime {
     pub root: PathBuf,
     pub executable: PathBuf,
+    pub script: Option<PathBuf>,
     pub model: Model,
     pub voices: Vec<SpeechVoice>,
 }
@@ -143,6 +173,63 @@ fn relative_path(root: &Path, relative: &str, directory: bool) -> Result<PathBuf
         return Err(format!("内置语音资源为空：{relative}。请重新安装。"));
     }
     Ok(resolved)
+}
+
+// Some Python model loaders join subpaths with forward slashes, which Windows
+// does not normalize inside a verbatim path. Keep validation paths canonical,
+// but pass an equivalent ordinary path when it retains Win32 path semantics.
+#[cfg(any(windows, test))]
+fn ordinary_windows_python_path(path: &str) -> Option<String> {
+    let extended = path.strip_prefix(r"\\?\")?;
+    let ordinary = if let Some(unc) = extended.strip_prefix(r"UNC\") {
+        let mut components = unc.split('\\');
+        if components.next()?.is_empty() || components.next()?.is_empty() {
+            return None;
+        }
+        format!(r"\\{unc}")
+    } else if extended.as_bytes().first()?.is_ascii_alphabetic()
+        && extended.as_bytes().get(1..3) == Some(b":\\")
+    {
+        extended.to_owned()
+    } else {
+        return None;
+    };
+    // Preserve genuine extended paths, device names and components whose
+    // interpretation would change after removing the prefix.
+    if ordinary.encode_utf16().count() >= 260
+        || ordinary.split('\\').any(|component| {
+            if component.ends_with(['.', ' ']) {
+                return true;
+            }
+            let stem = component
+                .split('.')
+                .next()
+                .unwrap_or("")
+                .to_ascii_uppercase();
+            matches!(
+                stem.as_str(),
+                "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+            ) || ["COM", "LPT"].iter().any(|prefix| {
+                stem.strip_prefix(prefix).is_some_and(|suffix| {
+                    matches!(
+                        suffix,
+                        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                    )
+                })
+            })
+        })
+    {
+        return None;
+    }
+    Some(ordinary)
+}
+
+fn python_process_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    if let Some(ordinary) = path.to_str().and_then(ordinary_windows_python_path) {
+        return PathBuf::from(ordinary);
+    }
+    path.to_owned()
 }
 
 impl SpeechRuntime {
@@ -229,6 +316,7 @@ impl SpeechRuntime {
         Ok(Self {
             root,
             executable,
+            script: None,
             model,
             voices: manifest.voices,
         })
@@ -240,13 +328,46 @@ impl SpeechRuntime {
             .iter()
             .find(|voice| voice.id == request.voice_id)
             .ok_or("所选音色不可用，请重新选择。")?;
-        let mut command = Command::new(&self.executable);
+        let python = matches!(self.model.kind, ModelKind::F5 | ModelKind::Qwen3);
+        let mut command = Command::new(if python {
+            python_process_path(&self.executable)
+        } else {
+            self.executable.clone()
+        });
         #[cfg(target_os = "windows")]
         {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
-        command.current_dir(&self.root);
+        command.current_dir(if python {
+            python_process_path(&self.root)
+        } else {
+            self.root.clone()
+        });
+        if python {
+            let script = self
+                .script
+                .as_ref()
+                .ok_or("音色运行环境不完整，请重新下载。")?;
+            command
+                .arg("-I")
+                .arg("-B")
+                .arg(python_process_path(script))
+                .arg("--config")
+                .arg(python_process_path(&self.root.join(&self.model.config)))
+                .arg("--text-file")
+                .arg(python_process_path(text_file))
+                .arg("--output-filename")
+                .arg(python_process_path(output))
+                .arg("--speed")
+                .arg(request.speed.to_string())
+                .env("HF_HUB_OFFLINE", "1")
+                .env("TRANSFORMERS_OFFLINE", "1")
+                .env("PYTHONNOUSERSITE", "1")
+                .env("TOKENIZERS_PARALLELISM", "false")
+                .stdin(Stdio::null());
+            return Ok(command);
+        }
         match self.model.kind {
             ModelKind::Matcha => command.args([
                 format!("--matcha-acoustic-model={}", self.model.file),
@@ -262,6 +383,18 @@ impl SpeechRuntime {
                 format!("--kokoro-data-dir={}", self.model.data_dir),
                 format!("--kokoro-lexicon={}", self.model.lexicons.join(",")),
             ]),
+            ModelKind::Zipvoice => command.args([
+                format!("--zipvoice-encoder={}", self.model.encoder),
+                format!("--zipvoice-decoder={}", self.model.decoder),
+                format!("--zipvoice-vocoder={}", self.model.vocoder),
+                format!("--zipvoice-tokens={}", self.model.tokens),
+                format!("--zipvoice-data-dir={}", self.model.data_dir),
+                format!("--zipvoice-lexicon={}", self.model.lexicons.join(",")),
+                format!("--reference-audio={}", self.model.reference_audio),
+                format!("--reference-text-file={}", self.model.reference_text),
+                "--num-steps=8".into(),
+            ]),
+            ModelKind::F5 | ModelKind::Qwen3 => unreachable!(),
         };
         command.args([
             format!("--sample-rate={}", self.model.sample_rate),
@@ -356,7 +489,9 @@ impl SpeechManager {
             voices.extend(models.voices());
         }
         SpeechStatus {
-            ready: self.runtime.is_ok(),
+            ready: voices
+                .iter()
+                .any(|voice| matches!(voice.status.as_deref(), Some("bundled" | "ready"))),
             voices,
             error: self.runtime.as_ref().err().cloned(),
         }
@@ -397,13 +532,13 @@ impl SpeechManager {
     ) -> Result<SpeechJob> {
         validate_request(&request)?;
         request.text = request.text.trim().to_owned();
-        let speech = self.runtime.clone()?;
-        let speech = if speech
-            .voices
-            .iter()
-            .any(|voice| voice.id == request.voice_id)
-        {
+        let speech = if let Some(speech) = self.runtime.as_ref().ok().filter(|speech| {
             speech
+                .voices
+                .iter()
+                .any(|voice| voice.id == request.voice_id)
+        }) {
+            speech.clone()
         } else {
             self.models
                 .as_ref()
@@ -708,8 +843,12 @@ fn synthesize(
         .map_err(|e| format!("无法创建配音临时目录：{e}"))?;
     let output = workspace.path().join("speech.wav");
     let text_file = workspace.path().join("text.txt");
-    fs::write(&text_file, request.text.as_bytes())
-        .map_err(|e| format!("无法保存待朗读文字：{e}"))?;
+    let text = if speech.model.kind == ModelKind::Zipvoice {
+        crate::speech_chinese::normalize_chinese(&request.text)
+    } else {
+        request.text.clone()
+    };
+    fs::write(&text_file, text.as_bytes()).map_err(|e| format!("无法保存待朗读文字：{e}"))?;
     let log_path = workspace.path().join("generation.log");
     let log = OpenOptions::new()
         .create_new(true)
@@ -872,6 +1011,8 @@ fn validate_wave(path: &Path, expected_rate: u32) -> Result<()> {
         return Err(invalid());
     }
     let mut format_seen = false;
+    let mut float_samples = false;
+    let mut sample_bytes = 2_u64;
     let mut audio_seen = false;
     let mut cursor = 12_u64;
     while cursor + 8 <= file_size {
@@ -890,19 +1031,24 @@ fn validate_wave(path: &Path, expected_rate: u32) -> Result<()> {
                 let mut format = [0_u8; 16];
                 file.read_exact(&mut format).map_err(|_| invalid())?;
                 let rate = u32::from_le_bytes(format[4..8].try_into().unwrap());
-                if u16::from_le_bytes(format[..2].try_into().unwrap()) != 1
+                let encoding = u16::from_le_bytes(format[..2].try_into().unwrap());
+                let bits = u16::from_le_bytes(format[14..16].try_into().unwrap());
+                float_samples = encoding == 3 && bits == 32;
+                sample_bytes = if float_samples { 4 } else { 2 };
+                if !(float_samples || encoding == 1 && bits == 16)
                     || u16::from_le_bytes(format[2..4].try_into().unwrap()) != 1
                     || rate != expected_rate
-                    || u32::from_le_bytes(format[8..12].try_into().unwrap()) != rate * 2
-                    || u16::from_le_bytes(format[12..14].try_into().unwrap()) != 2
-                    || u16::from_le_bytes(format[14..16].try_into().unwrap()) != 16
+                    || u32::from_le_bytes(format[8..12].try_into().unwrap())
+                        != rate * sample_bytes as u32
+                    || u16::from_le_bytes(format[12..14].try_into().unwrap()) != sample_bytes as u16
                 {
                     return Err(invalid());
                 }
                 format_seen = true;
             }
             b"data" => {
-                if !format_seen || audio_seen || length < 2 || length % 2 != 0 {
+                if !format_seen || audio_seen || length < sample_bytes || length % sample_bytes != 0
+                {
                     return Err(invalid());
                 }
                 let mut remaining = length;
@@ -912,9 +1058,19 @@ fn validate_wave(path: &Path, expected_rate: u32) -> Result<()> {
                     let size = remaining.min(buffer.len() as u64) as usize;
                     file.read_exact(&mut buffer[..size])
                         .map_err(|_| invalid())?;
-                    audible |= buffer[..size]
-                        .chunks_exact(2)
-                        .any(|pair| i16::from_le_bytes([pair[0], pair[1]]).unsigned_abs() > 8);
+                    if float_samples {
+                        for bytes in buffer[..size].chunks_exact(4) {
+                            let sample = f32::from_le_bytes(bytes.try_into().unwrap());
+                            if !sample.is_finite() {
+                                return Err(invalid());
+                            }
+                            audible |= sample.abs() > 8.0 / 32768.0;
+                        }
+                    } else {
+                        audible |= buffer[..size]
+                            .chunks_exact(2)
+                            .any(|pair| i16::from_le_bytes([pair[0], pair[1]]).unsigned_abs() > 8);
+                    }
                     remaining -= size as u64;
                 }
                 if !audible {
@@ -1146,6 +1302,173 @@ mod tests {
         assert!(!args.iter().any(|arg| arg.starts_with("--matcha-")));
     }
 
+    #[test]
+    fn python_windows_paths_preserve_unc_unicode_and_extended_semantics() {
+        for (extended, ordinary) in [
+            (
+                r"\\?\D:\配音 路径\models\runner-config.json",
+                r"D:\配音 路径\models\runner-config.json",
+            ),
+            (
+                r"\\?\UNC\server\share\音色\config.json",
+                r"\\server\share\音色\config.json",
+            ),
+        ] {
+            assert_eq!(
+                ordinary_windows_python_path(extended).as_deref(),
+                Some(ordinary)
+            );
+        }
+        for unchanged in [
+            r"C:\普通路径\config.json",
+            r"\\server\share\config.json",
+            r"\\?\Volume{123}\config.json",
+            r"\\.\C:\config.json",
+            r"\\?\UNC\server",
+            r"\\?\C:relative\config.json",
+            r"\\?\C:\name.\config.json",
+            r"\\?\C:\name \config.json",
+            r"\\?\C:\NUL\config.json",
+            r"\\?\C:\COM1.txt\config.json",
+            r"\\?\C:\LPT¹\config.json",
+        ] {
+            assert!(
+                ordinary_windows_python_path(unchanged).is_none(),
+                "{unchanged}"
+            );
+        }
+        let long = format!(r"\\?\C:\{}\config.json", "目录".repeat(125));
+        assert!(ordinary_windows_python_path(&long).is_none());
+        // Count UTF-16 code units rather than bytes or Unicode scalar values.
+        let supplementary = format!(r"\\?\C:\{}\config.json", "𐐀".repeat(125));
+        assert!(ordinary_windows_python_path(&supplementary).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn downloaded_python_command_removes_safe_windows_verbatim_prefixes() {
+        let root = fixture();
+        let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        runtime.model.kind = ModelKind::Qwen3;
+        runtime.model.config = "runner-config.json".into();
+        runtime.root = PathBuf::from(r"\\?\C:\Users\测试 用户\models\qwen3");
+        runtime.executable = PathBuf::from(r"\\?\C:\Users\测试 用户\runtime\python\python.exe");
+        runtime.script = Some(PathBuf::from(
+            r"\\?\C:\Users\测试 用户\runtime\runner\tts.py",
+        ));
+        let command = runtime
+            .command(
+                &request("测试路径"),
+                Path::new(r"\\?\UNC\server\share\字幕 文本.txt"),
+                Path::new(r"\\?\C:\Users\测试 用户\生成 音频.wav"),
+            )
+            .unwrap();
+        assert_eq!(
+            command.get_program(),
+            r"C:\Users\测试 用户\runtime\python\python.exe"
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(Path::new(r"C:\Users\测试 用户\models\qwen3"))
+        );
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args[2], r"C:\Users\测试 用户\runtime\runner\tts.py");
+        assert_eq!(
+            args[4],
+            r"C:\Users\测试 用户\models\qwen3\runner-config.json"
+        );
+        assert_eq!(args[6], r"\\server\share\字幕 文本.txt");
+        assert_eq!(args[8], r"C:\Users\测试 用户\生成 音频.wav");
+    }
+
+    #[test]
+    fn downloaded_python_command_uses_isolated_offline_runner_and_unicode_paths() {
+        let root = fixture();
+        let config = root.path().join("runner-config.json");
+        fs::write(&config, b"{}").unwrap();
+        let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        runtime.model.kind = ModelKind::Qwen3;
+        runtime.model.config = "runner-config.json".into();
+        runtime.script = Some(root.path().join("运行 环境/runner/tts.py"));
+        let input = request("需要保留原始文字。");
+        let command = runtime
+            .command(
+                &input,
+                Path::new("字幕 文本.txt"),
+                Path::new("配音 音频.wav"),
+            )
+            .unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(&args[..2], &["-I", "-B"]);
+        assert_eq!(args[2], runtime.script.as_ref().unwrap().to_string_lossy());
+        assert_eq!(args[3], "--config");
+        // Temporary directories can use an 8.3 alias on Windows while the
+        // validated runtime uses its canonical long name. Compare identity.
+        assert_eq!(
+            Path::new(&args[4]).canonicalize().unwrap(),
+            config.canonicalize().unwrap()
+        );
+        assert_eq!(
+            &args[5..],
+            &[
+                "--text-file",
+                "字幕 文本.txt",
+                "--output-filename",
+                "配音 音频.wav",
+                "--speed",
+                "1"
+            ]
+        );
+        assert!(command
+            .get_envs()
+            .any(|(name, value)| name == "HF_HUB_OFFLINE"
+                && value == Some(std::ffi::OsStr::new("1"))));
+        assert!(!args
+            .iter()
+            .any(|arg| arg.contains("--kokoro") || arg.contains("--matcha")));
+        runtime.script = None;
+        assert!(runtime
+            .command(&input, Path::new("text.txt"), Path::new("speech.wav"))
+            .is_err());
+    }
+
+    #[test]
+    fn downloaded_reference_voice_uses_native_fixed_steps_and_reference_paths() {
+        let root = fixture();
+        let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        runtime.model.kind = ModelKind::Zipvoice;
+        runtime.model.encoder = "encoder.onnx".into();
+        runtime.model.decoder = "decoder.onnx".into();
+        runtime.model.reference_audio = "reference.wav".into();
+        runtime.model.reference_text = "reference.txt".into();
+        let command = runtime
+            .command(
+                &request("你好。"),
+                Path::new("text.txt"),
+                Path::new("speech.wav"),
+            )
+            .unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        for expected in [
+            "--zipvoice-encoder=encoder.onnx",
+            "--zipvoice-decoder=decoder.onnx",
+            "--reference-audio=reference.wav",
+            "--reference-text-file=reference.txt",
+            "--num-steps=8",
+        ] {
+            assert!(args.iter().any(|arg| arg == expected));
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn manifest_rejects_symbolic_link_outside_bundle() {
@@ -1329,6 +1652,34 @@ mod tests {
         assert!(validate_wave(file.path(), 16000).is_err());
     }
 
+    #[test]
+    fn floating_point_speech_is_preserved_and_non_finite_samples_rejected() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let float_wave = |samples: &[f32]| {
+            let mut bytes = wave(&[]);
+            bytes[4..8].copy_from_slice(&(36 + samples.len() as u32 * 4).to_le_bytes());
+            bytes[20..22].copy_from_slice(&3_u16.to_le_bytes());
+            bytes[28..32].copy_from_slice(&64000_u32.to_le_bytes());
+            bytes[32..34].copy_from_slice(&4_u16.to_le_bytes());
+            bytes[34..36].copy_from_slice(&32_u16.to_le_bytes());
+            bytes[40..44].copy_from_slice(&(samples.len() as u32 * 4).to_le_bytes());
+            for sample in samples {
+                bytes.extend_from_slice(&sample.to_le_bytes());
+            }
+            bytes
+        };
+        let original = float_wave(&[0.0, 1.009, -0.5, 0.0]);
+        fs::write(file.path(), &original).unwrap();
+        validate_wave(file.path(), 16000).unwrap();
+        assert_eq!(fs::read(file.path()).unwrap(), original);
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            fs::write(file.path(), float_wave(&[0.5, invalid])).unwrap();
+            assert!(validate_wave(file.path(), 16000).is_err());
+        }
+        fs::write(file.path(), float_wave(&[0.0; 4])).unwrap();
+        assert!(validate_wave(file.path(), 16000).is_err());
+    }
+
     fn await_job(manager: &SpeechManager, id: &str) -> SpeechJob {
         let deadline = Instant::now() + Duration::from_secs(180);
         loop {
@@ -1424,6 +1775,96 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a real downloaded portable runtime and model; no desktop bundle needed"]
+    fn real_portable_runtime_command_and_audio_round_trip() {
+        let runtime_root = PathBuf::from(
+            std::env::var_os("OPEN_MEDIA_TEST_RUNTIME_ROOT").expect("portable runtime root"),
+        );
+        let model_root = PathBuf::from(
+            std::env::var_os("OPEN_MEDIA_TEST_MODEL_ROOT").expect("downloaded model root"),
+        )
+        .canonicalize()
+        .unwrap();
+        let engine = std::env::var("OPEN_MEDIA_TEST_ENGINE").expect("f5 or qwen3");
+        assert!(matches!(engine.as_str(), "f5" | "qwen3"));
+        let metadata_path =
+            PathBuf::from(std::env::var_os("OPEN_MEDIA_TEST_RUNTIME_METADATA").expect(
+                "OPEN_MEDIA_TEST_RUNTIME_METADATA must name the real builder artifact metadata",
+            ));
+        let model_id = if engine == "f5" {
+            "f5-v1-base-fp32"
+        } else {
+            "qwen3-tts-1.7b-serena"
+        };
+        let (executable, script) = crate::speech_models::verify_portable_runtime_for_integration(
+            &runtime_root,
+            &metadata_path,
+            model_id,
+        )
+        .expect(
+            "real portable runtime must pass the application's complete integrity and path checks",
+        );
+        let model: Model = serde_json::from_value(
+            json!({"kind":engine,"config":"runner-config.json","sampleRate":24000}),
+        )
+        .unwrap();
+        let voice: SpeechVoice = serde_json::from_value(
+            json!({"id":"integration_voice","name":"集成验证","language":"zh-CN","speakerId":0}),
+        )
+        .unwrap();
+        let speech = SpeechRuntime {
+            root: model_root,
+            executable,
+            script: Some(script),
+            model,
+            voices: vec![voice],
+        };
+        let work = tempfile::Builder::new()
+            .prefix("配音 路径, 兼容-")
+            .tempdir()
+            .unwrap();
+        let text = work.path().join("字幕 文本.txt");
+        let output = work.path().join("生成 音频.wav");
+        let log_path = work.path().join("generation.log");
+        let mut input = request("这是一款全程由AI接管并生成的软件。");
+        input.voice_id = "integration_voice".into();
+        fs::write(&text, &input.text).unwrap();
+        let log = OpenOptions::new()
+            .create_new(true)
+            .append(true)
+            .open(&log_path)
+            .unwrap();
+        let mut command = speech.command(&input, &text, &output).unwrap();
+        command.stdout(log.try_clone().unwrap()).stderr(log);
+        let started = Instant::now();
+        let mut child = RunningChild(command.spawn().expect("portable runner must launch"));
+        let status = loop {
+            if let Some(status) = child.0.try_wait().unwrap() {
+                break status;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(1800),
+                "portable synthesis exceeded 30 minutes"
+            );
+            thread::sleep(Duration::from_millis(100));
+        };
+        let details = fs::read_to_string(&log_path).unwrap_or_default();
+        assert!(status.success(), "portable runtime failed: {details}");
+        validate_wave(&output, 24000).expect("real portable output must be finite audible WAV");
+        let bytes = fs::read(&output).unwrap();
+        assert!(
+            bytes.len() > 24000,
+            "spoken sentence must contain substantial audio"
+        );
+        eprintln!(
+            "portable {engine}: {} real WAV bytes in {:.2}s; {}",
+            bytes.len(),
+            started.elapsed().as_secs_f64(),
+            details
+        );
+    }
+
+    #[test]
     #[ignore = "requires network access and the prepared offline voice and media runtimes"]
     fn real_optional_voice_download_and_speech_round_trip() {
         let root = PathBuf::from(
@@ -1439,11 +1880,16 @@ mod tests {
         let resource = root.parent().unwrap();
         let speech = SpeechManager::new(data.path(), resource).unwrap();
         assert!(speech.status().ready, "{:?}", speech.status().error);
+        let selected_model = std::env::var("OPEN_MEDIA_TEST_VOICE_MODEL")
+            .unwrap_or_else(|_| "zipvoice-distill-fp32".into());
         let optional = speech
             .status()
             .voices
             .into_iter()
-            .filter(|voice| voice.status.as_deref() == Some("not-downloaded"))
+            .filter(|voice| {
+                voice.status.as_deref() == Some("not-downloaded")
+                    && voice.model_id.as_deref() == Some(selected_model.as_str())
+            })
             .collect::<Vec<_>>();
         assert!(!optional.is_empty());
         let model_id = optional[0].model_id.clone().unwrap();

@@ -2,6 +2,7 @@ import type { Clip, MediaAsset, Project, Track } from './types.ts'
 import { isClipFilterIdentity } from './clip-filters.ts'
 import { isChromaKeyEnabled } from './chroma-key.ts'
 import { ClipFilterRenderer } from './filter-renderer.ts'
+import { audioSourceDistance, audioSourceTime } from './audio-loop.ts'
 
 export { clipOpacityAt } from './timeline.ts'
 import { clipDuration as previewClipDuration, projectDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
@@ -35,7 +36,12 @@ export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
     lines.push(line)
   }
   const x = ctx.textAlign === 'left' ? 12 : ctx.textAlign === 'right' ? clip.width - 12 : clip.width / 2
-  lines.forEach((line, index) => ctx.fillText(line, x, clip.height / 2 + (index - (lines.length - 1) / 2) * fontSize * 1.35, Math.max(1, clip.width - 24)))
+  const lineHeight = fontSize * 1.35
+  const padding = Math.min(12, Math.max(0, (clip.height - fontSize) / 2))
+  const firstLineY = clip.textVerticalAlign === 'top' ? padding + fontSize / 2
+    : clip.textVerticalAlign === 'bottom' ? clip.height - padding - fontSize / 2 - (lines.length - 1) * lineHeight
+      : clip.height / 2 - (lines.length - 1) * lineHeight / 2
+  lines.forEach((line, index) => ctx.fillText(line, x, firstLineY + index * lineHeight, Math.max(1, clip.width - 24)))
 
 }
 
@@ -280,13 +286,19 @@ export class TimelinePreview {
         }
         entry.active = true
         entry.timing = timing
-        const sourceTime = mediaSourceTime(clip, time)
+        const asset = this.project.assets.find(item => item.id === clip.assetId)
+        const sourceDuration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : asset?.duration || 0
+        const loops = track.kind === 'audio' && clip.trimOut > sourceDuration + 1e-6
+        if (media.loop !== loops) media.loop = loops
+        const unwrappedSourceTime = mediaSourceTime(clip, time)
+        const sourceTime = loops ? audioSourceTime(unwrappedSourceTime, sourceDuration) : unwrappedSourceTime
         // Reassigning rate/volume on every paint can restart native audio processing.
         if (media.playbackRate !== clip.speed) {
           try { media.playbackRate = clip.speed } catch { this.report(`speed:${clip.id}`, '当前浏览器无法预览此播放速度，请调整速度或使用导出结果') }
         }
         const canCorrectDrift = playing && !media.paused && !media.seeking && media.readyState >= 3 && !entry.playRequest && now - (entry.lastSync || 0) >= 1000
-        const drifted = Math.abs(media.currentTime - sourceTime) > Math.max(0.25 * clip.speed, 0.08)
+        const drift = loops ? audioSourceDistance(media.currentTime, sourceTime, sourceDuration) : Math.abs(media.currentTime - sourceTime)
+        const drifted = drift > Math.max(0.25 * clip.speed, 0.08)
         if (media.readyState >= 1 && (!media.seeking || forceSeek) && (entry.needsSeek || !playing || (canCorrectDrift && drifted))) {
           const target = Math.min(sourceTime, Number.isFinite(media.duration) ? Math.max(0, media.duration - 0.001) : sourceTime)
           try {

@@ -988,6 +988,22 @@ fn timeline_plan(
         };
         let path = store.authorized_path(asset)?;
         let image = text || asset["kind"] == "image";
+        let loop_audio = if image {
+            false
+        } else {
+            let source_duration = number(asset, "duration", 0.0, 0.0, 86400.0)?;
+            if source_duration <= 0.0 {
+                return Err("素材时长无效，请重新导入后导出。".into());
+            }
+            if track["kind"] == "audio" {
+                *trim_out > source_duration
+            } else {
+                if *trim_out > source_duration + 0.001 {
+                    return Err("视频片段超出素材原始时长，请缩短片段后导出。".into());
+                }
+                false
+            }
+        };
         let color_filter = crate::clip_filters::filter_chain(
             clip,
             track["kind"] == "video" && (asset["kind"] == "video" || asset["kind"] == "image"),
@@ -996,7 +1012,7 @@ fn timeline_plan(
             clip,
             track["kind"] == "video" && (asset["kind"] == "video" || asset["kind"] == "image"),
         )?;
-        if image && asset["mime"] == "image/gif" {
+        if loop_audio || (image && asset["mime"] == "image/gif") {
             arg(
                 &mut args,
                 &["-stream_loop", "-1", "-t", &trim_out.to_string()],
@@ -1066,7 +1082,7 @@ fn timeline_plan(
         if !image && volume > 0.0 && track["muted"] != true && store.has_audio(runtime, &path) {
             let (fade_in, fade_out, fade_peak) = fade_parameters(clip, *duration)?;
             let volume = volume * fade_peak;
-            let mut chain=format!("[{index}:a]atrim=start={trim_in}:end={trim_out},asetpts=PTS-STARTPTS,{},volume={volume}",tempo(*speed));
+            let mut chain=format!("[{index}:a]atrim=start={trim_in}:end={trim_out},asetpts=PTS-STARTPTS,{},apad=whole_dur={duration},atrim=duration={duration},volume={volume}",tempo(*speed));
             if fade_in > 0.0 {
                 chain += &format!(",afade=t=in:st=0:d={fade_in}");
             }

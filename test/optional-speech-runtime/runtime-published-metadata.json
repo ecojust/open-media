@@ -1,0 +1,65 @@
+[
+  {
+    "platform": "macos-arm64",
+    "filename": "speech-runtime-python-cpu-v1-macos-arm64.zip",
+    "size": 229466785,
+    "sha256": "22108ab339e20b53c16791e9cb406db1876a81a2c7eb98ef586179710bebb9bc",
+    "unpackedSize": 833310647,
+    "manifestSha256": "4d90803b3879d4864f7fa34d4c8144fb1557cff521ea99c0ab08bc3ef58c236c",
+    "executable": "python/bin/python3",
+    "script": "runner/tts.py",
+    "id": "python-cpu-v1",
+    "version": 1,
+    "validatedModels": [
+      "f5-v1-base-fp32",
+      "qwen3-tts-1.7b-serena"
+    ],
+    "validated": true,
+    "sourceCommit": "6d72c6e5347a553733c214c3e32f568db46cee43",
+    "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-arm64.zip",
+    "applicationSourceCommit": "6d72c6e5347a553733c214c3e32f568db46cee43",
+    "applicationValidationRunId": "39056847155"
+  },
+  {
+    "platform": "macos-x64",
+    "filename": "speech-runtime-python-cpu-v1-macos-x64.zip",
+    "size": 335981482,
+    "sha256": "bbcb0d5083a434e935ce569d7024de67fd29468a5e79b7ba86f6044230f20b37",
+    "unpackedSize": 1212713611,
+    "manifestSha256": "7c450d4cb79023e56db45bd52437a22f77f8351fcd237f6d1357e0c85b02fa93",
+    "executable": "python/bin/python3",
+    "script": "runner/tts.py",
+    "id": "python-cpu-v1",
+    "version": 1,
+    "validatedModels": [
+      "f5-v1-base-fp32",
+      "qwen3-tts-1.7b-serena"
+    ],
+    "validated": true,
+    "sourceCommit": "6d72c6e5347a553733c214c3e32f568db46cee43",
+    "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-macos-x64.zip",
+    "applicationSourceCommit": "6d72c6e5347a553733c214c3e32f568db46cee43",
+    "applicationValidationRunId": "39056847155"
+  },
+  {
+    "platform": "windows-x64",
+    "filename": "speech-runtime-python-cpu-v1-windows-x64.zip",
+    "size": 291456476,
+    "sha256": "70b222267052d3abe205e3a0b4f1ab8653af078b721824a7e645531bc7e07705",
+    "unpackedSize": 985590814,
+    "manifestSha256": "4d52a3022502a39a2c76ec286ad44468a54717d8f4fe6e84563497745f4138b8",
+    "executable": "python/python.exe",
+    "script": "runner/tts.py",
+    "id": "python-cpu-v1",
+    "version": 1,
+    "validatedModels": [
+      "f5-v1-base-fp32",
+      "qwen3-tts-1.7b-serena"
+    ],
+    "validated": true,
+    "sourceCommit": "6d72c6e5347a553733c214c3e32f568db46cee43",
+    "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/speech-runtime-python-cpu-v1-windows-x64.zip",
+    "applicationSourceCommit": "affdff1bd54f6577694f95dc8b7c0c159eeff31c",
+    "applicationValidationRunId": "39060595430"
+  }
+]
