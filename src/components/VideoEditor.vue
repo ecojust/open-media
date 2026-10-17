@@ -17,6 +17,7 @@ import WatermarkLibrary from './WatermarkLibrary.vue'
 import ChromaKeyPanel from './ChromaKeyPanel.vue'
 import { addWatermark } from '../core/watermark-track'
 import type { WatermarkMaterial } from '../core/watermark-library'
+import { chooseWatermarkSource } from '../core/watermark-source'
 import { addRecordedAudio } from '../core/recording-track'
 import { importMediaFile, revokeMediaAsset } from '../core/media-import'
 import { importBlobAsset, isDesktop } from '../native'
@@ -253,17 +254,20 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
   }
   try {
     const material = source instanceof File ? undefined : source
+    const desktop = isDesktop()
+    const materialUrl = material ? (desktop ? material.url : chooseWatermarkSource(material)) : ''
     let blob: Blob
     if (source instanceof File) blob = source
     else {
-      const response = await fetch(source.url, { signal: abort.signal })
+      const response = await fetch(materialUrl, { signal: abort.signal })
       if (!response.ok) throw new Error('内置素材读取失败，请重新打开素材库。')
       blob = await response.blob()
     }
     if (stale()) return
     window.clearTimeout(timeout)
-    const name = material ? `${material.name}.${material.kind === 'video' ? 'mp4' : 'png'}` : (source as File).name
-    asset = isDesktop()
+    const extension = material?.kind === 'video' ? (materialUrl.endsWith('.webm') ? 'webm' : 'mp4') : 'png'
+    const name = material ? `${material.name}.${extension}` : (source as File).name
+    asset = desktop
       ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
       : await importMediaFile(new File([blob], name, { type: blob.type }))
     if (stale()) return

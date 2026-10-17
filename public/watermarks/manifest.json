@@ -15,6 +15,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "thumb-pulse.webm",
+        "bytes": 204923,
+        "sha256": "51369d99368f965b0587c4ae1e7cf0c116cecfd7be2cfcecb8df6b5676d0dda4",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "thumb-pulse.png",
         "bytes": 43078,
@@ -32,6 +44,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "star-save.webm",
+        "bytes": 203419,
+        "sha256": "6128f42f5b85eed603c1e0af0def25d332fa5aaf58d1589282726ef687b8d12a",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "star-save.png",
         "bytes": 48374,
@@ -49,6 +73,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "follow-pop.webm",
+        "bytes": 144023,
+        "sha256": "079f14fabce67d605335188823af2f79a1423fd150af9bb73ca9fceef3407be6",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "follow-pop.png",
         "bytes": 27803,
@@ -66,6 +102,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "share-plane.webm",
+        "bytes": 97051,
+        "sha256": "0bc79cccbf0f0a6d67f97fe7f1709046c1d755eec779df8794094d4315a93735",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "share-plane.png",
         "bytes": 35675,
@@ -83,6 +131,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "heart-wave.webm",
+        "bytes": 268763,
+        "sha256": "1d250fcc9568c51d9203634fd10307c7f9cd6029b74686835b31f2a7ff0b1f4d",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "heart-wave.png",
         "bytes": 55379,
@@ -100,6 +160,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "celebrate.webm",
+        "bytes": 85023,
+        "sha256": "43ed68a15fd5fc7c302b014ba809cdb278e80fbbc070bfde7dc07d5d5ef849af",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "celebrate.png",
         "bytes": 25776,
@@ -117,6 +189,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "sparkle-trail.webm",
+        "bytes": 49913,
+        "sha256": "1daffd34ae70013dc9c002bf16e4e8d95d7907f8f0ce55186547c3174310b711",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "sparkle-trail.png",
         "bytes": 13519,
@@ -134,6 +218,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "ripple-rings.webm",
+        "bytes": 249980,
+        "sha256": "d2dab63cce64008090ea5007bf99d2d9902ded89a67ad86531aca5a2218a84e2",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "ripple-rings.png",
         "bytes": 48344,
@@ -151,6 +247,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "corner-frame.webm",
+        "bytes": 40379,
+        "sha256": "f147bc4ecb04965379ca2b4c7ca73ac934e02728f8cb7efae28436254e14d265",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "corner-frame.png",
         "bytes": 5275,
@@ -168,6 +276,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "loading-dots.webm",
+        "bytes": 13739,
+        "sha256": "6cabf108f6c66f8a77820adf1eac6558c77c4943ef71db5391e11311643769c4",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "loading-dots.png",
         "bytes": 14737,
@@ -185,6 +305,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "rec-label.webm",
+        "bytes": 10434,
+        "sha256": "70e3286feb15614d6f21d894ccd48c963a98e2c1a9b4be9ae209e9c3ed5d47af",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "rec-label.png",
         "bytes": 13945,
@@ -202,6 +334,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "notice-bubble.webm",
+        "bytes": 117669,
+        "sha256": "b562a5463e06895f5dbde7869e3ad9133d6c6b00abff129c7c67672decfee35d",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "notice-bubble.png",
         "bytes": 37785,
@@ -219,6 +363,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "cursor-click.webm",
+        "bytes": 89434,
+        "sha256": "a2f40c2ed8e26ecc35a3c8fe71ecc0e54fac3bb1ca8482057bcce0c1b971a888",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "cursor-click.png",
         "bytes": 25210,
@@ -236,6 +392,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "point-arrow.webm",
+        "bytes": 18420,
+        "sha256": "cd2f91e92392d47ec503085cf8ad6f72c605d764daefbaf9e349b98581da99ff",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "point-arrow.png",
         "bytes": 15478,
@@ -253,6 +421,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "focus-circle.webm",
+        "bytes": 132087,
+        "sha256": "d10f3647d6cd285260bb7f76e159d8a709d6dfd1a22ac251dc7149e4beef4adf",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "focus-circle.png",
         "bytes": 45040,
@@ -270,6 +450,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "chapter-card.webm",
+        "bytes": 32606,
+        "sha256": "2f791c6a2870c740b3fdfbcee6aac49e45b9b8db1cc621f3de93e2d22f5dbe5f",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "chapter-card.png",
         "bytes": 23754,
@@ -287,6 +479,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "note-strip.webm",
+        "bytes": 92506,
+        "sha256": "9d9ba243b2c040a6ffc8e4ff2a9ccb0f01ad00ff980ea59dda3ea6cc4a302604",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "note-strip.png",
         "bytes": 37470,
@@ -304,6 +508,18 @@
       "framesPerSecond": 24,
       "audio": false,
       "chromaColor": "#00ff00",
+      "fallback": {
+        "file": "thanks-card.webm",
+        "bytes": 171288,
+        "sha256": "64575e6b2165c2006e468ce4bbba72208c7d76f1cdb7aea72835ae0d4661fe5a",
+        "duration": 4.0,
+        "codec": "vp9",
+        "width": 640,
+        "height": 360,
+        "framesPerSecond": 24,
+        "audio": false,
+        "chromaColor": "#00ff00"
+      },
       "poster": {
         "file": "thanks-card.png",
         "bytes": 34882,

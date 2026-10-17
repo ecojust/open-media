@@ -7,6 +7,7 @@ export interface WatermarkMaterial {
   category: WatermarkCategory
   tags: string[]
   url: string
+  fallbackUrl?: string
   poster: string
   kind: 'video' | 'image'
   duration: number
@@ -45,6 +46,7 @@ export const WATERMARK_MATERIALS: WatermarkMaterial[] = definitions.map(([id, na
   category,
   tags,
   url: `/watermarks/${id}.mp4`,
+  fallbackUrl: `/watermarks/${id}.webm`,
   poster: `/watermarks/${id}.png`,
   kind: 'video',
   duration: 4,

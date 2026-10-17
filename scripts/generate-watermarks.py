@@ -339,16 +339,17 @@ def frame(material, time):
     raise ValueError(material)
 
 
-def verify(path):
+def verify(path, codec='h264'):
     probe = subprocess.run([
         'ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(path),
     ], check=True, capture_output=True, text=True)
     data = json.loads(probe.stdout)
     streams = data['streams']
-    assert len(streams) == 1 and streams[0]['codec_name'] == 'h264', path
+    assert len(streams) == 1 and streams[0]['codec_name'] == codec, path
     assert (streams[0]['width'], streams[0]['height']) == SIZE, path
     assert abs(float(data['format']['duration']) - DURATION) < .05, path
     assert streams[0]['pix_fmt'] == 'yuv420p', path
+    assert streams[0]['r_frame_rate'] == f'{FPS}/1', path
     # Decode every frame to catch damaged files, then verify two actual frames differ.
     subprocess.run(['ffmpeg', '-v', 'error', '-i', str(path), '-f', 'null', '-'], check=True)
     samples = []
@@ -361,10 +362,21 @@ def verify(path):
     return {
         'file': path.name, 'bytes': path.stat().st_size,
         'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
-        'duration': float(data['format']['duration']), 'codec': 'h264',
+        'duration': float(data['format']['duration']), 'codec': codec,
         'width': SIZE[0], 'height': SIZE[1], 'framesPerSecond': FPS,
         'audio': False, 'chromaColor': '#00ff00',
     }
+
+
+def encode_fallback(source, destination):
+    """Derive the same animation in a format usable without an H.264 decoder."""
+    subprocess.run([
+        'ffmpeg', '-v', 'error', '-y', '-i', str(source), '-map', '0:v:0', '-an',
+        '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '24', '-deadline', 'good',
+        '-cpu-used', '2', '-row-mt', '1', '-threads', '2', '-pix_fmt', 'yuv420p',
+        '-map_metadata', '-1', '-metadata', 'title=Open Media original overlay',
+        str(destination),
+    ], check=True)
 
 
 def main():
@@ -373,37 +385,47 @@ def main():
     parser.add_argument('--font', type=pathlib.Path, default=FONT_PATH)
     parser.add_argument('--output', type=pathlib.Path, default=ROOT / 'public/watermarks')
     parser.add_argument('--only', choices=IDS)
+    parser.add_argument('--fallback-only', action='store_true',
+                        help='Keep existing MP4/PNG files and regenerate their VP9/WebM alternatives.')
     args = parser.parse_args()
     FONT_PATH = args.font
-    if not FONT_PATH.is_file():
+    if not args.fallback_only and not FONT_PATH.is_file():
         parser.error('Provide an installed CJK sans-serif bold font with --font.')
     args.output.mkdir(parents=True, exist_ok=True)
     records = []
     for material in [args.only] if args.only else IDS:
         path = args.output / f'{material}.mp4'
         poster = args.output / f'{material}.png'
-        frame(material, .75).save(poster, optimize=True)
-        encoder = subprocess.Popen([
-            'ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
-            '-s', f'{SIZE[0]}x{SIZE[1]}', '-r', str(FPS), '-i', '-', '-an',
-            '-c:v', 'libx264', '-preset', 'slow', '-crf', '17', '-pix_fmt', 'yuv420p',
-            '-movflags', '+faststart', '-metadata', 'title=Open Media original overlay', str(path),
-        ], stdin=subprocess.PIPE)
-        try:
-            for index in range(FPS * DURATION):
-                overlay = frame(material, index / FPS)
-                background = Image.new('RGB', SIZE, '#00ff00')
-                background.paste(overlay, (0, 0), overlay)
-                encoder.stdin.write(background.tobytes())
-        finally:
-            encoder.stdin.close()
-        if encoder.wait() != 0:
-            raise RuntimeError(f'Encoding failed: {material}')
+        fallback = args.output / f'{material}.webm'
+        if args.fallback_only:
+            if not path.is_file() or not poster.is_file():
+                raise RuntimeError(f'Existing MP4 and PNG required: {material}')
+        else:
+            frame(material, .75).save(poster, optimize=True)
+            encoder = subprocess.Popen([
+                'ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+                '-s', f'{SIZE[0]}x{SIZE[1]}', '-r', str(FPS), '-i', '-', '-an',
+                '-c:v', 'libx264', '-preset', 'slow', '-crf', '17', '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart', '-metadata', 'title=Open Media original overlay', str(path),
+            ], stdin=subprocess.PIPE)
+            try:
+                for index in range(FPS * DURATION):
+                    overlay = frame(material, index / FPS)
+                    background = Image.new('RGB', SIZE, '#00ff00')
+                    background.paste(overlay, (0, 0), overlay)
+                    encoder.stdin.write(background.tobytes())
+            finally:
+                encoder.stdin.close()
+            if encoder.wait() != 0:
+                raise RuntimeError(f'Encoding failed: {material}')
         record = verify(path)
+        encode_fallback(path, fallback)
+        record['fallback'] = verify(fallback, 'vp9')
         record['poster'] = {'file': poster.name, 'bytes': poster.stat().st_size,
                             'sha256': hashlib.sha256(poster.read_bytes()).hexdigest()}
         records.append(record)
-        print(f'{material}: verified {record["bytes"]:,} bytes', flush=True)
+        print(f'{material}: verified MP4 {record["bytes"]:,} bytes, '
+              f'WebM {record["fallback"]["bytes"]:,} bytes', flush=True)
     if not args.only:
         manifest = {
             'schemaVersion': 1, 'license': 'MIT',
@@ -412,8 +434,8 @@ def main():
             'materials': records,
         }
         (args.output / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
-        total = sum(record['bytes'] + record['poster']['bytes'] for record in records)
-        if total > 3 * 1024 * 1024:
+        total = sum(record['bytes'] + record['fallback']['bytes'] + record['poster']['bytes'] for record in records)
+        if total > 5 * 1024 * 1024:
             raise RuntimeError(f'Media budget exceeded: {total:,} bytes')
         print(f'{len(records)} animations verified; media total {total:,} bytes', flush=True)
 

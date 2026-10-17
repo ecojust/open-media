@@ -24,9 +24,13 @@ async function installFilePickers(page) {
     window.showOpenFilePicker = async () => [(await (await navigator.storage.getDirectory()).getFileHandle('watermarks.omedia'))]
     const create = document.createElement.bind(document)
     window.watermarkVideos = []
+    window.watermarkMediaErrors = []
     document.createElement = function (tag, ...args) {
       const element = create(tag, ...args)
-      if (tag.toLowerCase() === 'video') window.watermarkVideos.push(element)
+      if (tag.toLowerCase() === 'video') {
+        window.watermarkVideos.push(element)
+        element.addEventListener('error', () => window.watermarkMediaErrors.push({ src: element.currentSrc || element.src, code: element.error?.code, message: element.error?.message }))
+      }
       return element
     }
   })
@@ -74,7 +78,35 @@ async function seek(page, seconds) {
   await page.locator('.timeline-ruler').click({ position: { x: seconds * 44, y: 8 } })
 }
 
-async function galleryChecks(page) {
+async function expectedBuiltinFormat(page) {
+  const capabilities = await page.evaluate(() => {
+    const video = document.createElement('video')
+    return { h264: video.canPlayType('video/mp4; codecs="avc1.64001e"'), vp9: video.canPlayType('video/webm; codecs="vp9"') }
+  })
+  assert(capabilities.h264 || capabilities.vp9, '检查浏览器至少需要支持一种内置动画编码')
+  return capabilities.h264 ? { extension: 'mp4', mime: 'video/mp4' } : { extension: 'webm', mime: 'video/webm' }
+}
+
+async function verifyImportedContainer(page, clip, format) {
+  const imported = await page.evaluate(async clipId => {
+    const { loadProject } = await import('/src/core/storage.ts')
+    const loaded = await loadProject(localStorage.getItem('open-media:last-project'))
+    try {
+      const clip = loaded.project.tracks.flatMap(track => track.clips).find(clip => clip.id === clipId)
+      const asset = loaded.project.assets.find(asset => asset.id === clip.assetId)
+      const blob = loaded.blobs.get(asset.id)
+      return { name: asset.name, mime: asset.mime, blobMime: blob.type, header: [...new Uint8Array(await blob.slice(0, 16).arrayBuffer())] }
+    } finally { loaded.revoke() }
+  }, clip.id)
+  assert.equal(imported.name, `点赞鼓励.${format.extension}`)
+  assert.equal(imported.mime, format.mime)
+  assert.equal(imported.blobMime, format.mime)
+  if (format.extension === 'mp4') assert.deepEqual(imported.header.slice(4, 8), [...Buffer.from('ftyp')], '支持 H264 时必须导入真实 MP4 字节')
+  else assert.deepEqual(imported.header.slice(0, 4), [0x1a, 0x45, 0xdf, 0xa3], '不支持 H264 时必须导入真实 WebM 字节')
+  console.log(`PASS 根据实际浏览器编码能力预览并导入 ${format.extension.toUpperCase()}，素材名称、MIME 与真实容器字节一致`)
+}
+
+async function galleryChecks(page, format) {
   const button = page.getByTestId('watermark-open')
   const position = await button.evaluate(element => ({ previous: element.previousElementSibling?.textContent.trim(), svg: element.querySelectorAll('svg').length }))
   assert.equal(position.previous, '字幕', '添加水印应紧接字幕按钮右侧')
@@ -101,6 +133,8 @@ async function galleryChecks(page) {
   await material.locator('.material-preview').hover()
   const preview = material.locator('canvas.ready')
   await expect(preview).toBeVisible()
+  const previewSource = await page.evaluate(() => window.watermarkVideos.findLast(video => !video.isConnected && !video.paused && video.currentSrc.includes('/watermarks/'))?.currentSrc)
+  assert.equal(new URL(previewSource).pathname, `/watermarks/thumb-pulse.${format.extension}`, '预览必须根据真实编码能力选择兼容素材')
   const pixels = () => preview.evaluate(canvas => {
     const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
     let hash = 0, opaque = 0, transparent = 0
@@ -215,12 +249,14 @@ async function appChecks(browser, url, productionCsp) {
     await installFilePickers(page)
     await installProject(page, url)
     const original = await projectState(page, 1)
-    await galleryChecks(page)
+    const format = await expectedBuiltinFormat(page)
+    await galleryChecks(page, format)
     await seek(page, 2.5)
     await addBuiltin(page)
     const added = await projectState(page, 2)
     const track = added.tracks.find(item => item.name === '水印轨道'), clip = track?.clips[0]
     assert(track && clip, '水印必须添加到独立轨道')
+    await verifyImportedContainer(page, clip, format)
     assert.equal(clip.start, 2.5, '素材必须从打开素材库时的当前刻度开始')
     assert.equal(clip.chromaKey.enabled, true)
     assert(added.tracks.indexOf(track) < added.tracks.findIndex(item => item.id === original.tracks[1].id), '水印轨道位于画面轨道上方')
@@ -286,6 +322,16 @@ async function appChecks(browser, url, productionCsp) {
     assert.deepEqual(violations, [], '合法素材读取、预览、导入、保存和真实导出不应触发生产安全策略违规')
     console.log('PASS 当前生产 CSP 下完整素材读取、预览、导入、保存与真实导出，无安全策略违规')
   } catch (error) {
+    const diagnostics = await page.evaluate(() => {
+      const video = document.createElement('video')
+      return {
+        codecs: { h264: video.canPlayType('video/mp4; codecs="avc1.42E01E"'), h264High: video.canPlayType('video/mp4; codecs="avc1.64001e"'), vp9: video.canPlayType('video/webm; codecs="vp9"') },
+        errors: window.watermarkMediaErrors || [],
+        media: (window.watermarkVideos || []).map(media => ({ src: media.getAttribute('src'), currentSrc: media.currentSrc, paused: media.paused, readyState: media.readyState, error: media.error?.message })),
+        previews: [...document.querySelectorAll('.material-preview.previewing,.material-preview.preview-ready')].map(element => ({ className: element.className, label: element.getAttribute('aria-label') })),
+      }
+    }).catch(() => null)
+    console.error('水印媒体诊断：', JSON.stringify(diagnostics))
     await page.screenshot({ path: path.join(artifacts, 'failure.png') }).catch(() => {})
     throw error
   } finally { await context.close() }

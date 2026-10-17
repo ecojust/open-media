@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { applyChromaKey, createChromaKey } from '../core/chroma-key'
 import { WATERMARK_CATEGORIES, WATERMARK_MATERIALS, type WatermarkMaterial } from '../core/watermark-library'
+import { chooseWatermarkSource } from '../core/watermark-source'
 import Icon from './Icon.vue'
 
 const props = withDefaults(defineProps<{ busy?: boolean; error?: string }>(), { busy: false, error: '' })
@@ -55,7 +56,7 @@ async function startPreview(material: WatermarkMaterial, explicit = false): Prom
   media.playsInline = true
   media.preload = 'auto'
   media.crossOrigin = 'anonymous'
-  media.src = material.url
+  media.src = chooseWatermarkSource(material, media)
   media.onerror = () => failedPreview(material.id, token)
   await nextTick()
   if (token !== generation) return
