@@ -3,7 +3,9 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'scripts/optional-speech-assets'
@@ -88,9 +90,52 @@ def build_models():
     return models
 
 
+def runtime_platforms(source):
+    files = [source] if source.is_file() else sorted(source.rglob('*.json'))
+    platforms = {}
+    commits = set()
+    required = {'macos-arm64', 'macos-x64', 'windows-x64'}
+    for file in files:
+        document = json.loads(file.read_text(encoding='utf-8'))
+        for data in document if isinstance(document, list) else [document]:
+            if not isinstance(data, dict) or data.get('platform') not in required:
+                continue
+            if data.get('id') != 'python-cpu-v1' or data.get('version') != 1:
+                raise ValueError(f'Unexpected runtime identity in {file}.')
+            if data.get('validated') is not True or set(data.get('validatedModels', [])) != {
+                'f5-v1-base-fp32', 'qwen3-tts-1.7b-serena'
+            }:
+                raise ValueError(f'Runtime metadata has not passed both real speech checks: {file}.')
+            commit = data.get('sourceCommit', '')
+            if not re.fullmatch('[a-f0-9]{40}', commit):
+                raise ValueError(f'Runtime metadata must identify its source commit: {file}.')
+            commits.add(commit)
+            archive = {key: data[key] for key in
+                       ['url', 'size', 'unpackedSize', 'sha256', 'manifestSha256', 'executable', 'script']}
+            if data.get('mirrors'):
+                archive['mirrors'] = data['mirrors']
+            if archive['url'] != RELEASE + f'speech-runtime-python-cpu-v1-{data["platform"]}.zip':
+                raise ValueError(f'Runtime URL does not match its immutable release: {file}.')
+            for url in [archive['url'], *archive.get('mirrors', [])]:
+                parsed = urlsplit(url)
+                if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+                    raise ValueError(f'Runtime download must use a public HTTPS address: {file}.')
+            if not (isinstance(archive['size'], int) and 0 < archive['size'] <= archive['unpackedSize']):
+                raise ValueError(f'Invalid runtime byte sizes: {file}.')
+            if any(not re.fullmatch('[a-f0-9]{64}', archive[key]) for key in ['sha256', 'manifestSha256']):
+                raise ValueError(f'Invalid runtime integrity digest: {file}.')
+            previous = platforms.get(data['platform'])
+            if previous is not None and previous != archive:
+                raise ValueError(f'Conflicting runtime metadata for {data["platform"]}.')
+            platforms[data['platform']] = archive
+    if set(platforms) != required or len(commits) != 1:
+        raise ValueError('Runtime metadata must include all three supported platforms from one verified source commit.')
+    return platforms
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--runtime-metadata', type=Path, help='Directory containing verified per-platform metadata JSON.')
+    parser.add_argument('--runtime-metadata', type=Path, help='Verified release metadata JSON or a directory of platform metadata.')
     parser.add_argument('--output', type=Path, default=ROOT / 'src-tauri/resources/speech-models.json')
     args = parser.parse_args()
     for model, name in [('f5-v1-base-fp32', 'f5'), ('qwen3-tts-1.7b-serena', 'qwen3')]:
@@ -98,16 +143,7 @@ def main():
         (ASSETS / f'{name}-runner-config.json').write_bytes(data)
     catalogue = dict(schema=2, models=build_models(), runtimes=[])
     if args.runtime_metadata:
-        platforms = {}
-        for file in sorted(args.runtime_metadata.glob('*.json')):
-            data = json.loads(file.read_text())
-            if data.get('platform') not in ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64']:
-                continue
-            platforms[data['platform']] = {key: data[key] for key in
-                ['url', 'size', 'unpackedSize', 'sha256', 'manifestSha256', 'executable', 'script']}
-        required = {'macos-arm64', 'macos-x64', 'windows-x64'}
-        if not required.issubset(platforms):
-            raise ValueError('Runtime metadata must include all three supported desktop platforms.')
+        platforms = runtime_platforms(args.runtime_metadata)
         catalogue['runtimes'] = [dict(id='python-cpu-v1', version=1, platforms=platforms)]
     args.output.write_text(json.dumps(catalogue, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f'Wrote {args.output}; runtime metadata: {bool(catalogue["runtimes"])}')

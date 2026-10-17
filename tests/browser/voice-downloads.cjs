@@ -9,9 +9,9 @@ async function installNativeContract(page) {
       { id: 'f5_zh_female', modelId: 'f5-v1-base-fp32', name: 'F5-TTS v1 Base FP32', modelSize: 1402816013, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC-4.0', usageNote: '模型限非商业用途' },
       { id: 'qwen3_serena', modelId: 'qwen3-tts-1.7b-serena', name: 'Qwen3-TTS 1.7B BF16 · Serena', modelSize: 4520159586, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'Apache-2.0' },
     ]
-    const state = window.voiceDownloadHarness = { calls: [], sharedRuntimeReady: false, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
-    const catalog = () => ({ ready: true, voices: [
-      { id: 'matcha_zh_en_female', name: '温柔女声（中英）', language: 'zh-CN', gender: 'female', status: 'bundled', modelSize: 149227292 },
+    const state = window.voiceDownloadHarness = { calls: [], bundledReady: true, sharedRuntimeReady: false, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
+    const catalog = () => ({ ready: state.bundledReady || Object.entries(state.models).some(([id, model]) => model.status === 'ready' && (id === 'zipvoice-distill-fp32' || state.sharedRuntimeReady || model.runtimeStatus === 'ready')), error: state.bundledReady ? undefined : '内置模型完整性校验失败', voices: [
+      { id: 'matcha_zh_en_female', name: '温柔女声（中英）', language: 'zh-CN', gender: 'female', status: state.bundledReady ? 'bundled' : 'failed', modelSize: 149227292 },
       ...packs.map(voice => {
         const model = state.models[voice.modelId]
         const runtimeStatus = voice.runtimeSize ? model.runtimeStatus || (state.sharedRuntimeReady ? 'ready' : 'not-downloaded') : undefined
@@ -173,8 +173,35 @@ async function main() {
     assert.equal(await dialog.locator('.voice-grid-scroll').evaluate(element => element.scrollWidth <= element.clientWidth), true, '声音网格不得横向溢出')
     await qwen.scrollIntoViewIfNeeded()
     await expect(qwen.getByRole('button', { name: '试听 Qwen3-TTS 1.7B BF16 · Serena', exact: true })).toBeInViewport()
-    assert.deepEqual(errors, [])
     console.log('PASS 不支持平台仅允许试听，四卡无Tab，长模型名与窄屏布局正常')
+
+    await close.click()
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.evaluate(() => {
+      const state = window.voiceDownloadHarness
+      state.bundledReady = false; state.sharedRuntimeReady = false
+      for (const model of Object.values(state.models)) Object.assign(model, { status: 'not-downloaded', runtimeStatus: undefined, downloadedBytes: 0, error: '', runtimeError: undefined })
+    })
+    await open.click()
+    await expect(dialog.getByRole('alert').filter({ hasText: '内置模型完整性校验失败' })).toBeVisible()
+    await expect(dialog.getByTestId('speech-generate-all')).toBeDisabled()
+    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
+    await expect(f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
+    await f5.getByRole('button', { name: '试听 F5-TTS v1 Base FP32', exact: true }).click()
+    await expect(dialog.getByLabel('声音试听音频')).toHaveJSProperty('paused', false)
+    await f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true }).click()
+    await expect(f5.getByRole('progressbar')).toBeVisible()
+    await expect(dialog.getByTestId('speech-generate-all')).toBeDisabled()
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_job').length), 0)
+    await page.evaluate(() => {
+      window.voiceDownloadHarness.sharedRuntimeReady = true
+      Object.assign(window.voiceDownloadHarness.models['f5-v1-base-fp32'], { status: 'ready', runtimeStatus: 'ready', error: '' })
+    })
+    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
+    await expect(dialog.getByTestId('speech-generate-all')).toBeEnabled()
+    await expect(dialog.getByRole('button', { name: '选择 温柔女声（中英）', exact: true })).toBeDisabled()
+    assert.deepEqual(errors, [])
+    console.log('PASS 内置模型损坏时仍可试听与下载独立模型，未就绪禁止生成，下载验证后正常解锁')
   } catch (error) {
     await page?.screenshot({ path: '/tmp/open-media-voice-downloads-failure.png', animations: 'disabled' }).catch(() => {})
     throw error

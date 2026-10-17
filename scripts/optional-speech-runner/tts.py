@@ -10,6 +10,7 @@ of the package contract and is never changed to accommodate a platform.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import importlib.metadata
 import json
 import math
@@ -36,7 +37,7 @@ def progress(samples: int, completed: int, total: int) -> None:
     print(f"sample={samples}, progress={completed / total:.6f}", flush=True)
 
 
-def configure_process(threads: int) -> None:
+def configure_process(threads: int, cache_dir: Path) -> None:
     # Set these before importing packages, including any transitive imports.
     for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE", "HF_DATASETS_OFFLINE",
                  "HF_HUB_DISABLE_TELEMETRY", "DO_NOT_TRACK"):
@@ -45,6 +46,12 @@ def configure_process(threads: int) -> None:
     os.environ["OMP_NUM_THREADS"] = str(threads)
     os.environ["MKL_NUM_THREADS"] = str(threads)
     os.environ["NUMBA_NUM_THREADS"] = str(threads)
+    # Native JIT cache files are independent of Python's -B flag. Keep them in
+    # this invocation's writable workspace, never beside verified dependencies.
+    numba_cache = cache_dir / "numba"
+    numba_cache.mkdir(parents=True, exist_ok=True)
+    os.environ["NUMBA_CACHE_DIR"] = str(numba_cache.resolve())
+    sys.dont_write_bytecode = True
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
@@ -56,6 +63,20 @@ def configure_process(threads: int) -> None:
                 raise RuntimeError("The installed speech runtime cannot access the network")
 
     sys.addaudithook(deny_network)
+
+
+@contextmanager
+def invocation_cache(output: Path | None):
+    parent = output.resolve().parent if output else None
+    if parent:
+        if parent.is_relative_to(ROOT.parent):
+            raise ValueError("Speech output must be outside the installed runtime")
+        parent.mkdir(parents=True, exist_ok=True)
+    # Generation uses the existing job directory, whose owner also cleans it on
+    # cancellation. Dependency-only probes use the operating system temp folder.
+    with tempfile.TemporaryDirectory(prefix="speech-cache-", dir=parent,
+                                     ignore_cleanup_errors=True) as directory:
+        yield Path(directory)
 
 
 def local_path(root: Path, value: str, *, directory: bool = False) -> Path:
@@ -345,6 +366,11 @@ def self_test(engine: str, torch, np, sf) -> dict:
         verify_bf16(torch)
     time = np.arange(SAMPLE_RATE // 10, dtype=np.float32) / SAMPLE_RATE
     wave = np.sin(time * 2 * np.pi * 440).astype(np.float32) * 0.1
+    # Exercise the JIT-backed speed control too: importing it alone would miss
+    # native-code or cache-path failures until the first non-default speed.
+    stretched = checked_audio(librosa.effects.time_stretch(wave, rate=1.25), np)
+    if len(stretched) != round(len(wave) / 1.25):
+        raise RuntimeError("Speech speed processing returned an unexpected duration")
     with tempfile.TemporaryDirectory(prefix="speech-probe-") as directory:
         probe = write_audio(Path(directory) / "audio.wav", wave, np, sf)
     versions = {name: importlib.metadata.version(name) for name in
@@ -352,7 +378,8 @@ def self_test(engine: str, torch, np, sf) -> dict:
                  "librosa", "safetensors", "vocos", "qwen-tts")}
     return {"schema": 1, "ok": True, "engine": engine, "python": sys.version.split()[0],
             "packages": versions, "f5SourceRevision": F5_SOURCE_REVISION,
-            "bf16": engine in ("all", "qwen3"), "audioProbe": probe}
+            "bf16": engine in ("all", "qwen3"), "audioProbe": probe,
+            "speedProbe": {"rate": 1.25, "sampleCount": len(stretched)}}
 
 
 def main() -> None:
@@ -369,7 +396,12 @@ def main() -> None:
         parser.error("Supported threads: 1..32; speed: 0.5..2")
     if not args.self_test and not all((args.config, args.text_file, args.output_filename)):
         parser.error("--config, --text-file and --output-filename are required")
-    configure_process(args.threads)
+    with invocation_cache(None if args.self_test else args.output_filename) as cache:
+        configure_process(args.threads, cache)
+        run(args)
+
+
+def run(args) -> None:
     # Validate user inputs before allocating model memory.
     config, root = load_config(args.config) if not args.self_test else (None, None)
     text = read_text(args.text_file) if not args.self_test else None

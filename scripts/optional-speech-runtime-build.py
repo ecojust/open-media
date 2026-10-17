@@ -60,6 +60,9 @@ def checked_file(path: Path, size: int, digest: str) -> bool:
 def download(spec: dict, destination: Path) -> None:
     size, digest = int(spec["size"]), spec["sha256"]
     urls = list(dict.fromkeys([spec["url"], *spec.get("mirrors", [])]))
+    # Hosted validation runs outside China. Prefer the original source here;
+    # the application keeps the regional ordering declared by its catalog.
+    urls.sort(key=lambda url: urllib.parse.urlparse(url).netloc != "huggingface.co")
     if size <= 0 or size > MAX_ARCHIVE_BYTES or len(digest) != 64 or any(urllib.parse.urlparse(url).scheme != "https" for url in urls):
         raise ValueError(f"Invalid download record for {destination.name}")
     if checked_file(destination, size, digest):
@@ -70,8 +73,10 @@ def download(spec: dict, destination: Path) -> None:
     # is never accepted as a fallback.
     for attempt in range(len(urls) * 2):
         url = urls[attempt // 2]
+        host = urllib.parse.urlparse(url).netloc
         try:
-            print(f"Downloading {destination.name}: {size:,} bytes from {urllib.parse.urlparse(url).netloc}", flush=True)
+            print(f"Downloading {destination.name}: {size:,} bytes from {host}", flush=True)
+            began = last_report = time.monotonic()
             with urllib.request.urlopen(url, timeout=120) as response, part.open("wb") as out:
                 total = 0
                 while chunk := response.read(4 * 1024**2):
@@ -79,11 +84,18 @@ def download(spec: dict, destination: Path) -> None:
                     if total > size:
                         raise ValueError("Download exceeded the locked size")
                     out.write(chunk)
+                    now = time.monotonic()
+                    if now - last_report >= 15:
+                        print(f"Download {destination.name} via {host}: {total:,}/{size:,} bytes, "
+                              f"{total / max(now - began, .001) / 1024**2:.2f} MiB/s", flush=True)
+                        last_report = now
             if not checked_file(part, size, digest):
                 raise ValueError(f"Download size or SHA-256 mismatch: {destination.name}")
             part.replace(destination)
             return
-        except Exception:
+        except Exception as error:
+            detail = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", str(error))
+            print(f"Download failed via {host}: {type(error).__name__}: {detail[:300]}", flush=True)
             part.unlink(missing_ok=True)
             if attempt == len(urls) * 2 - 1:
                 raise
@@ -146,11 +158,25 @@ def run(command: list[str | Path], log: Path, *, env=None, timeout=3600, cwd=Non
     log.parent.mkdir(parents=True, exist_ok=True)
     print("Running:", " ".join(str(x) for x in command), flush=True)
     with log.open("w", encoding="utf-8") as output:
-        result = subprocess.run([str(x) for x in command], stdout=output, stderr=subprocess.STDOUT,
-                                cwd=cwd, env=env, timeout=timeout)
-    if result.returncode:
+        began = time.monotonic()
+        with subprocess.Popen([str(x) for x in command], stdout=output, stderr=subprocess.STDOUT,
+                              cwd=cwd, env=env) as process:
+            while True:
+                try:
+                    returncode = process.wait(timeout=min(30, max(.01, timeout - (time.monotonic() - began))))
+                    break
+                except subprocess.TimeoutExpired:
+                    elapsed = time.monotonic() - began
+                    if elapsed >= timeout:
+                        process.kill()
+                        process.wait()
+                        raise TimeoutError(f"Command exceeded {timeout}s; see {log}")
+                    tail = log.read_text(encoding="utf-8", errors="replace")[-400:].strip()
+                    tail = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", tail)
+                    print(f"Still running {log.name} ({elapsed:.0f}s): {tail}", flush=True)
+    if returncode:
         print(log.read_text(encoding="utf-8", errors="replace")[-18000:], flush=True)
-        raise RuntimeError(f"Command failed with exit {result.returncode}; see {log}")
+        raise RuntimeError(f"Command failed with exit {returncode}; see {log}")
 
 
 def clean_environment() -> dict:
@@ -191,12 +217,21 @@ def audit_macos(root: Path, report: Path) -> None:
         headers = subprocess.check_output(["otool", "-l", str(path)], text=True)
         minima = re.findall(r"cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform \d+\s+minos ([\d.]+)", headers)
         minima += re.findall(r"cmd LC_VERSION_MIN_MACOSX\s+cmdsize \d+\s+version ([\d.]+)", headers)
-        signature = subprocess.run(["codesign", "-d", str(path)], capture_output=True, text=True)
+        signature = subprocess.run(["codesign", "-d", "--verbose=4", str(path)], capture_output=True, text=True)
+        verified = subprocess.run(["codesign", "--verify", "--strict", "--all-architectures", str(path)], capture_output=True, text=True)
         entry = {"path": path.relative_to(root).as_posix(), "minimumMacOS": minima,
-                 "hasCodeSignature": signature.returncode == 0}
-        if signature.returncode == 0:
-            verified = subprocess.run(["codesign", "--verify", "--strict", str(path)], capture_output=True, text=True)
-            entry.update(signatureValid=verified.returncode == 0, signatureDiagnostic=verified.stderr.strip())
+                 "originalDisplay": signature.stderr.strip(), "originalVerification": verified.stderr.strip(),
+                 "originalSha256": sha256(path), "signingAction": "preserved"}
+        # Some official wheels have an unsigned architecture inside a universal
+        # file. Display can succeed for its other architecture; verify every
+        # architecture before classifying it. A broken existing signature is
+        # never silently replaced.
+        if verified.returncode and "code object is not signed at all" in verified.stderr:
+            signed = subprocess.run(["codesign", "--force", "--sign", "-", "--timestamp=none", str(path)], capture_output=True, text=True)
+            entry.update(signingAction="ad-hoc for unsigned component", signingDiagnostic=signed.stderr.strip())
+            verified = subprocess.run(["codesign", "--verify", "--strict", "--all-architectures", str(path)], capture_output=True, text=True)
+        entry.update(signatureValid=verified.returncode == 0, signatureDiagnostic=verified.stderr.strip(),
+                     sha256=sha256(path))
         records.append(entry)
     write_json(report, {"schema": 1, "supportedMinimumMacOS": "13.0", "files": records})
     for entry in records:
@@ -325,6 +360,8 @@ def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
     flatten_links(root)
     complete_windows_runtime(root, logs / "windows-native-audit.json")
     audit_macos(root, logs / "macos-native-audit.json")
+    if (logs / "macos-native-audit.json").is_file():
+        shutil.copy2(logs / "macos-native-audit.json", root / "licenses/macos-native-audit.json")
     write_json(root / "runtime-info.json", {"schema": 1, "id": lock["id"], "version": lock["version"],
                "platform": args.platform, "pythonVersion": lock["pythonVersion"], "torchVersion": spec["torch"],
                "f5Source": lock["f5Source"], "qwenPackage": "qwen-tts==0.1.1", "device": "cpu",
@@ -444,16 +481,32 @@ def verify_archive(archive: Path, destination: Path, metadata: dict) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             with source.open(member) as src, target.open("wb") as dst:
                 shutil.copyfileobj(src, dst)
+    verify_tree(destination, metadata, restore_modes=True)
+
+
+def verify_tree(destination: Path, metadata: dict, *, restore_modes: bool = False) -> dict:
+    """Reject changed content and newly generated caches after actual inference."""
     if sha256(destination / "manifest.json") != metadata["manifestSha256"]:
         raise ValueError("Runtime tree manifest changed")
     manifest = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
-    if set(names) != {"manifest.json", *(item["path"] for item in manifest["files"])}:
-        raise ValueError("Runtime ZIP file list differs from its manifest")
+    names = set()
+    for path in destination.rglob("*"):
+        if path.is_symlink():
+            raise ValueError(f"Runtime acquired a symlink: {path.relative_to(destination)}")
+        if path.is_file():
+            names.add(path.relative_to(destination).as_posix())
+    expected = {"manifest.json", *(item["path"] for item in manifest["files"])}
+    if names != expected:
+        raise ValueError(f"Runtime file list changed; added={sorted(names - expected)[:20]}, missing={sorted(expected - names)[:20]}")
     for item in manifest["files"]:
         path = destination / relative(item["path"])
         if not checked_file(path, item["size"], item["sha256"]):
             raise ValueError(f"Runtime tree integrity mismatch: {item['path']}")
-        path.chmod(0o755 if item.get("executable") else 0o644)
+        if restore_modes:
+            path.chmod(0o755 if item.get("executable") else 0o644)
+        elif os.name != "nt" and bool(path.stat().st_mode & 0o111) != bool(item.get("executable")):
+            raise ValueError(f"Runtime executable permission changed: {item['path']}")
+    return {"files": len(names), "manifestSha256": metadata["manifestSha256"], "unchanged": True}
 
 
 def main() -> None:
@@ -466,7 +519,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--catalog", type=Path, default=REPO / "src-tauri/resources/speech-models.json")
     parser.add_argument("--models", nargs="+", default=list(MODEL_IDS))
-    parser.add_argument("--phase", choices=("build", "validate", "all"), default="all")
+    parser.add_argument("--phase", choices=("build", "validate", "integrity", "all"), default="all")
     args = parser.parse_args()
     args.work, args.output = args.work.resolve(), args.output.resolve()
     expected = {"macos-arm64": ("Darwin", "arm64"), "macos-x64": ("Darwin", "x86_64"), "windows-x64": ("Windows", "AMD64")}[args.platform]
@@ -477,6 +530,11 @@ def main() -> None:
     root = args.work / "runtime"
     logs = args.output / "logs"
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.phase == "integrity":
+        metadata = json.loads((args.output / "runtime-metadata.json").read_text(encoding="utf-8"))
+        proof = verify_tree(args.work / "移动验证 中文 空格/runtime", metadata)
+        write_json(args.output / "validation/post-application-integrity.json", proof)
+        return
     if args.phase in ("build", "all"):
         if root.exists():
             raise ValueError("Build directory already exists; use a fresh work directory")
@@ -498,11 +556,13 @@ def main() -> None:
     shutil.move(str(args.work / "models"), str(moved_models))
     configs = {name: moved_models / config.relative_to(args.work / "models") for name, config in models.items()}
     second = smoke(moved, spec, configs, args.output / "validation/离线 移动", offline=True)
+    integrity = verify_tree(moved, metadata)
     metadata.update(id=lock["id"], version=lock["version"], validatedModels=list(models),
                     validated=True, sourceCommit=os.environ.get("GITHUB_SHA"),
                     url="https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/" + archive.name)
     write_json(args.output / "runtime-metadata.json", metadata)
-    write_json(args.output / "validation.json", {"schema": 1, "platform": args.platform, "original": initial, "relocatedOffline": second})
+    write_json(args.output / "validation.json", {"schema": 1, "platform": args.platform, "original": initial, "relocatedOffline": second,
+                                                "postInferenceIntegrity": integrity})
     (args.output / "SHA256SUMS.txt").write_text(f"{metadata['sha256']}  {archive.name}\n", encoding="utf-8")
     print(json.dumps(metadata, ensure_ascii=False, indent=2), flush=True)
 

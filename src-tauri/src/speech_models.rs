@@ -1279,6 +1279,53 @@ fn download_cached_file(
     Ok(())
 }
 
+fn reuse_installed_file(
+    installed: &Path,
+    file: &ModelFile,
+    destination: &Path,
+    cancelled: &AtomicBool,
+) -> Result<bool> {
+    check_cancelled(cancelled)?;
+    if !fs::symlink_metadata(installed)
+        .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+    {
+        return Ok(false);
+    }
+    let Ok(source) = checked_path(installed, &file.path, false) else {
+        return Ok(false);
+    };
+    if hash_file(&source, file, cancelled).is_err() {
+        check_cancelled(cancelled)?;
+        return Ok(false);
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    if fs::hard_link(&source, destination).is_err() {
+        let mut input = File::open(&source).map_err(|e| e.to_string())?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)
+            .map_err(|e| e.to_string())?;
+        let mut buffer = vec![0_u8; BUFFER_BYTES];
+        loop {
+            check_cancelled(cancelled)?;
+            let count = input.read(&mut buffer).map_err(|e| e.to_string())?;
+            if count == 0 {
+                break;
+            }
+            output
+                .write_all(&buffer[..count])
+                .map_err(|e| e.to_string())?;
+        }
+        output.sync_all().map_err(|e| e.to_string())?;
+        hash_file(destination, file, cancelled)?;
+    }
+    check_cancelled(cancelled)?;
+    Ok(true)
+}
+
 fn update_source(downloads: &Mutex<Downloads>, id: &str, generation: u64, source: &str) {
     if source.is_empty() {
         return;
@@ -1366,6 +1413,19 @@ fn download_package(
     }
     for file in &package.files {
         let destination = staging.path().join(&file.path);
+        if file.embedded.is_none()
+            && reuse_installed_file(&installed, file, &destination, cancelled)?
+        {
+            completed += file.size;
+            update(
+                downloads,
+                &package.id,
+                generation,
+                State::Downloading,
+                completed,
+            );
+            continue;
+        }
         download_cached_file(
             &client,
             file,
@@ -1439,6 +1499,75 @@ fn download_package(
         );
     }
     Ok((runtime, stamps))
+}
+
+/// Exercise the application's strict runtime validator against real CI artifacts.
+/// The expected checksums come from the builder's artifact metadata, never from
+/// a newly computed hash of the tree being tested.
+#[cfg(test)]
+pub(crate) fn verify_portable_runtime_for_integration(
+    runtime_root: &Path,
+    metadata_path: &Path,
+    model_id: &str,
+) -> Result<(PathBuf, PathBuf)> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Metadata {
+        id: String,
+        version: u32,
+        platform: String,
+        filename: String,
+        validated: bool,
+        validated_models: Vec<String>,
+        #[serde(flatten)]
+        archive: runtime_packages::RuntimeArchive,
+    }
+    let bytes = fs::read(metadata_path).map_err(|e| format!("无法读取真实运行包元数据：{e}"))?;
+    if bytes.len() > 1024 * 1024 {
+        return Err("运行包测试元数据过大。".into());
+    }
+    let metadata: Metadata =
+        serde_json::from_slice(&bytes).map_err(|e| format!("真实运行包元数据无效：{e}"))?;
+    if metadata.platform != runtime_packages::platform()
+        || !metadata.validated
+        || !metadata
+            .validated_models
+            .iter()
+            .any(|value| value == model_id)
+        || !safe_relative(&metadata.filename)
+    {
+        return Err("运行包元数据未验证当前平台和所选模型。".into());
+    }
+    let definition = runtime_packages::RuntimeDefinition {
+        id: metadata.id.clone(),
+        version: metadata.version,
+        platforms: HashMap::from([(metadata.platform.clone(), metadata.archive.clone())]),
+    };
+    runtime_packages::validate(std::slice::from_ref(&definition))?;
+    let selected =
+        runtime_packages::select(&metadata.id, &[definition])?.ok_or("运行包没有当前平台配置。")?;
+    let cancelled = AtomicBool::new(false);
+    let archive_root = metadata_path.parent().ok_or("运行包元数据目录无效。")?;
+    let archive = checked_path(archive_root, &metadata.filename, false)?;
+    hash_file(
+        &archive,
+        &ModelFile {
+            path: metadata.filename,
+            size: metadata.archive.size,
+            sha256: metadata.archive.sha256,
+            ..ModelFile::default()
+        },
+        &cancelled,
+    )?;
+    let stamps = runtime_packages::verify(runtime_root, &selected, &cancelled)?;
+    if !stamps_unchanged(&stamps) {
+        return Err("运行包在校验期间发生变化。".into());
+    }
+    eprintln!("application runtime verification: {} files verified against actual artifact metadata on {}", stamps.len(), metadata.platform);
+    Ok((
+        checked_path(runtime_root, &selected.archive.executable, false)?,
+        checked_path(runtime_root, &selected.archive.script, false)?,
+    ))
 }
 
 #[cfg(test)]
@@ -1696,6 +1825,37 @@ mod tests {
         download_file(&client, &file, &output, &AtomicBool::new(false), |_, _| {}).unwrap();
         worker.join().unwrap();
         assert_eq!(fs::read(output).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn repairing_runtime_reuses_valid_installed_weights_but_rejects_corruption() {
+        let directory = tempfile::tempdir().unwrap();
+        let installed = directory.path().join("installed");
+        fs::create_dir(&installed).unwrap();
+        fs::write(installed.join("model.onnx"), b"verified weights").unwrap();
+        let file = ModelFile {
+            path: "model.onnx".into(),
+            size: 16,
+            sha256: format!("{:x}", Sha256::digest(b"verified weights")),
+            ..ModelFile::default()
+        };
+        let first = directory.path().join("staging/model.onnx");
+        assert!(reuse_installed_file(&installed, &file, &first, &AtomicBool::new(false)).unwrap());
+        assert_eq!(fs::read(&first).unwrap(), b"verified weights");
+        assert_eq!(
+            fs::read(installed.join("model.onnx")).unwrap(),
+            b"verified weights"
+        );
+        fs::write(installed.join("model.onnx"), b"corrupt").unwrap();
+        let second = directory.path().join("new-staging/model.onnx");
+        assert!(
+            !reuse_installed_file(&installed, &file, &second, &AtomicBool::new(false)).unwrap()
+        );
+        assert!(!second.exists());
+        assert_eq!(
+            reuse_installed_file(&installed, &file, &second, &AtomicBool::new(true)).unwrap_err(),
+            CANCELLED
+        );
     }
 
     #[test]

@@ -96,6 +96,7 @@ jobs:
         run: |
           set -o pipefail
           export OPEN_MEDIA_TEST_RUNTIME_ROOT="$RUNNER_TEMP/optional-speech-runtime/移动验证 中文 空格/runtime"
+          export OPEN_MEDIA_TEST_RUNTIME_METADATA="$GITHUB_WORKSPACE/artifacts/optional-speech-runtime/runtime-metadata.json"
           for engine in f5 qwen3; do
             if [[ "$engine" == f5 ]]; then
               model=f5-v1-base-fp32
@@ -108,6 +109,14 @@ jobs:
               real_portable_runtime_command_and_audio_round_trip -- --ignored --nocapture \
               2>&1 | tee "artifacts/optional-speech-runtime/logs/application-$engine.log"
           done
+      - name: Verify runtime remains unchanged after application inference
+        shell: bash
+        run: |
+          python scripts/optional-speech-runtime-build.py \
+            --platform '${{ matrix.platform }}' \
+            --work "$RUNNER_TEMP/optional-speech-runtime" \
+            --output artifacts/optional-speech-runtime \
+            --phase integrity
       - name: Require every speech engine validation to pass
         if: steps.native-speech.outcome != 'success'
         shell: bash
@@ -119,9 +128,11 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
           for path in sorted(Path('artifacts/optional-speech-runtime').rglob('*.log')):
               text = path.read_text(encoding='utf-8', errors='replace')[-6000:]
+              text = re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', text)
               text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
               print(f'::warning title={path.name}::{text}')
           PY

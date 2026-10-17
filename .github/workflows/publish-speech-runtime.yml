@@ -1,0 +1,166 @@
+name: Publish verified speech runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful optional speech runtime workflow run
+        type: string
+        required: true
+      expected_head:
+        description: Exact reviewed source commit SHA from that run
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: publish-speech-runtime-v1
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+      PYTHONUTF8: '1'
+    steps:
+      - name: Verify the reviewed source run and all three platforms
+        id: source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          run_id, expected = os.environ['SOURCE_RUN_ID'], os.environ['EXPECTED_HEAD']
+          if not re.fullmatch(r'[1-9][0-9]{0,19}', run_id) or not re.fullmatch(r'[0-9a-f]{40}', expected):
+              raise ValueError('Expected a numeric run ID and a complete lowercase source SHA')
+          repo = os.environ['GITHUB_REPOSITORY']
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/{path}']))
+          source = api(f'actions/runs/{run_id}')
+          assert source['status'] == 'completed' and source['conclusion'] == 'success', 'The source workflow has not passed'
+          assert source['head_sha'] == expected, 'The source revision differs from the reviewed revision'
+          assert source['repository']['full_name'] == repo and source['head_repository']['full_name'] == repo, 'Unexpected source repository'
+          workflow = api(f"actions/workflows/{source['workflow_id']}")
+          assert workflow['path'] == '.github/workflows/optional-speech-runtime.yml', 'Unexpected build workflow'
+          jobs = api(f'actions/runs/{run_id}/jobs?per_page=100')['jobs']
+          for platform in ('macos-arm64', 'macos-x64', 'windows-x64'):
+              candidates = [job for job in jobs if job['name'] == f'Runtime and real speech — {platform}']
+              assert len(candidates) == 1 and candidates[0]['conclusion'] == 'success', f'{platform} validation did not pass'
+              completed = {step['name']: step for step in candidates[0]['steps']}
+              for required in ('Verify native optional speech and Chinese normalization',
+                               'Verify real models, integrity, relocated paths and offline inference',
+                               'Verify application command and audio import with downloaded models',
+                               'Verify runtime remains unchanged after application inference'):
+                  assert completed.get(required, {}).get('conclusion') == 'success', f'{platform}: missing successful {required}'
+          artifacts = api(f'actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
+          for platform in ('macos-arm64', 'macos-x64', 'windows-x64'):
+              candidates = [a for a in artifacts if a['name'] == f'speech-runtime-python-cpu-v1-{platform}']
+              assert len(candidates) == 1 and not candidates[0]['expired'], f'Missing immutable artifact for {platform}'
+          Path('source-evidence').mkdir()
+          Path('source-evidence/build-run.json').write_text(json.dumps(source, indent=2) + '\n')
+          Path('source-evidence/build-jobs.json').write_text(json.dumps(jobs, indent=2) + '\n')
+          Path('source-evidence/build-artifacts.json').write_text(json.dumps(artifacts, indent=2) + '\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write(f'head={expected}\nrun_id={run_id}\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.head }}
+          path: source
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          pattern: speech-runtime-python-cpu-v1-*
+          path: runtime-artifacts
+      - name: Recheck every runtime byte and the source-bound model assets
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, stat, urllib.parse, zipfile
+          from pathlib import Path, PurePosixPath
+          root = Path('runtime-artifacts')
+          release = Path('runtime-release')
+          release.mkdir()
+          manifests = []
+          def digest(path):
+              with path.open('rb') as f:
+                  return hashlib.file_digest(f, 'sha256').hexdigest()
+          for platform in ('macos-arm64', 'macos-x64', 'windows-x64'):
+              folder = root / f'speech-runtime-python-cpu-v1-{platform}'
+              item = json.loads((folder / 'runtime-metadata.json').read_text())
+              assert item['platform'] == platform and item['id'] == 'python-cpu-v1' and item['version'] == 1
+              assert item['validated'] is True and item['sourceCommit'] == os.environ['EXPECTED_HEAD']
+              assert set(item['validatedModels']) == {'f5-v1-base-fp32', 'qwen3-tts-1.7b-serena'}
+              assert item['filename'] == f'speech-runtime-python-cpu-v1-{platform}.zip'
+              assert item['url'] == f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/speech-runtime-v1/{item['filename']}"
+              archive = folder / item['filename']
+              assert archive.stat().st_size == item['size'] and digest(archive) == item['sha256']
+              with zipfile.ZipFile(archive) as z:
+                  names = z.namelist()
+                  assert len(names) == len(set(names))
+                  raw = z.read('manifest.json')
+                  assert hashlib.sha256(raw).hexdigest() == item['manifestSha256']
+                  manifest = json.loads(raw)
+                  assert manifest['schema'] == 1
+                  assert set(names) == {'manifest.json', *(f['path'] for f in manifest['files'])}
+                  assert sum(f['size'] for f in manifest['files']) + len(raw) == item['unpackedSize']
+                  for f in manifest['files']:
+                      p = PurePosixPath(f['path'])
+                      assert not p.is_absolute() and '..' not in p.parts and '\\' not in f['path'] and ':' not in f['path']
+                      info = z.getinfo(f['path'])
+                      assert not info.is_dir() and not stat.S_ISLNK(info.external_attr >> 16)
+                      assert info.file_size == f['size']
+                      with z.open(info) as data:
+                          assert hashlib.file_digest(data, 'sha256').hexdigest() == f['sha256'], f['path']
+                  packaged = json.loads(z.read('runtime-info.json'))
+                  assert packaged['sourceCommit'] == item['sourceCommit'] and packaged['platform'] == platform
+                  assert packaged['f5Precision'] == 'float32' and packaged['qwenPrecision'] == 'bfloat16'
+              archive.rename(release / archive.name)
+              manifests.append(item)
+          catalog = json.loads(Path('source/src-tauri/resources/speech-models.json').read_text())
+          prefix = f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/speech-runtime-v1/"
+          for model in catalog['models']:
+              for f in model['files']:
+                  if not f['url'].startswith(prefix):
+                      continue
+                  name = urllib.parse.unquote(f['url'][len(prefix):])
+                  assert '/' not in name and '\\' not in name and name not in ('', '.', '..')
+                  asset = Path('source/scripts/optional-speech-assets') / name
+                  assert asset.stat().st_size == f['size'] and digest(asset) == f['sha256'], name
+                  (release / name).write_bytes(asset.read_bytes())
+          (release / 'runtime-metadata.json').write_text(json.dumps(manifests, indent=2) + '\n')
+          (release / 'SHA256SUMS.txt').write_text(''.join(f'{digest(p)}  {p.name}\n' for p in sorted(release.iterdir()) if p.is_file()))
+          Path('runtime-release-notes.md').write_text('可选离线配音使用的独立运行组件，供应用按需下载，不是应用安装包。\n\n三个桌面平台均已完成真实语音合成、断网运行、中文路径移动、文件完整性，以及应用调用和音频导入验证。\n')
+          PY
+      - name: Publish an immutable component prerelease
+        shell: bash
+        run: |
+          if gh release view speech-runtime-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'The component release already exists; refusing to overwrite immutable checksums.' >&2
+            exit 1
+          fi
+          gh release create speech-runtime-v1 \
+            --repo "$GITHUB_REPOSITORY" --target "$EXPECTED_HEAD" \
+            --prerelease --latest=false --title '可选配音运行组件 v1' \
+            --notes-file runtime-release-notes.md runtime-release/*
+      - name: Preserve component publication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-runtime-publication-${{ github.run_id }}
+          retention-days: 30
+          path: |
+            source-evidence/
+            runtime-release/runtime-metadata.json
+            runtime-release/SHA256SUMS.txt

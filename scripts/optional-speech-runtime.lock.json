@@ -14,7 +14,7 @@
       "size": 18836160,
       "sha256": "cd54cc868a9b1056fbd4654509431f402f0365329618e2583b60c82f73da4e56",
       "executable": "python/bin/python3",
-      "torch": "2.9.1",
+      "torch": "2.6.0",
       "torchIndex": "https://pypi.org/simple"
     },
     "macos-x64": {

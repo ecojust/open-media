@@ -274,8 +274,8 @@ defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel,
     <p v-else-if="loading" class="speech-note" role="status"><span class="speech-spinner" />正在检查内置声音…</p>
     <div v-else-if="!status.ready" class="speech-error" role="alert"><p>{{ status.error || '内置语音组件暂不可用。' }}</p><button :disabled="busy" @click="loadStatus()"><Icon name="refresh" :size="13" />重新检查</button></div>
     <template v-if="desktop">
-      <fieldset :disabled="busy || !status.ready">
-        <VoicePicker v-model="voiceId" :voices="status.voices" :disabled="busy || !status.ready" :preview-voice-id="previewVoiceId" :preview-state="previewState" :pending-models="pendingModels" @preview="previewVoice" @download="changeModelDownload($event)" @cancel-download="changeModelDownload($event, true)" />
+      <fieldset :disabled="busy || loading">
+        <VoicePicker v-model="voiceId" :voices="status.voices" :disabled="busy || loading" :preview-voice-id="previewVoiceId" :preview-state="previewState" :pending-models="pendingModels" @preview="previewVoice" @download="changeModelDownload($event)" @cancel-download="changeModelDownload($event, true)" />
         <p v-if="downloadError" class="speech-error" role="alert">{{ downloadError }}</p>
         <label>语速 <output>{{ speed.toFixed(2).replace(/0$/, '') }}×</output><input v-model.number="speed" type="range" min="0.5" max="2" step="0.05" aria-label="配音语速" /></label>
         <label class="speech-check"><input v-model="alignText" type="checkbox" aria-label="文字时长对齐语音" /><span>文字时长对齐语音</span></label>

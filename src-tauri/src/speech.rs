@@ -1635,6 +1635,23 @@ mod tests {
         .unwrap();
         let engine = std::env::var("OPEN_MEDIA_TEST_ENGINE").expect("f5 or qwen3");
         assert!(matches!(engine.as_str(), "f5" | "qwen3"));
+        let metadata_path =
+            PathBuf::from(std::env::var_os("OPEN_MEDIA_TEST_RUNTIME_METADATA").expect(
+                "OPEN_MEDIA_TEST_RUNTIME_METADATA must name the real builder artifact metadata",
+            ));
+        let model_id = if engine == "f5" {
+            "f5-v1-base-fp32"
+        } else {
+            "qwen3-tts-1.7b-serena"
+        };
+        let (executable, script) = crate::speech_models::verify_portable_runtime_for_integration(
+            &runtime_root,
+            &metadata_path,
+            model_id,
+        )
+        .expect(
+            "real portable runtime must pass the application's complete integrity and path checks",
+        );
         let model: Model = serde_json::from_value(
             json!({"kind":engine,"config":"runner-config.json","sampleRate":24000}),
         )
@@ -1645,12 +1662,8 @@ mod tests {
         .unwrap();
         let speech = SpeechRuntime {
             root: model_root,
-            executable: runtime_root.join(if cfg!(windows) {
-                "python/python.exe"
-            } else {
-                "python/bin/python3"
-            }),
-            script: Some(runtime_root.join("runner/tts.py")),
+            executable,
+            script: Some(script),
             model,
             voices: vec![voice],
         };

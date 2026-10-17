@@ -172,7 +172,7 @@ fn manifest(
             || !valid_hash(&file.sha256)
             || !paths.insert(file.path.to_lowercase())
         {
-            return Err("音色运行环境包含无效文件。".into());
+            return Err(format!("音色运行环境包含无效文件：{}。", file.path));
         }
         total = total
             .checked_add(file.size)

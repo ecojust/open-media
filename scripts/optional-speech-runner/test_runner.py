@@ -2,9 +2,12 @@
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent
@@ -77,6 +80,49 @@ class ChunkingTests(unittest.TestCase):
         for sequences in ([], [[]], [[1, 2, 3]], [[1, 99], [1, 99]]):
             with self.subTest(sequences=sequences), self.assertRaises(RuntimeError):
                 runner.verify_generation_stop(sequences, 99)
+
+
+class InvocationCacheTests(unittest.TestCase):
+    def test_both_entry_paths_set_and_clean_an_external_cache(self):
+        with tempfile.TemporaryDirectory(prefix="配音 测试 ") as directory:
+            job = Path(directory)
+            for self_test in (True, False):
+                with self.subTest(self_test=self_test):
+                    observed = []
+
+                    def check_cache(args):
+                        cache = Path(os.environ["NUMBA_CACHE_DIR"])
+                        self.assertTrue(cache.is_dir())
+                        self.assertFalse(cache.is_relative_to(ROOT.parent))
+                        if not self_test:
+                            self.assertTrue(cache.is_relative_to(job))
+                        (cache / "compiled.nbc").write_bytes(b"cache")
+                        observed.append(cache)
+
+                    argv = [str(ROOT / "tts.py"), "--self-test"] if self_test else [
+                        str(ROOT / "tts.py"), "--config", str(job / "config.json"),
+                        "--text-file", str(job / "text.txt"),
+                        "--output-filename", str(job / "output.wav")]
+                    with patch.object(sys, "argv", argv), patch.dict(os.environ), \
+                            patch.object(runner, "run", side_effect=check_cache):
+                        runner.main()
+                    self.assertEqual(len(observed), 1)
+                    self.assertFalse(observed[0].exists())
+
+    def test_error_cleans_cache_without_swallowing_generation_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = None
+            with self.assertRaisesRegex(RuntimeError, "generation failed"):
+                with runner.invocation_cache(Path(directory) / "output.wav") as cache:
+                    (cache / "probe.nbc").write_bytes(b"cache")
+                    raise RuntimeError("generation failed")
+            self.assertIsNotNone(cache)
+            self.assertFalse(cache.exists())
+
+    def test_runtime_cannot_be_used_as_a_cache_workspace(self):
+        with self.assertRaises(ValueError):
+            with runner.invocation_cache(ROOT / "output.wav"):
+                self.fail("Runtime tree must remain immutable")
 
 
 class AudioContractTests(unittest.TestCase):

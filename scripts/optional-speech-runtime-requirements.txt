@@ -4,7 +4,8 @@ accelerate==1.12.0
 audioread==3.1.0
 certifi==2026.7.22
 cffi==1.17.1
-charset-normalizer==3.4.4
+# The official pure-Python wheel avoids optional native speedups with invalid signatures.
+charset-normalizer @ https://files.pythonhosted.org/packages/0a/4c/925909008ed5a988ccbb72dcc897407e5d6d3bd72410d69e051fc0c14647/charset_normalizer-3.4.4-py3-none-any.whl#sha256=7a32c560861a02ff789ad905a2fe94e3f840803362c84fecf1851cb4cf3dc37f
 cloudpickle==3.1.2
 cn2an==0.5.23
 coloredlogs==15.0.1
@@ -35,7 +36,8 @@ narwhals==2.10.2
 networkx==3.4.2
 numba==0.61.2
 numpy==1.26.4
-onnxruntime==1.20.1
+# 1.20.1 embeds a 13.3 minimum despite its 11.0 wheel tag.
+onnxruntime==1.19.2
 packaging==26.3
 platformdirs==4.13.3
 pooch==1.9.0
@@ -55,7 +57,8 @@ setuptools==80.9.0
 soundfile==0.13.1
 sox==1.5.0
 soxr==0.5.0.post1
-sympy==1.14.0
+sympy==1.13.1; sys_platform == "darwin" and platform_machine == "arm64"
+sympy==1.14.0; sys_platform != "darwin" or platform_machine != "arm64"
 threadpoolctl==3.7.0
 tokenizers==0.22.1
 torchdiffeq==0.2.5
