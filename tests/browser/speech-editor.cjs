@@ -520,10 +520,15 @@ async function main() {
     console.log('PASS 原生桥契约：卡片喇叭独立试听、英文样句、暂停/缓存重播，不改变选择或添加时间线素材')
 
     await page.evaluate(() => { window.speechHarness.mode = 'pending' })
+    const beforePendingPreview = (await speechRequests(page)).length
     await page.getByRole('button', { name: '试听 温和', exact: true }).click()
     await expect(page.locator('.speech-cancel-row')).toContainText('正在准备试听…')
     await expect(page.locator('progress, .speech-progress')).toHaveCount(0)
-    const pendingPreviewId = (await speechRequests(page)).at(-1).requestId
+    // The loading state precedes the asynchronous native bridge invocation.
+    await expect.poll(async () => (await speechRequests(page)).length).toBe(beforePendingPreview + 1)
+    const pendingPreview = (await speechRequests(page))[beforePendingPreview]
+    assert.equal(pendingPreview.voiceId, 'voice-2')
+    const pendingPreviewId = pendingPreview.requestId
     await page.getByRole('button', { name: '取消生成', exact: true }).click()
     await expect(closeSpeech).toBeEnabled()
     await expect.poll(() => page.evaluate(id => window.speechHarness.cancelled.includes(id) && window.speechHarness.discarded.includes(id), pendingPreviewId)).toBe(true)
