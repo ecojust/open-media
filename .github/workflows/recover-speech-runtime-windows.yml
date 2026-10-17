@@ -108,6 +108,30 @@ jobs:
             --work "$RUNNER_TEMP/optional-speech-runtime" \
             --output artifacts/optional-speech-runtime \
             --phase validate
+      - name: Record candidate state before application integration validation
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          output = Path('artifacts/optional-speech-runtime')
+          state = {'schema': 1, 'candidateOnly': True, 'applicationValidated': False,
+                   'note': 'Preserved for recovery only; application validation is still required.'}
+          (output / 'candidate-state.json').write_text(json.dumps(state, indent=2) + '\n', encoding='utf-8')
+      - name: Preserve candidate runtime for application validation recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-runtime-candidate-${{ matrix.platform }}-${{ github.run_id }}
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            artifacts/optional-speech-runtime/*.zip
+            artifacts/optional-speech-runtime/runtime-metadata.json
+            artifacts/optional-speech-runtime/SHA256SUMS.txt
+            artifacts/optional-speech-runtime/runtime-validation-source.json
+            artifacts/optional-speech-runtime/validation.json
+            artifacts/optional-speech-runtime/validation/**/*.json
+            artifacts/optional-speech-runtime/candidate-state.json
       - name: Verify application command and audio import with downloaded models
         shell: bash
         run: |
@@ -166,10 +190,13 @@ jobs:
           import re
           from pathlib import Path
           for path in sorted(Path('artifacts/optional-speech-runtime').rglob('*.log')):
-              text = path.read_text(encoding='utf-8', errors='replace')[-6000:]
+              text = path.read_text(encoding='utf-8', errors='replace')
+              text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)[-10000:]
               text = re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', text)
-              text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-              print(f'::warning title={path.name}::{text}')
+              for start in range(0, len(text), 1500):
+                  part = text[start:start + 1500]
+                  part = part.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::warning title={path.name}, part {start // 1500 + 1}::{part}')
           PY
       - name: Preserve build logs and real audio validation
         if: always()

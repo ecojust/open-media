@@ -1387,6 +1387,8 @@ mod tests {
     #[test]
     fn downloaded_python_command_uses_isolated_offline_runner_and_unicode_paths() {
         let root = fixture();
+        let config = root.path().join("runner-config.json");
+        fs::write(&config, b"{}").unwrap();
         let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
         runtime.model.kind = ModelKind::Qwen3;
         runtime.model.config = "runner-config.json".into();
@@ -1406,9 +1408,11 @@ mod tests {
         assert_eq!(&args[..2], &["-I", "-B"]);
         assert_eq!(args[2], runtime.script.as_ref().unwrap().to_string_lossy());
         assert_eq!(args[3], "--config");
+        // Temporary directories can use an 8.3 alias on Windows while the
+        // validated runtime uses its canonical long name. Compare identity.
         assert_eq!(
-            args[4],
-            root.path().join("runner-config.json").to_string_lossy()
+            Path::new(&args[4]).canonicalize().unwrap(),
+            config.canonicalize().unwrap()
         );
         assert_eq!(
             &args[5..],

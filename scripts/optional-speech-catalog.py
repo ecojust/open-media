@@ -112,8 +112,10 @@ def runtime_platforms(source):
             commits.add(commit)
             archive = {key: data[key] for key in
                        ['url', 'size', 'unpackedSize', 'sha256', 'manifestSha256', 'executable', 'script']}
-            if data.get('mirrors'):
-                archive['mirrors'] = data['mirrors']
+            mirrors = data.get('mirrors')
+            if not isinstance(mirrors, list) or not mirrors or len(set(mirrors)) != len(mirrors):
+                raise ValueError(f'Runtime metadata must include independently verified alternate sources: {file}.')
+            archive['mirrors'] = mirrors
             if archive['url'] != RELEASE + f'speech-runtime-python-cpu-v1-{data["platform"]}.zip':
                 raise ValueError(f'Runtime URL does not match its immutable release: {file}.')
             for url in [archive['url'], *archive.get('mirrors', [])]:

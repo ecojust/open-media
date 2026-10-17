@@ -65,12 +65,33 @@ test('optional downloads pin independent Chinese models, reference audio and pla
     const platform = runtime.platforms[target]
     assert.ok(platform, `Missing ${target} runtime package`)
     httpsSource(platform.url)
+    assert.ok(platform.mirrors?.length, `Missing verified alternate sources for ${target}`)
+    for (const mirror of platform.mirrors) httpsSource(mirror)
     assert.ok(Number.isSafeInteger(platform.size) && platform.size > 0)
     assert.ok(Number.isSafeInteger(platform.unpackedSize) && platform.unpackedSize >= platform.size)
     assert.match(platform.sha256, /^[a-f0-9]{64}$/)
     assert.match(platform.manifestSha256, /^[a-f0-9]{64}$/)
     safeRelative(platform.executable); safeRelative(platform.script)
   }
+})
+
+test('model downloads retain independent domestic sources and fallback addresses', () => {
+  let independentFiles = 0
+  for (const file of catalog.models.flatMap(model => model.files).filter(file => !file.embedded)) {
+    assert.ok(file.mirrors?.length >= 2, `Missing alternate sources for ${file.path}`)
+    const sources = [file.url, ...file.mirrors]
+    assert.equal(new Set(sources).size, sources.length)
+    for (const source of sources) httpsSource(source)
+    if (new URL(file.url).hostname === 'modelscope.cn') {
+      independentFiles += 1
+      assert.ok(file.mirrors.some(source => new URL(source).hostname === 'huggingface.co'))
+      assert.ok(file.mirrors.some(source => new URL(source).hostname === 'hf-mirror.com'))
+    } else {
+      assert.equal(file.path, 'vocos_24khz.onnx')
+      assert.equal(new URL(file.url).hostname, 'github.com')
+    }
+  }
+  assert.equal(independentFiles, 18)
 })
 
 test('optional model publisher notices retain exact originals with distinct model and code licenses', () => {
