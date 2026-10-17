@@ -37,7 +37,7 @@ manifest = {
         'chunking':'Upstream UTF-8 byte-based sentence splitting targeting 22 seconds including the reference; chunks run sequentially.',
         'crossfade_seconds':0.15,'random_seed':'20261017 + corpus_number*100 + chunk_number',
         'text_normalization':'Exact original Chinese input. Upstream rjieba/pypinyin conversion only; numbers, English abbreviations and punctuation were not manually rewritten.',
-        'reference':reference,'postprocessing':'Upstream chunk crossfade and RMS restoration only; no extra denoising, pitch, tempo or loudness processing. WAV PCM16 and MP3 128kbps.'},
+        'reference':reference,'postprocessing':'Upstream chunk crossfade and RMS restoration only; no extra denoising, pitch, tempo or loudness processing. FLOAT WAV retains finite samples above full scale without gain normalization; MP3 128kbps is a lossy listening derivative.'},
     'sources':[{'url':sources['code']['repository'],'revision':sources['code']['commit'],'role':'inference source'},
         *[{'url':'https://huggingface.co/'+m['repository'],'revision':m['revision'],'license':m['license']} for m in sources['models']]],
     'license':{'weights':'CC-BY-NC-4.0','inference_code':'MIT','vocoder':'MIT',
@@ -53,7 +53,10 @@ manifest = {
         'generation_seconds':r['generationSeconds'],'audio_seconds':r['durationSeconds'],
         'wav_sha256':r['wavSha256'],'started_at':r['startedAt'],'finished_at':r['finishedAt'],
         'generation_notes':'模型已载入后的逐条合成时长，包含分句处理、声码器和拼接，排除文件编码及首次模型加载。原始执行日志和分句参数见records.json。',
-        'load_seconds':r['loadSeconds'],'chunks':r['chunks']} for r in records],
+        'load_seconds':r['loadSeconds'],'chunks':r['chunks'],
+        'wav_subtype':r.get('wavSubtype','PCM_16'),'raw_peak':r['peak'],
+        'over_full_scale_sample_count':r.get('overFullScaleSampleCount',0),
+        'over_full_scale_sample_ratio':r.get('overFullScaleSampleRatio',0)} for r in records],
     'corpus_sha256':hashlib.sha256(args.corpus.read_bytes()).hexdigest(),
 }
 (root/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2))

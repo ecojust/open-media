@@ -20,14 +20,17 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument('--start-index', type=int, default=1)
 parser.add_argument('--count', type=int, default=10)
+parser.add_argument('--chunk-index', type=int, default=None, help='Recover one unchanged upstream chunk; requires --count 1')
 parser.add_argument('--threads', type=int, default=2)
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--source-dir', type=Path, required=True)
 parser.add_argument('--corpus', type=Path, required=True)
 parser.add_argument('--reference', type=Path, required=True)
 args = parser.parse_args()
+if args.chunk_index is not None and (args.count != 1 or args.chunk_index < 0):
+    parser.error('--chunk-index requires --count 1 and a nonnegative index')
 ROOT = args.output.resolve()
-(ROOT/'audio').mkdir(parents=True, exist_ok=True)
+(ROOT/('chunks' if args.chunk_index is not None else 'audio')).mkdir(parents=True, exist_ok=True)
 os.environ['OMP_NUM_THREADS'] = str(args.threads)
 os.environ['MKL_NUM_THREADS'] = str(args.threads)
 os.environ['HF_HUB_OFFLINE'] = '1'
@@ -108,7 +111,12 @@ for index, entry in enumerate(corpus, 1):
     start = time.perf_counter()
     text = entry.get('text') or entry['texts']['zh']
     segments, chunk_records = [], []
-    for part_index, text_chunk in enumerate(chunks(text)):
+    text_chunks = chunks(text)
+    if args.chunk_index is not None and args.chunk_index >= len(text_chunks):
+        raise ValueError(f'Chunk index {args.chunk_index} outside {len(text_chunks)} chunks')
+    for part_index, text_chunk in enumerate(text_chunks):
+        if args.chunk_index is not None and part_index != args.chunk_index:
+            continue
         local_start = time.perf_counter()
         seed = 20261017 + index * 100 + part_index
         speed = 0.3 if len(text_chunk.encode('utf-8')) < 10 else 1.0
@@ -126,6 +134,37 @@ for index, entry in enumerate(corpus, 1):
         chunk_records.append({'text':text_chunk, 'seed':seed, 'speed':speed, 'framesIncludingReference':duration,
             'seconds':time.perf_counter()-local_start, 'audioSeconds':len(samples)/24000})
         print(entry['id'], 'chunk', part_index, chunk_records[-1], flush=True)
+        if args.chunk_index is not None:
+            assert np.isfinite(samples).all() and float(np.max(np.abs(samples))) > 0.001
+            wav = ROOT/'chunks'/f"{entry['id']}-{part_index}.wav"
+            sf.write(wav, samples, 24000, subtype='FLOAT')
+            over_count = int(np.count_nonzero(np.abs(samples) > 1.0))
+            chunk_record = {
+                'schema':1, 'modelId':'f5-v1-base-fp32', 'id':entry['id'], 'title':entry['title'],
+                'text':text, 'chunkText':text_chunk, 'chunkIndex':part_index,
+                'expectedChunkCount':len(text_chunks), 'allChunkTexts':text_chunks,
+                **chunk_records[-1], 'text':text,
+                'startedAt':began, 'finishedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'loadSeconds':load_seconds, 'torchThreads':args.threads,
+                'peakRssBytes':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
+                'sampleRate':24000, 'channels':1, 'sampleCount':len(samples), 'wavSubtype':'FLOAT',
+                'peak':float(np.max(np.abs(samples))), 'rms':float(np.sqrt(np.mean(samples**2))),
+                'overFullScaleSampleCount':over_count, 'overFullScaleSampleRatio':over_count/len(samples),
+                'wav':str(wav.relative_to(ROOT)), 'wavSha256':hashlib.sha256(wav.read_bytes()).hexdigest(),
+                'referenceSha256':hashlib.sha256(args.reference.read_bytes()).hexdigest(),
+                'corpusSha256':hashlib.sha256(args.corpus.read_bytes()).hexdigest(),
+                'source':json.loads((ROOT/'sources.json').read_text()),
+                'hardware':json.loads((ROOT/'hardware.json').read_text()),
+                'settings':{'device':'cpu','dtype':'float32','steps':32,'cfg_strength':2.0,
+                    'sway_sampling_coef':-1.0,'ode_method':'euler','sample_rate':24000,
+                    'threads':args.threads,'interop_threads':1,'crossfade_seconds':0.15,
+                    'reference_text':ref_text,'reference_frames':ref_frames,'reference_rms':float(reference_rms),
+                    'target_rms':0.1,'chunk_max_utf8_bytes':max_chars,
+                    'postprocessing':'Raw individual vocoder chunk after unchanged upstream RMS restoration; FLOAT WAV preserves finite samples above full scale. No gain normalization, clipping or crossfade at this stage.'}}
+            wav.with_suffix('.json').write_text(json.dumps(chunk_record,ensure_ascii=False,indent=2))
+            print('RECOVERY COMPLETE', entry['id'], part_index, 'peak',chunk_record['peak'],'over full scale',over_count,flush=True)
+    if args.chunk_index is not None:
+        continue
     combined = segments[0]
     for samples in segments[1:]:
         overlap = min(int(0.15*24000),len(combined),len(samples))
@@ -134,10 +173,10 @@ for index, entry in enumerate(corpus, 1):
     generation_seconds = time.perf_counter()-start
     peak = float(np.max(np.abs(combined)))
     assert np.isfinite(combined).all() and peak > 0.001
-    assert peak < 1.0, f'Unexpected clipping: {peak}'
+    over_count = int(np.count_nonzero(np.abs(combined) > 1.0))
     wav = ROOT/'audio'/f"{entry['id']}.wav"
     mp3 = wav.with_suffix('.mp3')
-    sf.write(wav, combined, 24000, subtype='PCM_16')
+    sf.write(wav, combined, 24000, subtype='FLOAT')
     subprocess.run(['ffmpeg','-v','error','-y','-i',str(wav),'-codec:a','libmp3lame','-b:a','128k',str(mp3)], check=True)
     record = {'id':entry['id'], 'title':entry['title'], 'text':text, 'startedAt':began,
         'finishedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -146,6 +185,8 @@ for index, entry in enumerate(corpus, 1):
         'peakRssBytes':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024,
         'durationSeconds':len(combined)/24000, 'sampleRate':24000, 'channels':1,
         'peak':peak, 'rms':float(np.sqrt(np.mean(combined**2))),
+        'wavSubtype':'FLOAT','overFullScaleSampleCount':over_count,
+        'overFullScaleSampleRatio':over_count/len(combined),
         'wav':str(wav.relative_to(ROOT)), 'mp3':str(mp3.relative_to(ROOT)),
         'wavSha256':hashlib.sha256(wav.read_bytes()).hexdigest(),
         'mp3Sha256':hashlib.sha256(mp3.read_bytes()).hexdigest(), 'chunks':chunk_records}
