@@ -1135,7 +1135,8 @@ mod tests {
             &cancelled,
         )
         .unwrap();
-        assert!(runtime.model.data_dir.ends_with("model/espeak-ng-data"));
+        assert!(Path::new(&runtime.model.data_dir)
+            .ends_with(Path::new("model").join("espeak-ng-data")));
         assert_eq!(runtime.model.file, "model.onnx");
         assert_eq!(runtime.model.sample_rate, 24000);
         finished(
