@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Open Media",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "identifier": "com.ecojust.openmedia",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,8 +28,8 @@
           "$APPDATA/media/**"
         ]
       },
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost asset: http://asset.localhost blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'",
-      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost asset: http://asset.localhost blob: http://127.0.0.1:5200 ws://127.0.0.1:5200; worker-src 'self' blob:; object-src 'none'; base-uri 'self'"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost blob: data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost blob: http://127.0.0.1:5200 ws://127.0.0.1:5200; worker-src 'self' blob:; object-src 'none'; base-uri 'self'"
     }
   },
   "bundle": {

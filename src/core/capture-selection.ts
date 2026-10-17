@@ -22,7 +22,8 @@ export interface CaptureSelectionContext {
   displayId: string
   display: SelectionDisplay
   targets: SelectionTarget[]
-  preferences?: { purpose?: 'record' | 'screenshot'; mode?: CaptureSelectionMode; sourceId?: string; outputSize?: SelectionSize; microphone?: boolean }
+  audioDevices?: { id: string; name: string }[]
+  preferences?: { purpose?: 'record' | 'screenshot'; mode?: CaptureSelectionMode; sourceId?: string; outputSize?: SelectionSize; microphone?: boolean; audioDevice?: string }
   availableModes?: CaptureSelectionMode[]
 }
 export interface CaptureSelection {
@@ -30,6 +31,7 @@ export interface CaptureSelection {
   region?: SelectionRect
   outputSize?: SelectionSize
   microphone?: boolean
+  audioDevice?: string
 }
 export type SelectionHandle = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
 export interface SelectionPoint { x: number; y: number }
@@ -81,6 +83,7 @@ export function selectionAtPoint(targets: SelectionTarget[], point: SelectionPoi
 export function validateSelection(selection: CaptureSelection, context: CaptureSelectionContext): string | undefined {
   const target = context.targets.find(item => item.id === selection.sourceId)
   if (!target) return '录制来源不可用，请重新选择。'
+  if (context.preferences?.purpose !== 'screenshot' && selection.microphone !== false && selection.audioDevice && context.audioDevices && !context.audioDevices.some(device => device.id === selection.audioDevice)) return '所选麦克风已断开或不可用，请重新选择来源，或关闭麦克风。'
   const region = selection.region
   if (region) {
     if (target.kind !== 'screen') return '区域录制需要选择屏幕。'

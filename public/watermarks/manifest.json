@@ -1,0 +1,314 @@
+{
+  "schemaVersion": 1,
+  "license": "MIT",
+  "source": "scripts/generate-watermarks.py",
+  "description": "Original geometric illustrations and motion designed for Open Media.",
+  "materials": [
+    {
+      "file": "thumb-pulse.mp4",
+      "bytes": 186811,
+      "sha256": "38c95f1d9ae2b244d307bf9192db9209494e24af69bc3502ece0b71b9bba6c42",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "thumb-pulse.png",
+        "bytes": 43078,
+        "sha256": "d90482dbdb9c9fef3317e9b12f59f457b39b02d7b7fca527fd09ea89d2a69ee4"
+      }
+    },
+    {
+      "file": "star-save.mp4",
+      "bytes": 237835,
+      "sha256": "641d8e42123dd0b2a3706674be4a8becf94dc41d9bedb86132b2b8623d4575e6",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "star-save.png",
+        "bytes": 48374,
+        "sha256": "80824e06f0a242f9264d685192dc3497a5c7a7527a1fbbf2ccb4781433d80629"
+      }
+    },
+    {
+      "file": "follow-pop.mp4",
+      "bytes": 162937,
+      "sha256": "e536d97725fd46171aaba2a1f3318896127be2e8685a387ac7e1aeaea23cea7a",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "follow-pop.png",
+        "bytes": 27803,
+        "sha256": "dc0131d2286d01b076668a2bc2bcf9c55c159536be01747484e818b629cadd3a"
+      }
+    },
+    {
+      "file": "share-plane.mp4",
+      "bytes": 127656,
+      "sha256": "723198d2c8cfce1dfd481a90e822e4a3c943a08e4962483181f21024f142dd5a",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "share-plane.png",
+        "bytes": 35675,
+        "sha256": "36a6217700c608dce7412ce58418c616e7f74f45ad61d7cc45280bfa0d6809bc"
+      }
+    },
+    {
+      "file": "heart-wave.mp4",
+      "bytes": 307501,
+      "sha256": "0f7e67d459becf5867af4b6f7ecb17b03634d7c1a70a251e9d30ec5b287e5b07",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "heart-wave.png",
+        "bytes": 55379,
+        "sha256": "eab2190b931d34814f716dd9155f71217d0f7c5eb37635a9178c3fec43b36182"
+      }
+    },
+    {
+      "file": "celebrate.mp4",
+      "bytes": 128356,
+      "sha256": "6c27b911e4e29b7938506f6aa2b193bb4d9d7f0fb8443c78c174e89bce0e9924",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "celebrate.png",
+        "bytes": 25776,
+        "sha256": "d18812b967c682d5acdbb574ff2b5bc919ada102f451cc7300b9014a31e4298f"
+      }
+    },
+    {
+      "file": "sparkle-trail.mp4",
+      "bytes": 66254,
+      "sha256": "1464a0c67984c5e6b8fa32ae80bd830f37b1584185b88ff8288e3ed813b18c64",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "sparkle-trail.png",
+        "bytes": 13519,
+        "sha256": "438960f505b92d4fea4d5cb433ead66d4fc506b8bcbc9b362dcb293b4bc7d978"
+      }
+    },
+    {
+      "file": "ripple-rings.mp4",
+      "bytes": 316896,
+      "sha256": "a664f392f6014cdea8cb3c88c1a84e1315151ceb24665cc63329d12ad78b525d",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "ripple-rings.png",
+        "bytes": 48344,
+        "sha256": "972a4f0c183ba6b76191d8728025f4df8b1dc31ab958bfac3e8605910bfd82a9"
+      }
+    },
+    {
+      "file": "corner-frame.mp4",
+      "bytes": 48757,
+      "sha256": "1decd66f272332359d84905f873c3e7d2cc522215b6b8dc857057df713ec33e2",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "corner-frame.png",
+        "bytes": 5275,
+        "sha256": "d3e05300507736b90b08e3afcf109a5979cbe9489b9848ad94a8de366c38a407"
+      }
+    },
+    {
+      "file": "loading-dots.mp4",
+      "bytes": 19345,
+      "sha256": "fa86136a0e8cc1471a6adcd52662190052afd2c1d23ec40156bc376075b55069",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "loading-dots.png",
+        "bytes": 14737,
+        "sha256": "6893d2c32258c8eae2a20acd83af06f3e968e6aa6f70bf56c29d971fd5d2ec24"
+      }
+    },
+    {
+      "file": "rec-label.mp4",
+      "bytes": 14091,
+      "sha256": "9176b9557056cf5811e08f1b1ccd43533ad6a8f67519ad0c76fc03abb56baba2",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "rec-label.png",
+        "bytes": 13945,
+        "sha256": "4e6b7d987975ec9da7bd2641cdbb7b392c7d38732f23c294bce5f6f9357c41a4"
+      }
+    },
+    {
+      "file": "notice-bubble.mp4",
+      "bytes": 120006,
+      "sha256": "0039b938775347fcc6e102388298959a9a3a82b6e5809f089fdcddef074c037e",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "notice-bubble.png",
+        "bytes": 37785,
+        "sha256": "44a3efb61f7409101d2ae1ecdc8f5c8f45307dbbf54d92b0617ba0563903b109"
+      }
+    },
+    {
+      "file": "cursor-click.mp4",
+      "bytes": 101012,
+      "sha256": "7a47d567b0ce32b6cf4a84bb8811ff7f9150327a2e122d1d148008e18a80a973",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "cursor-click.png",
+        "bytes": 25210,
+        "sha256": "a9f4493e6619aeaa89c0de2d94f1fbaaabe5103aea3404d61458065c34b4d312"
+      }
+    },
+    {
+      "file": "point-arrow.mp4",
+      "bytes": 25204,
+      "sha256": "9cfd93507cbbd12778655eb18651904edd4ce117161f2107eabd7d79302497ec",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "point-arrow.png",
+        "bytes": 15478,
+        "sha256": "3936a5ed1174ea097880f05f70751d05988dfc9525a2add49936f8c0f05e62cc"
+      }
+    },
+    {
+      "file": "focus-circle.mp4",
+      "bytes": 145671,
+      "sha256": "5ae32f13ef65f7ee6c416018391631792b42854d36ef93de81e8951896d9794a",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "focus-circle.png",
+        "bytes": 45040,
+        "sha256": "7e38eb745db038c15009f29456810721e6f67a923502e9c5eb151b2492fde83b"
+      }
+    },
+    {
+      "file": "chapter-card.mp4",
+      "bytes": 38683,
+      "sha256": "ee683a04af4cd14b157e1a1b71a9cce9ba67910ec89137fb16c61712944eb5ef",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "chapter-card.png",
+        "bytes": 23754,
+        "sha256": "18bf951c154cdc44d928499d60a260ae15a9e44fc9fa6476a382222cb2052c5a"
+      }
+    },
+    {
+      "file": "note-strip.mp4",
+      "bytes": 91235,
+      "sha256": "3c68051ab8c8975d9bd1a27bb4fed6fbdf566b59500ccd60974471beb467c2a3",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "note-strip.png",
+        "bytes": 37470,
+        "sha256": "eb17288ce5c58db571260544ba36611fb45891d2209f05788ce53bbb6254d060"
+      }
+    },
+    {
+      "file": "thanks-card.mp4",
+      "bytes": 172886,
+      "sha256": "be0b998d2a8e2cf151d6444b378f647814f962b6818197501bbfa65c7ada62c2",
+      "duration": 4.0,
+      "codec": "h264",
+      "width": 640,
+      "height": 360,
+      "framesPerSecond": 24,
+      "audio": false,
+      "chromaColor": "#00ff00",
+      "poster": {
+        "file": "thanks-card.png",
+        "bytes": 34882,
+        "sha256": "6cb0827c1745e2b2753601b4d7dab77b7d8fa218c54634943e4f875903517570"
+      }
+    }
+  ]
+}

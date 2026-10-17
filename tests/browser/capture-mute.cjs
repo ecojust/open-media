@@ -52,9 +52,10 @@ async function browserRecording(directory) {
       }
       screen.addTrack(tone(440).getAudioTracks()[0])
       let requests = 0
+      const microphoneConstraints = []
       Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => { requests++; return screen } })
-      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { requests++; return tone(660) } })
-      const capture = await startBrowserCapture({ fps: 20, microphone: true, systemAudio: true })
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async constraints => { requests++; microphoneConstraints.push(constraints); return tone(660) } })
+      const capture = await startBrowserCapture({ fps: 20, microphone: true, systemAudio: true, audioDevice: 'studio-microphone' })
       const initial = { available: capture.audioAvailable, muted: capture.muted }
       await sleep(1200)
       capture.setMuted(true)
@@ -82,13 +83,14 @@ async function browserRecording(directory) {
       clearInterval(render)
       await Promise.all(contexts.map(context => context.close()))
       return { initial, muteAt, unmuteAt, pausedAt, paused, mutedSources, mutedOutput, videoStillEnabled,
-        preservedMute, restored, unavailableAfterStop, noChangeAfterStop, requests, duration: recorded.duration,
+        preservedMute, restored, unavailableAfterStop, noChangeAfterStop, requests, microphoneConstraints, duration: recorded.duration,
         bytes: Array.from(new Uint8Array(await recorded.blob.arrayBuffer())) }
     }, source)
     assert.deepEqual(result.initial, { available: true, muted: false })
     for (const name of ['mutedSources', 'mutedOutput', 'videoStillEnabled', 'preservedMute', 'restored', 'unavailableAfterStop', 'noChangeAfterStop']) assert.equal(result[name], true, name)
     assert.deepEqual(result.paused, { phase: 'paused', elapsed: result.pausedAt, muted: true })
     assert.equal(result.requests, 2, 'muting never requests another capture source or microphone permission')
+    assert.deepEqual(result.microphoneConstraints, [{ audio: { echoCancellation: true, noiseSuppression: true, deviceId: { exact: 'studio-microphone' } }, video: false }], 'initial capture requests the exact selected microphone')
     const file = join(directory, 'browser.webm')
     writeFileSync(file, Buffer.from(result.bytes))
     const levels = [rms(file, 0.3, 0.7), rms(file, result.muteAt + 0.35, result.muteAt + 0.7), rms(file, result.unmuteAt + 0.35, result.unmuteAt + 0.7)]
@@ -134,10 +136,11 @@ async function browserRecording(directory) {
         const shared = sharedAudio ? tone(440).getAudioTracks()[0] : undefined
         if (shared) screen.addTrack(shared)
         let microphoneRequests = 0
+        const microphoneConstraints = []
         let microphone
         Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => screen })
-        Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async () => { microphoneRequests++; return (microphone = tone(660)) } })
-        const capture = await startBrowserCapture({ fps: 20, microphone: true, systemAudio: sharedAudio, chooseSource: async () => ({ microphone: false }) })
+        Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async constraints => { microphoneRequests++; microphoneConstraints.push(constraints); return (microphone = tone(660)) } })
+        const capture = await startBrowserCapture({ fps: 20, microphone: true, systemAudio: sharedAudio, audioDevice: 'previous-microphone', chooseSource: async () => ({ microphone: false, audioDevice: 'headset-microphone' }) })
         const trackIds = capture.stream.getTracks().map(track => track.id)
         const initial = { enabled: capture.microphoneEnabled, requests: microphoneRequests, available: capture.audioAvailable }
         await sleep(1100)
@@ -159,13 +162,14 @@ async function browserRecording(directory) {
         const ended = screen.getTracks().every(track => track.readyState === 'ended')
         clearInterval(render)
         await Promise.all(contexts.map(context => context.close()))
-        return { initial, pausedAt, paused, enableAt, disableAt, disabled, unchangedTracks, ended, requests: microphoneRequests,
+        return { initial, pausedAt, paused, enableAt, disableAt, disabled, unchangedTracks, ended, requests: microphoneRequests, microphoneConstraints,
           duration: recording.duration, bytes: Array.from(new Uint8Array(await recording.blob.arrayBuffer())) }
       }, { source, sharedAudio })
       assert.deepEqual(dynamic.initial, { enabled: false, requests: 0, available: sharedAudio }, 'picker can disable the initially selected microphone before any request')
       assert.deepEqual(dynamic.paused, { enabled: true, phase: 'paused', elapsed: dynamic.pausedAt }, 'microphone can be enabled while paused without advancing elapsed time')
       assert.deepEqual(dynamic.disabled, { enabled: false, available: sharedAudio, released: true, sharedLive: true }, 'turning off releases the microphone and preserves shared audio')
       assert.equal(dynamic.requests, 1)
+      assert.deepEqual(dynamic.microphoneConstraints, [{ audio: { echoCancellation: true, noiseSuppression: true, deviceId: { exact: 'headset-microphone' } }, video: false }], 'picker source overrides the previous device and is retained when enabling the microphone later')
       assert.equal(dynamic.unchangedTracks, true, 'dynamic microphone never changes encoder tracks')
       assert.equal(dynamic.ended, true)
       assert.ok(dynamic.duration > 3.1 && dynamic.duration < 4.2)
@@ -185,6 +189,56 @@ async function browserRecording(directory) {
       for (let i = 1; i < frames.length; i++) assert.ok(Number(frames[i].best_effort_timestamp_time) - Number(frames[i - 1].best_effort_timestamp_time) < 0.35, 'video has no microphone-related gap')
       console.log(`PASS actual dynamic microphone recording (${sharedAudio ? 'shared audio preserved' : 'initial silence'}): picker override, paused enable, released device, stable encoder track`, levels)
     }
+    const sourceSelection = await page.evaluate(async source => {
+      const { startBrowserCapture, captureErrorMessage } = await import(`data:text/javascript;base64,${btoa(unescape(encodeURIComponent(source)))}`)
+      const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
+      const screens = []
+      const requests = []
+      const microphones = []
+      const context = new AudioContext()
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async () => {
+        const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90
+        canvas.getContext('2d').fillRect(0, 0, 160, 90)
+        const stream = canvas.captureStream(20); screens.push(stream); return stream
+      } })
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async constraints => {
+        requests.push(constraints)
+        if (constraints.audio.deviceId?.exact === 'disconnected-microphone') throw new DOMException('Missing selected input', 'OverconstrainedError')
+        const stream = context.createMediaStreamDestination().stream; microphones.push(stream); return stream
+      } })
+      try {
+        let initialError
+        try { await startBrowserCapture({ fps: 20, microphone: true, systemAudio: false, audioDevice: 'disconnected-microphone' }) }
+        catch (error) { initialError = { name: error.name, message: captureErrorMessage(error) } }
+        const initial = { error: initialError, requests: requests.length, screenReleased: screens[0].getTracks().every(track => track.readyState === 'ended') }
+        const capture = await startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, audioDevice: 'disconnected-microphone' })
+        let laterError
+        try { await capture.setMicrophoneEnabled(true) } catch (error) { laterError = { name: error.name, message: captureErrorMessage(error) } }
+        const later = { error: laterError, requests: requests.length, microphoneEnabled: capture.microphoneEnabled, phase: capture.phase }
+        await sleep(250)
+        const retained = await capture.stop()
+        const defaultCapture = await startBrowserCapture({ fps: 20, microphone: false, systemAudio: false, audioDevice: 'previous-microphone', chooseSource: async () => ({ microphone: true, audioDevice: '' }) })
+        await sleep(100)
+        await defaultCapture.setMicrophoneEnabled(false)
+        await defaultCapture.setMicrophoneEnabled(true)
+        await sleep(150)
+        const defaultRecording = await defaultCapture.stop()
+        return { initial, later, requests, retainedBytes: retained.blob.size, defaultBytes: defaultRecording.blob.size,
+          released: [...screens, ...microphones].every(stream => stream.getTracks().every(track => track.readyState === 'ended')) }
+      } finally { await context.close() }
+    }, source)
+    assert.equal(sourceSelection.initial.error.name, 'OverconstrainedError')
+    assert.match(sourceSelection.initial.error.message, /所选麦克风当前不可用/)
+    assert.equal(sourceSelection.initial.requests, 1, 'unavailable selected source does not fall back to any other input')
+    assert.equal(sourceSelection.initial.screenReleased, true, 'failed preparation releases the screen')
+    assert.equal(sourceSelection.later.error.name, 'OverconstrainedError')
+    assert.equal(sourceSelection.later.requests, 2, 'later enabling also makes only one exact-source request')
+    assert.equal(sourceSelection.later.microphoneEnabled, false)
+    assert.equal(sourceSelection.later.phase, 'recording', 'unavailable microphone leaves the current silent video usable')
+    assert.deepEqual(sourceSelection.requests.map(value => value.audio.deviceId), [{ exact: 'disconnected-microphone' }, { exact: 'disconnected-microphone' }, undefined, undefined])
+    assert.ok(sourceSelection.retainedBytes > 0 && sourceSelection.defaultBytes > 0)
+    assert.equal(sourceSelection.released, true)
+    console.log('PASS disconnected selected microphone never falls back; explicit system default overrides remembered source and survives off/on; failure preserves silent recording')
     const lifecycle = await page.evaluate(async source => {
       const { startBrowserCapture } = await import(`data:text/javascript;base64,${btoa(unescape(encodeURIComponent(source)))}`)
       const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))

@@ -1,5 +1,6 @@
 import type { Clip, MediaAsset, Project, Track, TrackKind } from './types.ts'
 import { validateClipFilters } from './clip-filters.ts'
+import { validateChromaKey } from './chroma-key.ts'
 
 export const MAX_PROJECT_DURATION = 24 * 60 * 60
 export const MAX_ASSETS = 1000
@@ -156,6 +157,10 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       if (c.filters !== undefined) {
         if (kind !== 'video' || !['video', 'image'].includes(assetMap.get(clip.assetId!)?.kind ?? '')) throw new Error('滤镜只能用于视频轨道中的视频或图片片段。')
         clip.filters = validateClipFilters(c.filters)
+      }
+      if (c.chromaKey !== undefined) {
+        if (kind !== 'video' || !['video', 'image'].includes(assetMap.get(clip.assetId!)?.kind ?? '')) throw new Error('抠像只能用于视频轨道中的视频或图片片段。')
+        clip.chromaKey = validateChromaKey(c.chromaKey)
       }
       return clip
     })

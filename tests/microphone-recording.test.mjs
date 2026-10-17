@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { startMicrophoneRecording, microphoneRecordingErrorMessage } from '../src/core/microphone-recording.ts'
+import { authorizeBrowserMicrophones, listBrowserMicrophones, readMicrophonePreference, writeMicrophonePreference } from '../src/core/microphone-devices.ts'
 
 function deferred() {
   let resolve, reject
@@ -62,7 +63,9 @@ function environment(t, options = {}) {
       })
     }
   }
-  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia(constraints) {
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: {
+    async enumerateDevices() { return options.devices ?? [] },
+    getUserMedia(constraints) {
     requests.push(constraints)
     return options.permission ? options.permission(stream) : Promise.resolve(stream)
   } } } })
@@ -113,6 +116,86 @@ test('microphone recording requests only audio and resolves after the actual sta
   assert.match(audio.name, /^录音-.*\.webm$/)
   assert.equal(env.track.stops, 1)
   assert.equal(env.recorders[0].stops, 1)
+})
+
+test('an explicit microphone source uses an exact constraint, never the system fallback', async t => {
+  const env = environment(t), recording = await env.start({ deviceId: 'usb-microphone' })
+  assert.deepEqual(env.requests, [{ audio: { deviceId: { exact: 'usb-microphone' } }, video: false }])
+  assert.ok((await recording.stop()).blob.size > 0)
+})
+
+test('a missing selected source reports a disconnected microphone without retrying another input', async t => {
+  const env = environment(t, { permission: async () => { throw new DOMException('deviceId unavailable', 'OverconstrainedError') } })
+  await assert.rejects(startMicrophoneRecording({ deviceId: 'missing-microphone' }), { name: 'OverconstrainedError' })
+  assert.equal(env.requests.length, 1)
+  assert.equal(env.recorders.length, 0)
+  assert.match(microphoneRecordingErrorMessage(new DOMException('', 'OverconstrainedError')), /所选麦克风已断开/)
+})
+
+test('system default source does not lock recording to an input device', async t => {
+  const env = environment(t), recording = await env.start({ deviceId: '' })
+  assert.deepEqual(env.requests, [{ audio: true, video: false }])
+  await recording.stop()
+})
+
+test('listing microphones filters aliases, cameras and duplicate IDs without accessing any input', async t => {
+  const env = environment(t, { devices: [
+    { kind: 'videoinput', deviceId: 'camera', label: 'Camera' },
+    { kind: 'audioinput', deviceId: 'default', label: 'Default - USB Microphone' },
+    { kind: 'audioinput', deviceId: 'communications', label: 'Communication - USB Microphone' },
+    { kind: 'audioinput', deviceId: 'usb', label: 'USB Microphone' },
+    { kind: 'audioinput', deviceId: 'usb', label: 'USB Microphone' },
+    { kind: 'audioinput', deviceId: 'internal', label: 'Built-in Microphone' },
+    { kind: 'audiooutput', deviceId: 'speakers', label: 'Speakers' },
+  ] })
+  assert.deepEqual(await listBrowserMicrophones(), {
+    devices: [{ id: 'usb', name: 'USB Microphone' }, { id: 'internal', name: 'Built-in Microphone' }],
+    permissionRequired: false,
+  })
+  assert.equal(env.requests.length, 0)
+  assert.equal(env.recorders.length, 0)
+})
+
+test('hidden microphone labels request an explicit authorization action without opening a device', async t => {
+  const env = environment(t, { devices: [{ kind: 'audioinput', deviceId: '', label: '' }] })
+  assert.deepEqual(await listBrowserMicrophones(), { devices: [], permissionRequired: true })
+  assert.equal(env.requests.length, 0)
+})
+
+test('explicit label authorization immediately releases the microphone without starting an encoder', async t => {
+  const env = environment(t)
+  await authorizeBrowserMicrophones()
+  assert.equal(env.track.stops, 1)
+  assert.equal(env.recorders.length, 0)
+  assert.deepEqual(env.requests, [{ audio: true, video: false }])
+})
+
+test('canceling label authorization releases a stream granted after the picker closed', async t => {
+  const permission = deferred(), abort = new AbortController()
+  const env = environment(t, { permission: () => permission.promise })
+  const pending = authorizeBrowserMicrophones(abort.signal)
+  abort.abort()
+  await assert.rejects(pending, { name: 'AbortError' })
+  permission.resolve(env.stream)
+  await settle()
+  assert.equal(env.track.stops, 1)
+  assert.equal(env.recorders.length, 0)
+})
+
+test('source preferences remain separate for editor and capture device ID namespaces', t => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage'), values = new Map()
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  } })
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'localStorage', previous); else delete globalThis.localStorage })
+  assert.deepEqual(readMicrophonePreference('editor'), { deviceId: '', name: '' })
+  writeMicrophonePreference('editor', { deviceId: 'browser-opaque-id', name: 'USB microphone' })
+  writeMicrophonePreference('capture-native', { deviceId: 'native-device-id', name: 'USB microphone' })
+  assert.deepEqual(readMicrophonePreference('editor'), { deviceId: 'browser-opaque-id', name: 'USB microphone' })
+  assert.deepEqual(readMicrophonePreference('capture-native'), { deviceId: 'native-device-id', name: 'USB microphone' })
+  values.set('open-media:microphone:editor', '{invalid')
+  assert.deepEqual(readMicrophonePreference('editor'), { deviceId: '', name: '' })
 })
 
 test('cancel before requesting permission does not open any device', async t => {

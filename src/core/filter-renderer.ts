@@ -1,5 +1,6 @@
 import { applyClipColorMatrix, getClipColorMatrix, isClipFilterIdentity, type ColorMatrix } from './clip-filters.ts'
-import type { ClipFilters } from './types.ts'
+import { applyChromaKey, chromaKeyColor, isChromaKeyEnabled } from './chroma-key.ts'
+import type { ClipChromaKey, ClipFilters } from './types.ts'
 
 export interface ClipFilterRendererOptions { preferCpu?: boolean; maxPixels?: number; maxDimension?: number }
 
@@ -10,6 +11,8 @@ interface GlResources {
   position: number
   rows: [WebGLUniformLocation, WebGLUniformLocation, WebGLUniformLocation]
   sampler: WebGLUniformLocation
+  keyColor: WebGLUniformLocation
+  keySettings: WebGLUniformLocation
 }
 
 const VERTEX_SHADER = `
@@ -26,11 +29,19 @@ uniform sampler2D image;
 uniform vec4 redRow;
 uniform vec4 greenRow;
 uniform vec4 blueRow;
+uniform vec3 keyColor;
+uniform vec3 keySettings;
 void main() {
   vec4 source = texture2D(image, texCoord);
   vec4 color = vec4(source.rgb, 1.0);
   vec3 result = vec3(dot(redRow, color), dot(greenRow, color), dot(blueRow, color));
-  gl_FragColor = vec4(clamp(result, 0.0, 1.0), source.a);
+  float alpha = source.a;
+  if (keySettings.x > 0.5) {
+    float distance = length(source.rgb - keyColor) / sqrt(3.0);
+    float mask = keySettings.z > 0.0001 ? clamp((distance - keySettings.y) / keySettings.z, 0.0, 1.0) : float(distance > keySettings.y);
+    alpha *= mask;
+  }
+  gl_FragColor = vec4(clamp(result, 0.0, 1.0), alpha);
 }`
 
 /** Reuses its canvases; consume each result before rendering the next clip. */
@@ -107,7 +118,7 @@ export class ClipFilterRenderer {
       if (!buffer || !texture) throw new Error('滤镜渲染内存不足。')
       const position = gl.getAttribLocation(program, 'position')
       if (position < 0) throw new Error('滤镜渲染坐标不可用。')
-      this.resources = { program, buffer, texture, position, rows: [uniform('redRow'), uniform('greenRow'), uniform('blueRow')], sampler: uniform('image') }
+      this.resources = { program, buffer, texture, position, rows: [uniform('redRow'), uniform('greenRow'), uniform('blueRow')], sampler: uniform('image'), keyColor: uniform('keyColor'), keySettings: uniform('keySettings') }
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer)
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW)
       gl.bindTexture(gl.TEXTURE_2D, texture)
@@ -142,7 +153,7 @@ export class ClipFilterRenderer {
     return context
   }
 
-  private drawGl(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, width: number, height: number, matrix: ColorMatrix): HTMLCanvasElement | undefined {
+  private drawGl(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, width: number, height: number, matrix: ColorMatrix, chromaKey?: ClipChromaKey): HTMLCanvasElement | undefined {
     this.initializeGl()
     const gl = this.gl, resources = this.resources
     if (!gl || !resources || this.lost || gl.isContextLost()) return
@@ -169,6 +180,8 @@ export class ClipFilterRenderer {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textureSource as TexImageSource)
       gl.uniform1i(resources.sampler, 0)
       for (let row = 0; row < 3; row++) gl.uniform4fv(resources.rows[row]!, new Float32Array(matrix.slice(row * 4, row * 4 + 4)))
+      gl.uniform3fv(resources.keyColor, new Float32Array(chromaKey ? chromaKeyColor(chromaKey) : [0, 1, 0]))
+      gl.uniform3f(resources.keySettings, isChromaKeyEnabled(chromaKey) ? 1 : 0, chromaKey?.similarity ?? 0.18, chromaKey?.blend ?? 0.08)
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4)
       if (gl.getError() !== gl.NO_ERROR || gl.isContextLost()) return
       this.lastBackend = 'webgl'
@@ -179,20 +192,22 @@ export class ClipFilterRenderer {
     }
   }
 
-  render(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number, filters?: ClipFilters): HTMLCanvasElement {
+  render(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number, filters?: ClipFilters, chromaKey?: ClipChromaKey): HTMLCanvasElement {
     if (this.disposed) throw new Error('片段滤镜渲染器已关闭。')
     if (![sourceWidth, sourceHeight, targetWidth, targetHeight].every(value => Number.isFinite(value) && value > 0)) throw new Error('片段滤镜画面尺寸无效。')
     const [width, height] = this.dimensions(targetWidth, targetHeight)
     const matrix = getClipColorMatrix(filters)
     const identity = isClipFilterIdentity(filters)
-    if (!identity) {
-      const result = this.drawGl(source, sourceWidth, sourceHeight, width, height, matrix)
+    const keyed = isChromaKeyEnabled(chromaKey)
+    if (!identity || keyed) {
+      const result = this.drawGl(source, sourceWidth, sourceHeight, width, height, matrix, chromaKey)
       if (result) return result
     }
     const context = this.drawCpuSource(source, sourceWidth, sourceHeight, width, height)
-    if (!identity) {
+    if (!identity || keyed) {
       const image = context.getImageData(0, 0, width, height)
-      applyClipColorMatrix(image.data, matrix)
+      if (keyed) applyChromaKey(image.data, chromaKey)
+      if (!identity) applyClipColorMatrix(image.data, matrix)
       context.putImageData(image, 0, 0)
     }
     this.lastBackend = 'cpu'

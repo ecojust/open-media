@@ -6,6 +6,17 @@ const display = { id: 'screen:1', name: '主屏幕', logicalWidth: 1440, logical
 const screen = { id: display.id, name: display.name, kind: 'screen', rect: { x: 0, y: 0, width: 1440, height: 900 }, sourceWidth: 2880, sourceHeight: 1800 }
 const context = { requestId: 'example', displayId: display.id, display, targets: [screen] }
 
+test('不可用的指定麦克风阻止录制确认，但允许关闭麦克风或切回默认设备', () => {
+  const audioContext = { ...context, audioDevices: [{ id: 'usb-mic', name: 'USB 麦克风' }] }
+  const selected = { sourceId: screen.id, microphone: true, audioDevice: 'unplugged' }
+  assert.match(validateSelection(selected, audioContext), /麦克风已断开/)
+  assert.equal(validateSelection({ ...selected, audioDevice: 'usb-mic' }, audioContext), undefined)
+  assert.equal(validateSelection({ ...selected, audioDevice: '' }, audioContext), undefined)
+  assert.equal(validateSelection({ ...selected, microphone: false }, audioContext), undefined)
+  assert.match(validateSelection(selected, { ...audioContext, audioDevices: [] }), /麦克风已断开/)
+  assert.equal(validateSelection(selected, { ...audioContext, preferences: { purpose: 'screenshot' } }), undefined)
+})
+
 test('反向框选映射到屏幕物理像素，越界坐标约束在当前屏幕', () => {
   const rect = drawSelection({ x: 640, y: 450 }, { x: -100, y: 100 }, display)
   assert.deepEqual(rect, { x: 0, y: 100, width: 640, height: 350 })

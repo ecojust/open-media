@@ -72,5 +72,6 @@ test('recording names use an extension matching the actual container', () => {
   assert.equal(recordingFileName('video/mp4', date), '录屏-2026-10-16T03-00-00.mp4')
   assert.match(recordingFileName('video/webm;codecs=vp9', date), /\.webm$/)
   assert.match(captureErrorMessage(new DOMException('denied', 'NotAllowedError')), /权限/)
+  assert.match(captureErrorMessage(new DOMException('missing input', 'OverconstrainedError')), /所选麦克风当前不可用/)
   assert.equal(browserCaptureAvailable(), false)
 })

@@ -37,6 +37,7 @@ function workspace(name, overrides = {}) {
     beginMediaJob: async () => ({ id: 'job', state: 'running', progress: 0, name: 'result.gif' }),
     cancelMediaJob: async () => {}, getMediaJobs: async () => [],
     captureErrorMessage, validateGifSegments, gifFrameCount,
+    readMicrophonePreference: () => ({ deviceId: '', name: '' }), writeMicrophonePreference: () => {},
     ...overrides,
   }
   const scope = vue.effectScope()
@@ -428,6 +429,31 @@ test('picker receives default enabled microphone and its disabled choice is hono
     assert.equal(started.microphone, false, '窗口选择中的关闭选择必须传到实际采集')
     assert.equal(harness.state.microphoneEnabled.value, false)
     assert.equal(harness.state.pickerPreferences.value.microphone, false)
+  } finally { harness.dispose() }
+})
+
+test('native recorder remembers its own input and forwards the chosen input even when muted', async () => {
+  const saved = [], shown = [], started = []
+  let remembered = { deviceId: 'native-old-input', name: '旧麦克风' }
+  const chosen = { sourceId: 'window:24', microphone: false, audioDevice: 'native-usb-input' }
+  const harness = workspace('RecorderWorkspace', {
+    readMicrophonePreference: scope => { assert.equal(scope, 'capture-native'); return remembered },
+    writeMicrophonePreference: (scope, value) => { remembered = value; saved.push({ scope, value }) },
+    pickCaptureSource: async (_id, preferences) => { shown.push(preferences); return chosen },
+    startCapture: async options => { started.push(options); return { state: 'recording', elapsed: 0, microphoneEnabled: false } },
+  })
+  try {
+    harness.state.countdown.value = 0
+    await harness.state.begin()
+    assert.equal(shown[0].audioDevice, 'native-old-input')
+    assert.equal(started[0].audioDevice, 'native-usb-input')
+    assert.equal(started[0].microphone, false)
+    assert.equal(harness.state.pickerPreferences.value.audioDevice, 'native-usb-input')
+    assert.equal(saved[0].scope, 'capture-native')
+    assert.equal(saved[0].value.deviceId, 'native-usb-input')
+    await harness.state.stop()
+    await harness.state.begin()
+    assert.equal(shown[1].audioDevice, 'native-usb-input')
   } finally { harness.dispose() }
 })
 

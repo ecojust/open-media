@@ -37,6 +37,14 @@ export interface ClipFilters {
   sepia: number
 }
 
+/** Removes a selected source color before clip color adjustments and compositing. */
+export interface ClipChromaKey {
+  enabled: boolean
+  color: string
+  similarity: number
+  blend: number
+}
+
 /** Source trims are measured in source seconds; start and fades use timeline seconds. */
 export interface Clip {
   id: string
@@ -65,6 +73,7 @@ export interface Clip {
   textAlign?: 'left' | 'center' | 'right'
   speech?: SpeechBinding
   filters?: ClipFilters
+  chromaKey?: ClipChromaKey
 }
 
 export interface Track {

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from './Icon.vue'
+import { authorizeBrowserMicrophones, listBrowserMicrophones, readMicrophonePreference, writeMicrophonePreference, type BrowserMicrophoneDevice } from '../core/microphone-devices'
+import { microphoneRecordingErrorMessage } from '../core/microphone-recording'
 import { completeCapturePicker, getCapturePickerContext, readyCapturePicker } from '../core/capture-picker-client'
 import { drawSelection, limitPoint, logicalSelection, moveSelection, physicalSelection, resizeSelection, selectionAtPoint, validateSelection } from '../core/capture-selection'
 import type { CaptureSelection, CaptureSelectionContext, CaptureSelectionMode, SelectionHandle, SelectionPoint, SelectionRect } from '../core/capture-selection'
@@ -23,6 +25,15 @@ const preset = ref('original')
 const outputWidth = ref(1920)
 const outputHeight = ref(1080)
 const microphone = ref(true)
+const audioDevice = ref('')
+const browserAudioDevices = ref<BrowserMicrophoneDevice[]>([])
+const audioPermissionRequired = ref(false)
+const audioLoaded = ref(false)
+const audioLoading = ref(false)
+const audioAuthorizing = ref(false)
+const audioError = ref('')
+let audioRequest: AbortController | undefined
+let audioRevision = 0
 const error = ref('')
 const loading = ref(false)
 const busy = ref(false)
@@ -31,6 +42,14 @@ let destroyed = false
 let drag: { pointerId: number; start: SelectionPoint; original: SelectionRect | null; action: 'draw' | 'move' | SelectionHandle } | null = null
 
 const availableModes = computed<CaptureSelectionMode[]>(() => context.value?.availableModes ?? ['region', 'window', 'screen'])
+const audioDevices = computed(() => props.embedded ? browserAudioDevices.value : context.value?.audioDevices ?? [])
+const audioMissing = computed(() => !!audioDevice.value && !audioDevices.value.some(device => device.id === audioDevice.value))
+const audioUnavailable = computed(() => audioMissing.value && (props.embedded ? audioLoaded.value && !audioPermissionRequired.value : !!context.value?.audioDevices))
+const audioScope = computed(() => props.embedded ? 'capture-browser' : 'capture-native')
+const missingAudioName = computed(() => {
+  const remembered = readMicrophonePreference(audioScope.value)
+  return remembered.deviceId === audioDevice.value && remembered.name ? remembered.name : '上次选择的麦克风'
+})
 const screen = computed(() => context.value?.targets.find(target => target.kind === 'screen'))
 const selected = computed(() => context.value?.targets.find(target => target.id === selectedId.value))
 const hovered = computed(() => context.value?.targets.find(target => target.id === hoveredId.value))
@@ -39,11 +58,12 @@ const physical = computed(() => region.value && context.value ? physicalSelectio
 const dimensions = computed(() => mode.value === 'region' ? physical.value : (selected.value ?? hovered.value) && { width: (selected.value ?? hovered.value)!.sourceWidth, height: (selected.value ?? hovered.value)!.sourceHeight })
 const outputSize = computed(() => isScreenshot.value || preset.value === 'original' ? undefined : preset.value === '1080p' ? { width: 1920, height: 1080 } : preset.value === '720p' ? { width: 1280, height: 720 } : { width: outputWidth.value, height: outputHeight.value })
 const selection = computed<CaptureSelection | null>(() => {
-  const audio = isScreenshot.value ? {} : { microphone: microphone.value }
+  const audio = isScreenshot.value ? {} : { microphone: microphone.value, audioDevice: audioDevice.value }
   if (mode.value === 'region') return screen.value && physical.value ? { sourceId: screen.value.id, region: physical.value, outputSize: outputSize.value, ...audio } : null
   return selected.value ? { sourceId: selected.value.id, outputSize: outputSize.value, ...audio } : null
 })
 const validation = computed(() => {
+  if (!isScreenshot.value && microphone.value && audioUnavailable.value) return '所选麦克风已断开或不可用，请重新选择来源，或关闭麦克风。'
   const message = selection.value && context.value ? validateSelection(selection.value, context.value) : ''
   return isScreenshot.value ? message?.replaceAll('录制', '截屏') : message
 })
@@ -71,6 +91,7 @@ watch(context, value => {
   if (!value) return
   const preferences = value.preferences
   microphone.value = preferences?.microphone ?? true
+  audioDevice.value = preferences?.audioDevice ?? readMicrophonePreference(audioScope.value).deviceId
   const preferredMode = preferences?.mode ?? 'region'
   mode.value = availableModes.value.includes(preferredMode) ? preferredMode : availableModes.value[0] ?? 'screen'
   selectedId.value = ''
@@ -85,6 +106,47 @@ watch(context, value => {
   if (size) { outputWidth.value = size.width; outputHeight.value = size.height }
   void nextTick(focusPicker)
 }, { immediate: true })
+
+function changeAudioDevice(): void {
+  audioError.value = ''
+  writeMicrophonePreference(audioScope.value, { deviceId: audioDevice.value, name: audioDevices.value.find(device => device.id === audioDevice.value)?.name ?? '' })
+}
+
+async function refreshMicrophones(authorize = false): Promise<void> {
+  if (!props.embedded || isScreenshot.value || destroyed) return
+  audioRequest?.abort()
+  const request = new AbortController()
+  audioRequest = request
+  const revision = ++audioRevision
+  audioLoading.value = true
+  audioAuthorizing.value = authorize
+  audioError.value = ''
+  try {
+    if (authorize) await authorizeBrowserMicrophones(request.signal)
+    const result = await listBrowserMicrophones()
+    if (destroyed || request.signal.aborted || revision !== audioRevision) return
+    browserAudioDevices.value = result.devices
+    audioPermissionRequired.value = result.permissionRequired
+    audioLoaded.value = true
+  } catch (reason) {
+    if (!destroyed && !request.signal.aborted && revision === audioRevision) audioError.value = microphoneRecordingErrorMessage(reason)
+  } finally {
+    if (revision === audioRevision) { audioLoading.value = false; audioAuthorizing.value = false; audioRequest = undefined }
+  }
+}
+
+function audioDevicesChanged(): void { if (!audioAuthorizing.value) void refreshMicrophones() }
+watch(microphone, enabled => { if (!enabled) { audioRequest?.abort(); audioError.value = '' } })
+onMounted(() => {
+  if (!props.embedded || isScreenshot.value) return
+  void refreshMicrophones()
+  navigator.mediaDevices?.addEventListener?.('devicechange', audioDevicesChanged)
+})
+onBeforeUnmount(() => {
+  audioRevision++
+  audioRequest?.abort()
+  navigator.mediaDevices?.removeEventListener?.('devicechange', audioDevicesChanged)
+})
 
 function focusPicker(): void {
   if (!destroyed) (stage.value ?? root.value)?.focus({ preventScroll: true })
@@ -150,7 +212,7 @@ function updateRegionSize(axis: 'width' | 'height', event: Event) {
 }
 
 async function confirm() {
-  if (busy.value || !selection.value || validation.value || error.value) return
+  if (busy.value || audioAuthorizing.value || !selection.value || validation.value || error.value) return
   error.value = ''
   if (props.embedded) { emit('confirm', selection.value); return }
   busy.value = true
@@ -218,7 +280,7 @@ onBeforeUnmount(() => {
     </div>
     <header class="selection-topline"><span><Icon :name="isScreenshot ? 'camera' : 'record'" :size="17" />选择{{ actionName }}范围</span><span v-if="context" class="display-name">{{ context.display.name }}</span></header>
     <div class="selection-dock">
-      <p v-if="error || validation" class="selection-error" role="alert"><Icon name="alert" :size="15" /><span>{{ error || validation }}</span><button v-if="!context && !loading" @click="loadContext">重试</button></p>
+      <p v-if="error || validation || microphone && audioError" class="selection-error" role="alert"><Icon name="alert" :size="15" /><span>{{ error || validation || audioError }}</span><button v-if="!context && !loading" @click="loadContext">重试</button></p>
       <p v-else class="selection-hint" aria-live="polite">{{ loading ? `正在准备${actionName}范围…` : hint }}<span>Esc 取消</span></p>
       <div class="selection-toolbar">
         <div class="selection-options">
@@ -232,11 +294,15 @@ onBeforeUnmount(() => {
         <span v-else class="selection-summary">{{ dimensions ? `${dimensions.width} × ${dimensions.height} px` : '请在画面上选择' }}</span>
         <label v-if="!isScreenshot" class="selection-output">输出<select v-model="preset" aria-label="输出尺寸" :disabled="busy"><option value="original">原始尺寸</option><option value="1080p">1920 × 1080</option><option value="720p">1280 × 720</option><option value="custom">自定义</option></select></label>
         <div v-if="!isScreenshot && preset === 'custom'" class="selection-custom"><input v-model.number="outputWidth" aria-label="输出宽度" type="number" min="16" max="7680" step="2" :disabled="busy"><span>×</span><input v-model.number="outputHeight" aria-label="输出高度" type="number" min="16" max="4320" step="2" :disabled="busy"></div>
+        <div v-if="!isScreenshot" class="selection-audio-source">
+          <label>麦克风来源<select v-model="audioDevice" aria-label="麦克风来源" data-testid="capture-picker-audio-source" :disabled="busy || audioAuthorizing || !context" @change="changeAudioDevice"><option value="">{{ embedded ? '系统默认麦克风' : '默认麦克风' }}</option><option v-for="device in audioDevices" :key="device.id" :value="device.id">{{ device.name }}</option><option v-if="audioMissing" :value="audioDevice">{{ missingAudioName }}（{{ audioUnavailable ? '不可用' : '待授权确认' }}）</option></select></label>
+          <button v-if="embedded" :disabled="busy || audioLoading" :title="audioPermissionRequired ? '授权后显示麦克风名称' : '刷新麦克风列表'" :aria-label="audioPermissionRequired ? '授权并刷新麦克风' : '刷新麦克风列表'" data-testid="capture-picker-audio-refresh" @click="refreshMicrophones(audioPermissionRequired)"><Icon name="refresh" :size="15" /><span v-if="audioPermissionRequired">授权</span></button>
+        </div>
         </div>
         <div class="selection-actions">
           <button v-if="!isScreenshot" class="selection-microphone" :aria-pressed="microphone" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'" :title="microphone ? '麦克风已开启，点击关闭' : '麦克风已关闭，点击开启'" data-testid="capture-picker-microphone" :disabled="busy || !context" @click="microphone = !microphone"><Icon :name="microphone ? 'mic' : 'mic-off'" :size="17" /><span>麦克风{{ microphone ? '开' : '关' }}</span></button>
           <button class="selection-cancel" title="取消选择（Esc）" aria-label="取消选择" data-testid="capture-picker-cancel" :disabled="busy" @click="cancel"><Icon name="close" :size="15" />取消</button>
-          <button class="selection-confirm" :disabled="busy || !selection || !!validation || !!error" data-testid="capture-picker-confirm" @click="confirm"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="currentColor" /></svg>{{ busy ? '正在确认…' : isScreenshot ? '截取图片' : '开始录制' }}</button>
+          <button class="selection-confirm" :disabled="busy || audioAuthorizing || !selection || !!validation || !!error" data-testid="capture-picker-confirm" @click="confirm"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="currentColor" /></svg>{{ busy ? '正在确认…' : isScreenshot ? '截取图片' : '开始录制' }}</button>
         </div>
       </div>
     </div>
@@ -253,6 +319,9 @@ onBeforeUnmount(() => {
 .selection-microphone{padding:7px 9px;background:#f2f5fa;color:#5c687b;border:1px solid #d6dde8}
 .selection-microphone[aria-pressed=true]{background:#eaf5f0;color:#177851;border-color:#bddfce}
 .selection-cancel{padding:8px 10px;background:#fff;color:#4b586b;border:1px solid #d6dde8}
+.selection-audio-source,.selection-audio-source>label{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;color:#7a8698}
+.selection-audio-source select{width:170px;max-width:45vw;text-overflow:ellipsis}
+.selection-audio-source>button{padding:6px;min-height:30px;background:#f2f5fa;color:#5c687b;border:1px solid #d6dde8}
 @media(max-width:1100px){
   .selection-toolbar{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
   .selection-options{gap:8px}

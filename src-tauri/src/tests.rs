@@ -259,6 +259,97 @@ fn timeline_export_renders_clip_filter_in_final_video() {
 }
 
 #[test]
+fn chroma_key_graph_multiplies_original_alpha_and_rgb_distance_mask() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let pixels: Vec<u8> = [
+        [0, 255, 0, 255],
+        [255, 0, 0, 128],
+        [0, 0, 255, 0],
+        [0, 128, 0, 128],
+        [0, 160, 0, 192],
+        [40, 220, 40, 64],
+        [0, 255, 0, 1],
+        [100, 255, 100, 200],
+    ].into_iter().flatten().collect();
+    let source = temp.path().join("key-input.raw");
+    fs::write(&source, &pixels).unwrap();
+    for blend in [0.0, 0.08] {
+        let filter = crate::chroma_key::filter_chain(
+            &json!({"chromaKey":{"enabled":true,"color":"#00ff00","similarity":0.18,"blend":blend}}),
+            true,
+        ).unwrap().unwrap();
+        let mut graph = Vec::new();
+        let chain = crate::chroma_key::append_graph("[0:v]format=rgba".into(), &mut graph, 1, &filter);
+        graph.push(format!("{chain}[out]"));
+        let output = process(&rt.encoder)
+            .args(["-v", "error", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "4x2", "-i"])
+            .arg(&source)
+            .args(["-filter_complex", &graph.join(";"), "-map", "[out]", "-frames:v", "1", "-filter_complex_threads", "1", "-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgba", "-"])
+            .output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout.len(), pixels.len());
+        for (input, actual) in pixels.chunks_exact(4).zip(output.stdout.chunks_exact(4)) {
+            assert_eq!(&actual[..3], &input[..3]);
+            let distance = ((f64::from(input[0]).powi(2) + (f64::from(input[1]) - 255.0).powi(2) + f64::from(input[2]).powi(2)) / 3.0).sqrt() / 255.0;
+            let mask = if blend == 0.0 { if distance > 0.18 { 1.0 } else { 0.0 } } else { ((distance - 0.18) / blend).clamp(0.0, 1.0) };
+            let expected = (mask * f64::from(input[3])).floor() as i16;
+            assert!((i16::from(actual[3]) - expected).abs() <= 1, "{input:?}: expected alpha {expected}, got {actual:?}");
+        }
+    }
+}
+
+#[test]
+fn timeline_export_keys_images_and_video_before_filters_and_opacity() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let mut pixels = Vec::new();
+    for y in 0..80 {
+        for x in 0..80 {
+            pixels.extend_from_slice(if (16..64).contains(&x) && (16..64).contains(&y) {
+                if x < 40 { &[255, 0, 0, 128] } else { &[255, 0, 0, 255] }
+            } else { &[0, 255, 0, 255] });
+        }
+    }
+    let raw = temp.path().join("key-source.raw");
+    let png = temp.path().join("key-source.png");
+    let mov = temp.path().join("key-source.mov");
+    fs::write(&raw, pixels).unwrap();
+    let output = process(&rt.encoder)
+        .args(["-v", "error", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "80x80", "-i"])
+        .arg(&raw)
+        .args(["-frames:v", "1", "-threads", "1"])
+        .arg(&png).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let output = process(&rt.encoder)
+        .args(["-v", "error", "-loop", "1", "-framerate", "20", "-i"])
+        .arg(&png)
+        .args(["-t", "0.5", "-c:v", "qtrle", "-pix_fmt", "argb", "-threads", "1"])
+        .arg(&mov).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let store = MediaStore::new(temp.path()).unwrap();
+    for (input, name) in [(&png, "key-image.mp4"), (&mov, "key-video.mp4")] {
+        let asset = store.import(&rt, input, None).unwrap();
+        let keyed = json!({"id":"keyed","assetId":asset.id,"start":0,"trimIn":0,"trimOut":0.5,"speed":1,"volume":0,"opacity":0.8,"x":40,"y":20,"width":80,"height":80,"rotation":0,"fit":"fill","fadeIn":0,"fadeOut":0,
+            "chromaKey":{"enabled":true,"color":"#00ff00","similarity":0.18,"blend":0.08},
+            "filters":{"enabled":true,"intensity":1,"brightness":0,"contrast":1,"saturation":0,"temperature":0,"tint":0,"sepia":0}});
+        let spec = json!({"kind":"timeline","project":{"title":"keyed","width":160,"height":120,"background":"#0000ff","assets":[asset],"tracks":[{"kind":"video","muted":true,"clips":[keyed]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"high"}});
+        run(temp.path(), &rt, spec, name);
+        let output = process(&rt.encoder)
+            .args(["-v", "error", "-ss", "0.2", "-i"])
+            .arg(temp.path().join(name))
+            .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert_eq!(output.stdout.len(), 160 * 120 * 3);
+        for (x, y, expected) in [(4, 4, [0, 0, 255]), (44, 24, [0, 0, 255]), (64, 60, [21, 21, 175]), (96, 60, [43, 43, 94])] {
+            let actual = &output.stdout[(y * 160 + x) * 3..(y * 160 + x) * 3 + 3];
+            assert!(actual.iter().zip(expected).all(|(&a, e)| (i16::from(a) - e).abs() <= 10), "{name} at ({x}, {y}) expected {expected:?}, got {actual:?}");
+        }
+    }
+}
+
+#[test]
 fn timeline_composites_audio_transform_and_text_image() {
     let temp = tempfile::tempdir().unwrap();
     let rt = runtime();

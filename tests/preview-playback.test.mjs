@@ -4,7 +4,7 @@ import { TimelinePreview } from '../src/core/preview.ts'
 import { createProject, createClip } from '../src/core/project.ts'
 import { addAsset, addClip } from '../src/core/timeline.ts'
 
-function playbackHarness(t, { pending = false, ready = true } = {}) {
+function playbackHarness(t, { pending = false, ready = true, video = false, frameReady = false } = {}) {
   const elements = []
   class Media extends EventTarget {
     readyState = ready ? 4 : 0
@@ -19,6 +19,10 @@ function playbackHarness(t, { pending = false, ready = true } = {}) {
     rateWrites = 0
     volumeWrites = 0
     mutedWrites = 0
+    videoWidth = ready ? 32 : 0
+    videoHeight = ready ? 32 : 0
+    frameCallbacks = new Map()
+    frameCancels = []
     plays = 0
     pauses = 0
     get currentTime() { return this._time }
@@ -40,6 +44,10 @@ function playbackHarness(t, { pending = false, ready = true } = {}) {
     load() {}
     finishSeek() { this.seeking = false; this.dispatchEvent(new Event('seeked')) }
   }
+  if (frameReady) {
+    Media.prototype.requestVideoFrameCallback = function (callback) { const id = this.frameCallbacks.size + 1; this.frameCallbacks.set(id, callback); return id }
+    Media.prototype.cancelVideoFrameCallback = function (id) { this.frameCallbacks.delete(id); this.frameCancels.push(id) }
+  }
   class Image {}
   const replacements = {
     HTMLMediaElement: Media, HTMLVideoElement: Media, HTMLImageElement: Image,
@@ -56,14 +64,39 @@ function playbackHarness(t, { pending = false, ready = true } = {}) {
     }
   })
   let project = createProject('连续音频验证', { width: 32, height: 32 })
-  const asset = { id: 'tone', name: 'tone.wav', kind: 'audio', duration: 30, width: 0, height: 0, size: 1, mime: 'audio/wav', url: 'blob:tone' }
+  const asset = { id: 'tone', name: video ? 'frame.webm' : 'tone.wav', kind: video ? 'video' : 'audio', duration: 30, width: video ? 32 : 0, height: video ? 32 : 0, size: 1, mime: video ? 'video/webm' : 'audio/wav', url: 'blob:tone' }
   project = addAsset(project, asset)
-  project = addClip(project, project.tracks.find(track => track.kind === 'audio').id, createClip(asset, project, { trimOut: 20, speed: 1.5 }))
-  const ctx = { save() {}, restore() {}, setTransform() {}, fillRect() {}, translate() {}, rotate() {}, beginPath() {}, rect() {}, clip() {} }
+  project = addClip(project, project.tracks.find(track => track.kind === (video ? 'video' : 'audio')).id, createClip(asset, project, { trimOut: 20, speed: 1.5 }))
+  let imagesDrawn = 0
+  const ctx = { save() {}, restore() {}, setTransform() {}, fillRect() {}, translate() {}, rotate() {}, beginPath() {}, rect() {}, clip() {}, drawImage() { imagesDrawn++ } }
   const errors = []
   const preview = new TimelinePreview({ width: 32, height: 32, getContext: () => ctx }, project, error => errors.push(error))
-  return { preview, media: elements[0], errors }
+  return { preview, media: elements[0], errors, get imagesDrawn() { return imagesDrawn } }
 }
+
+test('暂停预览在首帧实际可绘制后重新绘制，移除素材和销毁会取消待处理回调', t => {
+  const first = playbackHarness(t, { video: true, ready: false, frameReady: true })
+  first.media.readyState = 2
+  first.media.dispatchEvent(new Event('loadeddata'))
+  assert.equal(first.imagesDrawn, 0, '加载事件发生时图像尺寸尚未就绪')
+  first.media.videoWidth = first.media.videoHeight = 32
+  const callback = [...first.media.frameCallbacks.values()][0]
+  callback()
+  assert.equal(first.imagesDrawn, 1, '帧呈现回调应更新静止画面，无需用户先定位')
+  first.preview.dispose()
+  assert.deepEqual(first.media.frameCancels, [], '已完成的回调无需取消')
+})
+
+test('尚未呈现首帧时移除或销毁素材释放帧回调，迟到回调不再绘制', t => {
+  const harness = playbackHarness(t, { video: true, ready: false, frameReady: true })
+  const callback = [...harness.media.frameCallbacks.values()][0]
+  harness.preview.setProject(createProject('空项目', { width: 32, height: 32 }))
+  assert.deepEqual(harness.media.frameCancels, [1])
+  assert.equal(harness.media.frameCallbacks.size, 0)
+  harness.preview.dispose()
+  callback()
+  assert.equal(harness.imagesDrawn, 0)
+})
 
 test('连续播放和待完成的启动不会逐帧重写速度或重复启动音轨', async t => {
   const { preview, media } = playbackHarness(t, { pending: true })
@@ -188,4 +221,51 @@ test('音频到达文件尾部后不会在下一个绘制帧重新从头播放',
   media._time = 6
   preview.render(4, true)
   assert.equal(media.plays, 1)
+})
+
+test('输入设备切换后被中断的音频输出会恢复，而不是只处理 suspended', async t => {
+  const { preview } = playbackHarness(t)
+  let resumed = 0
+  const context = { state: 'interrupted', resume: async () => { resumed++; context.state = 'running' }, close: async () => {} }
+  preview.audioContext = context
+  preview.destination = { stream: 'restored-stream' }
+  assert.equal(await preview.enableAudio(), 'restored-stream')
+  assert.equal(resumed, 1)
+})
+
+test('音频输出恢复未返回时仍能立即取消播放准备', async t => {
+  const { preview } = playbackHarness(t)
+  preview.audioContext = { state: 'interrupted', resume: () => new Promise(() => {}), close: async () => {} }
+  const controller = new AbortController()
+  const start = preview.enableAudio(true, controller.signal)
+  controller.abort()
+  await assert.rejects(start, error => error.name === 'AbortError')
+})
+
+test('音频输出恢复无响应时会超时退出，不会永久处于准备状态', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { preview } = playbackHarness(t)
+  preview.audioContext = { state: 'interrupted', resume: () => new Promise(() => {}), close: async () => {} }
+  const start = preview.enableAudio()
+  const rejected = assert.rejects(start, /音频输出未能恢复/)
+  t.mock.timers.tick(10000)
+  await rejected
+})
+
+test('媒体启动无响应会结束准备并暂停，可再次启动且旧请求不影响新播放', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { preview, media } = playbackHarness(t, { pending: true })
+  const start = preview.playReady(0)
+  const rejected = assert.rejects(start, /素材播放启动超时/)
+  await new Promise(setImmediate)
+  const resolveOld = media.resolvePlay
+  t.mock.timers.tick(10000)
+  await rejected
+  assert.equal(media.paused, true)
+  const retry = preview.playReady(0)
+  await new Promise(setImmediate)
+  assert.equal(media.plays, 2)
+  resolveOld()
+  media.resolvePlay()
+  await retry
 })

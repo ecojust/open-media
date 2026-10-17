@@ -13,13 +13,17 @@ import TimelineDivider from './TimelineDivider.vue'
 import ClipFilterPanel from './ClipFilterPanel.vue'
 import AudioClipPlayer from './AudioClipPlayer.vue'
 import EditorVoiceRecorder from './EditorVoiceRecorder.vue'
+import WatermarkLibrary from './WatermarkLibrary.vue'
+import ChromaKeyPanel from './ChromaKeyPanel.vue'
+import { addWatermark } from '../core/watermark-track'
+import type { WatermarkMaterial } from '../core/watermark-library'
 import { addRecordedAudio } from '../core/recording-track'
 import { importMediaFile, revokeMediaAsset } from '../core/media-import'
 import { importBlobAsset, isDesktop } from '../native'
 import type { RecordedMicrophoneAudio } from '../core/microphone-recording'
 
 const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean }>()
-const emit = defineEmits<{ change: [project: Project, label?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; 'recorded-asset': [asset: MediaAsset, blob: Blob] }>()
+const emit = defineEmits<{ change: [project: Project, label?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const editorRoot = ref<HTMLElement | null>(null)
 const timelineRatio = ref(0.4), timelineHeight = ref(268)
@@ -31,16 +35,21 @@ const inspectorTab = ref<'properties' | 'filters'>('properties')
 const playhead = ref(0)
 const playing = ref(false)
 const preparingPlayback = ref(false)
+const recordingPlayback = ref(false)
 const zoom = ref(44)
 const assetFilter = ref('all')
 const search = ref('')
-const editorDialog = ref<'speech' | 'project' | null>(null)
+const editorDialog = ref<'speech' | 'project' | 'watermark' | null>(null)
 const modalOpen = computed(() => editorDialog.value !== null)
 const dialogReturnFocus = ref<HTMLElement | null>(null)
 const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
 const audioClipPlayer = ref<InstanceType<typeof AudioClipPlayer> | null>(null)
-const speechBusy = ref(false), recordingBusy = ref(false)
-const editingBusy = computed(() => speechBusy.value || recordingBusy.value)
+const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false)
+const editingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value)
+const watermarkError = ref(''), watermarkStart = ref(0)
+const watermarkFile = ref<HTMLInputElement>()
+let watermarkLocalGreen = false
+let watermarkAbort: AbortController | undefined
 const clipSpeechTargetId = ref(''), clipSpeechError = ref(''), clipSpeechNotice = ref('')
 const selectedSpeechBusy = computed(() => speechBusy.value && clipSpeechTargetId.value === selectedId.value && editorDialog.value !== 'speech')
 const clipMenu = ref<{ x: number; y: number; clipId: string } | null>(null)
@@ -51,11 +60,13 @@ const pendingTrackDelete = ref<{ project: Project; trackId: string } | null>(nul
 const deleteTrackDialog = ref<HTMLElement | null>(null)
 const deleteTrackError = ref('')
 const snapEnabled = ref(true), snapGuide = ref<number | null>(null)
+const draggingTrackId = ref(''), trackDropBoundary = ref<number | null>(null), trackDropTop = ref(0)
+const trackOrderNotice = ref('')
 const workingProject = ref<Project | null>(null)
 const activeProject = computed(() => workingProject.value || props.project)
 const duration = computed(() => projectDuration(activeProject.value))
 const selected = computed(() => findClip(activeProject.value, selectedId.value))
-const timelineSeconds = computed(() => Math.max(20, Math.ceil(duration.value + 10)))
+const timelineSeconds = computed(() => Math.max(20, Math.ceil(duration.value + 10), recordingPlayback.value ? Math.ceil(playhead.value + 5) : 0))
 const timelineWidth = computed(() => Math.max(600, timelineSeconds.value * zoom.value))
 const tickStep = computed(() => zoom.value < 15 ? 10 : zoom.value < 30 ? 5 : zoom.value < 70 ? 2 : 1)
 const ticks = computed(() => {
@@ -111,6 +122,8 @@ let playbackOffset = 0
 let playbackRequest = 0
 let playbackAbort: AbortController | undefined
 let gesture: { kind: 'move' | 'trim-start' | 'trim-end'; clipId: string; trackId: string; startX: number; startScroll: number; original: Clip; base: Project } | undefined
+let trackDrag: { trackId: string; pointerId: number; startY: number; x: number; y: number; moved: boolean; base: Project; handle: HTMLButtonElement } | undefined
+let trackScrollFrame = 0, trackScrollTime = 0
 let menuReturnFocus: HTMLElement | null = null
 let deleteReturnFocus: HTMLElement | null = null
 
@@ -125,9 +138,51 @@ function setSpeechBusy(value: boolean): void {
   emit('busy', editingBusy.value)
 }
 function setRecordingBusy(value: boolean): void {
+  const wasBusy = recordingBusy.value
   recordingBusy.value = value
   if (value) { pause(); cancelGesture(); closeMenus(); finishTrackRename(false); cancelTrackDelete() }
+  else if (wasBusy) {
+    pause()
+    // Releasing microphone input can interrupt the previous output session.
+    // The next explicit play starts with fresh decoders and an output context.
+    resetPreview()
+  }
   emit('busy', editingBusy.value)
+}
+function startRecordingPlayback(start: number, projectId: string, elapsed: () => number): void {
+  if (editorDestroyed || !recordingBusy.value || props.project.id !== projectId || !preview) return
+  pause()
+  const renderer = preview, request = ++playbackRequest
+  const abort = new AbortController()
+  playbackAbort = abort
+  recordingPlayback.value = true
+  playing.value = true
+  playhead.value = start
+  // Picture time follows the recorder's clock, including decoder startup time.
+  // The captured input itself is never connected to the preview output.
+  void renderer.enableAudio(true, abort.signal).catch(cause => {
+    if (!abort.signal.aborted && request === playbackRequest) message(cause)
+  })
+  const tick = () => {
+    if (!recordingPlayback.value || request !== playbackRequest) return
+    playhead.value = start + elapsed()
+    const visualTime = Math.min(playhead.value, Math.max(0, duration.value - 0.001))
+    renderer.render(visualTime, playhead.value < duration.value)
+    const scroll = timelineScroll.value
+    if (scroll && playhead.value * zoom.value > scroll.scrollLeft + scroll.clientWidth - 180) {
+      scroll.scrollLeft = Math.max(0, playhead.value * zoom.value - scroll.clientWidth / 2)
+    }
+    frame = requestAnimationFrame(tick)
+  }
+  tick()
+}
+function stopRecordingPlayback(): void { if (recordingPlayback.value) pause() }
+function resetPreview(): void {
+  preview?.dispose()
+  preview = undefined
+  if (editorDestroyed || !canvas.value) return
+  preview = new TimelinePreview(canvas.value, activeProject.value, message)
+  preview.seek(playhead.value, false)
 }
 function releaseRecordingAsset(audio: RecordedMicrophoneAudio): void {
   const asset = recordedAssets.get(audio)
@@ -159,7 +214,7 @@ async function saveRecording(audio: RecordedMicrophoneAudio, start: number, proj
     throw cause
   }
 }
-function openEditorDialog(kind: 'speech' | 'project'): void {
+function openEditorDialog(kind: 'speech' | 'project' | 'watermark'): void {
   if (editingBusy.value) return
   const focused = document.activeElement
   dialogReturnFocus.value = focused instanceof HTMLElement && !focused.closest('.clip-context-menu') ? focused : menuReturnFocus
@@ -167,6 +222,71 @@ function openEditorDialog(kind: 'speech' | 'project'): void {
 }
 function openSpeech(): void { openEditorDialog('speech') }
 function closeEditorDialog(): void { if (!editingBusy.value) editorDialog.value = null }
+function openWatermarks(): void {
+  if (editingBusy.value || props.exportDisabled) return
+  watermarkStart.value = playhead.value
+  watermarkError.value = ''
+  openEditorDialog('watermark')
+}
+function importLocalWatermark(removeGreen = false): void {
+  if (editingBusy.value) return
+  watermarkLocalGreen = removeGreen
+  watermarkFile.value?.click()
+}
+function localWatermarkChosen(event: Event): void {
+  const input = event.target as HTMLInputElement, file = input.files?.[0]
+  input.value = ''
+  if (file) void insertWatermark(file, watermarkLocalGreen)
+}
+async function insertWatermark(source: WatermarkMaterial | File, removeGreen = false): Promise<void> {
+  if (editingBusy.value || props.exportDisabled || editorDialog.value !== 'watermark') return
+  const projectId = props.project.id, start = watermarkStart.value
+  const abort = new AbortController()
+  watermarkAbort = abort
+  watermarkBusy.value = true; watermarkError.value = ''; emit('busy', true)
+  const timeout = window.setTimeout(() => abort.abort(new Error('读取水印素材超时，请重试。')), 20000)
+  let asset: MediaAsset | undefined
+  const stale = () => {
+    if (editorDestroyed || props.project.id !== projectId) return true
+    if (abort.signal.aborted) throw abort.signal.reason
+    return false
+  }
+  try {
+    const material = source instanceof File ? undefined : source
+    let blob: Blob
+    if (source instanceof File) blob = source
+    else {
+      const response = await fetch(source.url, { signal: abort.signal })
+      if (!response.ok) throw new Error('内置素材读取失败，请重新打开素材库。')
+      blob = await response.blob()
+    }
+    if (stale()) return
+    window.clearTimeout(timeout)
+    const name = material ? `${material.name}.${material.kind === 'video' ? 'mp4' : 'png'}` : (source as File).name
+    asset = isDesktop()
+      ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
+      : await importMediaFile(new File([blob], name, { type: blob.type }))
+    if (stale()) return
+    const result = addWatermark(props.project, asset, start, { placement: material?.placement ?? 'bottom-right', chromaKey: material?.chromaKey ?? removeGreen })
+    emit('prepared-asset', asset, blob)
+    emit('change', result.project, '添加水印素材')
+    await nextTick()
+    if (stale()) return
+    if (!props.project.assets.some(item => item.id === asset!.id)) throw new Error('水印未能加入项目，请重试。')
+    selectedId.value = result.clipId; inspectorTab.value = 'properties'; playhead.value = start
+    editorDialog.value = null
+    await nextTick()
+    preview?.seek(start, false)
+    timelineScroll.value?.querySelector<HTMLElement>(`[data-clip-id="${result.clipId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  } catch (cause) {
+    const failure = abort.signal.aborted ? abort.signal.reason : cause
+    if (!editorDestroyed && props.project.id === projectId) watermarkError.value = failure instanceof Error ? failure.message : String(failure)
+  } finally {
+    window.clearTimeout(timeout)
+    if (asset && !props.project.assets.some(item => item.id === asset!.id)) revokeMediaAsset(asset)
+    if (watermarkAbort === abort) { watermarkAbort = undefined; watermarkBusy.value = false; emit('busy', editingBusy.value) }
+  }
+}
 async function generateTextSpeech(clipId: string): Promise<void> {
   if (editingBusy.value) return
   closeMenus(); selectedId.value = clipId
@@ -256,8 +376,123 @@ function finishTrackRename(save = true): void {
   if (name !== track.name) commit(() => setTrack(props.project, id, { name }), '重命名轨道')
 }
 function changeTrackOrder(track: Track, delta: number): void {
-  if (editingBusy.value || track.locked) return
-  commit(() => reorderTrack(props.project, track.id, props.project.tracks.findIndex(item => item.id === track.id) + delta), '调整轨道层级')
+  if (editingBusy.value || track.locked || trackDrag) return
+  const index = props.project.tracks.findIndex(item => item.id === track.id)
+  const destination = Math.max(0, Math.min(props.project.tracks.length - 1, index + delta))
+  if (index < 0 || destination === index) return
+  commit(() => reorderTrack(props.project, track.id, destination), '调整轨道层级')
+}
+function focusTrackHandle(trackId: string): void {
+  void nextTick(() => {
+    const handle = [...(timelineScroll.value?.querySelectorAll<HTMLButtonElement>('[data-track-drag]') || [])].find(item => item.dataset.trackDrag === trackId)
+    handle?.focus({ preventScroll: true })
+    handle?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
+}
+function trackHandleKeyboard(event: KeyboardEvent, track: Track): void {
+  if (!event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return
+  event.preventDefault(); event.stopPropagation()
+  if (editingBusy.value || props.exportDisabled || track.locked || modalOpen.value || pendingTrackDelete.value || gesture || trackDrag) return
+  const index = props.project.tracks.findIndex(item => item.id === track.id)
+  const destination = index + (event.key === 'ArrowUp' ? -1 : 1)
+  if (index < 0 || destination < 0 || destination >= props.project.tracks.length) return
+  if (commit(() => reorderTrack(props.project, track.id, destination), '调整轨道层级')) {
+    trackOrderNotice.value = `${track.name}已移至第 ${destination + 1} 层。`
+    focusTrackHandle(track.id)
+  }
+}
+function startTrackDrag(event: PointerEvent, track: Track): void {
+  if (event.button !== 0 || !event.isPrimary || editingBusy.value || props.exportDisabled || track.locked || modalOpen.value || pendingTrackDelete.value || gesture || trackDrag || renamingTrackId.value || props.project.tracks.length < 2) return
+  event.preventDefault(); event.stopPropagation()
+  const handle = event.currentTarget as HTMLButtonElement
+  handle.focus({ preventScroll: true })
+  pause(); closeMenus(); finishTrackRename(false)
+  trackDrag = { trackId: track.id, pointerId: event.pointerId, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false, base: props.project, handle }
+  try { handle.setPointerCapture(event.pointerId) } catch { /* Window listeners also cover devices without pointer capture. */ }
+  handle.addEventListener('lostpointercapture', cancelTrackPointer)
+  window.addEventListener('pointermove', moveTrackDrag, { passive: false })
+  window.addEventListener('pointerup', endTrackDrag)
+  window.addEventListener('pointercancel', cancelTrackPointer)
+  window.addEventListener('blur', cancelTrackDrag)
+}
+function updateTrackDrop(): void {
+  const drag = trackDrag, scroll = timelineScroll.value
+  trackDropBoundary.value = null
+  if (!drag?.moved || !scroll) return
+  const bounds = scroll.getBoundingClientRect()
+  if (drag.x < bounds.left || drag.x > bounds.right) return
+  const rows = [...scroll.querySelectorAll<HTMLElement>('[data-track-row-id]')]
+  const source = props.project.tracks.findIndex(track => track.id === drag.trackId)
+  if (!rows.length || source < 0) return
+  const pointerY = Math.max(bounds.top + 24, Math.min(bounds.bottom, drag.y))
+  let boundary = rows.findIndex(row => { const rect = row.getBoundingClientRect(); return pointerY < rect.top + rect.height / 2 })
+  if (boundary < 0) boundary = rows.length
+  const destination = boundary > source ? boundary - 1 : boundary
+  if (destination === source) return
+  const row = rows[Math.min(boundary, rows.length - 1)]!
+  trackDropTop.value = row.offsetTop + (boundary === rows.length ? row.offsetHeight : 0)
+  trackDropBoundary.value = boundary
+}
+function scrollTrackDrag(now: number): void {
+  trackScrollFrame = 0
+  const drag = trackDrag, scroll = timelineScroll.value
+  if (!drag?.moved || !scroll) return
+  const bounds = scroll.getBoundingClientRect(), elapsed = Math.min(32, now - (trackScrollTime || now))
+  trackScrollTime = now
+  if (drag.x >= bounds.left && drag.x <= bounds.right) {
+    const top = bounds.top + 24, bottom = bounds.bottom, edge = Math.min(32, (bottom - top) / 3)
+    const speed = drag.y < top + edge ? -Math.min(1, (top + edge - drag.y) / edge) : drag.y > bottom - edge ? Math.min(1, (drag.y - bottom + edge) / edge) : 0
+    if (speed) scroll.scrollTop += speed * elapsed * 0.6
+  }
+  updateTrackDrop()
+  trackScrollFrame = requestAnimationFrame(scrollTrackDrag)
+}
+function moveTrackDrag(event: PointerEvent): void {
+  const drag = trackDrag
+  if (!drag || drag.pointerId !== event.pointerId) return
+  event.preventDefault()
+  drag.x = event.clientX; drag.y = event.clientY
+  if (!drag.moved && Math.abs(event.clientY - drag.startY) < 4) return
+  if (!drag.moved) {
+    drag.moved = true; draggingTrackId.value = drag.trackId
+    trackOrderNotice.value = '上下拖动调整轨道层级，松开确认，Esc 取消。'
+    trackScrollTime = 0
+    trackScrollFrame = requestAnimationFrame(scrollTrackDrag)
+  }
+  updateTrackDrop()
+}
+function endTrackDrag(event: PointerEvent): void {
+  const drag = trackDrag
+  if (!drag || drag.pointerId !== event.pointerId) return
+  drag.x = event.clientX; drag.y = event.clientY
+  updateTrackDrop()
+  const boundary = trackDropBoundary.value
+  const source = props.project.tracks.findIndex(track => track.id === drag.trackId)
+  const track = props.project.tracks[source]
+  const destination = boundary === null ? source : boundary > source ? boundary - 1 : boundary
+  const bounds = timelineScroll.value?.getBoundingClientRect()
+  const inside = bounds && event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top + 24 && event.clientY <= bounds.bottom
+  const valid = inside && drag.moved && props.project === drag.base && track && !track.locked && !editingBusy.value && !props.exportDisabled && !modalOpen.value && !pendingTrackDelete.value
+  cancelTrackDrag()
+  if (valid && source !== destination && commit(() => reorderTrack(props.project, drag.trackId, destination), '调整轨道层级')) {
+    trackOrderNotice.value = `${track.name}已移至第 ${destination + 1} 层。`
+    focusTrackHandle(drag.trackId)
+  }
+}
+function cancelTrackPointer(event: PointerEvent): void { if (event.pointerId === trackDrag?.pointerId) cancelTrackDrag() }
+function cancelTrackDrag(): void {
+  const drag = trackDrag
+  trackDrag = undefined; draggingTrackId.value = ''; trackDropBoundary.value = null
+  cancelAnimationFrame(trackScrollFrame); trackScrollFrame = 0; trackScrollTime = 0
+  window.removeEventListener('pointermove', moveTrackDrag)
+  window.removeEventListener('pointerup', endTrackDrag)
+  window.removeEventListener('pointercancel', cancelTrackPointer)
+  window.removeEventListener('blur', cancelTrackDrag)
+  if (drag) {
+    trackOrderNotice.value = ''
+    drag.handle.removeEventListener('lostpointercapture', cancelTrackPointer)
+    try { if (drag.handle.hasPointerCapture(drag.pointerId)) drag.handle.releasePointerCapture(drag.pointerId) } catch { /* The pointer may already have been released. */ }
+  }
 }
 function requestTrackDelete(track: Track): void {
   if (editingBusy.value || track.locked) return
@@ -316,6 +551,7 @@ function pauseTimeline(): void {
   playbackAbort = undefined
   preparingPlayback.value = false
   playing.value = false
+  recordingPlayback.value = false
   cancelAnimationFrame(frame)
   preview?.pause()
 }
@@ -331,7 +567,7 @@ async function togglePlay(): Promise<void> {
   preparingPlayback.value = true
   if (playhead.value >= duration.value) playhead.value = 0
   try {
-    try { await renderer.enableAudio() } catch { if (!abort.signal.aborted) emit('status', '音频预览暂不可用，仍可查看画面') }
+    await renderer.enableAudio(true, abort.signal)
     if (abort.signal.aborted || request !== playbackRequest) return
     await renderer.playReady(playhead.value, abort.signal)
     if (abort.signal.aborted || request !== playbackRequest) return
@@ -351,7 +587,7 @@ async function togglePlay(): Promise<void> {
     if (request !== playbackRequest) return
     playing.value = false
     renderer.pause()
-    if (!(cause instanceof DOMException && cause.name === 'AbortError')) message(cause)
+    if (!(cause instanceof DOMException && cause.name === 'AbortError')) { resetPreview(); message(cause) }
   } finally {
     if (request === playbackRequest) { preparingPlayback.value = false; playbackAbort = undefined }
   }
@@ -394,6 +630,7 @@ function separateAudio(): void {
     if (!track) { track = createTrack('audio'); project = addTrack(project, track) }
     const clip = createClip(asset, project, { ...current.clip, id: newId('clip'), name: `${current.clip.name} · 音轨` })
     delete clip.filters
+    delete clip.chromaKey
     project = addClip(project, track.id, clip)
     return updateClip(project, current.clip.id, { volume: 0 })
   }, '分离片段音轨')
@@ -487,12 +724,12 @@ function onDrop(event: DragEvent, track: Track): void {
   } else if (event.dataTransfer?.files.length) emit('import', [...event.dataTransfer.files])
 }
 function setPlayheadFromPointer(event: PointerEvent): void {
-  if (event.button !== 0 || editingBusy.value || pendingTrackDelete.value || (event.target as HTMLElement).closest('.timeline-clip')) return
+  if (event.button !== 0 || editingBusy.value || pendingTrackDelete.value || trackDrag || (event.target as HTMLElement).closest('.timeline-clip')) return
   const row = event.currentTarget as HTMLElement
   seek((event.clientX - row.getBoundingClientRect().left) / zoom.value)
 }
 function startGesture(event: PointerEvent, clip: Clip, track: Track, kind: 'move' | 'trim-start' | 'trim-end'): void {
-  if (event.button !== 0 || editingBusy.value) return
+  if (event.button !== 0 || editingBusy.value || trackDrag) return
   event.preventDefault(); event.stopPropagation()
   ;(event.currentTarget as HTMLElement).closest<HTMLButtonElement>('.timeline-clip')?.focus({ preventScroll: true })
   selectedId.value = clip.id
@@ -562,9 +799,10 @@ function endGesture(): void {
   clearGesture()
   if (project && !editingBusy.value) emit('change', project, label)
 }
-function cancelGesture(): void { workingProject.value = null; clearGesture() }
+function cancelGesture(): void { workingProject.value = null; clearGesture(); cancelTrackDrag() }
 function fitTimeline(): void { zoom.value = Math.max(6, Math.min(160, ((timelineScroll.value?.clientWidth || 900) - 160) / Math.max(10, duration.value + 2))) }
 function keyboard(event: KeyboardEvent): void {
+  if (trackDrag) { if (event.key === 'Escape') { event.preventDefault(); cancelTrackDrag() }; return }
   if (event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return
   if (event.key === 'Escape' && (clipMenu.value || trackMenu.value)) { event.preventDefault(); closeMenus(true); return }
   if (editingBusy.value || pendingTrackDelete.value || modalOpen.value) return
@@ -590,11 +828,13 @@ watch(activeProject, project => {
 }, { deep: true })
 watch(() => props.project, project => {
   if (gesture && project !== gesture.base) cancelGesture()
+  if (trackDrag && project !== trackDrag.base) cancelTrackDrag()
   if (pendingTrackDelete.value && project !== pendingTrackDelete.value.project) cancelTrackDelete()
   if (clipMenu.value && !findClip(project, clipMenu.value.clipId)) closeMenus()
   if (trackMenu.value && !project.tracks.some(track => track.id === trackMenu.value?.trackId)) closeMenus()
 })
-watch(() => props.project.id, () => { pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
+watch(() => props.project.id, () => { cancelWatermarkImport(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
+watch([editingBusy, modalOpen, () => props.exportDisabled], values => { if (values.some(Boolean)) cancelTrackDrag() }, { flush: 'sync' })
 watch(selectedId, () => { clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
 onMounted(() => {
   if (canvas.value) {
@@ -608,7 +848,12 @@ onMounted(() => {
   window.addEventListener('resize', closeMenusOnResize)
 })
 function closeMenusOnResize(): void { closeMenus() }
-onBeforeUnmount(() => { editorDestroyed = true; pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
+function cancelWatermarkImport(): void {
+  watermarkAbort?.abort(new DOMException('已取消水印导入', 'AbortError'))
+  watermarkAbort = undefined
+  if (watermarkBusy.value) { watermarkBusy.value = false; emit('busy', editingBusy.value) }
+}
+onBeforeUnmount(() => { editorDestroyed = true; cancelWatermarkImport(); pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
 defineExpose({ getCanvas: () => canvas.value, pause, seek })
 </script>
 
@@ -648,7 +893,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
           <div class="play-controls">
             <button title="回到开头" :disabled="editingBusy" @click="seek(0)"><Icon name="skip-back" :size="17" /></button>
             <button class="play-button" :disabled="!duration || editingBusy" :title="preparingPlayback ? '正在准备播放，点击取消' : playing ? '暂停（空格）' : '播放（空格）'" :aria-busy="preparingPlayback" data-testid="preview-play" @click="togglePlay"><Icon :name="preparingPlayback ? 'clock' : playing ? 'pause' : 'play'" :size="20" /></button>
-            <EditorVoiceRecorder :project-id="project.id" :start="playhead" :disabled="speechBusy || !!exportDisabled || !!recordingDisabled" :save="saveRecording" @busy="setRecordingBusy" @release="releaseRecordingAsset" @status="emit('status', $event)" />
+            <EditorVoiceRecorder :project-id="project.id" :start="playhead" :disabled="speechBusy || !!exportDisabled || !!recordingDisabled" :save="saveRecording" @busy="setRecordingBusy" @started="startRecordingPlayback" @stopped="stopRecordingPlayback" @release="releaseRecordingAsset" @status="emit('status', $event)" />
             <button title="跳到结尾" :disabled="editingBusy" @click="seek(duration)"><Icon name="skip-forward" :size="17" /></button>
           </div>
           <span class="preview-scale">适应窗口</span>
@@ -673,6 +918,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
             <p v-if="clipSpeechError" class="clip-speech-error" role="alert">{{ clipSpeechError }}</p><p v-else-if="clipSpeechNotice" class="clip-speech-notice" role="status">{{ clipSpeechNotice }}</p>
           </div>
           <fieldset :disabled="selectedLocked || editingBusy">
+            <ChromaKeyPanel v-if="selectedSupportsFilters" :value="selected.clip.chromaKey" :disabled="selectedLocked || editingBusy" @change="(chromaKey, label) => updateSelected({ chromaKey }, label)" />
             <template v-if="selected.clip.text !== undefined"><h3>文本</h3><textarea :value="selected.clip.text" rows="3" aria-label="字幕内容" @change="updateSelected({ text: stringValue($event) }, '编辑字幕')" /><div class="property-grid"><label>字号<input type="number" min="4" max="2048" :value="selected.clip.fontSize" @change="updateSelected({ fontSize: numberValue($event) })" /></label><label>颜色<input type="color" :value="selected.clip.color" @change="updateSelected({ color: stringValue($event) })" /></label></div><label>字体<select :value="selected.clip.fontFamily" @change="updateSelected({ fontFamily: stringValue($event) })"><option value="sans-serif">无衬线</option><option value="serif">衬线</option><option value="monospace">等宽</option></select></label><label>文字底色<div class="text-background"><input type="color" :value="selected.clip.background === 'transparent' ? '#000000' : selected.clip.background" aria-label="文字底色" @change="updateSelected({ background: stringValue($event) })" /><button :class="{ active: selected.clip.background === 'transparent' }" @click="updateSelected({ background: 'transparent' })">透明</button></div></label><label>对齐<select :value="selected.clip.textAlign" @change="updateSelected({ textAlign: stringValue($event) as Clip['textAlign'] })"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><label>字重<select :value="selected.clip.fontWeight" @change="updateSelected({ fontWeight: numberValue($event) })"><option :value="400">常规</option><option :value="600">半粗</option><option :value="700">粗体</option></select></label></template>
             <h3>时间</h3><div class="property-grid"><label>开始 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.start.toFixed(3))" aria-label="片段开始时间" @change="updateSelected({ start: numberValue($event) })" /></label><label>时长 / 秒<input type="number" min="0.04" step="0.1" :value="Number(clipDuration(selected.clip).toFixed(3))" aria-label="片段时长" @change="updateSelected({ trimOut: selected!.clip.trimIn + numberValue($event) * selected!.clip.speed })" /></label><label>源起点 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.trimIn.toFixed(3))" @change="updateSelected({ trimIn: numberValue($event) })" /></label><label>源终点 / 秒<input type="number" min="0.001" step="0.1" :value="Number(selected.clip.trimOut.toFixed(3))" @change="updateSelected({ trimOut: numberValue($event) })" /></label></div>
             <label>播放速度<select :value="selected.clip.speed" aria-label="播放速度" @change="updateSelected({ speed: numberValue($event) })"><option v-for="speed in [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4, 8, 16]" :key="speed" :value="speed">{{ speed }}×</option></select></label>
@@ -694,6 +940,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
         <div class="track-add"><span>时间线</span><button title="添加视频轨道" @click="addTimelineTrack('video')"><Icon name="video" :size="14" /><Icon name="plus" :size="11" /></button><button title="添加音频轨道" @click="addTimelineTrack('audio')"><Icon name="audio" :size="14" /><Icon name="plus" :size="11" /></button><button title="添加字幕轨道" @click="addTimelineTrack('text')"><Icon name="text" :size="14" /><Icon name="plus" :size="11" /></button></div>
         <div class="timeline-clip-tools" role="group" aria-label="片段剪辑">
           <button title="添加字幕" @click="addText"><Icon name="text" :size="15" /><span>字幕</span></button>
+          <button title="从当前刻度添加水印" aria-label="添加水印" aria-haspopup="dialog" data-testid="watermark-open" :disabled="editingBusy || !!exportDisabled" @click="openWatermarks"><Icon name="sticker" :size="15" /><span>添加水印</span></button>
           <button :disabled="!canSplit" title="在播放头处分割（S）" @click="splitSelected"><Icon name="scissors" :size="15" /><span>分割</span></button>
           <button :disabled="!canTrimStart" title="裁掉播放头左侧（Q）" aria-label="裁掉播放头左侧（Q）" @click="trimSelected('start')"><Icon name="mark-in" :size="15" /></button>
           <button :disabled="!canTrimEnd" title="裁掉播放头右侧（W）" aria-label="裁掉播放头右侧（W）" @click="trimSelected('end')"><Icon name="mark-out" :size="15" /></button>
@@ -703,12 +950,12 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
         <div class="timeline-edits"><button data-testid="timeline-snap" :aria-pressed="snapEnabled" :class="{ active: snapEnabled }" :title="snapEnabled ? '吸附已开启，按住 Shift 临时关闭' : '吸附已关闭，仍按帧对齐'" aria-label="时间线吸附" @click="snapEnabled = !snapEnabled; snapGuide = null"><Icon name="magnet" :size="16" /></button><button data-testid="timeline-close-gaps" :disabled="!duration" title="清除全轨公共空隙，保持各轨道同步" aria-label="清除全轨公共空隙" @click="closeGaps"><Icon name="close-gap" :size="16" /></button></div>
         <div class="timeline-zoom"><button title="缩小时间线" @click="zoom = Math.max(6, zoom / 1.25)"><Icon name="zoom-out" :size="15" /></button><input v-model.number="zoom" type="range" min="6" max="160" aria-label="时间线缩放" /><button title="放大时间线" @click="zoom = Math.min(160, zoom * 1.25)"><Icon name="zoom-in" :size="15" /></button><button title="适应全部片段" @click="fitTimeline"><Icon name="fit" :size="16" /></button></div>
       </div>
-      <div ref="timelineScroll" class="timeline-scroll" tabindex="-1" @scroll="timelineOffset = ($event.target as HTMLElement).scrollLeft; closeMenus()">
+      <div ref="timelineScroll" class="timeline-scroll" :class="{ 'sorting-tracks': draggingTrackId }" tabindex="-1" @scroll="timelineOffset = ($event.target as HTMLElement).scrollLeft; closeMenus(); updateTrackDrop()">
         <div class="timeline-content" :style="{ width: `${timelineWidth + 140}px` }">
           <div class="ruler-row"><div class="track-label ruler-label">{{ formatTime(playhead, true) }}</div><div class="timeline-ruler" :style="{ width: `${timelineWidth}px` }" @pointerdown="setPlayheadFromPointer"><span v-for="tick in ticks" :key="tick" :style="{ left: `${tick * zoom}px` }">{{ formatTime(tick) }}</span><div class="ruler-playhead" :style="{ left: `${playhead * zoom}px` }" /></div></div>
-          <div v-for="(track, trackIndex) in activeProject.tracks" :key="track.id" class="track-row" :class="{ locked: track.locked }">
+          <div v-for="(track, trackIndex) in activeProject.tracks" :key="track.id" class="track-row" :data-track-row-id="track.id" :class="{ locked: track.locked, 'track-dragging': draggingTrackId === track.id }">
             <div class="track-label" :data-track-label-id="track.id" tabindex="-1" @contextmenu="openTrackMenu($event, track)">
-              <div class="track-name" @dblclick.stop="startTrackRename(track)"><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : 'video'" :size="13" /><input v-if="renamingTrackId === track.id" v-model="trackName" class="track-rename-input" aria-label="轨道名称" maxlength="200" @keydown.enter.prevent.stop="finishTrackRename()" @keydown.esc.prevent.stop="finishTrackRename(false)" @blur="finishTrackRename()" @pointerdown.stop @dblclick.stop @contextmenu.stop /><span v-else :title="`${track.name} · 双击重命名`">{{ track.name }}</span></div>
+              <div class="track-name" @dblclick.stop="startTrackRename(track)"><button class="track-drag-handle" :data-track-drag="track.id" :disabled="track.locked || editingBusy || !!exportDisabled || !!renamingTrackId || activeProject.tracks.length < 2" :aria-label="`拖动排序：${track.name}`" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="拖动调整轨道层级（Alt + ↑ / ↓）" @pointerdown="startTrackDrag($event, track)" @keydown="trackHandleKeyboard($event, track)" @click.stop @dblclick.stop @contextmenu.prevent.stop><Icon name="grip" :size="13" /></button><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : 'video'" :size="13" /><input v-if="renamingTrackId === track.id" v-model="trackName" class="track-rename-input" aria-label="轨道名称" maxlength="200" @keydown.enter.prevent.stop="finishTrackRename()" @keydown.esc.prevent.stop="finishTrackRename(false)" @blur="finishTrackRename()" @pointerdown.stop @dblclick.stop @contextmenu.stop /><span v-else :title="`${track.name} · 双击重命名`">{{ track.name }}</span></div>
               <div class="track-actions"><button :title="track.muted ? '开启轨道声音' : '静音轨道'" :class="{ enabled: track.muted }" :disabled="track.kind === 'text' || track.locked" @click="commit(() => setTrack(project, track.id, { muted: !track.muted }), '调整轨道静音')"><Icon :name="track.muted ? 'volume-off' : 'volume'" :size="13" /></button><button :title="track.locked ? '解锁轨道' : '锁定轨道'" :class="{ enabled: track.locked }" @click="commit(() => setTrack(project, track.id, { locked: !track.locked }), '调整轨道锁定')"><Icon :name="track.locked ? 'lock' : 'unlock'" :size="12" /></button><button :disabled="!trackIndex || track.locked" title="轨道上移一层" @click="changeTrackOrder(track, -1)"><Icon name="chevron-up" :size="13" /></button><button title="轨道操作" aria-label="轨道操作" aria-haspopup="menu" @click="openTrackMenu($event, track)"><Icon name="more" :size="13" /></button></div>
             </div>
             <div class="track-lane" :data-track-id="track.id" :style="{ width: `${timelineWidth}px`, backgroundSize: `${zoom * tickStep}px 100%` }" @dragover.prevent @drop="onDrop($event, track)" @pointerdown="setPlayheadFromPointer">
@@ -719,11 +966,17 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
               <div class="lane-playhead" :style="{ left: `${playhead * zoom}px` }" />
             </div>
           </div>
+          <div v-if="trackDropBoundary !== null" class="track-drop-indicator" data-testid="track-drop-indicator" :data-drop-index="trackDropBoundary" :style="{ top: `${trackDropTop}px` }" aria-hidden="true" />
           <div v-if="snapGuide !== null" class="snap-guide" data-testid="timeline-snap-guide" aria-hidden="true" :style="{ left: `${140 + snapGuide * zoom}px` }"><span>{{ formatTime(snapGuide, true) }}</span></div>
         </div>
       </div>
+      <span class="track-sort-announcement" role="status" aria-live="polite">{{ trackOrderNotice }}</span>
       <footer class="timeline-footer"><span>空格播放 · S 分割 · Q / W 裁剪 · Shift 临时关闭吸附 · 右键更多</span><span>{{ activeProject.tracks.reduce((sum, track) => sum + track.clips.length, 0) }} 个片段 · {{ formatTime(duration) }}</span></footer>
     </section>
+    <input ref="watermarkFile" type="file" accept="image/*,video/*,.mp4,.mov,.webm,.png,.webp,.svg" hidden data-testid="watermark-file" @change="localWatermarkChosen" />
+    <EditorDialog :open="editorDialog === 'watermark'" title="添加水印" icon="sticker" wide :busy="watermarkBusy" busy-message="正在添加水印素材…" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+      <WatermarkLibrary v-if="editorDialog === 'watermark'" :busy="watermarkBusy" :error="watermarkError" @select="insertWatermark" @import-local="importLocalWatermark" />
+    </EditorDialog>
     <EditorDialog :open="editorDialog === 'speech'" title="文字转语音" icon="audio" wide :busy="editingBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <SpeechPanel ref="speechPanel" :active="editorDialog === 'speech'" in-dialog :project="project" @change="(next, label) => emit('change', next, label)" @status="emit('status', $event)" @busy="setSpeechBusy" />
     </EditorDialog>
@@ -759,6 +1012,8 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
 </template>
 
 <style scoped>
+.track-name .track-drag-handle{flex:0 0 14px;width:14px;height:18px;min-height:18px;padding:0;margin-left:-5px;margin-right:-3px;color:var(--ed-muted);cursor:grab;touch-action:none}.track-name .track-drag-handle:active{cursor:grabbing}.track-name .track-drag-handle:disabled{cursor:not-allowed}.track-dragging>.track-label,.track-dragging>.track-lane{background-color:color-mix(in srgb,var(--ed-accent) 10%,var(--ed-panel))}.track-dragging .timeline-clip{opacity:.65}.sorting-tracks{cursor:grabbing;user-select:none}.sorting-tracks .track-lane{cursor:grabbing}.track-drop-indicator{position:absolute;left:0;right:0;height:3px;transform:translateY(-1px);background:var(--ed-accent);box-shadow:0 0 0 1px var(--ed-panel);z-index:5;pointer-events:none}.track-sort-announcement{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+
 .video-editor{--ed-bg:var(--ui-bg,#f5f6fa);--ed-panel:var(--ui-surface,#fff);--ed-border:var(--ui-line,#e3e6ed);--ed-text:var(--ui-text,#202638);--ed-muted:var(--ui-muted,#858b9a);--ed-accent:var(--ui-accent,#3267f6);height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden;color:var(--ed-text);font-size:12px;background:var(--ed-bg)}
 .clip-speech-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;margin-top:12px}.clip-speech-actions>button{border:1px solid var(--ed-border);font-size:10px;min-height:30px}.clip-speech-actions .selected-speech{color:var(--ed-accent)}.clip-speech-actions .clip-speech-cancel{grid-column:1/-1;justify-self:end}.clip-speech-error,.clip-speech-notice{grid-column:1/-1;overflow-wrap:anywhere;white-space:pre-line;font-size:10px;line-height:1.6;margin:0;padding:8px;border-radius:6px}.clip-speech-error{color:#bc423a;background:color-mix(in srgb,#e15b53 10%,var(--ed-panel))}.clip-speech-notice{color:var(--ed-text);background:var(--ed-bg)}.clip-speech-spinner{display:inline-block;width:11px;height:11px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:clip-speech-spin .8s linear infinite;flex-shrink:0}@keyframes clip-speech-spin{to{transform:rotate(360deg)}}.clip-context-menu{position:fixed;z-index:70;width:244px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow:auto;box-sizing:border-box;padding:5px;border:1px solid var(--ui-line,#e3e6ed);border-radius:8px;background:var(--ui-surface,#fff);color:var(--ui-text,#202638);box-shadow:0 8px 30px #0002;font-size:12px;scrollbar-width:thin}.clip-context-menu button{width:100%;justify-content:flex-start;padding:6px 8px;font-size:11px;gap:7px}.clip-context-menu button>svg{flex-shrink:0}.clip-context-menu button:hover:not(:disabled){color:var(--ui-accent,#3267f6);background:color-mix(in srgb,var(--ui-accent,#3267f6) 9%,transparent)}.clip-context-menu button:focus-visible{outline-color:var(--ui-accent,#3267f6);outline-offset:-2px}.clip-context-menu kbd,.menu-detail{margin-left:auto;font:9px ui-monospace,monospace;color:var(--ui-muted,#858b9a)}.clip-context-menu hr{border:0;border-top:1px solid var(--ui-line,#e3e6ed);margin:4px 3px}.track-delete-backdrop{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:16px;background:#10162670;box-sizing:border-box}.track-delete-dialog{width:min(380px,100%);box-sizing:border-box;border:1px solid var(--ui-line,#e3e6ed);background:var(--ui-surface,#fff);color:var(--ui-text,#202638);border-radius:12px;padding:20px;box-shadow:0 16px 65px #0004;font-size:13px}.track-delete-dialog h2{font-size:16px;margin:0 0 12px}.track-delete-dialog p{line-height:1.7;overflow-wrap:anywhere;margin:10px 0}.track-delete-dialog .dialog-note{font-size:11px;color:var(--ui-muted,#858b9a)}.track-delete-dialog .dialog-error{font-size:11px;color:#bd4039}.track-delete-dialog footer{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}.track-delete-dialog button{border:1px solid var(--ui-line,#e3e6ed);padding:7px 12px;font:inherit}.track-delete-dialog button:focus-visible{outline-color:var(--ui-accent,#3267f6)}.track-delete-dialog .confirm-delete{color:#fff;background:#ce4a43;border-color:#ce4a43}.track-delete-dialog .confirm-delete:hover{color:#fff;background:#ba3f39}
 button,input,textarea{font:inherit}button{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid transparent;background:transparent;color:inherit;cursor:pointer;border-radius:6px;min-height:29px;padding:4px 7px;white-space:nowrap}button:hover:not(:disabled){background:color-mix(in srgb,var(--ed-accent) 9%,transparent);color:var(--ed-accent)}button:disabled{opacity:.35;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--ed-accent);outline-offset:2px}input,textarea{box-sizing:border-box;min-width:0;width:100%;border:1px solid var(--ed-border);border-radius:6px;padding:7px 8px;background:var(--ed-panel);color:var(--ed-text)}select{width:100%}input[type=range]{padding:0;accent-color:var(--ed-accent);height:23px;border:0}input[type=color]{height:30px;padding:3px}textarea{resize:vertical}

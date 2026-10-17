@@ -992,6 +992,10 @@ fn timeline_plan(
             clip,
             track["kind"] == "video" && (asset["kind"] == "video" || asset["kind"] == "image"),
         )?;
+        let chroma_key = crate::chroma_key::filter_chain(
+            clip,
+            track["kind"] == "video" && (asset["kind"] == "video" || asset["kind"] == "image"),
+        )?;
         if image && asset["mime"] == "image/gif" {
             arg(
                 &mut args,
@@ -1027,7 +1031,11 @@ fn timeline_plan(
             let opacity = number(clip, "opacity", 1.0, 0.0, 1.0)? * fade_peak;
             let fit = clip["fit"].as_str().unwrap_or("contain");
             let scale=match fit{"cover"=>format!("scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}"),"fill"=>format!("scale={cw}:{ch}"),_=>format!("scale={cw}:{ch}:force_original_aspect_ratio=decrease,pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")};
-            let mut chain=format!("[{index}:v]trim=start={trim_in}:end={trim_out},setpts=(PTS-STARTPTS)/{speed},format=rgba,{scale},setsar=1");
+            let mut chain=format!("[{index}:v]trim=start={trim_in}:end={trim_out},setpts=(PTS-STARTPTS)/{speed},format=rgba");
+            if let Some(filter) = &chroma_key {
+                chain = crate::chroma_key::append_graph(chain, &mut filters, index, filter);
+            }
+            chain += &format!(",{scale},setsar=1");
             if let Some(filter) = &color_filter {
                 chain += &format!(",format=rgba,split[filter_input{index}][filter_alpha{index}]");
                 filters.push(chain);

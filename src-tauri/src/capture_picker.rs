@@ -24,6 +24,8 @@ pub struct PickerPreferences {
     pub output_size: Option<OutputSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub microphone: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_device: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -34,6 +36,8 @@ pub struct PickerSelection {
     pub output_size: Option<OutputSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub microphone: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_device: Option<String>,
     pub source_name: Option<String>,
     pub source_width: Option<u32>,
     pub source_height: Option<u32>,
@@ -62,16 +66,29 @@ pub struct PickerTarget {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct PickerAudioDevice {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PickerContext {
     pub request_id: String,
     pub display_id: String,
     pub display: PickerDisplay,
     pub targets: Vec<PickerTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_devices: Option<Vec<PickerAudioDevice>>,
     pub preferences: PickerPreferences,
 }
 
 fn normalized_preferences(mut preferences: PickerPreferences) -> PickerPreferences {
+    preferences.audio_device = if preferences.purpose.as_deref() == Some("screenshot") {
+        None
+    } else {
+        preferences.audio_device.filter(|id| !id.is_empty())
+    };
     preferences.microphone = if preferences.purpose.as_deref() == Some("screenshot") {
         None
     } else {
@@ -84,6 +101,16 @@ fn apply_audio_preference(
     mut selection: PickerSelection,
     preferences: &PickerPreferences,
 ) -> PickerSelection {
+    selection.audio_device = if preferences.purpose.as_deref() == Some("screenshot") {
+        None
+    } else {
+        // An empty selection explicitly returns to the default device; an
+        // absent field retains the user's previous input choice.
+        selection
+            .audio_device
+            .or_else(|| preferences.audio_device.clone())
+            .filter(|id| !id.is_empty())
+    };
     selection.microphone = if preferences.purpose.as_deref() == Some("screenshot") {
         None
     } else {
@@ -186,6 +213,20 @@ fn make_context(
             pixel_height,
         },
         targets,
+        audio_devices: if preferences.purpose.as_deref() == Some("screenshot") {
+            None
+        } else {
+            Some(
+                sources
+                    .iter()
+                    .filter(|source| source.kind == "audio")
+                    .map(|source| PickerAudioDevice {
+                        id: source.id.clone(),
+                        name: source.name.clone(),
+                    })
+                    .collect(),
+            )
+        },
         preferences: normalized_preferences(preferences.clone()),
     })
 }
@@ -195,6 +236,20 @@ fn validate_selection(
     display: &CaptureDevice,
     sources: &[CaptureDevice],
 ) -> Result<PickerSelection> {
+    if selection.microphone == Some(true) {
+        if let Some(id) = selection
+            .audio_device
+            .as_deref()
+            .filter(|id| !id.is_empty())
+        {
+            if !sources
+                .iter()
+                .any(|source| source.kind == "audio" && source.id == id)
+            {
+                return Err("所选麦克风已断开，请重新选择或关闭麦克风录制。".into());
+            }
+        }
+    }
     let source = sources
         .iter()
         .find(|source| source.id == selection.source_id)
@@ -612,8 +667,10 @@ mod desktop {
                     .ok_or("当前窗口没有此录制选择的访问权限。")?;
                 selection
                     .map(|selection| {
-                        validate_selection(selection, &window.display, &session.sources).map(
-                            |selection| apply_audio_preference(selection, &session.preferences),
+                        validate_selection(
+                            apply_audio_preference(selection, &session.preferences),
+                            &window.display,
+                            &session.sources,
                         )
                     })
                     .transpose()?
@@ -855,6 +912,7 @@ mod tests {
             region: None,
             output_size: None,
             microphone: None,
+            audio_device: None,
             source_name: Some("untrusted name".into()),
             source_width: Some(1),
             source_height: Some(1),
@@ -1021,23 +1079,109 @@ mod tests {
     }
 
     #[test]
+    fn microphone_sources_preserve_native_ids_and_allow_returning_to_default() {
+        let display = display();
+        let audio = CaptureDevice {
+            id: "native-microphone-unique-id".into(),
+            name: "USB 麦克风".into(),
+            kind: "audio".into(),
+            ..CaptureDevice::default()
+        };
+        let sources = vec![display.clone(), audio.clone()];
+        let preferences = PickerPreferences {
+            microphone: Some(false),
+            audio_device: Some(audio.id.clone()),
+            ..PickerPreferences::default()
+        };
+        let context = make_context("test", &display, &sources, &preferences, true).unwrap();
+        assert_eq!(context.targets.len(), 1);
+        let context_json = serde_json::to_value(context).unwrap();
+        assert_eq!(context_json["audioDevices"][0]["id"], audio.id);
+        assert_eq!(context_json["audioDevices"][0]["name"], audio.name);
+        assert_eq!(context_json["preferences"]["audioDevice"], audio.id);
+        let empty_context =
+            make_context("test", &display, &[display.clone()], &preferences, true).unwrap();
+        assert_eq!(
+            serde_json::to_value(empty_context).unwrap()["audioDevices"],
+            serde_json::json!([])
+        );
+
+        let inherited = apply_audio_preference(selection(&display.id), &preferences);
+        assert_eq!(inherited.audio_device.as_deref(), Some(audio.id.as_str()));
+        assert_eq!(inherited.microphone, Some(false));
+        assert!(validate_selection(inherited, &display, &sources).is_ok());
+
+        let mut chosen = selection(&display.id);
+        chosen.audio_device = Some(String::new());
+        let reset = apply_audio_preference(chosen, &preferences);
+        assert!(reset.audio_device.is_none());
+    }
+
+    #[test]
+    fn missing_selected_microphone_is_not_replaced_with_another_device() {
+        let display = display();
+        let sources = vec![
+            display.clone(),
+            CaptureDevice {
+                id: "other-microphone".into(),
+                name: "另一个麦克风".into(),
+                kind: "audio".into(),
+                ..CaptureDevice::default()
+            },
+        ];
+        let mut chosen = selection(&display.id);
+        chosen.microphone = Some(true);
+        chosen.audio_device = Some("disconnected-microphone".into());
+        assert!(validate_selection(chosen.clone(), &display, &sources)
+            .unwrap_err()
+            .contains("所选麦克风已断开"));
+        chosen.microphone = Some(false);
+        let disabled = validate_selection(chosen, &display, &sources).unwrap();
+        assert_eq!(
+            disabled.audio_device.as_deref(),
+            Some("disconnected-microphone")
+        );
+    }
+
+    #[test]
     fn screenshots_never_return_a_microphone_preference() {
         let preferences = PickerPreferences {
             purpose: Some("screenshot".into()),
             microphone: Some(true),
+            audio_device: Some("old-microphone".into()),
             ..PickerPreferences::default()
         };
         let sanitized = normalized_preferences(preferences.clone());
-        assert!(serde_json::to_value(sanitized)
-            .unwrap()
-            .get("microphone")
-            .is_none());
+        let sanitized = serde_json::to_value(sanitized).unwrap();
+        assert!(sanitized.get("microphone").is_none());
+        assert!(sanitized.get("audioDevice").is_none());
         let mut chosen = selection("screen:1");
         chosen.microphone = Some(true);
+        chosen.audio_device = Some("unavailable-microphone".into());
         let sanitized = apply_audio_preference(chosen, &preferences);
-        assert!(serde_json::to_value(sanitized)
+        let sanitized = serde_json::to_value(sanitized).unwrap();
+        assert!(sanitized.get("microphone").is_none());
+        assert!(sanitized.get("audioDevice").is_none());
+
+        let display = display();
+        let context = make_context(
+            "screenshot",
+            &display,
+            &[
+                display.clone(),
+                CaptureDevice {
+                    id: "available-microphone".into(),
+                    kind: "audio".into(),
+                    ..CaptureDevice::default()
+                },
+            ],
+            &preferences,
+            true,
+        )
+        .unwrap();
+        assert!(serde_json::to_value(context)
             .unwrap()
-            .get("microphone")
+            .get("audioDevices")
             .is_none());
     }
 }

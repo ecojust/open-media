@@ -51,12 +51,24 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
       const draw = () => { const context = canvas.getContext('2d'); context.fillStyle = frame++ % 2 ? '#2070d0' : '#20b070'; context.fillRect(0, 0, 320, 180); context.fillStyle = '#f8ca53'; context.fillRect(40, 30, 110, 70) }
       draw()
       const timer = setInterval(draw, 60)
-      const stream = canvas.captureStream(15)
-      state.screenTrack = stream.getVideoTracks()[0]
-      Object.defineProperty(state.screenTrack, 'getSettings', { value: () => ({ width: 320, height: 180, frameRate: 15, displaySurface: surface }) })
-      Object.defineProperty(state.screenTrack, 'label', { value: '授权画面' })
-      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async options => { state.calls.push({ command: 'getDisplayMedia', args: options }); return stream } })
+      let stream
+      const newDisplay = () => {
+        stream = canvas.captureStream(15)
+        state.screenTrack = stream.getVideoTracks()[0]
+        Object.defineProperty(state.screenTrack, 'getSettings', { value: () => ({ width: 320, height: 180, frameRate: 15, displaySurface: surface }) })
+        Object.defineProperty(state.screenTrack, 'label', { value: '授权画面' })
+      }
+      newDisplay()
+      Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { configurable: true, value: async options => {
+        state.calls.push({ command: 'getDisplayMedia', args: options })
+        if (state.screenTrack.readyState === 'ended') newDisplay()
+        return stream
+      } })
       state.microphoneTracks = []
+      Object.defineProperty(navigator.mediaDevices, 'enumerateDevices', { configurable: true, value: async () => [
+        { kind: 'audioinput', deviceId: 'browser-internal', label: '内置麦克风', groupId: 'internal' },
+        { kind: 'audioinput', deviceId: 'browser-usb', label: 'USB 采访麦克风', groupId: 'usb' },
+      ] })
       Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true, value: async options => {
         state.calls.push({ command: 'getUserMedia', args: options })
         if (state.rejectMicrophone) { state.rejectMicrophone = false; throw new DOMException('用户拒绝麦克风', 'NotAllowedError') }
@@ -79,7 +91,7 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
 
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: { ignored: ['**/src-tauri/target/**'] }, hmr: false }, logLevel: 'error' })
   await server.listen()
   const baseURL = `http://127.0.0.1:${server.httpServer.address().port}`
   let browser
@@ -107,12 +119,13 @@ async function main() {
     assert.deepEqual(await page.evaluate(() => window.recorderHarness.events), [true])
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'start_capture').length), 0)
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.find(call => call.command === 'pick_capture_source').args.preferences.microphone), true)
-    await page.evaluate(() => window.recorderHarness.resolvePicker({ microphone: false, sourceId: 'window:4', sourceName: '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: { width: 1280, height: 720 } }))
+    await page.evaluate(() => window.recorderHarness.resolvePicker({ microphone: false, audioDevice: 'native-usb', sourceId: 'window:4', sourceName: '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: { width: 1280, height: 720 } }))
     await page.getByTestId('recording-source').waitFor()
     assert.match(await page.getByTestId('recording-source').innerText(), /演示窗口[\s\S]*1200 × 900[\s\S]*1280 × 720/)
     const started = await page.evaluate(() => window.recorderHarness.calls.find(call => call.command === 'start_capture').args.options)
     assert.equal(started.sourceId, 'window:4')
     assert.equal(started.microphone, false, '选择面板关闭麦克风后不应在开始时请求麦克风')
+    assert.equal(started.audioDevice, 'native-usb', '关闭麦克风仍保留选择来源，供红框中开启时使用')
     assert.deepEqual(started.outputSize, { width: 1280, height: 720 })
     await page.evaluate(() => window.recorderHarness.action('toggle-microphone'))
     await expect(page.getByRole('button', { name: '关闭麦克风', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -143,6 +156,19 @@ async function main() {
     assert.equal(calls.filter(call => call.command === 'pick_capture_source').length, 3)
     assert.equal(calls.filter(call => call.command === 'cancel_capture_picker').length, 1)
     assert.equal(calls.filter(call => call.command === 'start_capture').length, 1)
+    assert.equal(calls.filter(call => call.command === 'pick_capture_source').at(-1).args.preferences.audioDevice, 'native-usb', '再次选择录制范围保留上次麦克风来源')
+    await page.getByTestId('record-start').click()
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pick_capture_source').length)).toBe(4)
+    // The native picker writes its choice immediately even if its window is canceled.
+    await page.evaluate(() => localStorage.setItem('open-media:microphone:capture-native', JSON.stringify({ deviceId: 'native-internal', name: '内置麦克风' })))
+    await page.getByTestId('record-stop').click()
+    await page.getByTestId('record-start').click()
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pick_capture_source').length)).toBe(5)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pick_capture_source').at(-1).args.preferences.audioDevice), 'native-internal')
+    await page.getByTestId('record-stop').click()
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'start_capture').length), 1)
+    console.log('PASS 原生选区更改麦克风后取消，再次开启选择器读取最新来源且不启动录制')
+
     await page.setViewportSize({ width: 320, height: 850 })
     assert.equal(await page.evaluate(() => document.querySelector('[data-testid="recorder-workspace"]').scrollWidth > document.documentElement.clientWidth), false)
     await page.screenshot({ path: 'test-results/browser/recorder-start-mobile.png', fullPage: true })
@@ -159,8 +185,11 @@ async function main() {
     const pickerMicrophone = page.getByTestId('capture-picker-microphone')
     await expect(pickerMicrophone).toHaveAttribute('aria-pressed', 'true')
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'getUserMedia').length), 0, '选择面板确认前不申请麦克风')
+    await page.getByTestId('capture-picker-audio-source').selectOption('browser-usb')
     await pickerMicrophone.click()
     await expect(pickerMicrophone).toHaveAttribute('aria-pressed', 'false')
+    await expect(page.getByTestId('capture-picker-audio-source')).toHaveValue('browser-usb')
+    await expect(page.getByTestId('capture-picker-audio-source')).toBeEnabled()
     const cancelBounds = await page.getByTestId('capture-picker-cancel').boundingBox()
     assert(cancelBounds.x >= 0 && cancelBounds.y >= 0 && cancelBounds.x + cancelBounds.width <= 1100 && cancelBounds.y + cancelBounds.height <= 850, '取消按钮留在选择面板可视区内')
     await page.getByLabel('输出尺寸').selectOption('custom')
@@ -180,6 +209,7 @@ async function main() {
     await toolbar.getByRole('button', { name: '开启麦克风', exact: true }).click()
     await expect(toolbar.getByRole('button', { name: '关闭麦克风', exact: true })).toHaveAttribute('aria-pressed', 'true')
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'getUserMedia').length), 1)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.find(call => call.command === 'getUserMedia').args.audio.deviceId.exact), 'browser-usb', '红框开启麦克风使用之前选择的明确来源')
     assert.equal(await toolbar.locator('button svg').count(), 3)
     const bounds = await toolbar.boundingBox(), previewBounds = await page.getByTestId('recording-preview').boundingBox()
     assert(Math.abs(previewBounds.x + previewBounds.width - bounds.x - bounds.width - 8) < 3, '控制栏位于红框右上角')
@@ -232,14 +262,24 @@ async function main() {
     assert.equal(await page.getByLabel('选区宽度').inputValue(), '208')
     assert.equal(await page.getByLabel('选区高度').inputValue(), '117')
     await page.screenshot({ path: 'test-results/browser/recorder-preview-selection.png', fullPage: true })
+    await page.getByTestId('capture-picker-audio-source').selectOption('browser-internal')
     await page.getByTestId('capture-picker-cancel').click()
     await page.getByTestId('record-start').waitFor()
     assert.equal(await page.getByRole('dialog').count(), 0)
     assert.equal(await page.evaluate(() => window.recorderHarness.screenTrack.readyState), 'ended')
     assert.equal(await page.evaluate(() => window.recorderHarness.blobs.length), 0)
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'getUserMedia').length), 0)
+    await page.getByTestId('record-start').click()
+    await page.getByRole('dialog', { name: '选择录制范围', exact: true }).waitFor()
+    await expect(page.getByTestId('capture-picker-audio-source')).toHaveValue('browser-internal')
+    await page.getByTestId('capture-picker-cancel').click()
+    await page.getByTestId('record-start').waitFor()
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'getDisplayMedia').length), 2)
+    assert.equal(await page.evaluate(() => window.recorderHarness.screenTrack.readyState), 'ended')
+    assert.equal(await page.evaluate(() => window.recorderHarness.blobs.length), 0)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'getUserMedia').length), 0)
     await page.evaluate(() => window.recorderHarness.cleanup())
-    console.log('PASS 网页选择器取消后释放共享来源且不生成空白录像')
+    console.log('PASS 网页选择器取消后释放共享来源且不生成空白录像；再次打开保留取消前选择的麦克风')
 
     await mountRecorder(page, baseURL, false)
     await page.getByLabel('开始倒计时').selectOption('0')

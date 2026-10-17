@@ -7,6 +7,7 @@ pub mod capture_picker;
 mod capture_windows;
 pub mod engine;
 pub mod clip_filters;
+pub mod chroma_key;
 pub mod preview;
 pub mod project_files;
 pub mod speech;

@@ -275,17 +275,7 @@ impl CaptureManager {
         options.output_size = Some(resolve_output(&source, &options)?);
         options.source_id = Some(source.id.clone());
         options.screen_id = None;
-        if options.microphone {
-            options.audio_device = Some(
-                match options.audio_device.as_deref().filter(|s| !s.is_empty()) {
-                    Some(id) => devices.iter().find(|d| d.kind == "audio" && d.id == id),
-                    None => devices.iter().find(|d| d.kind == "audio"),
-                }
-                .ok_or("未找到所选麦克风，请刷新设备列表或关闭麦克风录制。")?
-                .id
-                .clone(),
-            );
-        }
+        prepare_audio_choice(&devices, &mut options)?;
         check_cancelled(cancelled)?;
         self.runtime = Some(runtime.clone());
         self.options = Some(options);
@@ -536,15 +526,10 @@ impl CaptureManager {
             let runtime = self.runtime.as_ref().ok_or("录制引擎不可用。")?;
             let devices = list_devices_with_permission(runtime, false, cancelled)?;
             device = Some(
-                match device.as_deref().filter(|id| !id.is_empty()) {
-                    Some(id) => devices
-                        .iter()
-                        .find(|device| device.kind == "audio" && device.id == id),
-                    None => devices.iter().find(|device| device.kind == "audio"),
-                }
-                .ok_or("未找到所选麦克风，当前录制将保持原来的麦克风状态。")?
-                .id
-                .clone(),
+                select_audio_device(&devices, device.as_deref())
+                    .map_err(|error| format!("{error}当前录制将保持原来的麦克风状态。"))?
+                    .id
+                    .clone(),
             );
             preflight_microphone(runtime, device.as_deref().unwrap(), cancelled)?;
         }
@@ -1026,6 +1011,36 @@ fn helper_stage_timeout(stage: &str) -> Duration {
         _ => 20,
     })
 }
+fn select_audio_device<'a>(
+    devices: &'a [CaptureDevice],
+    requested: Option<&str>,
+) -> Result<&'a CaptureDevice> {
+    match requested.filter(|id| !id.is_empty()) {
+        Some(id) => devices
+            .iter()
+            .find(|device| device.kind == "audio" && device.id == id)
+            .ok_or_else(|| "所选麦克风已断开，请重新选择或关闭麦克风录制。".into()),
+        None => devices
+            .iter()
+            .find(|device| device.kind == "audio")
+            .ok_or_else(|| "未找到可用麦克风，请连接输入设备或关闭麦克风录制。".into()),
+    }
+}
+
+fn prepare_audio_choice(devices: &[CaptureDevice], options: &mut CaptureOptions) -> Result<()> {
+    options.audio_device = options.audio_device.take().filter(|id| !id.is_empty());
+    if options.microphone {
+        options.audio_device = Some(
+            select_audio_device(devices, options.audio_device.as_deref())?
+                .id
+                .clone(),
+        );
+    }
+    // Keep an explicitly selected input even while disabled. Enabling it later
+    // validates the same device rather than silently switching microphones.
+    Ok(())
+}
+
 fn select_source(devices: &[CaptureDevice], options: &CaptureOptions) -> Result<CaptureDevice> {
     let selected = options
         .source_id
@@ -1357,6 +1372,55 @@ mod capture_tests {
             region: None,
             output_size: None,
         }
+    }
+    #[test]
+    fn explicit_audio_input_never_falls_back_to_another_microphone() {
+        let default = source("audio", 0, 0);
+        let mut selected = default.clone();
+        selected.id = "selected-usb-input".into();
+        let devices = vec![
+            source("screen", 1920, 1080),
+            default.clone(),
+            selected.clone(),
+        ];
+        assert_eq!(select_audio_device(&devices, None).unwrap().id, default.id);
+        assert_eq!(
+            select_audio_device(&devices, Some("")).unwrap().id,
+            default.id
+        );
+        assert_eq!(
+            select_audio_device(&devices, Some(&selected.id))
+                .unwrap()
+                .id,
+            selected.id
+        );
+        assert!(select_audio_device(&devices, Some("missing-input"))
+            .unwrap_err()
+            .contains("已断开"));
+        assert!(select_audio_device(&devices, Some("screen:selected")).is_err());
+    }
+
+    #[test]
+    fn disabled_audio_retains_the_exact_input_for_later_activation() {
+        let mut requested = options();
+        requested.audio_device = Some("temporarily-disconnected-input".into());
+        let devices = vec![source("audio", 0, 0)];
+        prepare_audio_choice(&devices, &mut requested).unwrap();
+        assert_eq!(
+            requested.audio_device.as_deref(),
+            Some("temporarily-disconnected-input")
+        );
+        requested.microphone = true;
+        assert!(prepare_audio_choice(&devices, &mut requested)
+            .unwrap_err()
+            .contains("已断开"));
+        assert_eq!(
+            requested.audio_device.as_deref(),
+            Some("temporarily-disconnected-input")
+        );
+        requested.audio_device = Some(String::new());
+        prepare_audio_choice(&devices, &mut requested).unwrap();
+        assert_eq!(requested.audio_device.as_deref(), Some("audio:selected"));
     }
     #[test]
     fn mute_preserves_paused_state_and_never_enables_an_unrequested_device() {

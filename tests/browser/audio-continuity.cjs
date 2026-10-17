@@ -5,7 +5,7 @@ const { existsSync } = require('node:fs')
 /** Development server only: these checks exercise decoded audio without a production build. */
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false } })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: { ignored: ['**/src-tauri/target/**'] }, hmr: false } })
   await server.listen()
   const baseURL = `http://127.0.0.1:${server.httpServer.address().port}`
   const browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] })

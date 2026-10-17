@@ -1,3 +1,5 @@
+import { requestBrowserMicrophone } from './microphone-devices.ts'
+
 export interface RecordedMicrophoneAudio {
   blob: Blob
   name: string
@@ -25,40 +27,13 @@ function releaseStream(stream: MediaStream): void {
   for (const track of stream.getTracks()) track.stop()
 }
 
-/** Permission prompts cannot be dismissed programmatically; release a stream granted after cancellation. */
-function requestMicrophone(signal?: AbortSignal): Promise<MediaStream> {
-  const pending = navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-  if (!signal) return pending
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const abort = () => {
-      if (settled) return
-      settled = true
-      signal.removeEventListener('abort', abort)
-      reject(cancelled())
-    }
-    signal.addEventListener('abort', abort, { once: true })
-    pending.then(stream => {
-      if (settled) { releaseStream(stream); return }
-      settled = true
-      signal.removeEventListener('abort', abort)
-      resolve(stream)
-    }, error => {
-      if (settled) return
-      settled = true
-      signal.removeEventListener('abort', abort)
-      reject(error)
-    })
-    if (signal.aborted) abort()
-  })
-}
-
 export function microphoneRecordingErrorMessage(error: unknown): string {
   const name = error && typeof error === 'object' && 'name' in error ? error.name : undefined
   if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
     return '麦克风访问被拒绝，请在系统或浏览器的麦克风权限中允许 Open Media 后重试。'
   }
   if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return '没有找到可用的麦克风，请连接麦克风后重试。'
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') return '所选麦克风已断开或不可用，请重新连接或选择其他麦克风。'
   if (name === 'NotReadableError' || name === 'TrackStartError') return '无法读取麦克风，请检查设备连接、系统权限以及设备是否被其他程序占用。'
   if (name === 'AbortError') return '已取消录音。'
   if (name === 'NotSupportedError') return '当前环境不支持麦克风音频编码，请更新应用或浏览器后重试。'
@@ -66,12 +41,12 @@ export function microphoneRecordingErrorMessage(error: unknown): string {
 }
 
 /** Called only from an explicit recording action. Audio is never connected to speakers. */
-export async function startMicrophoneRecording({ signal }: { signal?: AbortSignal } = {}): Promise<MicrophoneRecording> {
+export async function startMicrophoneRecording({ signal, deviceId }: { signal?: AbortSignal; deviceId?: string } = {}): Promise<MicrophoneRecording> {
   if (signal?.aborted) throw cancelled()
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
     throw new Error('当前环境不支持麦克风录音，请使用桌面版或通过安全连接访问网页。')
   }
-  const stream = await requestMicrophone(signal)
+  const stream = await requestBrowserMicrophone({ signal, deviceId })
   let recorder: MediaRecorder
   try {
     if (signal?.aborted) throw cancelled()

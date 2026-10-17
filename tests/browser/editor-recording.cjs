@@ -110,13 +110,106 @@ async function record(page, { checkBusy = false } = {}) {
   await expect(button).toHaveAttribute('aria-label', '开始录音', { timeout: 20000 })
   await expect(page.getByTestId('save-project')).toBeEnabled()
   await devicesReleased(page)
+  const play = page.getByTestId('preview-play')
+  await expect(play).toHaveAttribute('aria-busy', 'false')
+  await play.click()
+  await expect(play).toHaveAttribute('title', '暂停（空格）')
+  await page.waitForTimeout(120)
+  await play.click()
+  await expect(play).toHaveAttribute('title', '播放（空格）')
 }
 
 const narrationTracks = project => project.tracks.filter(track => track.name === '配音轨道')
 const lastAudio = project => project.assets.at(-1)
 const lastClip = project => project.tracks.flatMap(track => track.clips).find(clip => clip.assetId === lastAudio(project).id)
 
+async function synchronizedPicture(browser, url) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 850 } })
+  const page = await context.newPage(), errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  try {
+    await installDevices(page)
+    await page.route('**/recording-picture-test', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><style>html,body,#app{height:100%;margin:0}*{box-sizing:border-box}</style></head><body><div id="app"></div></body></html>' }))
+    await page.goto(`${url}/recording-picture-test`)
+    await page.evaluate(async () => {
+      const source = await (await fetch('/src/components/VideoEditor.vue')).text()
+      const vueImport = source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
+      const { createApp, h, ref, nextTick } = await import(vueImport)
+      const Editor = (await import('/src/components/VideoEditor.vue')).default
+      const { createProject, createTextClip } = await import('/src/core/project.ts')
+      const { addClip } = await import('/src/core/timeline.ts')
+      let project = createProject('同步画面验证', { width: 320, height: 180 })
+      for (const [start, end, background] of [[0, 1, '#cc2233'], [1, 0.3, '#2244dd']]) {
+        project = addClip(project, project.tracks[0].id, createTextClip(project, { start, trimOut: end, background, text: '', x: 0, y: 0, width: 320, height: 180 }))
+      }
+      const current = ref(project), editor = ref(null), messages = []
+      createApp({ render: () => h(Editor, { ref: editor, project: current.value, onChange: value => { current.value = value }, onStatus: value => messages.push(value) }) }).mount('#app')
+      await nextTick(); editor.value.seek(0.4)
+      window.pictureRecording = { current, editor, messages }
+      window.recordingFixture.mode = 'pending'
+    })
+    const pixel = () => page.getByTestId('video-preview').evaluate(canvas => [...canvas.getContext('2d').getImageData(5, 5, 1, 1).data].slice(0, 3))
+    const initial = await page.locator('.ruler-label').innerText()
+    assert.deepEqual(await pixel(), [204, 34, 51])
+    await page.getByTestId('preview-record').click()
+    await expect(page.getByTestId('preview-record')).toHaveAttribute('aria-label', '取消麦克风授权')
+    await page.waitForTimeout(500)
+    assert.equal(await page.locator('.ruler-label').innerText(), initial, '等待授权不应提前走动播放头')
+    await page.evaluate(() => { window.recordingFixture.pending.splice(0).forEach(resolve => resolve()) })
+    await expect(page.getByTestId('preview-record')).toHaveAttribute('aria-label', '停止录音')
+    await expect.poll(pixel, { intervals: [30] }).toEqual([34, 68, 221])
+    await expect(page.getByTestId('preview-record-status')).toContainText('00:02')
+    assert.deepEqual(await pixel(), [34, 68, 221], '录音超过原有片段结尾时画面停留在最后一帧')
+    await page.getByTestId('preview-record').click()
+    await expect(page.getByTestId('preview-record')).toHaveAttribute('aria-label', '开始录音')
+    await devicesReleased(page)
+    const result = await page.evaluate(() => {
+      const project = window.pictureRecording.current.value
+      const asset = project.assets.at(-1), clip = project.tracks.flatMap(track => track.clips).find(clip => clip.assetId === asset.id)
+      return { start: clip.start, duration: asset.duration }
+    })
+    assert.equal(result.start, 0.4)
+    assert(result.duration >= 2, '实际录音应保留超过原项目结尾的内容')
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('aria-busy', 'false')
+    await page.getByTestId('preview-play').click()
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '暂停（空格）')
+    await expect.poll(pixel, { intervals: [30] }).toEqual([34, 68, 221])
+    await page.getByTestId('preview-play').click()
+    console.log('PASS 等待授权期间保持原刻度；录音开始后同步切换画面，越过原片尾保留最后画面，录音仍插入原始 0.4 秒位置，结束后立即正常播放')
+    await page.evaluate(async () => {
+      const { TimelinePreview } = await import('/src/core/preview.ts')
+      const original = TimelinePreview.prototype.enableAudio
+      const schedule = window.setTimeout
+      let inject = true
+      window.setTimeout = (callback, delay, ...args) => schedule(callback, delay === 10000 ? 250 : delay, ...args)
+      TimelinePreview.prototype.enableAudio = function (monitor, signal) {
+        if (inject) {
+          inject = false
+          Object.defineProperty(this.audioContext, 'state', { configurable: true, value: 'interrupted' })
+          this.audioContext.resume = () => new Promise(() => {})
+        }
+        return original.call(this, monitor, signal)
+      }
+      window.pictureRecording.restorePlayback = () => {
+        TimelinePreview.prototype.enableAudio = original
+        window.setTimeout = schedule
+      }
+    })
+    await page.getByTestId('preview-play').click()
+    await expect.poll(() => page.evaluate(() => window.pictureRecording.messages.at(-1))).toContain('音频输出未能恢复')
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('aria-busy', 'false')
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '播放（空格）')
+    await page.evaluate(() => window.pictureRecording.restorePlayback())
+    await page.getByTestId('preview-play').click()
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '暂停（空格）')
+    await page.getByTestId('preview-play').click()
+    console.log('PASS 人为注入音频输出恢复无响应后，播放准备自动结束，提示原因并重建输出，再次播放可正常工作')
+    assert.deepEqual(errors, [])
+  } finally { await context.close() }
+}
+
 async function extraChecks(browser, url) {
+  await synchronizedPicture(browser, url)
   for (const viewport of [{ width: 800, height: 700 }, { width: 320, height: 850 }]) {
     const context = await browser.newContext({ viewport })
     const page = await context.newPage(), errors = []
@@ -245,7 +338,7 @@ async function main() {
   await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve))
   const port = probe.address().port
   await new Promise(resolve => probe.close(resolve))
-  const server = await createServer({ server: { host: '127.0.0.1', port, strictPort: true, watch: null, hmr: false } })
+  const server = await createServer({ server: { host: '127.0.0.1', port, strictPort: true, watch: { ignored: ['**/src-tauri/target/**'] }, hmr: false } })
   await server.listen()
   const browser = await chromium.launch({ headless: true,
     executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined),
@@ -324,10 +417,10 @@ async function main() {
     await page.waitForTimeout(180)
     await recordButton.click()
     await expect(recordButton).toHaveAttribute('aria-label', '停止录音')
-    await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '播放（空格）')
-    const frozenPlayhead = await page.locator('.ruler-label').innerText()
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '暂停（空格）')
+    const initialPlayhead = await page.locator('.ruler-label').innerText()
     await page.waitForTimeout(1100)
-    assert.equal(await page.locator('.ruler-label').innerText(), frozenPlayhead, '录音期间预览应暂停，不播放原有音轨')
+    assert.notEqual(await page.locator('.ruler-label').innerText(), initialPlayhead, '录音期间预览应从当前刻度同步前进')
     await recordButton.click()
     await expect(recordButton).toHaveAttribute('aria-label', '开始录音')
     await devicesReleased(page)
@@ -336,7 +429,7 @@ async function main() {
     assert(lastClip(overlapping).start > 0 && lastClip(overlapping).start < firstEnd)
     assert.deepEqual(narrationTracks(overlapping).find(track => track.id === narrationTracks(second)[0].id).clips, narrationTracks(second)[0].clips, '原有配音片段不应移动或覆盖')
     await verifyAudio(page, lastAudio(overlapping))
-    console.log('PASS 录音前暂停正在播放的预览；占用时段新建同名配音轨道并完整保留已有片段')
+    console.log('PASS 录音期间预览从当前刻度同步前进；占用时段新建同名配音轨道并完整保留已有片段')
 
     for (const track of narrationTracks(overlapping)) await page.locator(`[data-track-label-id="${track.id}"]`).getByRole('button', { name: '锁定轨道', exact: true }).click()
     await page.getByRole('button', { name: '跳到结尾', exact: true }).click()

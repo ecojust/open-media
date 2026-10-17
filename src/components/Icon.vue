@@ -18,6 +18,7 @@ const paths: Record<string, string> = {
   camera: 'M3 7h4l2-3h6l2 3h4v13H3zM16 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
   microphone: 'M9 4a3 3 0 0 1 6 0v8a3 3 0 0 1-6 0zM5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8',
   image: 'M3 3h18v18H3zM3 17l5-5 4 4 4-6 5 7M9 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0',
+  sticker: 'M4 3h16a1 1 0 0 1 1 1v10l-7 7H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM14 21v-6a1 1 0 0 1 1-1h6M8 8h1M15 8h1M8 12c2 3 6 3 8 0',
   audio: 'M9 18V5l11-2v13M9 9l11-2M9 18c0 4-6 4-6 1s6-4 6-1m11-2c0 4-6 4-6 1s6-4 6-1',
   gif: 'M3 4h18v16H3zM7 4v16M17 4v16M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4m-11-8 4 4-4 4z',
   convert: 'M4 7h15m-4-4 4 4-4 4M20 17H5m4-4-4 4 4 4',

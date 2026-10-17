@@ -33,6 +33,7 @@ export interface BrowserCaptureSelection {
   region?: CaptureRegion
   outputSize?: CaptureOutputSize
   microphone?: boolean
+  audioDevice?: string
 }
 
 export interface BrowserCaptureSelectionRequest {
@@ -45,6 +46,7 @@ export interface BrowserCaptureOptions {
   fps: number
   microphone: boolean
   systemAudio: boolean
+  audioDevice?: string
   sourceType?: 'screen' | 'window' | 'region'
   region?: CaptureRegion
   outputSize?: CaptureOutputSize
@@ -131,6 +133,7 @@ export function captureErrorMessage(error: unknown): string {
   if (error instanceof DOMException) {
     if (error.name === 'NotAllowedError') return '未获得录屏或麦克风权限，请允许访问后重试。'
     if (error.name === 'NotFoundError') return '没有找到可用的屏幕或麦克风。'
+    if (error.name === 'OverconstrainedError') return '所选麦克风当前不可用，请重新连接设备或选择其他麦克风来源。'
     if (error.name === 'NotReadableError') return '无法读取录制来源，请检查系统权限和设备是否被其他程序占用。'
     if (error.name === 'AbortError') return '已取消录制来源选择。'
   }
@@ -200,6 +203,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     let region = options.region ? { ...options.region } : undefined
     let outputSize = options.outputSize ? { ...options.outputSize } : undefined
     let microphoneSelected = options.microphone
+    let audioDeviceSelected = options.audioDevice
     let transformsVideo = !!(region || outputSize)
     const source: BrowserCaptureSource = {
       type: settings.displaySurface === 'monitor' ? 'screen' : settings.displaySurface === 'window' ? 'window' : settings.displaySurface === 'browser' ? 'tab' : 'unknown',
@@ -257,6 +261,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       region = selected.region ? { ...selected.region } : undefined
       outputSize = selected.outputSize ? { ...selected.outputSize } : undefined
       microphoneSelected = selected.microphone ?? microphoneSelected
+      audioDeviceSelected = selected.audioDevice ?? audioDeviceSelected
       transformsVideo = !!(region || outputSize)
       updateSource()
     }
@@ -317,8 +322,16 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     } else if (sourceVideo) {
       sourceVideo.pause(); sourceVideo.srcObject = null; sourceVideo.remove(); sourceVideo = undefined
     }
+    const requestMicrophone = (signal: AbortSignal) => waitForCapture(navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        ...(audioDeviceSelected && audioDeviceSelected !== 'default' ? { deviceId: { exact: audioDeviceSelected } } : {}),
+      },
+      video: false,
+    }), signal, releaseStream)
     if (microphoneSelected) {
-      microphone = await waitForCapture(navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }), preparation.signal, releaseStream)
+      microphone = await requestMicrophone(preparation.signal)
       microphone.getTracks().forEach(track => ownedTracks.add(track))
     }
     if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
@@ -400,7 +413,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
         const abort = () => request.abort(cancelledCapture(preparation.signal))
         preparation.signal.addEventListener('abort', abort, { once: true })
         try {
-          const acquired = await waitForCapture(navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }), request.signal, releaseStream)
+          const acquired = await requestMicrophone(request.signal)
           if (hasStopped() || revision !== microphoneRevision || request.signal.aborted) {
             releaseStream(acquired)
             if (hasStopped()) throw new Error('录制已结束。')

@@ -8,6 +8,7 @@ import EditorDialog from './EditorDialog.vue'
 import RuntimeCheck from './RuntimeCheck.vue'
 import type { CaptureSelectionContext, CaptureSelection as OverlaySelection } from '../core/capture-selection'
 import type { MediaAsset } from '../core/types'
+import { readMicrophonePreference, writeMicrophonePreference } from '../core/microphone-devices'
 import { recordingClock, type CaptureControlAction, type CaptureControlsSnapshot } from '../core/capture-controls'
 import { browserCaptureAvailable, captureErrorMessage, startBrowserCapture, type BrowserCapture, type BrowserCaptureSelectionRequest } from '../core/capture'
 import { cancelCapturePicker, cancelCaptureStart, getCaptureStatus, onCaptureControlsAction, pauseCapture, pickCaptureSource, resumeCapture, setCaptureMicrophone, startCapture, stopCapture, type CaptureSelection, type CapturePickerPreferences, type CaptureStatus } from '../native'
@@ -28,7 +29,8 @@ const countdown = ref(3)
 const remaining = ref(0)
 const error = ref('')
 const selection = ref<CaptureSelection>()
-const pickerPreferences = ref<CapturePickerPreferences>({ mode: 'region' })
+const microphoneScope = props.native ? 'capture-native' : 'capture-browser'
+const pickerPreferences = ref<CapturePickerPreferences>({ mode: 'region', audioDevice: readMicrophonePreference(microphoneScope).deviceId })
 const sourceType = computed(() => selection.value?.region ? 'region' : selection.value?.sourceId.startsWith('window:') ? 'window' : 'screen')
 const browserPicker = shallowRef<{ context: CaptureSelectionContext; stream: MediaStream }>()
 let finishBrowserChoice: ((selection: OverlaySelection | null) => void) | undefined
@@ -118,7 +120,7 @@ function chooseBrowserSource(request: BrowserCaptureSelectionRequest): Promise<O
       if (chosen) {
         microphone.value = chosen.microphone ?? microphone.value
         selection.value = { ...chosen, sourceName: source.label, sourceWidth: width, sourceHeight: height }
-        pickerPreferences.value = { mode: chosen.region ? 'region' : source.type === 'screen' ? 'screen' : 'window', microphone: microphone.value, ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) }
+        pickerPreferences.value = { mode: chosen.region ? 'region' : source.type === 'screen' ? 'screen' : 'window', microphone: microphone.value, audioDevice: chosen.audioDevice ?? '', ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) }
         phase.value = 'starting'
       }
       resolve(chosen)
@@ -134,13 +136,14 @@ function chooseBrowserSource(request: BrowserCaptureSelectionRequest): Promise<O
         display: { id: sourceId, name: source.label, logicalWidth: width, logicalHeight: height, pixelWidth: width, pixelHeight: height },
         targets: [{ id: sourceId, name: source.label, kind: source.type === 'screen' ? 'screen' : 'window', rect: { x: 0, y: 0, width, height }, sourceWidth: width, sourceHeight: height }],
         availableModes: source.type === 'screen' ? ['region', 'screen'] : ['window'],
-        preferences: { mode, sourceId, outputSize: pickerPreferences.value.outputSize, microphone: microphone.value },
+        preferences: { mode, sourceId, outputSize: pickerPreferences.value.outputSize, microphone: microphone.value, audioDevice: pickerPreferences.value.audioDevice },
       },
     }
   })
 }
 async function begin(): Promise<void> {
   if (active.value || props.screenshotBusy) return
+  pickerPreferences.value = { ...pickerPreferences.value, audioDevice: readMicrophonePreference(microphoneScope).deviceId }
   error.value = ''
   recoveryError = ''
   actualSource.value = undefined
@@ -167,7 +170,9 @@ async function begin(): Promise<void> {
       if (!chosen || destroyed || abort.signal.aborted) { phase.value = 'idle'; return }
       microphone.value = chosen.microphone ?? microphone.value
       selection.value = chosen
-      pickerPreferences.value = { mode: sourceType.value, sourceId: chosen.sourceId, microphone: microphone.value, ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) }
+      pickerPreferences.value = { mode: sourceType.value, sourceId: chosen.sourceId, microphone: microphone.value, audioDevice: chosen.audioDevice ?? '', ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) }
+      const remembered = readMicrophonePreference(microphoneScope)
+      writeMicrophonePreference(microphoneScope, { deviceId: chosen.audioDevice ?? '', name: remembered.deviceId === chosen.audioDevice ? remembered.name : '' })
       phase.value = 'starting'
       for (let count = countdown.value; count > 0; count--) {
         if (abort.signal.aborted) throw new DOMException('已取消录制。', 'AbortError')
@@ -180,7 +185,7 @@ async function begin(): Promise<void> {
       abort.signal.addEventListener('abort', cancelPendingStart, { once: true })
       let result: CaptureStatus
       try {
-        result = await startCapture({ requestId, fps: fps.value, microphone: microphone.value, sourceId: chosen.sourceId, ...(chosen.region ? { region: chosen.region } : {}), ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) })
+        result = await startCapture({ requestId, fps: fps.value, microphone: microphone.value, audioDevice: chosen.audioDevice, sourceId: chosen.sourceId, ...(chosen.region ? { region: chosen.region } : {}), ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) })
       } finally { abort.signal.removeEventListener('abort', cancelPendingStart) }
       nativeStarted = true
       updateNativeSource(result)
@@ -189,7 +194,7 @@ async function begin(): Promise<void> {
       elapsed.value = result.elapsed
     } else {
       controller = await startBrowserCapture({
-        fps: fps.value, microphone: microphone.value, systemAudio: systemAudio.value, chooseSource: chooseBrowserSource,
+        fps: fps.value, microphone: microphone.value, audioDevice: pickerPreferences.value.audioDevice, systemAudio: systemAudio.value, chooseSource: chooseBrowserSource,
         countdown: countdown.value, signal: abort.signal,
         onCountdown: value => { remaining.value = value; phase.value = 'starting' },
         onFinished: result => finished(result.blob, result.name),

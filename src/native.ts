@@ -14,8 +14,8 @@ export interface CaptureRegion extends CaptureSize { x: number; y: number }
 export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
 export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize; muted?: boolean; audioAvailable?: boolean; microphoneEnabled?: boolean }
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
-export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize; microphone?: boolean }
-export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize; microphone?: boolean }
+export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
+export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
 export interface SpeechVoice { id: string; name: string; language: string; gender?: string }
 export interface SpeechStatus { ready: boolean; voices: SpeechVoice[]; error?: string }
 export interface SpeechRequest { requestId: string; text: string; voiceId: string; speed: number }

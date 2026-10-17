@@ -349,7 +349,12 @@ public func openMediaCaptureWindowBounds(_ windowID: UInt32, _ x: UnsafeMutableP
                                   width: size.0, height: size.1, bounds: Bounds(window.frame), scaleFactor: scale))
         }
     }
-    for device in AVCaptureDevice.devices(for: .audio) {
+    let microphones = AVCaptureDevice.devices(for: .audio)
+    let defaultMicrophoneID = AVCaptureDevice.default(for: .audio)?.uniqueID
+    // The first device is the default choice when no explicit input was selected.
+    let orderedMicrophones = microphones.filter { $0.uniqueID == defaultMicrophoneID }
+        + microphones.filter { $0.uniqueID != defaultMicrophoneID }
+    for device in orderedMicrophones {
         sources.append(Source(id: device.uniqueID, name: device.localizedName, kind: "audio"))
     }
     return sources

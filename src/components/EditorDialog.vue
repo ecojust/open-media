@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 
-const props = defineProps<{ open: boolean; title: string; icon: string; busy?: boolean; wide?: boolean; returnFocus?: HTMLElement | null }>()
+const props = defineProps<{ open: boolean; title: string; icon: string; busy?: boolean; busyMessage?: string; wide?: boolean; returnFocus?: HTMLElement | null }>()
 const emit = defineEmits<{ close: [] }>()
 const dialog = ref<HTMLDialogElement | null>(null)
 let opener: HTMLElement | null = null
@@ -37,9 +37,9 @@ onBeforeUnmount(() => { dialog.value?.close() })
 
 <template>
   <dialog ref="dialog" class="editor-dialog" :class="{ wide }" role="dialog" :aria-modal="open ? true : undefined" :aria-label="title" @cancel.prevent="requestClose" @pointerdown="pointerStartedOutside = outside($event)" @click="backdropClick">
-    <header class="editor-dialog-heading"><Icon :name="icon" :size="18" /><h2>{{ title }}</h2><button autofocus type="button" :aria-label="`关闭${title}`" :title="busy ? '请先完成或取消生成' : '关闭'" :disabled="busy" @click="requestClose"><Icon name="close" :size="18" /></button></header>
+    <header class="editor-dialog-heading"><Icon :name="icon" :size="18" /><h2>{{ title }}</h2><button autofocus type="button" :aria-label="`关闭${title}`" :title="busy ? busyMessage || '请先完成或取消生成' : '关闭'" :disabled="busy" @click="requestClose"><Icon name="close" :size="18" /></button></header>
     <div class="editor-dialog-content"><slot /></div>
-    <p v-if="busy" class="editor-dialog-hint" role="status">请先完成或取消生成，再关闭弹窗。</p>
+    <p v-if="busy" class="editor-dialog-hint" role="status">{{ busyMessage || '请先完成或取消生成，再关闭弹窗。' }}</p>
     <footer v-if="$slots.footer" class="editor-dialog-footer"><slot name="footer" /></footer>
   </dialog>
 </template>
