@@ -1,10 +1,10 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const { chromium } = require('@playwright/test')
+const { chromium, expect } = require('@playwright/test')
 
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: { ignored: () => true } }, logLevel: 'error' })
   await server.listen()
   const address = server.httpServer.address()
   const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--no-proxy-server'] })
@@ -108,14 +108,40 @@ async function main() {
       const player = document.createElement('video')
       player.src = converted.url
       player.muted = true
+      player.playsInline = true
+      player.width = 80
+      player.height = 44
+      document.body.append(player)
       await new Promise((resolve, reject) => { player.onloadeddata = resolve; player.onerror = reject })
-      await new Promise(resolve => { player.onseeked = resolve; player.currentTime = 0.35 })
+      await new Promise((resolve, reject) => {
+        let seeked = false, frameReady = false, frameId
+        const timeout = setTimeout(() => { cleanup(); reject(new Error(`目标视频帧未呈现：time=${player.currentTime}, readyState=${player.readyState}`)) }, 10000)
+        const cleanup = () => {
+          clearTimeout(timeout)
+          if (frameId !== undefined) player.cancelVideoFrameCallback(frameId)
+          player.removeEventListener('seeked', onSeeked)
+          player.removeEventListener('error', onError)
+        }
+        const ready = () => { if (seeked && frameReady && player.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) { cleanup(); resolve() } }
+        const onSeeked = () => { seeked = true; ready() }
+        const onError = () => { cleanup(); reject(new Error(player.error?.message || '输出视频无法解码')) }
+        const onFrame = (_now, metadata) => {
+          if (Math.abs(metadata.mediaTime - 0.35) <= 0.12) { frameReady = true; ready() }
+          else frameId = player.requestVideoFrameCallback(onFrame)
+        }
+        player.addEventListener('seeked', onSeeked)
+        player.addEventListener('error', onError)
+        // seeked reports the seek operation, not necessarily a frame ready for canvas.
+        frameId = player.requestVideoFrameCallback(onFrame)
+        player.currentTime = 0.35
+      })
       const image = document.createElement('canvas')
       image.width = 80
       image.height = 44
       const ctx = image.getContext('2d')
       ctx.drawImage(player, 0, 0, 80, 44)
       const pixel = [...ctx.getImageData(60, 32, 1, 1).data]
+      player.removeAttribute('src'); player.load(); player.remove()
       const audioCheck = new AudioContext()
       const audioBuffer = await audioCheck.decodeAudioData(await blob.arrayBuffer())
       const samples = audioBuffer.getChannelData(0)
@@ -147,6 +173,8 @@ async function main() {
     await page.getByTestId('convert-start').click()
     await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="convert-result"]')].filter(item => item.classList.contains('done')).length === 2).catch(async error => { throw new Error(`${error.message}\n${await page.locator('body').innerText()}`) })
     assert.equal(await page.locator('.source-selection').innerText(), '已选 2 项', 'converted results are not silently added to the next conversion selection')
+    await expect(page.getByTestId('convert-image-preview')).toHaveJSProperty('naturalWidth', 45)
+    await expect(page.getByTestId('convert-image-preview')).toHaveJSProperty('naturalHeight', 80)
     const dimensions = await page.getByTestId('convert-image-preview').evaluate(image => ({ width: image.naturalWidth, height: image.naturalHeight }))
     assert.deepEqual(dimensions, { width: 45, height: 80 })
     const downloadPromise = page.waitForEvent('download')
@@ -174,15 +202,20 @@ async function main() {
     assert.equal(await page.locator('.source-selection').innerText(), '已选 2 项', 'a pending screenshot focus must wait for its image to arrive')
     await page.evaluate(() => window.conversionHarness.assets.value.push(window.conversionHarness.screenshot))
     await page.waitForFunction(() => document.querySelector('.source-selection').textContent === '已选 1 项')
-    await page.getByTestId('convert-image-preview').evaluate(image => image.decode())
-    const focused = await page.getByTestId('convert-image-preview').evaluate(image => ({ name: image.alt, width: image.naturalWidth, height: image.naturalHeight }))
-    assert.deepEqual(focused, { name: '截屏.png', width: 96, height: 48 }, 'screenshot focus opens the original image instead of the previous conversion result')
+    await expect(page.getByTestId('convert-image-preview')).toHaveJSProperty('naturalWidth', 40)
+    await expect(page.getByTestId('convert-image-preview')).toHaveJSProperty('naturalHeight', 80)
+    const focused = await page.getByTestId('convert-image-preview').evaluate(image => {
+      const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d'); context.drawImage(image, 0, 0)
+      return { name: image.alt, width: image.naturalWidth, height: image.naturalHeight, pixel: [...context.getImageData(20, 40, 1, 1).data] }
+    })
+    assert.deepEqual(focused, { name: '截屏.png', width: 40, height: 80, pixel: [32, 106, 216, 255] }, 'screenshot focus applies current image settings to the new source instead of showing the previous image result')
     assert.equal(await page.getByLabel('选择 截屏.png', { exact: true }).isChecked(), true)
     assert.equal(await page.locator('.convert-source input:checked').count(), 1, 'only the screenshot is selected for conversion')
     await page.getByLabel('选择 示例图.png', { exact: true }).first().check()
     await page.evaluate(() => { window.conversionHarness.assets.value = [...window.conversionHarness.assets.value] })
     assert.equal(await page.locator('.source-selection').innerText(), '已选 2 项', 'later asset updates must preserve manual selection instead of reapplying a consumed focus request')
-    console.log('PASS screenshot focus waits for import, selects only the screenshot, opens original pixels and preserves subsequent manual selection')
+    console.log('PASS screenshot focus waits for import, selects only the screenshot, previews its edited pixels and preserves subsequent manual selection')
 
     await page.evaluate(() => {
       const original = HTMLCanvasElement.prototype.toBlob
