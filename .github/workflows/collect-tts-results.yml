@@ -93,6 +93,25 @@ jobs:
           merge-multiple: false
           path: ${{ env.DOWNLOAD_ROOT }}
 
+      - name: Report generation diagnostics
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const root = process.env.DOWNLOAD_ROOT;
+            function inspect(directory) {
+              for (const entry of fs.readdirSync(directory, {withFileTypes: true})) {
+                const file = path.join(directory, entry.name);
+                if (entry.isDirectory()) inspect(file);
+                else if (entry.isFile() && entry.name === 'generation.log') {
+                  const log = fs.readFileSync(file, 'utf8');
+                  core.warning(`${path.relative(root, file)}\n${log.slice(-8000)}`);
+                }
+              }
+            }
+            inspect(root);
+
       - name: Select the isolated results branch
         env:
           RESULT_BRANCH: ${{ steps.source.outputs.branch }}
