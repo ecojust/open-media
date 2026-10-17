@@ -253,7 +253,7 @@ async function main() {
     await firstTrack.locator('.track-name').dblclick()
     await page.getByLabel('轨道名称', { exact: true }).fill('旁白字幕')
     await page.getByLabel('轨道名称', { exact: true }).press('Enter')
-    await expect(firstTrack.locator('.track-name')).toHaveText('旁白字幕')
+    await expect(firstTrack.locator('.track-name > span[title="旁白字幕 · 双击重命名"]')).toHaveText('旁白字幕')
     assert.equal(await page.evaluate(() => window.editorState.value.tracks[0].name), '旁白字幕')
     await firstTrack.click({ button: 'right' })
     await page.getByRole('menuitem', { name: '轨道下移一层', exact: true }).click()

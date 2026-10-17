@@ -306,7 +306,7 @@ async function subtitleDefaultsChecks(page) {
   await page.getByLabel('文字底色', { exact: true }).fill('#223344')
   await page.getByLabel(/^字体/).selectOption('serif')
   await page.getByLabel(/^字重/).selectOption('700')
-  await page.getByLabel(/^对齐/).selectOption('left')
+  await page.getByLabel('字幕横向对齐', { exact: true }).selectOption('left')
   await drag(page, 103, 187, { alt: true })
   const source = await clip(page)
   assert.equal(source.color, '#ffcc55'); assert.equal(source.background, '#223344')
