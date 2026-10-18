@@ -1,4 +1,6 @@
-# Open Media
+<h1 align="center">
+  <img src="public/brand-mark.png" alt="Open Media 图标" width="64" height="64" align="absmiddle" />&nbsp; Open Media
+</h1>
 
 本地录屏、分段 GIF、视频剪辑、视频转换与图片编辑工作台。五个工作区共享素材，在同一项目中完成采集、创作与导出；支持浅色、深色和跟随系统主题。
 
