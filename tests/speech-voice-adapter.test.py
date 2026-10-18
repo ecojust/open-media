@@ -82,9 +82,9 @@ class VoiceAdapterTests(unittest.TestCase):
         for voice in ("unavailable_voice", "arbitrary", "f5_zh_male"):
             with self.subTest(voice=voice), self.assertRaises(ValueError):
                 adapter.bind_voice(self.runtime, voice, config, self.job)
-        data = json.loads(config.read_text())
+        data = json.loads(config.read_text(encoding="utf-8"))
         data["speaker"] = "Uncle_Fu"
-        config.write_text(json.dumps(data))
+        config.write_text(json.dumps(data), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "Unsupported model voice"):
             adapter.bind_voice(self.runtime, "qwen3_uncle_fu", config, self.job)
 
