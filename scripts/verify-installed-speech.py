@@ -124,6 +124,8 @@ def compile_test(target: str, output: Path, env: dict) -> Path:
     integrity.run([executable, TEST, '--exact', '--list'], output / 'test-discovery.log', env=env, cwd=ROOT, timeout=60)
     if f'{TEST}: test' not in (output / 'test-discovery.log').read_text(encoding='utf-8'):
         raise ValueError('The compiled binary does not contain the production synthesis test')
+    integrity.run([executable, 'speech::tests::', '--nocapture', '--test-threads=1'],
+                  output / 'speech-process-regressions.log', env=env, cwd=ROOT, timeout=180)
     return executable
 
 
@@ -271,6 +273,21 @@ def main() -> None:
                                            runtimeId=runtime['id'], releasedVersion=runtime['version'])
         integrity.write_json(output / 'runtime-metadata.json', metadata)
         summary['availability']['python'] = probe_python(runtime_root / integrity.relative(spec['executable']), output, env)
+        summary['groupedAttentionRegression'] = []
+        attention_devices = ['cpu']
+        if summary['availability']['python']['mpsAvailable']:
+            attention_devices.append('mps')
+        for device in attention_devices:
+            proof_path = output / f'grouped-attention-{device}.json'
+            integrity.run([runtime_root / integrity.relative(spec['executable']), '-I', '-B',
+                           ROOT / 'scripts/test-speech-qwen-attention.py', '--device', device,
+                           '--output', proof_path], output / f'grouped-attention-{device}.log',
+                          env=env, cwd=work, timeout=180)
+            proof = json.loads(proof_path.read_text(encoding='utf-8'))
+            if proof.get('status') != 'passed' or proof.get('device') != device:
+                raise ValueError('The grouped-attention regression did not pass on the selected device')
+            summary['groupedAttentionRegression'].append(proof)
+        integrity.write_json(output / 'summary.json', summary)
         def synthesize(voice: str, model_root: Path | None = None) -> None:
             print(f'Verifying installed voice {voice}', flush=True)
             voice_env = dict(env, OPEN_MEDIA_TEST_VOICE_ID=voice)

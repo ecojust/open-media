@@ -20,6 +20,7 @@ test('release requires the same successful source commit and all platform checks
   const { run, jobs, artifacts } = fixture();
   assert.equal(validateBuild(run, jobs, artifacts, commit).length, 4);
   assert.throws(() => validateBuild({ ...run, head_sha: 'b'.repeat(40) }, jobs, artifacts, commit));
+  assert.throws(() => validateBuild({ ...run, path: '.github/workflows/optional-speech-runtime.yml' }, jobs, artifacts, commit));
   assert.throws(() => validateBuild(run, jobs.filter(job => job.name !== 'Application checks'), artifacts, commit));
   assert.throws(() => validateBuild(run, jobs.map(job => job.name === 'windows-x64' ? { ...job, conclusion: 'failure' } : job), artifacts, commit));
 });

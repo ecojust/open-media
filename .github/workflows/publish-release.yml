@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_run_id:
-        description: Successful desktop build run ID
+        description: Selected desktop build run ID
         required: true
         type: string
       expected_commit:
@@ -21,13 +21,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  await-build:
+    name: Wait for the selected verified build
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Validate selection and wait for all platform checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_BUILD_RUN: ${{ inputs.build_run_id }}
+          RELEASE_EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        run: |
+          [[ "$RELEASE_BUILD_RUN" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_EXPECTED_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          selected_commit=$(gh api "repos/$RELEASE_REPOSITORY/actions/runs/$RELEASE_BUILD_RUN" --jq 'select(.path == ".github/workflows/desktop-build.yml") | .head_sha')
+          [[ "$selected_commit" == "$RELEASE_EXPECTED_COMMIT" ]]
+          gh run watch "$RELEASE_BUILD_RUN" --repo "$RELEASE_REPOSITORY" --interval 45 --exit-status
   publish:
+    needs: await-build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.expected_commit }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

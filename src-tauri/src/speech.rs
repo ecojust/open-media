@@ -935,6 +935,52 @@ fn update_job(jobs: &Mutex<Jobs>, id: &str, stage: &str, progress: Option<f64>) 
     }
 }
 
+fn cpu_retry_command(original: &Command, kind: ModelKind, log_path: &Path) -> Result<Command> {
+    let python = matches!(kind, ModelKind::F5 | ModelKind::Qwen3);
+    let option = if python { "--device" } else { "--provider" };
+    let mut arguments = original.get_args();
+    let mut command = Command::new(original.get_program());
+    while let Some(argument) = arguments.next() {
+        if argument == option {
+            arguments.next();
+        } else if !argument
+            .to_string_lossy()
+            .starts_with(&format!("{option}="))
+        {
+            command.arg(argument);
+        }
+    }
+    if python {
+        command.args(["--device", "cpu"]);
+    } else {
+        command.arg("--provider=cpu");
+    }
+    if let Some(directory) = original.get_current_dir() {
+        command.current_dir(directory);
+    }
+    for (name, value) in original.get_envs() {
+        if let Some(value) = value {
+            command.env(name, value);
+        } else {
+            command.env_remove(name);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let log = OpenOptions::new()
+        .append(true)
+        .open(log_path)
+        .map_err(|error| format!("无法打开 CPU 配音重试日志：{error}"))?;
+    command
+        .stdin(Stdio::null())
+        .stdout(log.try_clone().map_err(|error| error.to_string())?)
+        .stderr(log);
+    Ok(command)
+}
+
 fn generate_wave(
     speech: &SpeechRuntime,
     workspace: &Path,
@@ -968,7 +1014,7 @@ fn generate_wave(
     );
     let mut log_reader = File::open(&log_path).map_err(|e| e.to_string())?;
     let mut log_text = String::new();
-    let mut retried_native_cpu = false;
+    let mut retried_cpu = false;
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     loop {
         check_cancelled(cancelled)?;
@@ -1006,9 +1052,15 @@ fn generate_wave(
                         .take(MAX_LOG_BYTES)
                         .read_to_end(&mut remaining);
                     log_text.push_str(&String::from_utf8_lossy(&remaining));
-                    if should_retry_native_cpu(speech.model.kind, &log_text, retried_native_cpu) {
+                    if should_retry_cpu(speech.model.kind, &log_text, retried_cpu) {
                         check_cancelled(cancelled)?;
-                        retried_native_cpu = true;
+                        if Instant::now() >= deadline {
+                            return Err(
+                                "语音生成超过 30 分钟，请缩短文字或降低同时运行的任务数量。".into(),
+                            );
+                        }
+                        retried_cpu = true;
+                        let failed_device = last_generation_device(&log_text).unwrap_or("gpu");
                         match fs::remove_file(&output) {
                             Ok(()) => (),
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
@@ -1018,7 +1070,7 @@ fn generate_wave(
                             .append(true)
                             .open(&log_path)
                             .map_err(|error| format!("无法记录配音回退状态：{error}"))?;
-                        writeln!(retry_log, "\nstage=fallback,from=coreml,device=cpu,reason=加速引擎初始化或合成失败")
+                        writeln!(retry_log, "\nstage=fallback,from={failed_device},device=cpu,reason=加速进程异常退出")
                             .map_err(|error| format!("无法记录配音回退状态：{error}"))?;
                         update_job(
                             jobs,
@@ -1027,9 +1079,10 @@ fn generate_wave(
                             None,
                         );
                         check_cancelled(cancelled)?;
-                        command.arg("--provider=cpu");
+                        let mut retry_command =
+                            cpu_retry_command(&command, speech.model.kind, &log_path)?;
                         child = RunningChild(
-                            command
+                            retry_command
                                 .spawn()
                                 .map_err(|error| format!("无法启动 CPU 配音重试：{error}"))?,
                         );
@@ -1154,10 +1207,14 @@ fn last_generation_device(log: &str) -> Option<&str> {
     })
 }
 
-fn should_retry_native_cpu(kind: ModelKind, log: &str, retried: bool) -> bool {
+fn should_retry_cpu(kind: ModelKind, log: &str, retried: bool) -> bool {
     !retried
-        && !matches!(kind, ModelKind::F5 | ModelKind::Qwen3)
-        && last_generation_device(log) == Some("coreml")
+        && match kind {
+            ModelKind::F5 | ModelKind::Qwen3 => {
+                matches!(last_generation_device(log), Some("mps" | "cuda"))
+            }
+            _ => last_generation_device(log) == Some("coreml"),
+        }
         && !log
             .lines()
             .rev()
@@ -1440,12 +1497,12 @@ mod tests {
     fn native_retry_is_limited_to_one_failed_coreml_attempt() {
         let coreml = "stage=device,device=coreml\n";
         for kind in [ModelKind::Matcha, ModelKind::Zipvoice, ModelKind::Kokoro] {
-            assert!(should_retry_native_cpu(kind, coreml, false));
-            assert!(!should_retry_native_cpu(kind, coreml, true));
-            assert!(!should_retry_native_cpu(kind,
+            assert!(should_retry_cpu(kind, coreml, false));
+            assert!(!should_retry_cpu(kind, coreml, true));
+            assert!(!should_retry_cpu(kind,
                 "stage=device,device=coreml\nstage=fallback,from=coreml,device=cpu,reason=unsupported\n", false));
             for phase in ["writing", "complete"] {
-                assert!(!should_retry_native_cpu(
+                assert!(!should_retry_cpu(
                     kind,
                     &format!("{coreml}stage={phase}\n"),
                     false
@@ -1453,13 +1510,320 @@ mod tests {
             }
         }
         for kind in [ModelKind::F5, ModelKind::Qwen3] {
-            assert!(!should_retry_native_cpu(kind, coreml, false));
+            assert!(!should_retry_cpu(kind, coreml, false));
         }
-        assert!(!should_retry_native_cpu(
+        assert!(!should_retry_cpu(
             ModelKind::Matcha,
             "stage=device,device=cpu\n",
             false
         ));
+    }
+
+    #[test]
+    fn python_gpu_retry_requires_explicit_device_and_excludes_cpu_and_writing() {
+        for kind in [ModelKind::F5, ModelKind::Qwen3] {
+            for device in ["mps", "cuda"] {
+                let gpu = format!("stage=device,device={device}\nstage=generating,chunks=1\n");
+                assert!(should_retry_cpu(kind, &gpu, false));
+                assert!(!should_retry_cpu(kind, &gpu, true));
+                for suffix in [
+                    "stage=writing\n",
+                    "stage=complete\n",
+                    "stage=device,device=cpu\n",
+                    "stage=fallback,device=cpu,reason=GPU failed\n",
+                ] {
+                    assert!(!should_retry_cpu(kind, &format!("{gpu}{suffix}"), false));
+                }
+            }
+            assert!(!should_retry_cpu(
+                kind,
+                "stage=loading\nLLVM ERROR\n",
+                false
+            ));
+            assert!(!should_retry_cpu(kind, "stage=device,device=cpu\n", false));
+        }
+    }
+
+    #[test]
+    fn cpu_retry_replaces_device_options_without_losing_offline_environment() {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        for (kind, options, expected) in [
+            (
+                ModelKind::Qwen3,
+                vec!["--device", "auto"],
+                vec!["--device", "cpu"],
+            ),
+            (ModelKind::F5, vec!["--device=mps"], vec!["--device", "cpu"]),
+            (
+                ModelKind::Matcha,
+                vec!["--provider=coreml"],
+                vec!["--provider=cpu"],
+            ),
+        ] {
+            let mut original = Command::new("配音 程序");
+            original
+                .args(["--config", "原始 模型/config.json"])
+                .args(options)
+                .args(["--voice", "固定声音"])
+                .current_dir("模型 目录")
+                .env("HF_HUB_OFFLINE", "1")
+                .env_remove("OPEN_MEDIA_TEST_UNUSED_ENV");
+            let retry = cpu_retry_command(&original, kind, log.path()).unwrap();
+            assert_eq!(retry.get_program(), original.get_program());
+            assert_eq!(retry.get_current_dir(), original.get_current_dir());
+            assert_eq!(
+                retry.get_envs().collect::<Vec<_>>(),
+                original.get_envs().collect::<Vec<_>>()
+            );
+            let args: Vec<_> = retry
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            let expected: Vec<_> = ["--config", "原始 模型/config.json", "--voice", "固定声音"]
+                .into_iter()
+                .chain(expected)
+                .collect();
+            assert_eq!(args, expected);
+        }
+    }
+
+    fn process_failure_fixture(
+        kind: ModelKind,
+        device: &str,
+        behavior: &str,
+    ) -> (tempfile::TempDir, SpeechRuntime, SpeechRequest) {
+        let root = fixture();
+        let mut speech = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        speech.model.kind = kind;
+        speech.model.sample_rate = 24000;
+        speech.model.config = "runner-config.json".into();
+        speech.script = Some(root.path().join("verified/runner/tts.py"));
+        let id = if kind == ModelKind::Qwen3 {
+            "qwen3_uncle_fu"
+        } else {
+            "f5_zh_male"
+        };
+        speech.voices[0].id = id.into();
+        let mut input = request("验证硬崩溃后的完整 CPU 重试。");
+        input.voice_id = id.into();
+        let mut audio = wave(&[0, 500, -500, 0]);
+        audio[24..28].copy_from_slice(&24000_u32.to_le_bytes());
+        audio[28..32].copy_from_slice(&48000_u32.to_le_bytes());
+        fs::write(
+            speech.executable.with_file_name("engine.expected.wav"),
+            audio,
+        )
+        .unwrap();
+        #[cfg(windows)]
+        {
+            speech.executable.set_extension("cmd");
+        }
+        #[cfg(unix)]
+        let script = r#"#!/bin/sh
+ulimit -c 0
+mode=auto
+output=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --device) mode="$2"; shift ;;
+    --output-filename) output="$2"; shift ;;
+  esac
+  shift
+done
+printf '%s\n' "$mode" >> "$0.calls"
+if [ "$mode" = cpu ]; then
+  printf 'stage=device,device=cpu\nstage=generating,chunks=1\n'
+  if [ @BEHAVIOR@ = cpu-fails ]; then exit 6; fi
+  printf 'stage=writing\n'
+  cp "$0.expected.wav" "$output"
+  printf 'stage=complete\n'
+  exit 0
+fi
+if [ @BEHAVIOR@ = unknown-device ]; then
+  printf 'stage=loading\n'; exit 1
+fi
+printf 'stage=device,device=@DEVICE@\nstage=generating,chunks=1\nsample=20, progress=0.8\n'
+if [ @BEHAVIOR@ = internal-cpu-fails ]; then
+  printf 'stage=fallback,from=@DEVICE@,device=cpu,reason=GPU exception\nstage=device,device=cpu\n'
+  exit 6
+fi
+if [ @BEHAVIOR@ = writing ]; then printf 'stage=writing\n'; exit 4; fi
+if [ @BEHAVIOR@ = cancel ]; then
+  while [ ! -f "$0.cancel" ]; do sleep 0.01; done
+  exit 1
+fi
+if [ @BEHAVIOR@ = abort ]; then kill -ABRT "$$"; fi
+exit 1
+"#;
+        #[cfg(windows)]
+        let script = r#"@echo off
+setlocal
+set "mode=auto"
+set "output="
+:arguments
+if "%~1"=="" goto run
+if "%~1"=="--device" goto device
+if "%~1"=="--output-filename" goto output
+shift
+goto arguments
+:device
+set "mode=%~2"
+shift
+shift
+goto arguments
+:output
+set "output=%~2"
+shift
+shift
+goto arguments
+:run
+echo %mode%>>"%~dpn0.calls"
+if "%mode%"=="cpu" goto cpu
+if "@BEHAVIOR@"=="unknown-device" (
+  echo stage=loading
+  exit /b 1
+)
+echo stage=device,device=@DEVICE@
+echo stage=generating,chunks=1
+echo sample=20, progress=0.8
+if "@BEHAVIOR@"=="internal-cpu-fails" (
+  echo stage=fallback,from=@DEVICE@,device=cpu,reason=GPU exception
+  echo stage=device,device=cpu
+  exit /b 6
+)
+if "@BEHAVIOR@"=="writing" (
+  echo stage=writing
+  exit /b 4
+)
+if "@BEHAVIOR@"=="cancel" goto cancelled
+exit /b 1
+:cancelled
+if not exist "%~dpn0.cancel" goto cancelled
+exit /b 1
+:cpu
+echo stage=device,device=cpu
+echo stage=generating,chunks=1
+if "@BEHAVIOR@"=="cpu-fails" exit /b 6
+echo stage=writing
+copy /b "%~dpn0.expected.wav" "%output%" >nul
+if errorlevel 1 exit /b 4
+echo stage=complete
+exit /b 0
+"#;
+        let script = script
+            .replace("@DEVICE@", device)
+            .replace("@BEHAVIOR@", behavior);
+        fs::write(&speech.executable, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&speech.executable, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        (root, speech, input)
+    }
+
+    #[test]
+    fn python_gpu_abort_and_error_exit_recover_in_a_new_cpu_process() {
+        for (kind, device, behavior) in [
+            #[cfg(unix)]
+            (ModelKind::Qwen3, "mps", "abort"),
+            (ModelKind::Qwen3, "cuda", "exit"),
+            (ModelKind::F5, "mps", "exit"),
+            #[cfg(unix)]
+            (ModelKind::F5, "cuda", "abort"),
+        ] {
+            let (_root, speech, input) = process_failure_fixture(kind, device, behavior);
+            let work = tempfile::tempdir().unwrap();
+            generate_wave(
+                &speech,
+                work.path(),
+                &input,
+                &AtomicBool::new(false),
+                &Mutex::new(Jobs::default()),
+            )
+            .unwrap();
+            assert_eq!(
+                fs::read_to_string(speech.executable.with_file_name("engine.calls"))
+                    .unwrap()
+                    .replace("\r\n", "\n"),
+                "auto\ncpu\n"
+            );
+            assert_eq!(
+                fs::read(work.path().join("speech.wav")).unwrap(),
+                fs::read(speech.executable.with_file_name("engine.expected.wav")).unwrap()
+            );
+            let log = fs::read_to_string(work.path().join("generation.log")).unwrap();
+            assert_eq!(last_generation_device(&log), Some("cpu"));
+            assert_eq!(log.matches("stage=fallback,").count(), 1);
+            assert!(log.contains(&format!("from={device},device=cpu")));
+            assert!(work.path().join("speech-voice-adapter.py").is_file());
+            if kind == ModelKind::F5 {
+                assert!(work.path().join("male-reference.wav").is_file());
+            }
+        }
+    }
+
+    #[test]
+    fn python_process_retry_stops_for_writing_cpu_failure_and_unknown_device() {
+        for (device, behavior, count) in [
+            ("mps", "writing", 1),
+            ("cpu", "exit", 1),
+            ("mps", "cpu-fails", 2),
+            ("mps", "internal-cpu-fails", 1),
+            ("mps", "unknown-device", 1),
+        ] {
+            let (_root, speech, input) =
+                process_failure_fixture(ModelKind::Qwen3, device, behavior);
+            let work = tempfile::tempdir().unwrap();
+            assert!(generate_wave(
+                &speech,
+                work.path(),
+                &input,
+                &AtomicBool::new(false),
+                &Mutex::new(Jobs::default())
+            )
+            .is_err());
+            assert_eq!(
+                fs::read_to_string(speech.executable.with_file_name("engine.calls"))
+                    .unwrap()
+                    .lines()
+                    .count(),
+                count
+            );
+        }
+    }
+
+    #[test]
+    fn cancelled_python_gpu_process_never_starts_cpu_retry() {
+        let (_root, speech, input) = process_failure_fixture(ModelKind::Qwen3, "mps", "cancel");
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let signal = cancelled.clone();
+        let executable = speech.executable.clone();
+        let watcher = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !executable.with_file_name("engine.calls").is_file() && Instant::now() < deadline
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            signal.store(true, Ordering::SeqCst);
+            fs::write(executable.with_file_name("engine.cancel"), b"cancel").unwrap();
+        });
+        let work = tempfile::tempdir().unwrap();
+        let result = generate_wave(
+            &speech,
+            work.path(),
+            &input,
+            &cancelled,
+            &Mutex::new(Jobs::default()),
+        );
+        watcher.join().unwrap();
+        assert_eq!(result.unwrap_err(), CANCELLED);
+        assert_eq!(
+            fs::read_to_string(speech.executable.with_file_name("engine.calls"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "auto\n"
+        );
     }
 
     #[cfg(unix)]

@@ -25,6 +25,50 @@ def torch_fixture(*, cuda=False, mps=False):
 
 
 class DeviceSelectionTests(unittest.TestCase):
+    def test_qwen_uses_explicit_grouped_attention_only_on_mps(self):
+        self.assertEqual(device_runtime.qwen_attention_implementation("mps"), "eager")
+        for device in ("cpu", "cuda"):
+            self.assertEqual(device_runtime.qwen_attention_implementation(device), "sdpa")
+
+    def test_qwen_loader_configures_main_model_and_independent_audio_decoder(self):
+        for device in ("mps", "cuda"):
+            with self.subTest(device=device):
+                layers = [SimpleNamespace(num_key_value_groups=2, q_proj=object(),
+                                          config=SimpleNamespace(_attn_implementation="sdpa")) for _ in range(2)]
+                def component(layer):
+                    def select(value):
+                        layer.config._attn_implementation = value
+                    return SimpleNamespace(set_attn_implementation=Mock(side_effect=select),
+                                           modules=lambda: [layer])
+                main, decoder = [component(layer) for layer in layers]
+                main.speech_tokenizer = SimpleNamespace(model=SimpleNamespace(decoder=decoder))
+                model = SimpleNamespace(model=main)
+                loader = Mock(return_value=model)
+                runtime = SimpleNamespace(local_path=lambda *args, **kwargs: Path("model"), stage=Mock())
+                with patch.dict(sys.modules, {"qwen_tts": SimpleNamespace(Qwen3TTSModel=SimpleNamespace(from_pretrained=loader))}):
+                    actual = device_runtime.load_qwen_model(runtime, {"model": "."}, Path("model"),
+                                                           SimpleNamespace(bfloat16="bf16"), device)
+                self.assertIs(actual, model)
+                self.assertEqual(loader.call_args.kwargs["attn_implementation"], "eager" if device == "mps" else "sdpa")
+                self.assertEqual(loader.call_args.kwargs["dtype"], "bf16")
+                if device == "mps":
+                    main.set_attn_implementation.assert_called_once_with("eager")
+                    decoder.set_attn_implementation.assert_called_once_with("eager")
+                    self.assertTrue(all(layer.config._attn_implementation == "eager" for layer in layers))
+                else:
+                    main.set_attn_implementation.assert_not_called()
+                    decoder.set_attn_implementation.assert_not_called()
+
+    def test_qwen_refuses_silently_ignored_attention_configuration(self):
+        layer = SimpleNamespace(num_key_value_groups=2, q_proj=object(), config=SimpleNamespace(_attn_implementation="sdpa"))
+        component = SimpleNamespace(set_attn_implementation=Mock(), modules=lambda: [layer])
+        component.speech_tokenizer = SimpleNamespace(model=SimpleNamespace(decoder=component))
+        model = SimpleNamespace(model=component)
+        runtime = SimpleNamespace(local_path=lambda *args, **kwargs: Path("model"), stage=Mock())
+        with patch.dict(sys.modules, {"qwen_tts": SimpleNamespace(Qwen3TTSModel=SimpleNamespace(from_pretrained=Mock(return_value=model)))}), \
+                self.assertRaisesRegex(RuntimeError, "explicit grouped attention"):
+            device_runtime.load_qwen_model(runtime, {"model": "."}, Path("model"), SimpleNamespace(bfloat16="bf16"), "mps")
+
     def test_auto_prefers_cuda_then_mps_then_cpu(self):
         self.assertEqual(device_runtime.gpu_candidates(torch_fixture(cuda=True, mps=True), "auto"), ["cuda"])
         self.assertEqual(device_runtime.gpu_candidates(torch_fixture(mps=True), "auto"), ["mps"])

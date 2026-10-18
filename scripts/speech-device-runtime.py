@@ -65,6 +65,39 @@ def release_device(torch, device: str) -> None:
         print(f"GPU cleanup: {safe_reason(error)}", file=sys.stderr, flush=True)
 
 
+def qwen_attention_implementation(device: str) -> str:
+    # The MPS SDPA kernel in the released runtime cannot safely execute the
+    # model's 16-query/8-key-value grouped attention. Eager attention explicitly
+    # repeats key/value heads before matmul and keeps all model weights in BF16.
+    return "eager" if device == "mps" else "sdpa"
+
+
+def probe_qwen_grouped_attention(torch, device: str):
+    from types import SimpleNamespace
+    from qwen_tts.core.models.modeling_qwen3_tts import eager_attention_forward
+    # Exercise both prefill and cached decode with the real model head counts.
+    # Equal-head q/q/q probes cannot expose grouped-attention shape failures.
+    outputs = []
+    module = SimpleNamespace(num_key_value_groups=2, training=False)
+    for query_length, key_length in ((49, 49), (1, 50)):
+        query = torch.randn(1, 16, query_length, 128, device=device, dtype=torch.bfloat16)
+        key = torch.randn(1, 8, key_length, 128, device=device, dtype=torch.bfloat16)
+        value = torch.randn_like(key)
+        mask = None
+        if query_length > 1:
+            mask = torch.full((query_length, key_length), float("-inf"), device=device, dtype=query.dtype)
+            mask = torch.triu(mask, diagonal=1)[None, None]
+        if qwen_attention_implementation(device) == "eager":
+            output, _ = eager_attention_forward(module, query, key, value, mask, scaling=128 ** -0.5)
+        else:
+            output = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=mask, enable_gqa=True).transpose(1, 2).contiguous()
+        if output.shape != (1, query_length, 16, 128):
+            raise RuntimeError("Grouped speech attention returned an unexpected shape")
+        outputs.append(output)
+    return outputs
+
+
 def probe_device(torch, device: str, engine: str) -> None:
     """Exercise required dtypes/operations instead of trusting a device name."""
     if device == "cuda":
@@ -85,18 +118,19 @@ def probe_device(torch, device: str, engine: str) -> None:
     dtype = torch.bfloat16 if engine == "qwen3" else torch.float32
     with torch.inference_mode():
         x = torch.randn(1, 4, 16, device=device, dtype=dtype)
-        q = torch.randn(1, 2, 4, 16, device=device, dtype=dtype)
         values = [
             torch.nn.Linear(16, 8).to(device=device, dtype=dtype)(x),
-            functional.scaled_dot_product_attention(q, q, q),
             functional.layer_norm(x, (16,)),
         ]
         if engine == "f5":
+            q = torch.randn(1, 2, 4, 16, device=device, dtype=dtype)
+            values.append(functional.scaled_dot_product_attention(q, q, q))
             # Convolution is part of the F5 transformer. FFT and waveform
             # reconstruction are separate capabilities checked below.
             conv_input = torch.randn(1, 4, 16, device=device, dtype=dtype)
             values.append(torch.nn.Conv1d(4, 8, 3, padding=1).to(device=device, dtype=dtype)(conv_input))
         else:
+            values.extend(probe_qwen_grouped_attention(torch, device))
             # Autoregressive sampling must stay on the selected device too.
             probabilities = torch.softmax(x[0, 0].float(), dim=-1)
             sampled = torch.multinomial(probabilities, 1)
@@ -239,12 +273,34 @@ def generate_f5(runtime, config, root, text, speed, torch, np, sf, device):
     return runtime.join_audio(parts, 0.15, np)
 
 
-def generate_qwen(runtime, config, root, text, speed, torch, np, device):
+def load_qwen_model(runtime, config, root, torch, device):
     from qwen_tts import Qwen3TTSModel
+    attention = qwen_attention_implementation(device)
     model = Qwen3TTSModel.from_pretrained(
         str(runtime.local_path(root, config["model"], directory=True)),
-        device_map=device, dtype=torch.bfloat16, attn_implementation="sdpa",
+        device_map=device, dtype=torch.bfloat16, attn_implementation=attention,
         local_files_only=True, low_cpu_mem_usage=True)
+    if attention == "eager":
+        tokenizer = getattr(model.model, "speech_tokenizer", None)
+        tokenizer_model = getattr(tokenizer, "model", None)
+        decoder = getattr(tokenizer_model, "decoder", None)
+        if decoder is None:
+            raise RuntimeError("The speech audio decoder was not loaded")
+        # The model loader consumes attn_implementation before loading its
+        # independent tokenizer. CustomVoice uses only its audio decoder;
+        # configure that dynamic-attention component explicitly as well.
+        for component in (model.model, decoder):
+            component.set_attn_implementation("eager")
+            layers = [layer for layer in component.modules()
+                      if hasattr(layer, "num_key_value_groups") and hasattr(layer, "q_proj")]
+            if not layers or any(getattr(layer.config, "_attn_implementation", None) != "eager" for layer in layers):
+                raise RuntimeError("The speech model did not apply explicit grouped attention")
+    runtime.stage("attention", engine="qwen3", device=device, implementation=attention)
+    return model
+
+
+def generate_qwen(runtime, config, root, text, speed, torch, np, device):
+    model = load_qwen_model(runtime, config, root, torch, device)
     talker = getattr(model.model, "talker", None)
     tokenizer = getattr(model.model, "speech_tokenizer", None)
     if talker is None or tokenizer is None or getattr(tokenizer, "model", None) is None:
