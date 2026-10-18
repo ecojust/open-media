@@ -77,6 +77,23 @@ jobs:
           set -o pipefail
           cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib speech::tests::real_offline_speech_round_trip -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee .speech-runtime/logs/native.log
       - run: npx playwright install --with-deps chromium
+      - name: Select the locked browser runtime
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { chromium } from '@playwright/test';
+          const executablePath = chromium.executablePath();
+          const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
+          try {
+            console.log(`Browser executable: ${executablePath}`);
+            console.log(`Browser version: ${browser.version()}`);
+          } finally {
+            await browser.close();
+          }
+          for (const name of ['BROWSER_EXECUTABLE', 'CHROMIUM_PATH', 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH']) {
+            appendFileSync(process.env.GITHUB_ENV, `${name}=${executablePath}\n`);
+          }
+          NODE
       - name: Browser interaction checks
         id: browser
         run: |
