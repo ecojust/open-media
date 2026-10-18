@@ -736,24 +736,37 @@ async fn dispatch_tool(server: &Server, rpc_id: Value, tool: String, arguments: 
     }
     match tokio::time::timeout(timeout, received).await {
         Ok(Ok((result, is_error))) => {
-            let text = if let Some(text) = result.as_str() {
-                text.to_owned()
-            } else {
-                result.to_string()
-            };
-            let structured = if result.is_object() {
-                result
-            } else {
-                json!({"result":result})
-            };
-            success(
-                rpc_id,
-                json!({"content":[{"type":"text","text":text}],"structuredContent":structured,"isError":is_error}),
-            )
+            let content = tool_content(&result, is_error);
+            let structured = if result.is_object() { result } else { json!({"result":result}) };
+            success(rpc_id, json!({"content":content,"structuredContent":structured,"isError":is_error}))
         }
         Ok(Err(_)) => error(rpc_id, -32000, "MCP 请求已取消。"),
         Err(_) => error(rpc_id, -32000, "编辑器响应超时，请确认视频剪辑界面已打开。"),
     }
+}
+
+/// Image results are native MCP image content so agents can inspect composed pixels.
+/// Keep binary download chunks unchanged; only remove duplicated image bytes from text.
+fn tool_content(result: &Value, is_error: bool) -> Vec<Value> {
+    let payload = result.get("result").filter(|value| value.is_object()).unwrap_or(result);
+    let frame = payload.get("sheet").filter(|value| value.is_object()).unwrap_or(payload);
+    let image = if !is_error && frame.get("mimeType").and_then(Value::as_str) == Some("image/png") {
+        frame.get("base64").and_then(Value::as_str).filter(|data| !data.is_empty() && data.len() <= 12 * 1024 * 1024)
+    } else { None };
+    let text_value = if image.is_some() {
+        fn strip(value: &Value) -> Value {
+            match value {
+                Value::Object(fields) => Value::Object(fields.iter().filter(|(key, _)| key.as_str() != "base64").map(|(key, value)| (key.clone(), strip(value))).collect()),
+                Value::Array(values) => Value::Array(values.iter().map(strip).collect()),
+                _ => value.clone(),
+            }
+        }
+        strip(result)
+    } else { result.clone() };
+    let text = text_value.as_str().map(str::to_owned).unwrap_or_else(|| text_value.to_string());
+    let mut content = vec![json!({"type":"text","text":text})];
+    if let Some(data) = image { content.push(json!({"type":"image","mimeType":"image/png","data":data})); }
+    content
 }
 
 #[cfg(test)]

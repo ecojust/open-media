@@ -27,6 +27,16 @@ import BackgroundMusicLibrary from './BackgroundMusicLibrary.vue'
 import VideoSegmentLibrary from './VideoSegmentLibrary.vue'
 import TransitionLibrary from './TransitionLibrary.vue'
 import ProjectSizeControls from './ProjectSizeControls.vue'
+import AssetToolsPanel from './editor-tools/AssetToolsPanel.vue'
+import VisualClipTools from './editor-tools/VisualClipTools.vue'
+import AudioClipTools from './editor-tools/AudioClipTools.vue'
+import TranscriptionTools from './editor-tools/TranscriptionTools.vue'
+import SubtitleToolsPanel from './editor-tools/SubtitleToolsPanel.vue'
+import SpeechToolsPanel from './editor-tools/SpeechToolsPanel.vue'
+import ProjectToolsPanel from './editor-tools/ProjectToolsPanel.vue'
+import VisualElementsPanel from './editor-tools/VisualElementsPanel.vue'
+import PreviewToolsPanel from './editor-tools/PreviewToolsPanel.vue'
+import type { AssetToolAction, EditorToolRunner } from './editor-tools/types'
 import ChromaKeyPanel from './ChromaKeyPanel.vue'
 import PreviewSelection from './PreviewSelection.vue'
 import type { PreviewPosition } from '../core/preview-position'
@@ -44,7 +54,7 @@ import { importMediaFile, mediaKind, revokeMediaAsset } from '../core/media-impo
 import { importBlobAsset, isDesktop, prepareStoredVideoPreview } from '../native'
 import type { RecordedMicrophoneAudio } from '../core/microphone-recording'
 
-const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean; automationBusy?: boolean; mcpConnected?: boolean }>()
+const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean; automationBusy?: boolean; mcpConnected?: boolean; runTool?: EditorToolRunner }>()
 const emit = defineEmits<{ change: [project: Project, label?: string, historyGroup?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; openMcp: []; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const previewSelection = ref<InstanceType<typeof PreviewSelection> | null>(null)
@@ -64,13 +74,15 @@ const assetFilter = ref('all')
 const native = isDesktop()
 const assetSource = ref<'recordings' | 'imported'>(native ? 'recordings' : 'imported')
 const search = ref('')
-const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | null>(null)
+const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | 'asset-tools' | 'subtitle-tools' | 'project-tools' | 'visual-elements' | 'preview-tools' | null>(null)
 const modalOpen = computed(() => editorDialog.value !== null)
 const dialogReturnFocus = ref<HTMLElement | null>(null)
 const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
 const audioClipPlayer = ref<InstanceType<typeof AudioClipPlayer> | null>(null)
 const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false), segmentBusy = ref(false), sourceImportBusy = ref(false)
-const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value || sourceImportBusy.value)
+const toolBusy = ref(false), toolAsset = ref<MediaAsset>(), assetToolAction = ref<AssetToolAction>('probe')
+const projectToolTab = ref<'markers' | 'snapshots' | 'validate'>('markers')
+const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value || sourceImportBusy.value || toolBusy.value)
 const editingBusy = computed(() => localEditingBusy.value || !!props.automationBusy)
 const watermarkError = ref(''), watermarkStart = ref(0)
 const watermarkFile = ref<HTMLInputElement>()
@@ -91,6 +103,7 @@ const clipSpeechTargetId = ref(''), clipSpeechError = ref(''), clipSpeechNotice 
 const selectedSpeechBusy = computed(() => speechBusy.value && clipSpeechTargetId.value === selectedId.value && editorDialog.value !== 'speech')
 const clipMenu = ref<{ x: number; y: number; clipId: string } | null>(null)
 const trackMenu = ref<{ x: number; y: number; trackId: string } | null>(null)
+const assetMenu = ref<{ x: number; y: number; asset: MediaAsset } | null>(null)
 const menuElement = ref<HTMLElement | null>(null)
 const renamingTrackId = ref(''), trackName = ref('')
 const pendingTrackDelete = ref<{ project: Project; trackId: string } | null>(null)
@@ -167,6 +180,14 @@ const menuTrack = computed(() => props.project.tracks.find(track => track.id ===
 const menuTrackIndex = computed(() => props.project.tracks.findIndex(track => track.id === trackMenu.value?.trackId))
 const deletingTrack = computed(() => props.project.tracks.find(track => track.id === pendingTrackDelete.value?.trackId))
 const selectedVideo = computed(() => selected.value?.track.kind === 'video' && props.project.assets.find(asset => asset.id === selected.value?.clip.assetId)?.kind === 'video')
+const selectedToolKind = computed(() => {
+  const current = selected.value
+  if (current?.track.kind === 'transition') return 'transition'
+  if (current?.track.kind === 'audio') return 'audio'
+  if (current?.track.kind === 'text') return 'text'
+  const kind = props.project.assets.find(asset => asset.id === current?.clip.assetId)?.kind
+  return kind === 'image' || kind === 'video' ? kind : 'text'
+})
 const selectedVideoSize = computed(() => videoClipSourceSize(activeProject.value, selectedId.value))
 const selectedVideoSizeError = computed(() => selectedVideoSize.value ? projectSizeError(selectedVideoSize.value.width, selectedVideoSize.value.height) : '无法读取视频源尺寸。')
 const selectedSupportsAudioPlayback = computed(() => {
@@ -287,11 +308,25 @@ async function saveRecording(audio: RecordedMicrophoneAudio, start: number, proj
 function openEditorDialog(kind: NonNullable<typeof editorDialog.value>): void {
   if (editingBusy.value) return
   const focused = document.activeElement
-  dialogReturnFocus.value = focused instanceof HTMLElement && !focused.closest('.clip-context-menu') ? focused : menuReturnFocus
+  if (!(focused instanceof HTMLElement && focused.closest('.editor-dialog'))) dialogReturnFocus.value = focused instanceof HTMLElement && !focused.closest('.clip-context-menu') ? focused : menuReturnFocus
   pause(); cancelGesture(); closeMenus(); finishTrackRename(); editorDialog.value = kind
 }
 function openSpeech(): void { openEditorDialog('speech') }
 function closeEditorDialog(): void { if (!editingBusy.value) editorDialog.value = null }
+function setToolBusy(value: boolean): void {
+  toolBusy.value = value
+  if (value) { pause(); cancelGesture(); closeMenus() }
+  emit('busy', localEditingBusy.value)
+}
+function openAssetTools(action: AssetToolAction, asset?: MediaAsset): void {
+  if (!props.runTool || editingBusy.value || props.exportDisabled) return
+  toolAsset.value = asset; assetToolAction.value = action
+  openEditorDialog('asset-tools')
+}
+function openProjectTools(tab: 'markers' | 'snapshots' | 'validate'): void {
+  if (!props.runTool || editingBusy.value) return
+  projectToolTab.value = tab; openEditorDialog('project-tools')
+}
 function openWatermarks(): void {
   if (editingBusy.value || props.exportDisabled) return
   watermarkStart.value = playhead.value
@@ -612,9 +647,17 @@ function openTrackMenu(event: MouseEvent, track: Track): void {
   trackMenu.value = { x: event.type === 'contextmenu' && event.clientX ? event.clientX : rect.left, y: event.type === 'contextmenu' && event.clientY ? event.clientY : rect.bottom, trackId: track.id }
   void positionMenu()
 }
+function openAssetMenu(event: MouseEvent | KeyboardEvent, asset: MediaAsset): void {
+  if (!props.runTool || editingBusy.value || pendingTrackDelete.value) return
+  event.preventDefault(); event.stopPropagation()
+  closeMenus(); menuReturnFocus = event.currentTarget as HTMLElement
+  const rect = menuReturnFocus.getBoundingClientRect()
+  assetMenu.value = { x: event instanceof MouseEvent && event.clientX ? event.clientX : rect.left, y: event instanceof MouseEvent && event.clientY ? event.clientY : rect.bottom, asset }
+  void positionMenu()
+}
 async function positionMenu(): Promise<void> {
   await nextTick()
-  const value = clipMenu.value || trackMenu.value, element = menuElement.value
+  const value = clipMenu.value || trackMenu.value || assetMenu.value, element = menuElement.value
   if (!value || !element) return
   const bounds = element.getBoundingClientRect()
   value.x = Math.max(8, Math.min(value.x, window.innerWidth - bounds.width - 8))
@@ -629,7 +672,7 @@ function restoreMenuFocus(): void {
   })
 }
 function closeMenus(restoreFocus = false): void {
-  clipMenu.value = null; trackMenu.value = null
+  clipMenu.value = null; trackMenu.value = null; assetMenu.value = null
   if (restoreFocus) restoreMenuFocus()
 }
 function outsideMenus(event: PointerEvent): void {
@@ -924,7 +967,7 @@ function getPlayback(): EditorPlayback {
 function getInteractionBusy(): boolean {
   const focused = document.activeElement
   const editingField = focused instanceof HTMLElement && editorRoot.value?.contains(focused) && focused.matches('input:not([readonly]):not(:disabled),textarea:not([readonly]):not(:disabled),select:not(:disabled),[contenteditable="true"]')
-  return !!(editorDestroyed || localEditingBusy.value || preparingPlayback.value || gesture || previewPositionGesture || trackDrag || renamingTrackId.value || pendingTrackDelete.value || modalOpen.value || clipMenu.value || trackMenu.value || editingField || editorRoot.value?.querySelector('.timeline-divider.dragging'))
+  return !!(editorDestroyed || localEditingBusy.value || preparingPlayback.value || gesture || previewPositionGesture || trackDrag || renamingTrackId.value || pendingTrackDelete.value || modalOpen.value || clipMenu.value || trackMenu.value || assetMenu.value || editingField || editorRoot.value?.querySelector('.timeline-divider.dragging'))
 }
 async function setPlayback(patch: Partial<EditorPlayback>): Promise<EditorPlayback> {
   if (editorDestroyed) throw new Error('剪辑界面已关闭。')
@@ -1218,7 +1261,7 @@ function keyboard(event: KeyboardEvent): void {
   if (previewPositionGesture) { if (event.key === 'Escape') { event.preventDefault(); cancelPreviewPosition() }; return }
   if (trackDrag) { if (event.key === 'Escape') { event.preventDefault(); cancelTrackDrag() }; return }
   if (event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return
-  if (event.key === 'Escape' && (clipMenu.value || trackMenu.value)) { event.preventDefault(); closeMenus(true); return }
+  if (event.key === 'Escape' && (clipMenu.value || trackMenu.value || assetMenu.value)) { event.preventDefault(); closeMenus(true); return }
   if (editingBusy.value || pendingTrackDelete.value || modalOpen.value) return
   const element = event.target as HTMLElement
   if (element.closest('input,textarea,select,[contenteditable="true"],dialog,[role="dialog"],.speech-panel,.clip-context-menu,.audio-clip-player')) return
@@ -1302,9 +1345,10 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
         <div v-if="native" class="asset-source-tabs" aria-label="素材来源"><button :aria-pressed="assetSource === 'recordings'" @click="assetSource = 'recordings'">录屏</button><button :aria-pressed="assetSource === 'imported'" @click="assetSource = 'imported'">已导入</button></div>
         <VideoLibraryToolbar v-if="native && assetSource === 'recordings'" description="仅显示录屏文件 · 最近录屏在前" :directory="recordingDirectory" :loading="libraryLoading" :preparing="sourceImportBusy" :error="libraryError" :warnings="libraryWarnings" :disabled="editingBusy" @refresh="refreshRecordings" @reveal="revealRecordingDirectory" />
         <div class="asset-search"><input v-model="search" aria-label="搜索素材" placeholder="搜索素材" /></div>
+        <button v-if="runTool" class="asset-url-shortcut" title="从网址导入素材" aria-label="从网址导入素材" data-testid="asset-url-open" @click="openAssetTools('url')"><Icon name="import" :size="13" />从网址导入</button>
         <div v-if="assetSource === 'imported'" class="asset-filters" aria-label="素材类型"><button v-for="filter in [{ key: 'all', label: '全部' }, { key: 'video', label: '视频' }, { key: 'audio', label: '音频' }, { key: 'image', label: '图片' }]" :key="filter.key" :class="{ active: assetFilter === filter.key }" @click="assetFilter = filter.key">{{ filter.label }}</button></div>
         <div class="asset-list" @dragover.prevent @drop.prevent="importEditorAssets([...($event.dataTransfer?.files || [])])">
-          <button v-for="asset in assets" :key="asset.id" class="asset-card" :data-source-asset-id="asset.id" draggable="true" :title="`${asset.name} · ${assetTimes.get(asset.id)?.full || '加入时间未记录'} · 双击添加到播放头位置`" @dragstart="onAssetDrag($event, asset)" @dblclick="addAssetToTimeline(asset)" @keydown.enter.prevent="addAssetToTimeline(asset)">
+          <button v-for="asset in assets" :key="asset.id" class="asset-card" :data-source-asset-id="asset.id" draggable="true" :title="`${asset.name} · ${assetTimes.get(asset.id)?.full || '加入时间未记录'} · 双击添加到播放头位置`" @dragstart="onAssetDrag($event, asset)" @dblclick="addAssetToTimeline(asset)" @keydown.enter.prevent="addAssetToTimeline(asset)" @contextmenu="openAssetMenu($event, asset)" @keydown.shift.f10="openAssetMenu($event, asset)">
             <div class="asset-thumb" :class="asset.kind"><img v-if="asset.kind === 'image'" :src="asset.url" alt="" /><video v-else-if="asset.kind === 'video' && (assetSource !== 'recordings' || projectAssetIds.has(asset.id))" :src="asset.url" preload="metadata" muted /><Icon v-else :name="asset.kind === 'video' ? 'video' : 'audio'" :size="28" /><span v-if="asset.duration">{{ formatTime(asset.duration) }}</span></div>
             <span class="asset-name">{{ asset.name }}</span><span class="asset-meta">{{ asset.kind === 'audio' ? '音频素材' : `${asset.width} × ${asset.height}` }}</span>
             <time class="asset-added-time" :datetime="asset.addedAt" :title="assetTimes.get(asset.id)?.full || '旧项目未记录素材加入时间'">{{ assetTimes.get(asset.id)?.short || '时间未记录' }}</time>
@@ -1314,7 +1358,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
         <footer>双击素材添加 · 拖动调整位置</footer>
       </aside>
       <main class="preview-panel" :inert="speechBusy || undefined">
-        <div class="preview-heading"><span class="preview-title">预览</span><span>{{ project.width }} × {{ project.height }} · {{ project.fps }} fps</span></div>
+        <div class="preview-heading"><span class="preview-title">预览</span><span>{{ project.width }} × {{ project.height }} · {{ project.fps }} fps</span><button v-if="runTool" title="预览与试听工具" aria-label="预览与试听工具" data-testid="preview-tools-open" :disabled="editingBusy || !duration" @click="openEditorDialog('preview-tools')"><Icon name="more" :size="15" /></button></div>
         <ProjectSizeControls ref="projectSizeControls" :project="project" :disabled="editingBusy || !!exportDisabled || modalOpen" @change="resizeProjectLive" />
         <div class="preview-stage">
           <div class="preview-frame" :style="{ aspectRatio: ratio }">
@@ -1328,7 +1372,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
           <div class="play-controls">
             <button title="回到开头" :disabled="editingBusy" @click="seek(0)"><Icon name="skip-back" :size="17" /></button>
             <button class="play-button" :disabled="!duration || editingBusy" :title="preparingPlayback ? '正在准备播放，点击取消' : playing ? '暂停（空格）' : '播放（空格）'" :aria-busy="preparingPlayback" data-testid="preview-play" @click="togglePlay"><Icon :name="preparingPlayback ? 'clock' : playing ? 'pause' : 'play'" :size="20" /></button>
-            <EditorVoiceRecorder :project-id="project.id" :start="playhead" :disabled="speechBusy || !!exportDisabled || !!recordingDisabled" :save="saveRecording" @busy="setRecordingBusy" @started="startRecordingPlayback" @stopped="stopRecordingPlayback" @release="releaseRecordingAsset" @status="emit('status', $event)" />
+            <EditorVoiceRecorder :project-id="project.id" :start="playhead" :disabled="speechBusy || toolBusy || !!exportDisabled || !!recordingDisabled" :save="saveRecording" @busy="setRecordingBusy" @started="startRecordingPlayback" @stopped="stopRecordingPlayback" @release="releaseRecordingAsset" @status="emit('status', $event)" />
             <button title="跳到结尾" :disabled="editingBusy" @click="seek(duration)"><Icon name="skip-forward" :size="17" /></button>
           </div>
           <span class="preview-scale">适应窗口</span>
@@ -1342,7 +1386,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
           </div>
           <span v-else>片段属性</span>
         </header>
-        <div v-if="selected" class="property-content" :inert="editingBusy && !selectedSpeechBusy || undefined">
+        <div v-if="selected" class="property-content" :inert="editingBusy && !selectedSpeechBusy && !toolBusy || undefined">
           <div class="selected-heading"><Icon :name="selected.track.kind === 'text' ? 'text' : selected.track.kind === 'audio' ? 'audio' : selected.track.kind === 'transition' ? 'transition' : 'video'" :size="16" /><strong>{{ selected.clip.name }}</strong><span v-if="selectedLocked">已锁定</span></div>
           <fieldset v-if="selected.clip.transition" class="transition-properties" :disabled="selectedLocked || editingBusy">
             <label>转场效果<select aria-label="片段转场效果" :value="selected.clip.transition.effect" @change="changeTransition(stringValue($event) as TransitionEffect, clipDuration(selected.clip))"><option v-for="effect in TRANSITION_PRESETS" :key="effect.id" :value="effect.id">{{ effect.name }}</option></select></label>
@@ -1377,6 +1421,9 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
             <ClipFilterPanel :key="selected.clip.id" :filters="selected.clip.filters" :disabled="selectedLocked" @change="(filters, label) => updateSelected({ filters }, label)" />
           </section>
           </template>
+          <VisualClipTools v-if="runTool && (selected.clip.transition || inspectorTab === 'properties')" :key="`visual-${project.id}-${selected.clip.id}`" :clip="selected.clip" :kind="selectedToolKind" :time="playhead" :run="runTool" :disabled="selectedLocked || editingBusy || !!exportDisabled" @busy="setToolBusy" />
+          <AudioClipTools v-if="runTool && selectedSupportsAudioPlayback && inspectorTab === 'properties'" :key="`audio-${project.id}-${selected.clip.id}`" :clip="selected.clip" :project="project" :native="native" :run="runTool" :disabled="selectedLocked || editingBusy || !!exportDisabled" @busy="setToolBusy" />
+          <TranscriptionTools v-if="runTool && ['audio', 'video'].includes(selectedToolKind) && inspectorTab === 'properties'" :key="`transcription-${project.id}-${selected.clip.id}`" :clip-id="selected.clip.id" :native="native" :run="runTool" :disabled="editingBusy || !!exportDisabled" @busy="setToolBusy" />
         </div>
         <div v-else class="property-empty"><Icon name="settings" :size="28" /><strong>选择一个片段</strong><span>调整画面、速度、声音<br />或添加淡入淡出</span></div>
       </aside>
@@ -1387,11 +1434,14 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
         <div class="track-add"><span>时间线</span><button title="添加视频轨道" @click="addTimelineTrack('video')"><Icon name="video" :size="14" /><Icon name="plus" :size="11" /></button><button title="添加音频轨道" @click="addTimelineTrack('audio')"><Icon name="audio" :size="14" /><Icon name="plus" :size="11" /></button><button title="添加字幕轨道" @click="addTimelineTrack('text')"><Icon name="text" :size="14" /><Icon name="plus" :size="11" /></button></div>
         <div class="timeline-clip-tools" role="group" aria-label="片段剪辑">
           <button title="添加字幕" @click="addText"><Icon name="text" :size="15" /><span>字幕</span></button>
+          <button v-if="runTool" title="导入或导出字幕文件" aria-label="字幕文件" data-testid="subtitle-tools-open" :disabled="editingBusy || !!exportDisabled" @click="openEditorDialog('subtitle-tools')"><Icon name="import" :size="14" /><span>字幕文件</span></button>
           <button title="从当前刻度添加水印" aria-label="添加水印" aria-haspopup="dialog" data-testid="watermark-open" :disabled="editingBusy || !!exportDisabled" @click="openWatermarks"><Icon name="sticker" :size="15" /><span>水印</span></button>
           <button title="从当前刻度加入背景音乐" aria-label="背景音乐" aria-haspopup="dialog" data-testid="background-music-open" :disabled="editingBusy || !!exportDisabled" @click="openBackgroundMusic"><Icon name="audio" :size="15" /><span>背景音乐</span></button>
           <button title="添加到项目开头，现有片段整体后移" aria-label="片头" aria-haspopup="dialog" data-testid="video-segment-intro-open" :disabled="editingBusy || !!exportDisabled" @click="openVideoSegments('prepend')"><Icon name="skip-back" :size="15" /><span>片头</span></button>
           <button title="添加到项目结尾" aria-label="片尾" aria-haspopup="dialog" data-testid="video-segment-outro-open" :disabled="editingBusy || !!exportDisabled" @click="openVideoSegments('append')"><Icon name="skip-forward" :size="15" /><span>片尾</span></button>
           <button title="在相邻视频切点应用转场" aria-label="转场" aria-haspopup="dialog" data-testid="transition-open" :disabled="editingBusy || !!exportDisabled" @click="openTransitions"><Icon name="transition" :size="15" /><span>转场</span></button>
+          <button v-if="runTool" title="添加画面标注或动态标题" aria-label="标注与标题" data-testid="visual-elements-open" :disabled="editingBusy || !!exportDisabled" @click="openEditorDialog('visual-elements')"><Icon name="sticker" :size="15" /><span>标注 / 标题</span></button>
+          <button v-if="runTool" title="管理时间线标记" aria-label="项目标记" data-testid="project-markers-open" :disabled="editingBusy" @click="openProjectTools('markers')"><Icon name="mark-in" :size="15" /><span>标记</span></button>
           <button :disabled="!canSplit" title="在播放头处分割（S）" @click="splitSelected"><Icon name="scissors" :size="15" /><span>分割</span></button>
           <button :disabled="!canTrimStart" title="裁掉播放头左侧（Q）" aria-label="裁掉播放头左侧（Q）" @click="trimSelected('start')"><Icon name="mark-in" :size="15" /></button>
           <button :disabled="!canTrimEnd" title="裁掉播放头右侧（W）" aria-label="裁掉播放头右侧（W）" @click="trimSelected('end')"><Icon name="mark-out" :size="15" /></button>
@@ -1403,7 +1453,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
       </div>
       <div ref="timelineScroll" class="timeline-scroll" :class="{ 'sorting-tracks': draggingTrackId }" tabindex="-1" @scroll="timelineOffset = ($event.target as HTMLElement).scrollLeft; closeMenus(); updateTrackDrop()">
         <div class="timeline-content" :style="{ width: `${timelineWidth + 140}px` }">
-          <div class="ruler-row"><div class="track-label ruler-label">{{ formatTime(playhead, true) }}</div><div class="timeline-ruler" :style="{ width: `${timelineWidth}px` }" @pointerdown="setPlayheadFromPointer"><span v-for="tick in ticks" :key="tick" :style="{ left: `${tick * zoom}px` }">{{ formatTime(tick) }}</span><div class="ruler-playhead" :style="{ left: `${playhead * zoom}px` }" /></div></div>
+          <div class="ruler-row"><div class="track-label ruler-label">{{ formatTime(playhead, true) }}</div><div class="timeline-ruler" :style="{ width: `${timelineWidth}px` }" @pointerdown="setPlayheadFromPointer"><span v-for="tick in ticks" :key="tick" :style="{ left: `${tick * zoom}px` }">{{ formatTime(tick) }}</span><button v-for="marker in project.markers || []" :key="marker.id" class="timeline-marker" :style="{ left: `${marker.time * zoom}px`, color: marker.color || 'var(--ed-accent)' }" :title="`${marker.label} · ${formatTime(marker.time, true)}`" :aria-label="`跳转标记：${marker.label}`" :disabled="editingBusy" @pointerdown.stop @click.stop="seek(marker.time)"><Icon name="mark-in" :size="12" /></button><div class="ruler-playhead" :style="{ left: `${playhead * zoom}px` }" /></div></div>
           <div v-for="(track, trackIndex) in activeProject.tracks" :key="track.id" class="track-row" :data-track-row-id="track.id" :class="{ locked: track.locked, muted: track.muted, 'track-dragging': draggingTrackId === track.id }">
             <div class="track-label" :data-track-label-id="track.id" tabindex="-1" @contextmenu="openTrackMenu($event, track)">
               <div class="track-name" @dblclick.stop="startTrackRename(track)"><button class="track-drag-handle" :data-track-drag="track.id" :disabled="track.locked || editingBusy || !!exportDisabled || !!renamingTrackId || activeProject.tracks.length < 2" :aria-label="`拖动排序：${track.name}`" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="拖动调整轨道层级（Alt + ↑ / ↓）" @pointerdown="startTrackDrag($event, track)" @keydown="trackHandleKeyboard($event, track)" @click.stop @dblclick.stop @contextmenu.prevent.stop><Icon name="grip" :size="13" /></button><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : track.kind === 'transition' ? 'transition' : 'video'" :size="13" /><input v-if="renamingTrackId === track.id" v-model="trackName" class="track-rename-input" aria-label="轨道名称" maxlength="200" @keydown.enter.prevent.stop="finishTrackRename()" @keydown.esc.prevent.stop="finishTrackRename(false)" @blur="finishTrackRename()" @pointerdown.stop @dblclick.stop @contextmenu.stop /><span v-else :title="`${track.name} · 双击重命名`">{{ track.name }}</span><button v-if="subtitleIssues.get(track.id)?.length" class="track-subtitle-warning" data-testid="track-subtitle-warning" :data-warning-track-id="track.id" :disabled="editingBusy" :title="subtitleWarningLabel(track)" :aria-label="subtitleWarningLabel(track)" @pointerdown.stop @dblclick.stop @click.stop="focusSubtitleIssue(track)"><Icon name="alert" :size="13" /><span>{{ subtitleIssues.get(track.id)?.length }}</span></button><span class="track-clip-count" data-testid="track-clip-count" :data-count-track-id="track.id" :title="`${track.name}：${track.clips.length} 个片段`" :aria-label="`${track.name}：${track.clips.length} 个片段`" @dblclick.stop>{{ track.clips.length }}</span></div>
@@ -1443,17 +1493,30 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
       <WatermarkLibrary v-if="editorDialog === 'watermark'" :busy="watermarkBusy" :error="watermarkError" @select="insertWatermark" @import-local="importLocalWatermark" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'speech'" title="文字转语音" icon="audio" wide :busy="editingBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
-      <SpeechPanel ref="speechPanel" :active="editorDialog === 'speech'" in-dialog :project="project" @change="(next, label) => emit('change', next, label)" @status="emit('status', $event)" @busy="setSpeechBusy" />
+      <div :inert="toolBusy || undefined"><SpeechPanel ref="speechPanel" :active="editorDialog === 'speech'" in-dialog :project="project" @change="(next, label) => emit('change', next, label)" @status="emit('status', $event)" @busy="setSpeechBusy" /></div>
+      <SpeechToolsPanel v-if="runTool && editorDialog === 'speech'" :run="runTool" :disabled="speechBusy" :selected-clip-id="selected?.track.kind === 'text' ? selected.clip.id : undefined" @busy="setToolBusy" />
     </EditorDialog>
+    <EditorDialog :open="editorDialog === 'asset-tools'" :title="assetToolAction === 'url' ? '从网址导入' : '素材工具'" icon="video" wide :busy="toolBusy" busy-message="正在处理素材…" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><AssetToolsPanel v-if="runTool && editorDialog === 'asset-tools'" :asset="toolAsset" :action="assetToolAction" :native="native" :run="runTool" @busy="setToolBusy" /></EditorDialog>
+    <EditorDialog :open="editorDialog === 'subtitle-tools'" title="字幕文件" icon="text" wide :busy="toolBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><SubtitleToolsPanel v-if="runTool && editorDialog === 'subtitle-tools'" :project="project" :run="runTool" @busy="setToolBusy" /></EditorDialog>
+    <EditorDialog :open="editorDialog === 'project-tools'" title="项目工具" icon="settings" wide :busy="toolBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><ProjectToolsPanel v-if="runTool && editorDialog === 'project-tools'" :project="project" :time="playhead" :run="runTool" :initial-tab="projectToolTab" @busy="setToolBusy" /></EditorDialog>
+    <EditorDialog :open="editorDialog === 'visual-elements'" title="标注与标题" icon="sticker" wide :busy="toolBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><VisualElementsPanel v-if="runTool && editorDialog === 'visual-elements'" :project="project" :time="playhead" :selected-clip-id="selectedId || undefined" :run="runTool" @busy="setToolBusy" /></EditorDialog>
+    <EditorDialog :open="editorDialog === 'preview-tools'" title="预览与试听" icon="play" wide :busy="toolBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><PreviewToolsPanel v-if="runTool && editorDialog === 'preview-tools'" :project="project" :time="playhead" :selected-clip-id="selectedId || undefined" :run="runTool" @busy="setToolBusy" /></EditorDialog>
     <EditorDialog :open="editorDialog === 'project'" title="项目设置" icon="settings" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
         <div class="property-content project-settings-content">
           <h3>画面</h3>
           <label>帧率<select :value="project.fps" aria-label="项目帧率" @change="setProjectSetting({ fps: numberValue($event) })"><option :value="24">24 fps</option><option :value="25">25 fps</option><option :value="30">30 fps</option><option :value="60">60 fps</option></select></label><label>背景颜色<input type="color" :value="project.background" aria-label="项目背景颜色" @change="setProjectSetting({ background: stringValue($event) })" /></label><div class="setting-note"><template v-if="project.autoSizeFromVideo">首次导入视频后自动采用源视频尺寸。</template>当前尺寸 {{ project.width }} × {{ project.height }}，可在预览上方直接调整并实时查看。轨道从上到下对应画面从前景到背景。</div>
           <h3>项目概况</h3><dl><dt>总时长</dt><dd>{{ formatTime(duration, true) }}</dd><dt>素材</dt><dd>{{ project.assets.length }} 个</dd><dt>轨道</dt><dd>{{ project.tracks.length }} 条</dd></dl>
+          <div v-if="runTool" class="project-tool-actions"><button data-testid="project-snapshots-open" @click="openProjectTools('snapshots')"><Icon name="copy" :size="14" />项目快照</button><button data-testid="project-validation-open" @click="openProjectTools('validate')"><Icon name="check" :size="14" />输出检查</button></div>
         </div>
       <template #footer><button class="editor-primary" @click="closeEditorDialog">完成</button></template>
     </EditorDialog>
-    <Teleport to="body">
+    <Teleport :to="editorRoot?.closest('.app-shell') || 'body'">
+      <div v-if="assetMenu" ref="menuElement" class="clip-context-menu" role="menu" tabindex="-1" aria-label="素材操作" :style="{ left: `${assetMenu.x}px`, top: `${assetMenu.y}px` }" @keydown="menuKeyboard" @contextmenu.prevent>
+        <button role="menuitem" @click="openAssetTools('probe', assetMenu.asset)"><Icon name="info" :size="14" />分析素材信息</button>
+        <template v-if="assetMenu.asset.kind !== 'audio'"><button role="menuitem" @click="openAssetTools('frame', assetMenu.asset)"><Icon name="image" :size="14" />提取画面</button><button role="menuitem" @click="openAssetTools('ocr', assetMenu.asset)"><Icon name="text" :size="14" />识别画面文字</button></template>
+        <template v-if="assetMenu.asset.kind === 'video'"><button role="menuitem" @click="openAssetTools('storyboard', assetMenu.asset)"><Icon name="panel" :size="14" />生成联系表</button><button role="menuitem" @click="openAssetTools('scenes', assetMenu.asset)"><Icon name="scissors" :size="14" />检测场景变化</button></template>
+        <button v-if="assetMenu.asset.kind !== 'image'" role="menuitem" @click="openAssetTools('idle', assetMenu.asset)"><Icon name="volume-off" :size="14" />检测静默与静止片段</button>
+      </div>
       <div v-if="clipMenu && selected" ref="menuElement" class="clip-context-menu" role="menu" tabindex="-1" :aria-label="selected.track.kind === 'text' ? '文字片段操作' : '片段操作'" :style="{ left: `${clipMenu.x}px`, top: `${clipMenu.y}px` }" @keydown="menuKeyboard">
         <template v-if="selected.track.kind === 'text'"><button role="menuitem" :disabled="editingBusy || !selectedSpeechPlan.sources.length" @click="generateTextSpeech(clipMenu.clipId)"><Icon name="audio" :size="14" />文字转语音</button><button role="menuitem" :disabled="editingBusy || !!selectedSpeechAlignmentError" @click="menuAction(() => alignTextSpeech(selectedId))"><Icon name="clock" :size="14" />文字对齐已有语音</button><hr /></template>
         <template v-if="isSubtitleClip(selected.track, selected.clip)"><button role="menuitem" data-testid="apply-subtitle-style-to-track" :disabled="selectedLocked || editingBusy || !selectedSubtitleTargets" :title="selectedSubtitleTargets ? '同步字体、颜色、位置、尺寸和淡入淡出，保留每条字幕的文字与时间' : '同轨道没有其他字幕'" @click="menuAction(applySelectedSubtitleStyle)"><Icon name="sliders" :size="14" />将样式应用到同轨道字幕</button><hr /></template>
@@ -1480,6 +1543,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
 </template>
 
 <style scoped>
+.asset-panel>.asset-url-shortcut{margin:0 12px 9px;min-height:27px;font-size:10px;border-color:var(--ed-border);color:var(--ed-muted);flex:none}.preview-heading>button{min-height:23px;height:23px;padding:2px 4px;color:var(--ed-muted)}.project-tool-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.project-tool-actions button{font-size:11px;border-color:var(--ed-border)}
 .asset-source-tabs{display:flex;gap:4px;padding:0 12px 9px;flex-shrink:0}.asset-source-tabs button{flex:1;font-size:11px;border:1px solid var(--ed-border);color:var(--ed-muted)}.asset-source-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--ed-accent) 10%,transparent);color:var(--ed-accent);border-color:color-mix(in srgb,var(--ed-accent) 35%,var(--ed-border))}.asset-panel>.video-library-toolbar{margin:0 12px 9px;max-height:180px;overflow:auto}
 
 .mcp-service-button{width:32px;height:32px;flex:none;padding:6px;color:var(--ed-text)}.editor-output-actions>.mcp-service-button.connected{border-color:transparent;background:linear-gradient(var(--ed-panel),var(--ed-panel)) padding-box,linear-gradient(110deg,#06b6d4,#8b5cf6,#06b6d4,#8b5cf6,#06b6d4) border-box;background-size:100% 100%,400% 100%;background-position:0 0,0% 50%;box-shadow:0 0 7px #06b6d438,0 0 12px #8b5cf626;animation:mcp-connection-flow 4s linear infinite}.mcp-service-button.connected>svg{filter:drop-shadow(0 0 2px #22d3ee42)}@keyframes mcp-connection-flow{to{background-position:0 0,100% 50%}}@media(prefers-reduced-motion:reduce){.editor-output-actions>.mcp-service-button.connected{animation:none;background-position:0 0,50% 50%}}
@@ -1558,4 +1622,8 @@ button,input,textarea{font:inherit}button{display:inline-flex;align-items:center
 .subtitle-issue-note{display:flex;align-items:flex-start;gap:5px;margin:0;color:var(--ed-warning,#a35b08);font-size:11px;line-height:1.5}
 .subtitle-issue-note svg{flex:none;margin-top:2px}
 :global([data-theme="dark"] .video-editor){--ed-warning:#ffd080}
+</style>
+
+<style scoped>
+.timeline-marker{position:absolute;bottom:0;z-index:2;transform:translateX(-50%);width:16px;height:15px;min-height:0;padding:0;border:0;border-radius:3px;background:var(--ed-panel);cursor:pointer}.timeline-marker:hover:not(:disabled){background:var(--ed-accent-soft)}
 </style>

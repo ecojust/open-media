@@ -1,6 +1,6 @@
 # Third-party notices
 
-Open Media's main application code is licensed under MIT; see [LICENSE](LICENSE). The application starts the bundled media and speech executables as separate processes. Their licenses are independent of the main application's license. The independent speech runner source explicitly uses GPL-3.0-or-later.
+Open Media's main application code is licensed under MIT; see [LICENSE](LICENSE). The application starts the bundled media, speech and recognition executables as separate processes. Their licenses are independent of the main application's license. The independent speech and recognition runner sources explicitly use GPL-3.0-or-later.
 
 ## Bundled media executables
 
@@ -39,12 +39,29 @@ See [docs/SPEECH_RUNTIME.md](docs/SPEECH_RUNTIME.md) and [licenses/speech-runtim
 | tempfile | MIT OR Apache-2.0 | Copyright (c) 2015 Steven Allen |
 | getrandom | MIT OR Apache-2.0 | Copyright (c) 2018-2026 The rust-random Project Developers; Copyright (c) 2014 The Rust Project Developers |
 | arboard | MIT OR Apache-2.0 | Copyright 2022 The Arboard contributors; original notices and image clipboard dependencies retained in `licenses/application/cargo/` |
+| base64 | MIT OR Apache-2.0 | Original upstream notices for the locked 0.22.1 archive are retained in `licenses/application/cargo/` |
 
 The exact dependency graph and versions are retained in `package-lock.json` and `src-tauri/Cargo.lock`. The installation's `licenses/application/cargo/manifest.json` inventories every locked registry package, including indirect, build-only and platform-specific dependencies. Original license, copyright and notice texts are retained alongside it, with exact source archive checksums and upstream provenance for notices omitted from published packages. Each package entry provides a source URL for the listed version.
 
 The `licenses/application/frontend/manifest.json` inventory records the dependencies actually emitted into the production browser bundle and its direct entry point. It retains or references identical original notices, including the original 0BSD copyright and permission notice for the embedded helper code. Duplicate license texts are shared without changing their contents. Required copyright notices and the full license texts are included in the installation's `licenses/application/` directory.
 
 Required dependency names, file-format names, copyright statements, and licensing references are preserved for accurate attribution.
+
+## Bundled image text recognition
+
+Offline recognition uses `tesseract.js` 7.0.0 and `tesseract.js-core` 7.0.0 under Apache-2.0. The worker, WebAssembly code and simplified Chinese/English language models are included locally. Images and recognized text are not sent to a remote recognition service.
+
+The precompiled worker contains nine separately attributed packages: bmp-js 0.1.0, idb-keyval 6.2.1, is-url 1.2.4, regenerator-runtime 0.13.11, wasm-feature-detect 1.8.0, zlibjs 0.3.1, buffer 6.0.3, base64-js 1.5.1 and ieee754 1.2.1. Their licenses are MIT, Apache-2.0 or BSD-3-Clause as recorded per package. Exact versions were checked against the worker's source map, original archive bytes and its publisher's pinned dependency lock; they can differ from installed dependencies that are not emitted into the application. Full original copyrights and permissions are in `licenses/application/frontend/ocr-worker/`.
+
+The WebAssembly core includes Tesseract, Leptonica, GIF, JPEG, PNG, TIFF and WebP libraries, zlib, OpenLibm and compiler runtime code. Their original license, author and patent notices, fixed upstream revisions and source URLs are recorded in `licenses/application/frontend/manifest.json` and retained in `licenses/application/frontend/ocr-native/`. This software is based in part on the work of the Independent JPEG Group. The compiler runtime notices include Emscripten, musl, libc++ and libc++abi; OpenLibm's original notice also identifies licenses of test sources that are not part of the runtime.
+
+The two language models come from `tesseract-ocr/tessdata_fast` at revision `87416418657359cb625c412a48b6e1d6d41c29bd`, under Apache-2.0. Lossless gzip packaging leaves their weights unchanged. The original license, compressed file hashes and original model hashes are retained in `licenses/application/ocr/`.
+
+## Optional offline speech recognition
+
+The Whisper Small INT8 attention model is downloaded only on request. Original Whisper model weights are licensed under MIT, copyright (c) 2022 OpenAI. The converted distribution is published by `clairemcw/sherpa-onnx-whisper-small-attention` at revision `9a896a02c311676d366ebfda3797753df4153fe2`; the converter is not the original model author. That distribution provides no additional license statement, so the original model license and this provenance are preserved in `licenses/audio-asr/` and included in the installed speech runtime notices.
+
+The three model files total 375,744,699 bytes and are verified against fixed hashes in `scripts/audio-asr-models.lock.json`. Model weights are not bundled with the installer, and model repository code is not executed. The independent `open-media-asr` helper uses the existing bundled speech runtime libraries, is licensed under GPL-3.0-or-later, and its source and build instructions are included in the corresponding speech source archive. Audio is processed locally.
 
 ## Optional offline voices
 

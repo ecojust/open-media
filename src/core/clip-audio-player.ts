@@ -1,5 +1,6 @@
 import type { Clip, MediaAsset } from './types.ts'
 import { clipDuration } from './timeline.ts'
+import { animatedSourceTimeAt, keyframeValue, playbackSpeedAt, speedSegments } from './visual-animation.ts'
 import { audioSourceTime } from './audio-loop.ts'
 
 function cancelled(): DOMException { return new DOMException('片段试听已取消', 'AbortError') }
@@ -40,7 +41,7 @@ export class ClipAudioPlayer {
 
   constructor(asset: MediaAsset, clip: Clip, callbacks: { ended: () => void; error: (message: string) => void }) {
     this.asset = { ...asset }
-    this.bufferEligible = asset.kind === 'audio' && clip.speed === 1 && asset.size > 0 && asset.size <= MAX_BUFFERED_BYTES && asset.duration <= MAX_BUFFERED_SECONDS
+    this.bufferEligible = asset.kind === 'audio' && clip.speed === 1 && !clip.speedRamp && asset.size > 0 && asset.size <= MAX_BUFFERED_BYTES && asset.duration <= MAX_BUFFERED_SECONDS
     this.clip = { ...clip }
     this.duration = clipDuration(clip)
     this.loops = clip.trimOut > asset.duration + 1e-6
@@ -65,7 +66,7 @@ export class ClipAudioPlayer {
     if (this.completed) return this.duration
     const elapsed = this.buffer
       ? this.bufferOffset + (this.active && this.context ? this.context.currentTime - this.bufferStarted : 0)
-      : this.loops
+      : this.loops || this.clip.speedRamp
         ? this.mediaElapsed + (this.active && this.mediaClockRunning && this.context ? this.context.currentTime - this.mediaStarted : 0)
         : ((this.media?.currentTime ?? this.clip.trimIn) - this.clip.trimIn) / this.clip.speed
     return Math.max(0, Math.min(this.duration, elapsed))
@@ -104,7 +105,7 @@ export class ClipAudioPlayer {
   }
 
   private volumeAt(elapsed: number): number {
-    return this.clip.volume * Math.max(0, Math.min(1,
+    return keyframeValue(this.clip, 'volume', elapsed + (this.clip.animationOffset ?? 0), this.clip.volume) * Math.max(0, Math.min(1,
       this.clip.fadeIn > 0 ? elapsed / this.clip.fadeIn : 1,
       this.clip.fadeOut > 0 ? (this.duration - elapsed) / this.clip.fadeOut : 1))
   }
@@ -119,6 +120,7 @@ export class ClipAudioPlayer {
     // Schedule the piecewise-linear envelope once on the audio thread. Even a
     // busy interface cannot interrupt playback or let sound pass the trim end.
     const points = [this.clip.fadeIn, this.duration - this.clip.fadeOut, this.duration]
+    if (this.clip.keyframes?.volume) points.push(...this.clip.keyframes.volume.map(p => p.time - (this.clip.animationOffset ?? 0)), ...Array.from({ length: 129 }, (_, i) => elapsed + (this.duration - elapsed) * i / 128))
     if (this.clip.fadeIn > 0 && this.clip.fadeOut > 0) points.push(this.duration * this.clip.fadeIn / (this.clip.fadeIn + this.clip.fadeOut))
     for (const point of [...new Set(points)].filter(point => point > elapsed && point <= this.duration).sort((a, b) => a - b)) {
       parameter.linearRampToValueAtTime(this.volumeAt(point), now + point - elapsed)
@@ -128,7 +130,7 @@ export class ClipAudioPlayer {
 
   private onPlaying = (): void => {
     if (!this.active || this.disposed) return
-    if (this.loops && !this.mediaClockRunning) {
+    if ((this.loops || this.clip.speedRamp) && !this.mediaClockRunning) {
       this.mediaStarted = this.context!.currentTime
       this.mediaClockRunning = true
     }
@@ -138,11 +140,13 @@ export class ClipAudioPlayer {
 
   private scheduleBoundary(): void {
     window.clearTimeout(this.boundaryTimer)
+    if (this.media && this.clip.speedRamp) { const rate = playbackSpeedAt(this.clip, this.clip.start + this.elapsed); if (this.media.playbackRate !== rate) this.media.playbackRate = rate }
+    const nextChange = this.clip.speedRamp ? speedSegments(this.clip).find(s => s.timeEnd > this.elapsed + 0.002)?.timeEnd ?? this.duration : this.duration
     this.boundaryTimer = window.setTimeout(() => {
       if (!this.active || this.disposed) return
       if (this.elapsed >= this.duration - 0.002 || (this.media?.ended && !this.loops)) this.finish()
       else this.scheduleBoundary()
-    }, Math.max(10, (this.duration - this.elapsed) * 1000))
+    }, Math.max(10, (nextChange - this.elapsed) * 1000))
   }
 
   private onWaiting = (): void => {
@@ -275,10 +279,12 @@ export class ClipAudioPlayer {
       }
       await this.waitForReady(pending.signal)
       check()
-      if (media.playbackRate !== this.clip.speed) media.playbackRate = this.clip.speed
+      const rate = playbackSpeedAt(this.clip, this.clip.start + elapsed)
+      if (media.playbackRate !== rate) media.playbackRate = rate
+      media.preservesPitch = this.clip.speedRamp?.preservePitch !== false
       this.mediaElapsed = Math.max(0, Math.min(this.duration, elapsed))
       if (this.mediaElapsed >= this.duration) { this.finish(); return }
-      const sourceTime = this.clip.trimIn + this.mediaElapsed * this.clip.speed
+      const sourceTime = animatedSourceTimeAt(this.clip, this.clip.start + this.mediaElapsed)
       const target = this.loops ? audioSourceTime(sourceTime, Number.isFinite(media.duration) ? media.duration : this.asset.duration) : sourceTime
       if (Number.isFinite(media.duration) && target >= media.duration) throw new Error('音频裁剪位置超出素材时长')
       if (Math.abs(media.currentTime - target) > 0.002) {
@@ -313,7 +319,7 @@ export class ClipAudioPlayer {
 
   pause(): void {
     if (this.buffer && this.active) this.bufferOffset = this.elapsed
-    else if (this.loops && this.active) this.mediaElapsed = this.elapsed
+    else if ((this.loops || this.clip.speedRamp) && this.active) this.mediaElapsed = this.elapsed
     this.mediaClockRunning = false
     this.active = false
     if (this.bufferSource) {

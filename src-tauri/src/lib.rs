@@ -15,6 +15,11 @@ mod media_metadata;
 pub mod video_library;
 pub mod mcp;
 pub mod mcp_files;
+pub mod asset_tools;
+pub mod clip_animation;
+pub mod audio_tools;
+pub mod audio_tools_asr;
+pub mod preview_tools;
 #[cfg(any(feature = "desktop", test))]
 pub mod image_clipboard;
 pub mod speech;
@@ -66,6 +71,9 @@ mod desktop {
         store: MediaStore,
         jobs: JobManager,
         video_library: VideoLibrary,
+        asset_tools: crate::asset_tools::AssetTools,
+        audio_tools: crate::audio_tools::AudioToolsManager,
+        asr: crate::audio_tools_asr::AsrManager,
         speech: SpeechManager,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
@@ -95,6 +103,92 @@ mod desktop {
     fn require_mcp_window(window: &tauri::WebviewWindow) -> engine::Result<()> {
         let url = window.url().map_err(|_| "无法确认 MCP 请求来源。")?;
         crate::mcp_files::require_editor_origin(window.label(), url.scheme(), url.host_str(), url.port(), cfg!(debug_assertions))
+    }
+
+    #[tauri::command]
+    pub async fn mcp_asset_tool(task_id: String, operation: String, args: Value, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Value> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.asset_tools.execute(&state.store, &state.runtime()?, &task_id, &operation, &args)).await
+    }
+    #[tauri::command]
+    pub fn mcp_asset_cancel(task_id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<bool> {
+        require_mcp_window(&window)?;
+        state.asset_tools.cancel(&task_id)
+    }
+
+    #[tauri::command]
+    pub async fn begin_tool_preview(spec: Value, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<MediaJob> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || crate::preview_tools::begin(&state.store, &state.runtime()?, &state.jobs, &spec)).await
+    }
+    #[tauri::command]
+    pub async fn tool_preview_result(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Asset> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || crate::preview_tools::result(&state.store, &state.runtime()?, &state.jobs, &id)).await
+    }
+    #[tauri::command]
+    pub async fn tool_preview_discard(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || crate::preview_tools::discard(&state.store, &state.jobs, &id)).await
+    }
+    #[tauri::command]
+    pub async fn asr_status(window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Value> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || Ok(state.asr.status())).await
+    }
+    #[tauri::command]
+    pub async fn asr_download(model_id: Option<String>, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools_asr::AsrJob> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.asr.begin_download(model_id.as_deref())).await
+    }
+    #[tauri::command]
+    pub async fn asr_transcribe(spec: Value, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools_asr::AsrJob> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.asr.begin_transcribe(&state.runtime()?, &state.store, spec)).await
+    }
+    #[tauri::command]
+    pub fn asr_job(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools_asr::AsrJob> {
+        require_mcp_window(&window)?;
+        state.asr.get(&id)
+    }
+    #[tauri::command]
+    pub fn asr_cancel(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        state.asr.cancel(&id)
+    }
+    #[tauri::command]
+    pub async fn audio_tool_begin(spec: Value, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools::AudioToolJob> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.audio_tools.begin(&state.runtime()?, &state.store, spec)).await
+    }
+    #[tauri::command]
+    pub fn audio_tool_status(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools::AudioToolJob> {
+        require_mcp_window(&window)?;
+        state.audio_tools.get(&id)
+    }
+    #[tauri::command]
+    pub fn audio_tool_cancel(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        state.audio_tools.cancel(&id)
+    }
+    #[tauri::command]
+    pub fn audio_tool_accept(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        state.audio_tools.accept(&id)
+    }
+    #[tauri::command]
+    pub async fn audio_tool_discard(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.audio_tools.discard(&id)).await
     }
 
     #[tauri::command]
@@ -814,6 +908,9 @@ mod desktop {
                     store,
                     jobs: JobManager::default(),
                     video_library: VideoLibrary::new(data.join("stored-recording-index.json")),
+                    asset_tools: crate::asset_tools::AssetTools::new(&data).map_err(std::io::Error::other)?,
+                    audio_tools: crate::audio_tools::AudioToolsManager::default(),
+                    asr: crate::audio_tools_asr::AsrManager::new(&data, Some(&resource)).map_err(std::io::Error::other)?,
                     speech: SpeechManager::new(&data, &resource).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
@@ -859,6 +956,21 @@ mod desktop {
                 mcp_save_project_file,
                 mcp_open_project_file,
                 mcp_begin_media_job,
+                mcp_asset_tool,
+                mcp_asset_cancel,
+                begin_tool_preview,
+                tool_preview_result,
+                tool_preview_discard,
+                asr_status,
+                asr_download,
+                asr_transcribe,
+                asr_job,
+                asr_cancel,
+                audio_tool_begin,
+                audio_tool_status,
+                audio_tool_cancel,
+                audio_tool_accept,
+                audio_tool_discard,
                 get_runtime_status,
                 list_stored_videos,
                 open_media_library_directory,
@@ -926,6 +1038,9 @@ mod desktop {
                 state.capture_starts.cancel_all();
                 state.speech.shutdown();
                 state.jobs.shutdown();
+                state.asset_tools.shutdown();
+                state.audio_tools.shutdown();
+                state.asr.shutdown();
                 state.capture.lock().unwrap().abort();
             }
         });

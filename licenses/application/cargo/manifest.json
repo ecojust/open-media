@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "sourceLock": "src-tauri/Cargo.lock",
-  "sourceLockSha256": "0e81bee519b66212dda4256bce9a6a74c4e75e07aa9164d5faead30a5b8a6555",
+  "sourceLockSha256": "793fc53e335b1ad1fa3f33aa47cbf59610d6b868e4abbd4f39cc4af872c72616",
   "coverage": "All registry packages in the locked dependency graph, including build-only and platform-specific packages. The inventory may exceed the dependencies present in an individual installer.",
   "originalTextPolicy": "Original license, copyright and notice bytes are retained without modification. Identical texts share one stored copy. Supplemental upstream sources are recorded where published package archives omit their notices.",
   "packages": [
@@ -15957,5 +15957,5 @@
       ]
     }
   ],
-  "reviewMethod": "Application package version updated to 0.1.16. All registry package entries, archive checksums and original license texts are unchanged."
+  "reviewMethod": "Added a direct base64 0.22.1 dependency for bounded asset transport. The package and checksum were already in the locked registry graph; all original notices remain verified and no registry versions were changed."
 }

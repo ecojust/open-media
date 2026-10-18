@@ -2,6 +2,23 @@ export type AssetKind = 'video' | 'audio' | 'image'
 export type TrackKind = 'video' | 'audio' | 'text' | 'transition'
 export type MediaFit = 'contain' | 'cover' | 'fill'
 
+export type AnimationEasing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'step'
+export type AnimatedProperty = 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity' | 'rotation' | 'volume'
+export interface ClipKeyframe { time: number; value: number; easing?: AnimationEasing }
+export type ClipKeyframes = Partial<Record<AnimatedProperty, ClipKeyframe[]>>
+export interface NormalizedRect { x: number; y: number; width: number; height: number }
+export interface ClipSpeedRamp { points: { position: number; speed: number }[]; easing: AnimationEasing; preservePitch: boolean; sourceRange?: { start: number; end: number } }
+export interface ClipFreezeFrame { sourceTime: number; original: { trimIn: number; trimOut: number; speed: number; volume: number; speedRamp?: ClipSpeedRamp } }
+export interface ClipOverlay {
+  kind: 'arrow' | 'rectangle' | 'highlight' | 'mask' | 'spotlight' | 'blur'
+  color: string
+  strokeWidth: number
+  blurRadius: number
+  /** Spotlight opening in local clip pixels. */
+  region?: { x: number; y: number; width: number; height: number }
+}
+export interface TimelineMarker { id: string; time: number; label: string; kind: 'chapter' | 'highlight' | 'review'; color?: string }
+
 export type TransitionEffect = 'fade' | 'wipe-up' | 'wipe-down' | 'wipe-left' | 'wipe-right' | 'close-vertical' | 'close-horizontal' | 'slide-left' | 'slide-right' | 'zoom'
 
 /** A transition is anchored to the shared cut of two adjacent video clips. */
@@ -9,6 +26,11 @@ export interface ClipTransition {
   effect: TransitionEffect
   fromClipId: string
   toClipId: string
+  direction?: 'up' | 'down' | 'left' | 'right'
+  easing?: AnimationEasing
+  color?: string
+  blur?: number
+  scope?: 'both' | 'outgoing' | 'incoming'
 }
 
 export interface MediaAsset {
@@ -16,6 +38,7 @@ export interface MediaAsset {
   /** Time this asset was added to the project; absent in older documents. */
   addedAt?: string
   /** Built-in library material role; ordinary imported files have no role. */
+  provenance?: { kind: 'upload' | 'url'; name?: string; url?: string; finalUrl?: string; mimeType?: string; sha256: string; size?: number; importedAt: number }
   libraryRole?: 'watermark' | 'background-music' | 'video-segment'
   name: string
   kind: AssetKind
@@ -94,6 +117,13 @@ export interface Clip {
   filters?: ClipFilters
   chromaKey?: ClipChromaKey
   transition?: ClipTransition
+  /** Local animation time retained when a clip is split or trimmed. */
+  animationOffset?: number
+  keyframes?: ClipKeyframes
+  crop?: NormalizedRect
+  overlay?: ClipOverlay
+  freezeFrame?: ClipFreezeFrame
+  speedRamp?: ClipSpeedRamp
 }
 
 /** Visual settings remembered independently of subtitle content and timing. */
@@ -127,6 +157,7 @@ export interface Project {
   assets: MediaAsset[]
   tracks: Track[]
   subtitleStyle?: SubtitleStyle
+  markers?: TimelineMarker[]
 }
 
 export type MediaProject = Project

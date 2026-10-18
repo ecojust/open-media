@@ -1,3 +1,4 @@
+use crate::clip_animation::Easing;
 use crate::engine::{number, Result};
 use serde::Deserialize;
 use serde_json::Value;
@@ -19,6 +20,22 @@ enum Effect {
     SlideRight,
     Zoom,
 }
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+#[derive(Clone, Copy, Debug, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+enum Scope {
+    #[default]
+    Both,
+    Outgoing,
+    Incoming,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -26,6 +43,14 @@ struct Binding {
     effect: Effect,
     from_clip_id: String,
     to_clip_id: String,
+    direction: Option<Direction>,
+    #[serde(default)]
+    easing: Easing,
+    color: Option<String>,
+    #[serde(default)]
+    blur: f64,
+    #[serde(default)]
+    scope: Scope,
 }
 
 struct Half {
@@ -33,6 +58,10 @@ struct Half {
     start: f64,
     end: f64,
     incoming: bool,
+    direction: Option<Direction>,
+    easing: Easing,
+    color: Option<String>,
+    blur: f64,
 }
 
 #[derive(Default)]
@@ -40,10 +69,7 @@ pub(super) struct Transitions(HashMap<String, Vec<Half>>);
 
 fn timing(clip: &Value) -> Result<(f64, f64)> {
     let start = number(clip, "start", 0.0, 0.0, 86400.0)?;
-    let trim_in = number(clip, "trimIn", 0.0, 0.0, 86400.0)?;
-    let trim_out = number(clip, "trimOut", 1.0, trim_in, 86400.0)?;
-    let speed = number(clip, "speed", 1.0, 0.1, 16.0)?;
-    Ok((start, (trim_out - trim_in) / speed))
+    Ok((start, crate::clip_animation::duration(clip)?))
 }
 
 impl Transitions {
@@ -92,6 +118,16 @@ impl Transitions {
                 }
                 let binding: Binding = serde_json::from_value(clip["transition"].clone())
                     .map_err(|_| "转场类型或关联片段无效，请重新添加转场。")?;
+                if !binding.blur.is_finite()
+                    || !(0.0..=50.0).contains(&binding.blur)
+                    || binding.color.as_ref().is_some_and(|color| {
+                        color.len() != 7
+                            || !color.starts_with('#')
+                            || !color[1..].chars().all(|c| c.is_ascii_hexdigit())
+                    })
+                {
+                    return Err("转场颜色或模糊参数无效。".into());
+                }
                 let from = sources
                     .get(binding.from_clip_id.as_str())
                     .ok_or("转场的前一个视频片段已丢失。")?;
@@ -143,22 +179,34 @@ impl Transitions {
                     continue;
                 }
                 let half = duration / 2.0;
-                result
-                    .0
-                    .entry(binding.from_clip_id)
-                    .or_default()
-                    .push(Half {
+                if !matches!(binding.scope, Scope::Incoming) {
+                    result
+                        .0
+                        .entry(binding.from_clip_id)
+                        .or_default()
+                        .push(Half {
+                            effect: binding.effect,
+                            start: from_duration - half,
+                            end: from_duration,
+                            incoming: false,
+                            direction: binding.direction,
+                            easing: binding.easing,
+                            color: binding.color.clone(),
+                            blur: binding.blur,
+                        });
+                }
+                if !matches!(binding.scope, Scope::Outgoing) {
+                    result.0.entry(binding.to_clip_id).or_default().push(Half {
                         effect: binding.effect,
-                        start: from_duration - half,
-                        end: from_duration,
-                        incoming: false,
+                        start: 0.0,
+                        end: half,
+                        incoming: true,
+                        direction: binding.direction,
+                        easing: binding.easing,
+                        color: binding.color.clone(),
+                        blur: binding.blur,
                     });
-                result.0.entry(binding.to_clip_id).or_default().push(Half {
-                    effect: binding.effect,
-                    start: 0.0,
-                    end: half,
-                    incoming: true,
-                });
+                }
             }
         }
         Ok(result)
@@ -166,16 +214,23 @@ impl Transitions {
 
     /// Operate inside the clip rectangle before its rotation. Each half uses the
     /// existing frames and timeline duration; no source handles or overlap are needed.
-    pub(super) fn filter_chain(&self, clip: &Value, fps: f64) -> String {
+    pub(super) fn append_graph(
+        &self,
+        clip: &Value,
+        fps: f64,
+        mut chain: String,
+        filters: &mut Vec<String>,
+        index: usize,
+    ) -> String {
         let Some(halves) = clip["id"].as_str().and_then(|id| self.0.get(id)) else {
-            return String::new();
+            return chain;
         };
         let clip_start = clip["start"].as_f64().unwrap_or(0.0);
         // Apply animated masks at the project's actual frame times. Evaluating
         // them on the source frame grid makes slowed or low-rate sources hold
         // stale mask positions across the cut. Preserve fractional clip offsets.
-        let mut filters = format!(",settb=AVTB,setpts=PTS+{clip_start}/TB,fps={fps},settb=AVTB");
-        for half in halves {
+        chain += &format!(",settb=AVTB,setpts=PTS+{clip_start}/TB,fps={fps},settb=AVTB");
+        for (part, half) in halves.iter().enumerate() {
             let duration = half.end - half.start;
             let start = clip_start + half.start;
             let end = clip_start + half.end;
@@ -184,10 +239,31 @@ impl Transitions {
             } else {
                 format!("clip(({end}-T)/{duration},0,1)")
             };
-            let v = format!("({progress})");
+            let v = format!("({})", half.easing.expression(&progress));
+            if half.blur > 0.0 {
+                chain+=&format!(",format=gbrap,split[transition_plain{index}_{part}][transition_blur{index}_{part}]");
+                filters.push(chain);
+                filters.push(format!("[transition_blur{index}_{part}]gblur=sigma={}:steps=2[transition_blurred{index}_{part}]",half.blur));
+                filters.push(format!("[transition_plain{index}_{part}][transition_blurred{index}_{part}]blend=all_expr='A*{v}+B*(1-{v})':enable='gte(t,{start})*lt(t,{end})'[transition_mix{index}_{part}]"));
+                chain = format!("[transition_mix{index}_{part}]null");
+            }
             let mut sample_x = "X".to_string();
             let mut sample_y = "Y".to_string();
-            let mask = match half.effect {
+            let effect = if matches!(
+                half.effect,
+                Effect::WipeUp | Effect::WipeDown | Effect::WipeLeft | Effect::WipeRight
+            ) {
+                match half.direction {
+                    Some(Direction::Up) => Effect::WipeUp,
+                    Some(Direction::Down) => Effect::WipeDown,
+                    Some(Direction::Left) => Effect::WipeLeft,
+                    Some(Direction::Right) => Effect::WipeRight,
+                    None => half.effect,
+                }
+            } else {
+                half.effect
+            };
+            let mask = match effect {
                 Effect::Fade => v.clone(),
                 Effect::WipeUp => format!("gte(Y,H*(1-{v}))"),
                 Effect::WipeDown => format!("lt(Y,H*{v})"),
@@ -195,13 +271,31 @@ impl Transitions {
                 Effect::WipeRight => format!("lt(X,W*{v})"),
                 Effect::CloseVertical => format!("gte(Y,H*(1-{v})/2)*lt(Y,H*(1+{v})/2)"),
                 Effect::CloseHorizontal => format!("gte(X,W*(1-{v})/2)*lt(X,W*(1+{v})/2)"),
-                Effect::SlideLeft => {
-                    sample_x = format!("X+W*(1-{v})");
-                    format!("lt({sample_x},W)")
-                }
-                Effect::SlideRight => {
-                    sample_x = format!("X-W*(1-{v})");
-                    format!("gte({sample_x},0)")
+                Effect::SlideLeft | Effect::SlideRight => {
+                    match half
+                        .direction
+                        .unwrap_or(if matches!(effect, Effect::SlideLeft) {
+                            Direction::Left
+                        } else {
+                            Direction::Right
+                        }) {
+                        Direction::Up => {
+                            sample_y = format!("Y+H*(1-{v})");
+                            format!("lt({sample_y},H)")
+                        }
+                        Direction::Down => {
+                            sample_y = format!("Y-H*(1-{v})");
+                            format!("gte({sample_y},0)")
+                        }
+                        Direction::Left => {
+                            sample_x = format!("X+W*(1-{v})");
+                            format!("lt({sample_x},W)")
+                        }
+                        Direction::Right => {
+                            sample_x = format!("X-W*(1-{v})");
+                            format!("gte({sample_x},0)")
+                        }
+                    }
                 }
                 Effect::Zoom => {
                     sample_x = format!("(X-W/2)/max({v},0.000001)+W/2");
@@ -211,12 +305,21 @@ impl Transitions {
                     )
                 }
             };
-            filters += &format!(
-                ",format=gbrap,geq=r='r({sample_x},{sample_y})':g='g({sample_x},{sample_y})':b='b({sample_x},{sample_y})':a='alpha({sample_x},{sample_y})*({mask})':enable='gte(t,{})*lt(t,{})',format=rgba",
-                start, end
-            );
+            if let Some(color) = half
+                .color
+                .as_ref()
+                .filter(|_| matches!(effect, Effect::Fade))
+            {
+                let red = u8::from_str_radix(&color[1..3], 16).unwrap();
+                let green = u8::from_str_radix(&color[3..5], 16).unwrap();
+                let blue = u8::from_str_radix(&color[5..7], 16).unwrap();
+                let mix = format!("alpha(X,Y)/255*{v}");
+                chain+=&format!(",format=gbrap,geq=r='r(X,Y)*({mix})+{red}*(1-({mix}))':g='g(X,Y)*({mix})+{green}*(1-({mix}))':b='b(X,Y)*({mix})+{blue}*(1-({mix}))':a='255':enable='gte(t,{start})*lt(t,{end})',format=rgba");
+            } else {
+                chain += &format!(",format=gbrap,geq=r='r({sample_x},{sample_y})':g='g({sample_x},{sample_y})':b='b({sample_x},{sample_y})':a='alpha({sample_x},{sample_y})*({mask})':enable='gte(t,{start})*lt(t,{end})',format=rgba");
+            }
         }
-        filters += &format!(",setpts=PTS-{clip_start}/TB");
-        filters
+        chain += &format!(",setpts=PTS-{clip_start}/TB");
+        chain
     }
 }

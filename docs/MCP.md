@@ -2,7 +2,7 @@
 
 Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。视频剪辑顶部“项目设置”左侧的 **M** 按钮打开简洁的服务弹窗，显示连接地址、Token 和“复制配置”按钮，通过服务开关启停。有已认证的客户端连接时，M 按钮显示青紫色流动荧光；连接断开或服务停止后恢复普通样式。自动化任务的进度和取消操作位于“处理任务”中。
 
-服务直接使用界面中的工程、撤销历史和保存位置。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场、背景音乐、片头片尾、配音、模型管理和视频导出，共 **46 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
+服务直接使用界面中的工程、撤销历史和保存位置。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场、背景音乐、片头片尾、配音、模型管理和视频导出，共 **84 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
 
 ## 连接
 
@@ -33,11 +33,11 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 }
 ```
 
-连接后先发送 `initialize` 和 `notifications/initialized`，再调用 `tools/list`、`tools/call`。请求使用 `Content-Type: application/json`；初始化之后可发送协商好的 `MCP-Protocol-Version`。所有 HTTP 请求都需要 Token。服务返回 JSON 响应，不提供独立 GET 事件流；调用工具的结果同时包含文字 `content` 和可解析的 `structuredContent`。
+连接后先发送 `initialize` 和 `notifications/initialized`，再调用 `tools/list`、`tools/call`。请求使用 `Content-Type: application/json`；初始化之后可发送协商好的 `MCP-Protocol-Version`。所有 HTTP 请求都需要 Token。服务返回 JSON 响应，不提供独立 GET 事件流；调用工具的结果同时包含文字 `content` 和可解析的 `structuredContent`；取帧及联系表还提供 MCP 图片内容，可直接供视觉模型检查。
 
 连接指示依据已认证且仍保持打开的 HTTP 连接，不缓存历史访问。服务支持连接复用，空闲 40 秒后关闭连接；短连接客户端在请求完成后关闭连接时，指示也会恢复普通样式。
 
-服务默认仅监听本机回环地址。服务拒绝不匹配的 Host 和带有浏览器 Origin 的请求；不提供跨域网页接口、任意命令执行或任意远程 URL 下载。
+服务默认仅监听本机回环地址。服务拒绝不匹配的 Host 和带有浏览器 Origin 的请求；不提供跨域网页接口或任意命令执行。网址素材导入只下载公开 HTTP(S) 媒体，拒绝私网、凭据地址及越界重定向。
 
 ## 工具范围
 
@@ -92,17 +92,72 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_job_get` | 查询任务进度、耗时、错误或完成结果 |
 | `open_media_job_cancel` | 请求取消仍可取消的任务 |
 
+### 分析、预览与高级编辑
+
+这些工具与素材右键菜单、片段属性、字幕／配音面板及项目设置共用实现。只修改工程的操作可以撤销；处理媒体的工具先准备结果，再一次性写回工程。
+
+| 工具 | 功能 |
+| --- | --- |
+| `open_media_asset_upload` | 分块上传媒体并导入当前工程 |
+| `open_media_asset_import_url` | 从公开 HTTP/HTTPS 直链下载图片、音频或视频并导入工程，保存来源与 SHA-256 |
+| `open_media_asset_probe` | 读取素材真实编码、显示尺寸、时长、帧率、音轨、旋转角度和 Alpha 通道信息；返回已保存的来源记录 |
+| `open_media_asset_get_frame` | 按素材源时间提取真实 PNG 帧，返回可读取的图像数据、请求时间和实际帧时间 |
+| `open_media_asset_storyboard` | 在素材源时间范围内均匀抽取 1–24 张真实图像帧，返回联系表帧集合及每张图像的实际时间 |
+| `open_media_asset_detect_scenes` | 根据真实画面差异检测场景切换，返回源时间、分数、阈值与检测依据 |
+| `open_media_asset_detect_idle` | 检测真实黑场、画面冻结和静音区间，返回源时间范围、置信依据和检测阈值 |
+| `open_media_speech_generate_preview` | 合成一句可试听的配音，不加入时间线 |
+| `open_media_speech_pronunciation_set` | 保存当前应用读法词典；按最长原文优先替换，仅影响合成发音，不改字幕文字 |
+| `open_media_speech_timing_plan` | 根据文字和标点估算时长及溢出风险 |
+| `open_media_speech_alignment_set` | 设置后续配音对齐策略：subtitle只调整字幕；ripple顺延后续字幕及配音；extend_visual延长覆盖画面（视频减速）并顺延后文 |
+| `open_media_subtitle_import_export` | 导入或导出SRT、VTT、ASS字幕，支持按句分段和自动换行 |
+| `open_media_audio_loudness_analyze` | 实际测量选中音频片段的综合响度LUFS、响度范围及真峰值dBTP，返回可取消任务 |
+| `open_media_audio_normalize` | 按目标LUFS及真峰值做双遍响度归一，生成新本地音频并替换片段，保留原素材供撤销 |
+| `open_media_audio_process` | 离线处理音频片段：降噪、三段EQ、动态压缩、去齿音、峰值限制 |
+| `open_media_audio_ducking` | 在人声轨道片段时段压低选中背景音频，含渐入和恢复；基于时间线区间烘焙新音频，非实时说话检测 |
+| `open_media_music_fit_duration` | 将选中音乐适配目标秒数 |
+| `open_media_audio_transcribe` | 使用按需下载的离线识别模型生成真实逐句或逐词时间戳 |
+| `open_media_speech_pronunciation_get` | 读取当前配音读法词典，不修改设置 |
+| `open_media_speech_alignment_get` | 读取当前配音对齐模式及间隔秒数 |
+| `open_media_timeline_get_frame` | 返回指定时间的最终合成PNG画面，包含字幕、水印、滤镜和转场 |
+| `open_media_preview_render` | 生成指定范围的低清预览视频并返回可分块下载的artifactId |
+| `open_media_audio_preview` | 生成指定片段或范围的真实WAV试听 |
+| `open_media_artifact_read` | 分块读取预览文件的原始二进制数据（base64） |
+| `open_media_asset_ocr` | 离线识别素材帧中的简体中文和英文，返回文字、行/词区域及置信度；区域坐标以返回图像像素计 |
+| `open_media_export_validate` | 检查缺失素材、字幕越界、配音重叠及无效剪辑 |
+| `open_media_timeline_batch_edit` | 原子批量编辑时间线与项目 |
+| `open_media_timeline_markers_set` | 完整替换当前项目的章节、重点和待检查标记 |
+| `open_media_project_snapshot` | 管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id |
+| `open_media_clip_keyframes_set` | 设置片段关键帧 |
+| `open_media_clip_crop` | 裁剪视频或图片的源画面，坐标及宽高为0..1归一化值 |
+| `open_media_focus_region` | 聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像 |
+| `open_media_overlay_add` | 新增可编辑视觉标注 |
+| `open_media_title_add` | 添加可编辑标题 |
+| `open_media_template_customize` | 统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景 |
+| `open_media_clip_freeze_frame` | 将选中视频片段变为指定源帧的停帧，按duration展示且静音 |
+| `open_media_clip_speed_ramp` | 设置视频或音频的变速曲线；points覆盖源片段0和1端点，按源位置插值 |
+| `open_media_transition_parameters_set` | 调整转场方向、缓动、过渡颜色、模糊半径及作用范围 |
+
+上传通过 `asset_upload` 的 `begin → chunk → commit` 流程：开始时提供文件名称、总大小和 SHA-256，每块携带 offset、base64 数据和分块 SHA-256；支持 status 查询与 abort 清理。每块最大 512 KiB，单文件最大 1 GiB；提交会核对全文件哈希并探测真实媒体类型。上传和网址导入成功后返回可用于剪辑的 assetId，并在工程中保存来源信息。
+
+视频与音频预览每次最多 60 秒，视频预览宽度最多 1280 像素。结果的 artifactId 可通过 `artifact_read` 分块下载；响应包含总大小和完整 SHA-256。缓存单个文件最大 64 MiB，最多保留 20 个／256 MiB，24 小时过期；请及时下载需要保留的结果。预览与取帧不会改变播放头或向工程添加素材。
+
+`timeline_batch_edit` 只接受工具清单中的同步工程编辑操作，最多 100 项；可先 dryRun，带 expectedRevision 校验，任何一项失败都不会写入部分修改，成功后共用一个撤销步骤。`project_snapshot` 保存包含素材的命名版本，可比较、恢复、删除；本地最多 100 个版本、总容量 1 GiB，恢复也可撤销。
+
+文字识别引擎与中英文文字模型随应用提供。语音识别使用独立离线模型，首次通过 `audio_transcribe` 查询状态并主动下载；支持逐句和基于模型 token 的逐词时间戳，识别结果仍需人工核对。配音时长计划为估计值，会明确标注估计区间，不作为实际合成时长。
+
+导出检查分别报告工程结构检查和所选媒体范围。开启 analyzeMedia 后，会真实渲染并解码该范围，列出黑场、峰值风险及其他证据；黑场可能是正常设计，只作为待检查项。低清局部检查不能代替完整成片核验。
+
 锁定轨道遵守界面相同的编辑限制，需先解除锁定。修改通过项目校验后才提交到界面，并使用现有撤销历史；删除素材引用不会删除原文件。录屏和麦克风采集不属于这些编辑工具，仍由用户在界面主动启动并完成系统授权。
 
 ## 项目版本和任务
 
 `open_media_project_get` 返回当前 `projectId` 和 `revision`。写操作建议带上 `expectedRevision`，防止把基于旧画面的修改应用到用户刚编辑过的工程。版本不匹配时工具会返回错误，应重新读取工程并据此重试，而不是直接去掉版本参数。
 
-导入、打开、新建、保存、添加内置素材、配音和导出采用异步任务。调用返回相同值的 `id` 和 `jobId`，查询及取消工具的参数名为 `id`。用 `open_media_job_get` 查询，或在“处理任务”中查看进度；`state` 为 `running`、`completed`、`failed` 或 `cancelled`。只有 `completed` 表示操作完成，仍应检查 `result`；创建任务本身不代表已经生成音频或视频。配音提供当前阶段、完成数量及可用的百分比，其他任务按实际能力返回进度。
+导入、打开、新建、保存、添加内置素材、配音、媒体分析、预览、版本操作和导出采用异步任务。上传的 begin／chunk／status／abort 以及 artifact_read 直接返回协议结果，commit 返回导入任务。调用返回相同值的 `id` 和 `jobId`，查询及取消工具的参数名为 `id`。用 `open_media_job_get` 查询，或在“处理任务”中查看进度；`state` 为 `running`、`completed`、`failed` 或 `cancelled`。只有 `completed` 表示操作完成，仍应检查 `result`；创建任务本身不代表已经生成音频或视频。配音提供当前阶段、完成数量及可用的百分比，其他任务按实际能力返回进度。
 
 调用工具时，界面显示当前工具名称，短调用完成后短暂显示结果状态。长任务继续显示“MCP 正在处理”、任务名称、阶段和可用的进度，并提供查看任务和取消入口。
 
-同一工程同时只运行一个需要占用编辑状态的自动化任务；查询进度和取消仍可进行。长任务的提示会说明暂时锁定编辑，结束后自动恢复；只读查询不额外锁定工程。异步编辑在写入前再次校验工程和版本，避免将旧任务结果加入新的工程。批量配音完成后统一提交时间线；中途失败或取消时不提交部分配音。
+同一工程同时只运行一个需要占用编辑状态的自动化任务；查询进度和取消仍可进行。长任务的提示会说明暂时锁定编辑，结束后自动恢复；普通状态查询不额外锁定工程；取帧、媒体分析及预览任务使用稳定的工程快照并暂时锁定编辑。异步编辑在写入前再次校验工程和版本，避免将旧任务结果加入新的工程。批量配音完成后统一提交时间线；中途失败或取消时不提交部分配音。
 
 关闭服务会拒绝新的调用，并取消尚可取消的自动化任务。已经完成的编辑保留在工程中；进入最终文件写入阶段的任务会显示不可取消。关闭 M 弹窗不会停止服务。模型下载使用独立状态：通过 `open_media_speech_model` 的 `action: "status"` 查询、`action: "cancel"` 取消，不使用剪辑任务 ID。
 

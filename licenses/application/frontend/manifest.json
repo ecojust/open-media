@@ -1,22 +1,22 @@
 {
   "schemaVersion": 1,
-  "scope": "Production browser bundle and its direct Vue entry point. Development tools and non-emitted compiler, server-rendering and type-only dependencies are excluded. Native application and media runtime dependencies are documented separately.",
-  "auditMethod": "Vite production build with build.write=false; collect node_modules IDs from every emitted JavaScript chunk.modules. Match package versions and archive URLs against package-lock.json. Original license bytes are copied or reused without rewriting. Vendored code inside emitted modules is audited separately.",
+  "scope": "Production browser bundle, direct Vue entry point, standalone recognition worker and WebAssembly core. Development tools and non-emitted compiler, server-rendering and type-only dependencies are excluded. Native application and media runtime dependencies are documented separately.",
+  "auditMethod": "Vite production build with build.write=false; collect emitted chunk.modules and copied asset originalFileNames, and verify copied bytes. Match package versions, tarball integrity and original notices against package-lock.json and npm archives. Audit the precompiled worker using its published source map: each embedded module is byte-identical to the exact archive pinned by the upstream release lock, which can differ from this application lock. Audit WebAssembly dependencies using the npm gitHead source commit, its submodule pins and build configuration. Original notices are retained byte-for-byte.",
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "3662a8451f6698be6f67b8ff07bb9ef5a2e0c1ad24e984a02cd8e85c53513580",
-      "reviewMethod": "Application version updated to 0.1.16; editor recording-library browser regression added. Production dependencies, versions and original license texts are unchanged."
+      "sha256": "83fdaf57a273fcbc6f65428afdacb045ba7ebd133210941d84d98adeba25546e",
+      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives."
     },
     {
       "path": "package-lock.json",
-      "sha256": "2294bfbcf7a4c4204fb70044deec00636b3b654a1856f7c86d45012574439ab5",
-      "reviewMethod": "Application version updated to 0.1.16; editor recording-library browser regression added. Production dependencies, versions and original license texts are unchanged."
+      "sha256": "caf0c2872de4fa6273c615d5c968a5bf73179bd6f9f4689be1ba3f100ce6770f",
+      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives."
     },
     {
       "path": "vite.config.ts",
       "sha256": "1a63438982834e89dc1f8eda6d8440b95f79411b88f5a8ed2e6ab9e18893125b",
-      "reviewMethod": "Source review of development-only file watching exclusions for generated runtime and compiler output. Production dependencies, plugins, aliases and build settings are unchanged."
+      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives."
     }
   ],
   "packages": [
@@ -173,6 +173,93 @@
       ]
     },
     {
+      "name": "regenerator-runtime",
+      "version": "0.13.11",
+      "license": "MIT",
+      "sourceUrl": "https://registry.npmjs.org/regenerator-runtime/-/regenerator-runtime-0.13.11.tgz",
+      "sourceIntegrity": "sha512-kY1AZVr2Ra+t+piVaJ4gxaFaReZVH40AKNo7UCX6W+dEwBo/2oZJzqfuN1qLq1oL45o56cPaTXELwrTh8Fpggg==",
+      "role": "Included in the production browser bundle and, where applicable, its standalone recognition worker.",
+      "bundledModules": [
+        "node_modules/regenerator-runtime/runtime.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/regenerator-runtime/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/regenerator-runtime/-/regenerator-runtime-0.13.11.tgz",
+          "bundledPath": "licenses/application/frontend/regenerator-runtime-LICENSE",
+          "sha256": "51887a3d47051ac2fce1210562e5b9fe0830a8a8fabeb272c2d586eeb18a05fd",
+          "bytes": 1080,
+          "reused": false
+        }
+      ]
+    },
+    {
+      "name": "tesseract.js",
+      "version": "7.0.0",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://registry.npmjs.org/tesseract.js/-/tesseract.js-7.0.0.tgz",
+      "sourceIntegrity": "sha512-exPBkd+z+wM1BuMkx/Bjv43OeLBxhL5kKWsz/9JY+DXcXdiBjiAch0V49QR3oAJqCaL5qURE0vx9Eo+G5YE7mA==",
+      "role": "Included in the production browser bundle and, where applicable, its standalone recognition worker.",
+      "bundledModules": [
+        "node_modules/tesseract.js/dist/worker.min.js",
+        "node_modules/tesseract.js/package.json",
+        "node_modules/tesseract.js/src/Tesseract.js",
+        "node_modules/tesseract.js/src/constants/OEM.js",
+        "node_modules/tesseract.js/src/constants/PSM.js",
+        "node_modules/tesseract.js/src/constants/defaultOptions.js",
+        "node_modules/tesseract.js/src/constants/languages.js",
+        "node_modules/tesseract.js/src/createJob.js",
+        "node_modules/tesseract.js/src/createScheduler.js",
+        "node_modules/tesseract.js/src/createWorker.js",
+        "node_modules/tesseract.js/src/index.js",
+        "node_modules/tesseract.js/src/utils/getEnvironment.js",
+        "node_modules/tesseract.js/src/utils/getId.js",
+        "node_modules/tesseract.js/src/utils/log.js",
+        "node_modules/tesseract.js/src/utils/resolvePaths.js",
+        "node_modules/tesseract.js/src/worker/browser/defaultOptions.js",
+        "node_modules/tesseract.js/src/worker/browser/index.js",
+        "node_modules/tesseract.js/src/worker/browser/loadImage.js",
+        "node_modules/tesseract.js/src/worker/browser/onMessage.js",
+        "node_modules/tesseract.js/src/worker/browser/send.js",
+        "node_modules/tesseract.js/src/worker/browser/spawnWorker.js",
+        "node_modules/tesseract.js/src/worker/browser/terminateWorker.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/tesseract.js/LICENSE.md",
+          "sourceArchivePath": "package/LICENSE.md",
+          "sourceUrl": "https://registry.npmjs.org/tesseract.js/-/tesseract.js-7.0.0.tgz",
+          "bundledPath": "licenses/application/frontend/tesseract.js-LICENSE.md",
+          "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+          "bytes": 11357,
+          "reused": false
+        }
+      ]
+    },
+    {
+      "name": "tesseract.js-core",
+      "version": "7.0.0",
+      "license": "Apache-2.0",
+      "sourceUrl": "https://registry.npmjs.org/tesseract.js-core/-/tesseract.js-core-7.0.0.tgz",
+      "sourceIntegrity": "sha512-WnNH518NzmbSq9zgTPeoF8c+xmilS8rFIl1YKbk/ptuuc7p6cLNELNuPAzcmsYw450ca6bLa8j3t0VAtq435Vw==",
+      "role": "Included as a standalone local browser runtime asset.",
+      "bundledModules": [
+        "node_modules/tesseract.js-core/tesseract-core-lstm.wasm.js"
+      ],
+      "licenses": [
+        {
+          "sourcePath": "node_modules/tesseract.js-core/LICENSE",
+          "sourceArchivePath": "package/LICENSE",
+          "sourceUrl": "https://registry.npmjs.org/tesseract.js-core/-/tesseract.js-core-7.0.0.tgz",
+          "bundledPath": "licenses/application/frontend/tesseract.js-core-LICENSE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "bytes": 11358,
+          "reused": false
+        }
+      ]
+    },
+    {
       "name": "vue",
       "version": "3.5.44",
       "license": "MIT",
@@ -262,6 +349,11 @@
       "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
     },
     {
+      "name": "bmp-js",
+      "version": "0.1.0",
+      "reason": "This installed package is not emitted by Vite. The precompiled worker contains its own exact upstream-pinned copy, separately audited under browserRuntimeBundles; its version may differ from this application lock."
+    },
+    {
       "name": "csstype",
       "version": "3.2.3",
       "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
@@ -277,6 +369,16 @@
       "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
     },
     {
+      "name": "idb-keyval",
+      "version": "6.3.0",
+      "reason": "This installed package is not emitted by Vite. The precompiled worker contains its own exact upstream-pinned copy, separately audited under browserRuntimeBundles; its version may differ from this application lock."
+    },
+    {
+      "name": "is-url",
+      "version": "1.2.4",
+      "reason": "This installed package is not emitted by Vite. The precompiled worker contains its own exact upstream-pinned copy, separately audited under browserRuntimeBundles; its version may differ from this application lock."
+    },
+    {
       "name": "magic-string",
       "version": "0.30.21",
       "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
@@ -285,6 +387,16 @@
       "name": "nanoid",
       "version": "3.3.20",
       "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "node-fetch",
+      "version": "2.7.0",
+      "reason": "Node-only network dependency; browser worker uses browser fetch and contains none of this package."
+    },
+    {
+      "name": "opencollective-postinstall",
+      "version": "2.0.3",
+      "reason": "Installation-time script only; not emitted into the application or worker."
     },
     {
       "name": "picocolors",
@@ -302,9 +414,479 @@
       "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
     },
     {
+      "name": "tr46",
+      "version": "0.0.3",
+      "reason": "Node-only network dependency; browser worker uses browser fetch and contains none of this package."
+    },
+    {
       "name": "typescript",
       "version": "5.9.3",
       "reason": "Not included in the emitted production browser bundle; compiler, server-rendering, build-time dependency or type declarations only."
+    },
+    {
+      "name": "wasm-feature-detect",
+      "version": "1.9.0",
+      "reason": "This installed package is not emitted by Vite. The precompiled worker contains its own exact upstream-pinned copy, separately audited under browserRuntimeBundles; its version may differ from this application lock."
+    },
+    {
+      "name": "webidl-conversions",
+      "version": "3.0.1",
+      "reason": "Node-only network dependency; browser worker uses browser fetch and contains none of this package."
+    },
+    {
+      "name": "whatwg-url",
+      "version": "5.0.0",
+      "reason": "Node-only network dependency; browser worker uses browser fetch and contains none of this package."
+    },
+    {
+      "name": "zlibjs",
+      "version": "0.3.1",
+      "reason": "This installed package is not emitted by Vite. The precompiled worker contains its own exact upstream-pinned copy, separately audited under browserRuntimeBundles; its version may differ from this application lock."
+    }
+  ],
+  "browserRuntimeBundles": [
+    {
+      "name": "recognition-worker",
+      "container": "tesseract.js@7.0.0",
+      "sourcePath": "node_modules/tesseract.js/dist/worker.min.js",
+      "sha256": "576b7df7e3393e137e51849357c9adb53fe7ac1bb69bfa06cf3d61520f182c6d",
+      "sourceMapPath": "node_modules/tesseract.js/dist/worker.min.js.map",
+      "sourceMapSha256": "5cfacf7eb569f0e6e6302a7f045b2d76a2161b537230b90de790b81f5563fd7f",
+      "upstreamRevision": "42eae669e4b3a66429d8516f078912cc747a89df",
+      "dependencyLockUrl": "https://raw.githubusercontent.com/naptha/tesseract.js/42eae669e4b3a66429d8516f078912cc747a89df/package-lock.json",
+      "dependencyLockSha256": "afa73532ad3bc38038a7aac1b8cfbf0e0383f28d3726375028da53d26a088ed0",
+      "noticePath": "licenses/application/frontend/ocr-worker/worker.min.js.LICENSE.txt",
+      "noticeSha256": "45f54171aeaa1d10c0c1a66f374b7bba1f02472b1487fbe892eec04f840002ac",
+      "embeddedPackages": [
+        {
+          "name": "bmp-js",
+          "version": "0.1.0",
+          "license": "MIT",
+          "sourceUrl": "https://registry.npmjs.org/bmp-js/-/bmp-js-0.1.0.tgz",
+          "sourceIntegrity": "sha512-vHdS19CnY3hwiNdkaqk93DvjVLfbEcI8mys4UjuWrlX1haDmroo8o4xCzh4wD6DGV6HxRCyauwhHRqMTfERtjw==",
+          "modules": [
+            {
+              "path": "lib/encoder.js",
+              "sha256": "54c54b0043868c436048ee5405d87956370acc0a9356811f50a123812735bef5",
+              "bytes": 2429,
+              "archiveByteIdentical": true
+            },
+            {
+              "path": "index.js",
+              "sha256": "77ab01e2cb073a3a5d60d3f2ef1ed9ffd67d27985f03e528767dfb80dcf95aa8",
+              "bytes": 233,
+              "archiveByteIdentical": true
+            },
+            {
+              "path": "lib/decoder.js",
+              "sha256": "4e941bb5d1b3ce9c67165fc98adc3dfe1850b0dc92b541c4e50862b6015d7ea5",
+              "bytes": 14445,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE",
+              "sourceUrl": "https://registry.npmjs.org/bmp-js/-/bmp-js-0.1.0.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/bmp-js-LICENSE",
+              "sha256": "9f165f5bd2b462122cacb8c6dc32028be1abb4d8ad0322e9a332f30b2ebdb833",
+              "bytes": 1077
+            }
+          ]
+        },
+        {
+          "name": "idb-keyval",
+          "version": "6.2.1",
+          "license": "Apache-2.0",
+          "sourceUrl": "https://registry.npmjs.org/idb-keyval/-/idb-keyval-6.2.1.tgz",
+          "sourceIntegrity": "sha512-8Sb3veuYCyrZL+VBt9LJfZjLUPWVvqn8tG28VqYNFCo43KHcKuq+b4EiXGeuaLAQWL2YmyDgMp2aSpH9JHsEQg==",
+          "modules": [
+            {
+              "path": "dist/index.js",
+              "sha256": "541fcbcdaeb77fa87250844fd40e1ed0faf79be2e7f29be1aefb8b9ca19f7ce5",
+              "bytes": 6485,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENCE",
+              "sourceUrl": "https://registry.npmjs.org/idb-keyval/-/idb-keyval-6.2.1.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/idb-keyval-LICENCE",
+              "sha256": "20c27d6339619eeb3113cb865d4e98a3f559e52964fc75caea9cb5fa72674565",
+              "bytes": 555
+            }
+          ]
+        },
+        {
+          "name": "is-url",
+          "version": "1.2.4",
+          "license": "MIT",
+          "sourceUrl": "https://registry.npmjs.org/is-url/-/is-url-1.2.4.tgz",
+          "sourceIntegrity": "sha512-ITvGim8FhRiYe4IQ5uHSkj7pVaPDrCTkNd3yq3cV7iZAcJdHTUMPMEHcqSOy9xZ9qFenQCvi+2wjH9a1nXqHww==",
+          "modules": [
+            {
+              "path": "index.js",
+              "sha256": "c7cb9f56300321d104c9772c054144d75e3bf280d184d547fab525f9fbf16e5c",
+              "bytes": 856,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE-MIT",
+              "sourceUrl": "https://registry.npmjs.org/is-url/-/is-url-1.2.4.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/is-url-LICENSE-MIT",
+              "sha256": "80957b522b0ea4ce24290953d74d818220c804d1f42cad02b8d7da1c12ce1fc1",
+              "bytes": 1036
+            }
+          ]
+        },
+        {
+          "name": "regenerator-runtime",
+          "version": "0.13.11",
+          "license": "MIT",
+          "sourceUrl": "https://registry.npmjs.org/regenerator-runtime/-/regenerator-runtime-0.13.11.tgz",
+          "sourceIntegrity": "sha512-kY1AZVr2Ra+t+piVaJ4gxaFaReZVH40AKNo7UCX6W+dEwBo/2oZJzqfuN1qLq1oL45o56cPaTXELwrTh8Fpggg==",
+          "modules": [
+            {
+              "path": "runtime.js",
+              "sha256": "e4fa2bcc7507e23fb226bad104bd3c526149ebc9891afbc4bb3a4a0c88afded3",
+              "bytes": 25202,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE",
+              "sourceUrl": "https://registry.npmjs.org/regenerator-runtime/-/regenerator-runtime-0.13.11.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/regenerator-runtime-LICENSE",
+              "sha256": "51887a3d47051ac2fce1210562e5b9fe0830a8a8fabeb272c2d586eeb18a05fd",
+              "bytes": 1080
+            }
+          ]
+        },
+        {
+          "name": "wasm-feature-detect",
+          "version": "1.8.0",
+          "license": "Apache-2.0",
+          "sourceUrl": "https://registry.npmjs.org/wasm-feature-detect/-/wasm-feature-detect-1.8.0.tgz",
+          "sourceIntegrity": "sha512-zksaLKM2fVlnB5jQQDqKXXwYHLQUVH9es+5TOOHwGOVJOCeRBCiPjwSg+3tN2AdTCzjgli4jijCH290kXb/zWQ==",
+          "modules": [
+            {
+              "path": "dist/cjs/index.cjs",
+              "sha256": "1393262b2d5327b4ff2ebe1ebc0cc00a82f88bde0521e59b39c626a11c5aae43",
+              "bytes": 3226,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE",
+              "sourceUrl": "https://registry.npmjs.org/wasm-feature-detect/-/wasm-feature-detect-1.8.0.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/wasm-feature-detect-LICENSE",
+              "sha256": "bcf29b4fd3ec2cb5f9d40a0866da446f6da62170d2ccedf4aeca9cf9406dd20c",
+              "bytes": 11341
+            }
+          ]
+        },
+        {
+          "name": "zlibjs",
+          "version": "0.3.1",
+          "license": "MIT",
+          "sourceUrl": "https://registry.npmjs.org/zlibjs/-/zlibjs-0.3.1.tgz",
+          "sourceIntegrity": "sha512-+J9RrgTKOmlxFSDHo0pI1xM6BLVUv+o0ZT9ANtCxGkjIVCCUdx9alUF8Gm+dGLKbkkkidWIHFDZHDMpfITt4+w==",
+          "modules": [
+            {
+              "path": "bin/node-zlib.js",
+              "sha256": "29c696dd3a05fe913959064ec64d1e5808340d390f10698632efdca506edf1e9",
+              "bytes": 24166,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE",
+              "sourceUrl": "https://registry.npmjs.org/zlibjs/-/zlibjs-0.3.1.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/zlibjs-LICENSE",
+              "sha256": "131afe3f7bdce1698beb292fb8de1a968de01bce876122a60ef5db230471c866",
+              "bytes": 1222
+            }
+          ]
+        },
+        {
+          "name": "buffer",
+          "version": "6.0.3",
+          "license": "MIT",
+          "sourceUrl": "https://registry.npmjs.org/buffer/-/buffer-6.0.3.tgz",
+          "sourceIntegrity": "sha512-FTiCpNxtwiZZHEZbcbTIcZjERVICn9yq/pDFkTl95/AxzD1naBctN7YO68riM/gLSDY7sdrMby8hofADYuuqOA==",
+          "modules": [
+            {
+              "path": "index.js",
+              "sha256": "c25853fd31addfce188b01061fe85bfe667d5fb6c7a7bbb1c83d0ddfd8627acc",
+              "bytes": 58353,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE",
+              "sourceUrl": "https://registry.npmjs.org/buffer/-/buffer-6.0.3.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/buffer-LICENSE",
+              "sha256": "06bafa45fdad2579ba0e43b0c9b2c6290287c99c4203c300254a462b38a307f6",
+              "bytes": 1106
+            }
+          ]
+        },
+        {
+          "name": "base64-js",
+          "version": "1.5.1",
+          "license": "MIT",
+          "sourceUrl": "https://registry.npmjs.org/base64-js/-/base64-js-1.5.1.tgz",
+          "sourceIntegrity": "sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==",
+          "modules": [
+            {
+              "path": "index.js",
+              "sha256": "829eadd8a1a441d25be0cb93b00e16a0d0c20fd294db95d8f2ed87e6954b7182",
+              "bytes": 3932,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE",
+              "sourceUrl": "https://registry.npmjs.org/base64-js/-/base64-js-1.5.1.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/base64-js-LICENSE",
+              "sha256": "5b37224c080cdcc97c871ada971c224e9926370fe74f11b539aa1cf9f3b1aca1",
+              "bytes": 1081
+            }
+          ]
+        },
+        {
+          "name": "ieee754",
+          "version": "1.2.1",
+          "license": "BSD-3-Clause",
+          "sourceUrl": "https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz",
+          "sourceIntegrity": "sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==",
+          "modules": [
+            {
+              "path": "index.js",
+              "sha256": "fe3e2b20c1ebb57c3b390c8f685ad1e04e6f493517fa7e432f4351bb77a1a4d0",
+              "bytes": 2154,
+              "archiveByteIdentical": true
+            }
+          ],
+          "licenses": [
+            {
+              "sourceArchivePath": "package/LICENSE",
+              "sourceUrl": "https://registry.npmjs.org/ieee754/-/ieee754-1.2.1.tgz",
+              "bundledPath": "licenses/application/frontend/ocr-worker/ieee754-LICENSE",
+              "sha256": "18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1",
+              "bytes": 1465
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "recognition-webassembly-core",
+      "container": "tesseract.js-core@7.0.0",
+      "sourcePath": "node_modules/tesseract.js-core/tesseract-core-lstm.wasm.js",
+      "sha256": "eef5f8b2f8e20e150680b20adaec4a60babafee3adbe8a94583c81fee46e8680",
+      "upstreamRevision": "acffef2b66eb44a31df297e11d905f4b39001068",
+      "wasmPackaging": "WASM is embedded in the copied .wasm.js file; no CDN or separate .wasm download is used.",
+      "nativeDependencies": [
+        {
+          "name": "tesseract",
+          "revision": "2a9c1c49c360462733c386d2a44fcd22c4e21411",
+          "sourceRepository": "https://github.com/Balearica/tesseract",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/Balearica/tesseract/2a9c1c49c360462733c386d2a44fcd22c4e21411/LICENSE",
+              "sourcePath": "LICENSE",
+              "file": "licenses/application/frontend/ocr-native/tesseract-LICENSE",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+              "bytes": 11358
+            },
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/Balearica/tesseract/2a9c1c49c360462733c386d2a44fcd22c4e21411/AUTHORS",
+              "sourcePath": "AUTHORS",
+              "file": "licenses/application/frontend/ocr-native/tesseract-AUTHORS",
+              "sha256": "720862b7253993b348fe15f37ed6e0d4feb0fc8df8324284d75975d54dd29923",
+              "bytes": 787
+            }
+          ]
+        },
+        {
+          "name": "leptonica",
+          "revision": "4af068b56a9674da915debea4ed7e1b9885b17e8",
+          "sourceRepository": "https://github.com/DanBloomberg/leptonica",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/DanBloomberg/leptonica/4af068b56a9674da915debea4ed7e1b9885b17e8/leptonica-license.txt",
+              "sourcePath": "leptonica-license.txt",
+              "file": "licenses/application/frontend/ocr-native/leptonica-leptonica-license.txt",
+              "sha256": "87829abb5bbb00b55a107365da89e9a33f86c4250169e5a1e5588505be7d5806",
+              "bytes": 1521
+            }
+          ]
+        },
+        {
+          "name": "libjpeg",
+          "revision": "6c0fcb8ddee365e7abc4d332662b06900612e923",
+          "sourceRepository": "https://github.com/LuaDist/libjpeg",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/LuaDist/libjpeg/6c0fcb8ddee365e7abc4d332662b06900612e923/README",
+              "sourcePath": "README",
+              "file": "licenses/application/frontend/ocr-native/libjpeg-README",
+              "sha256": "c791da525733040e622ed257c7b096b8f5191b332604ead0c6bc2b54cbd8e0d1",
+              "bytes": 19110
+            }
+          ]
+        },
+        {
+          "name": "giflib",
+          "revision": "fa37672085ce4b3d62c51627ab3c8cf2dda8009a",
+          "sourceRepository": "https://github.com/mirrorer/giflib",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/mirrorer/giflib/fa37672085ce4b3d62c51627ab3c8cf2dda8009a/COPYING",
+              "sourcePath": "COPYING",
+              "file": "licenses/application/frontend/ocr-native/giflib-COPYING",
+              "sha256": "0c9b7990ecdca88b676db232c226548ac408b279f550d424d996f0d83591dd8e",
+              "bytes": 1088
+            }
+          ]
+        },
+        {
+          "name": "libpng",
+          "revision": "a37d4836519517bdce6cb9d956092321eca3e73b",
+          "sourceRepository": "https://github.com/glennrp/libpng",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/glennrp/libpng/a37d4836519517bdce6cb9d956092321eca3e73b/LICENSE",
+              "sourcePath": "LICENSE",
+              "file": "licenses/application/frontend/ocr-native/libpng-LICENSE",
+              "sha256": "33ba4e187d8b0c8d7ab2bc2e522bb095219e03089e9aa0122b4fb9eb2b7de82b",
+              "bytes": 5345
+            }
+          ]
+        },
+        {
+          "name": "libtiff",
+          "revision": "b51bb157123264e26d34c09cc673d213aea61fc7",
+          "sourceRepository": "https://github.com/libsdl-org/libtiff",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/libsdl-org/libtiff/b51bb157123264e26d34c09cc673d213aea61fc7/COPYRIGHT",
+              "sourcePath": "COPYRIGHT",
+              "file": "licenses/application/frontend/ocr-native/libtiff-COPYRIGHT",
+              "sha256": "fbd6fed7938541d2c809c0826225fc85e551fdbfa8732b10f0c87e0847acafd7",
+              "bytes": 1146
+            }
+          ]
+        },
+        {
+          "name": "libwebp",
+          "revision": "20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c",
+          "sourceRepository": "https://github.com/webmproject/libwebp",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/webmproject/libwebp/20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c/COPYING",
+              "sourcePath": "COPYING",
+              "file": "licenses/application/frontend/ocr-native/libwebp-COPYING",
+              "sha256": "5aec868f669e384a22372a4e8a1a6cd7d44c64cd451f960ca69cc170d1e13acf",
+              "bytes": 1496
+            },
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/webmproject/libwebp/20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c/PATENTS",
+              "sourcePath": "PATENTS",
+              "file": "licenses/application/frontend/ocr-native/libwebp-PATENTS",
+              "sha256": "cc3273e0694ea5896145e0677699b53471b03ea43021ddc50e7923fbb9f5023c",
+              "bytes": 1436
+            },
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/webmproject/libwebp/20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c/AUTHORS",
+              "sourcePath": "AUTHORS",
+              "file": "licenses/application/frontend/ocr-native/libwebp-AUTHORS",
+              "sha256": "f6399f3a0574412944d3a6c5910b62c6f9c4ec58728ca8eccd3a2cfe3e665fdb",
+              "bytes": 2346
+            }
+          ]
+        },
+        {
+          "name": "zlib",
+          "revision": "21767c654d31d2dccdde4330529775c6c5fd5389",
+          "sourceRepository": "https://github.com/madler/zlib",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/madler/zlib/21767c654d31d2dccdde4330529775c6c5fd5389/README",
+              "sourcePath": "README",
+              "file": "licenses/application/frontend/ocr-native/zlib-README",
+              "sha256": "fc2c3368901700f0acdeb1d8afeaca5923296768ec6824ecdf627aac396001fd",
+              "bytes": 5368
+            }
+          ]
+        },
+        {
+          "name": "openlibm",
+          "revision": "ae2d91698508701c83cab83714d42a1146dccf85",
+          "sourceRepository": "https://github.com/JuliaMath/openlibm",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/JuliaMath/openlibm/ae2d91698508701c83cab83714d42a1146dccf85/LICENSE.md",
+              "sourcePath": "LICENSE.md",
+              "file": "licenses/application/frontend/ocr-native/openlibm-LICENSE.md",
+              "sha256": "b1843fbf5b03f519a5f0a44fce751bdd1022ae7148614923f9d6293e17a18b17",
+              "bytes": 5857
+            }
+          ]
+        },
+        {
+          "name": "emscripten runtime and standard libraries",
+          "version": "4.0.15",
+          "sourceRepository": "https://github.com/emscripten-core/emscripten",
+          "versionEvidence": "https://github.com/naptha/tesseract.js-core/blob/acffef2b66eb44a31df297e11d905f4b39001068/build-with-docker.sh",
+          "notices": [
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.15/LICENSE",
+              "sourcePath": "LICENSE",
+              "file": "licenses/application/frontend/ocr-native/emscripten-LICENSE",
+              "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+              "bytes": 5093
+            },
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.15/system/lib/libc/musl/COPYRIGHT",
+              "sourcePath": "system/lib/libc/musl/COPYRIGHT",
+              "file": "licenses/application/frontend/ocr-native/emscripten-system_lib_libc_musl_COPYRIGHT",
+              "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+              "bytes": 6204
+            },
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.15/system/lib/libcxx/LICENSE.TXT",
+              "sourcePath": "system/lib/libcxx/LICENSE.TXT",
+              "file": "licenses/application/frontend/ocr-native/emscripten-system_lib_libcxx_LICENSE.TXT",
+              "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+              "bytes": 16703
+            },
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.15/system/lib/libcxxabi/LICENSE.TXT",
+              "sourcePath": "system/lib/libcxxabi/LICENSE.TXT",
+              "file": "licenses/application/frontend/ocr-native/emscripten-system_lib_libcxxabi_LICENSE.TXT",
+              "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+              "bytes": 16706
+            },
+            {
+              "sourceUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/4.0.15/AUTHORS",
+              "sourcePath": "AUTHORS",
+              "file": "licenses/application/frontend/ocr-native/emscripten-AUTHORS",
+              "sha256": "56f7df65203d4858dac19cafe3a84a8c49abaff56b67d32d2d463d5fef6e440b",
+              "bytes": 28933
+            }
+          ]
+        }
+      ]
     }
   ]
 }

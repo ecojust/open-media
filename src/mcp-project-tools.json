@@ -1,0 +1,206 @@
+[
+  {
+    "name": "open_media_timeline_batch_edit",
+    "description": "原子批量编辑时间线与项目。按顺序在隔离副本执行 1 至 100 个同步编辑，任一步失败全部不写入；成功只产生一次撤销记录。dryRun=true 仅预检，返回各操作结果但不提交。不得嵌套批量、导入文件、生成配音或其他异步/外部操作。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "tool": {
+                "type": "string",
+                "enum": [
+                  "open_media_project_update",
+                  "open_media_asset_remove",
+                  "open_media_track_add",
+                  "open_media_track_update",
+                  "open_media_track_remove",
+                  "open_media_track_reorder",
+                  "open_media_clip_add",
+                  "open_media_text_add",
+                  "open_media_clip_update",
+                  "open_media_clip_move",
+                  "open_media_clip_split",
+                  "open_media_clip_trim",
+                  "open_media_clip_duplicate",
+                  "open_media_clip_remove",
+                  "open_media_clip_restore_audio_length",
+                  "open_media_clip_extract_audio",
+                  "open_media_subtitle_apply_style",
+                  "open_media_timeline_close_gaps",
+                  "open_media_transition_add",
+                  "open_media_transition_update",
+                  "open_media_transition_remove",
+                  "open_media_speech_align",
+                  "open_media_timeline_markers_set",
+                  "open_media_clip_keyframes_set",
+                  "open_media_clip_crop",
+                  "open_media_focus_region",
+                  "open_media_overlay_add",
+                  "open_media_title_add",
+                  "open_media_template_customize",
+                  "open_media_clip_freeze_frame",
+                  "open_media_clip_speed_ramp",
+                  "open_media_transition_parameters_set"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "tool",
+              "arguments"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [
+        "operations"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_timeline_markers_set",
+    "description": "完整替换当前项目的章节、重点和待检查标记。time 单位为秒；省略 id 时生成新 ID。空数组清除全部标记。标记随项目文件和快照保存。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "markers": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "time": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 86400
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "chapter",
+                  "highlight",
+                  "review"
+                ]
+              },
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              }
+            },
+            "required": [
+              "time",
+              "label",
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [
+        "markers"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_snapshot",
+    "description": "管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id。创建/恢复含真实媒体的便携包，关闭重开后保留，不依赖临时素材URL。所有工程合计最多100份、1GiB；每份最多256MiB媒体。恢复产生一次可撤销编辑；删除不可撤销。长操作返回 jobId。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "list",
+            "compare",
+            "restore",
+            "delete"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "comparisonId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  }
+]

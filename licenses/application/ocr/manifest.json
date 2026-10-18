@@ -1,0 +1,30 @@
+{
+  "license": "Apache-2.0",
+  "repository": "https://github.com/tesseract-ocr/tessdata_fast",
+  "revision": "87416418657359cb625c412a48b6e1d6d41c29bd",
+  "transformation": "Lossless gzip compression; model weights unchanged.",
+  "models": [
+    {
+      "language": "chi_sim",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/chi_sim.traineddata",
+      "sourceSha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730",
+      "file": "public/ocr/chi_sim.traineddata.gz",
+      "bytes": 1723376,
+      "sha256": "89456b34c2769c9a6552b8c64e4186768f88aac37b698cfc073e5c5ea03293be"
+    },
+    {
+      "language": "eng",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/eng.traineddata",
+      "sourceSha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+      "file": "public/ocr/eng.traineddata.gz",
+      "bytes": 1967599,
+      "sha256": "f1c22599ed6fd3eb821d87fdb43e09f98b61179a4abe38c43cfca2cdcb9f5ec2"
+    }
+  ],
+  "licenseFile": {
+    "path": "licenses/application/ocr/LICENSE",
+    "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/87416418657359cb625c412a48b6e1d6d41c29bd/LICENSE",
+    "bytes": 11358,
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+  }
+}

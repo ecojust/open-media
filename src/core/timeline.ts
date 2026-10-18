@@ -1,13 +1,14 @@
+import { animatedSourceTimeAt, visualClipDuration } from './visual-animation.ts'
 import { cloneProject, createTrack, newId, validateProject } from './project.ts'
 import { isSubtitleClip, SUBTITLE_STYLE_KEYS, subtitleStyleFromClip } from './subtitle-style.ts'
 import { reconcileTransitions } from './transitions.ts'
 import type { Clip, MediaAsset, Project, ProjectHistory, Track, TrackKind } from './types.ts'
 
-export function clipDuration(clip: Clip): number { return Math.max(0, (clip.trimOut - clip.trimIn) / clip.speed) }
+export function clipDuration(clip: Clip): number { return visualClipDuration(clip) }
 export function clipEnd(clip: Clip): number { return clip.start + clipDuration(clip) }
 export function projectDuration(project: Project): number { return Math.max(0, ...project.tracks.flatMap((track) => track.clips.map(clipEnd))) }
 export function isClipActive(clip: Clip, time: number): boolean { return time >= clip.start && time < clipEnd(clip) }
-export function sourceTimeAt(clip: Clip, time: number): number { return Math.min(clip.trimOut, Math.max(clip.trimIn, clip.trimIn + (time - clip.start) * clip.speed)) }
+export function sourceTimeAt(clip: Clip, time: number): number { return animatedSourceTimeAt(clip, time) }
 export function clipOpacityAt(clip: Clip, time: number): number {
   if (!isClipActive(clip, time)) return 0
   const elapsed = time - clip.start
@@ -129,10 +130,12 @@ export function splitClip(project: Project, clipId: string, time: number): Proje
     const { track, clip, index } = requireClip(copy, clipId)
     if (track.kind === 'transition') throw new Error('转场不能分割，请调整转场时长。')
     if (!Number.isFinite(time) || time <= clip.start + 1e-6 || time >= clipEnd(clip) - 1e-6) throw new Error('请将播放头移到片段内部再分割。')
-    const source = sourceTimeAt(clip, time)
+    const source = clip.freezeFrame ? clip.trimIn + (time - clip.start) * clip.speed : sourceTimeAt(clip, time)
+    if (clip.speedRamp && !clip.speedRamp.sourceRange) clip.speedRamp.sourceRange = { start: clip.trimIn, end: clip.trimOut }
     if (track.kind === 'text') detachSpeechSources(copy, new Set([clip.id]))
     if (clip.speech) delete clip.speech.textClipId
     const right = { ...clip, ...(clip.speech ? { speech: { ...clip.speech } } : {}), id: newId('clip'), start: time, trimIn: source, fadeIn: 0 }
+    if (clip.keyframes) right.animationOffset = (clip.animationOffset ?? 0) + time - clip.start
     clip.trimOut = source
     clip.fadeOut = 0
     clip.fadeIn = Math.min(clip.fadeIn, clipDuration(clip))

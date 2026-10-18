@@ -68,7 +68,7 @@ function playbackHarness(t, { pending = false, ready = true, video = false, fram
   project = addAsset(project, asset)
   project = addClip(project, project.tracks.find(track => track.kind === (video ? 'video' : 'audio')).id, createClip(asset, project, { trimOut: 20, speed: 1.5 }))
   let imagesDrawn = 0
-  const ctx = { save() {}, restore() {}, setTransform() {}, fillRect() {}, translate() {}, rotate() {}, beginPath() {}, rect() {}, clip() {}, drawImage() { imagesDrawn++ } }
+  const ctx = { save() {}, restore() {}, setTransform() {}, fillRect() {}, translate() {}, rotate() {}, scale() {}, beginPath() {}, rect() {}, clip() {}, drawImage() { imagesDrawn++ } }
   const errors = []
   const preview = new TimelinePreview({ width: 32, height: 32, getContext: () => ctx }, project, error => errors.push(error))
   return { preview, media: elements[0], project, elements, errors, get imagesDrawn() { return imagesDrawn } }

@@ -8,6 +8,8 @@ import { DEFAULT_CHROMA_KEY } from './chroma-key.ts'
 import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, updateTransition } from './transitions.ts'
 import { trackSubtitleIssues } from './subtitle-validation.ts'
 import { alignTextToSpeech, planSpeech, validateSpeechPlanCapacity } from './speech.ts'
+import { executeVisualTool } from './visual-tools.ts'
+import { setTimelineMarkers } from './project-operations.ts'
 import type { Clip, ClipChromaKey, ClipFilters, MediaAsset, Project, Track, TrackKind, TransitionEffect } from './types.ts'
 
 export interface McpSchema {
@@ -106,11 +108,13 @@ export function validateMcpToolArguments(name: string, args: unknown): Record<st
   return result
 }
 
+const VISUAL_TOOLS = new Set(['clip_keyframes_set', 'clip_crop', 'focus_region', 'overlay_add', 'title_add', 'template_customize', 'clip_freeze_frame', 'clip_speed_ramp', 'transition_parameters_set'].map(name => `open_media_${name}`))
 const PROJECT_TOOLS = new Set([
+  ...VISUAL_TOOLS, 'open_media_timeline_markers_set', ...[
   'project_get', 'project_validate', 'project_update', 'asset_list', 'asset_remove', 'track_add', 'track_update', 'track_remove', 'track_reorder',
   'clip_add', 'text_add', 'clip_update', 'clip_move', 'clip_split', 'clip_trim', 'clip_duplicate', 'clip_remove', 'clip_restore_audio_length', 'clip_extract_audio',
   'subtitle_apply_style', 'timeline_close_gaps', 'filter_list', 'transition_list', 'transition_add', 'transition_update', 'transition_remove', 'speech_plan', 'speech_align',
-].map(name => `open_media_${name}`))
+].map(name => `open_media_${name}`)])
 export function isProjectTool(name: string): boolean { return PROJECT_TOOLS.has(name) }
 export interface McpProjectToolResult {
   project?: Project
@@ -156,6 +160,11 @@ function editedClip(project: Project, clipId: string, label: string): McpProject
 export function executeProjectTool(project: Project, name: string, rawArgs: unknown): McpProjectToolResult {
   const args = validateMcpToolArguments(name, rawArgs)
   if (!isProjectTool(name)) throw new Error('此工具需要桌面运行时执行。')
+  if (VISUAL_TOOLS.has(name)) {
+    const result = executeVisualTool(project, name, args)
+    return { ...result, selection: result.selection ? { clipId: result.selection } : undefined }
+  }
+  if (name === 'open_media_timeline_markers_set') return setTimelineMarkers(project, args as unknown as Parameters<typeof setTimelineMarkers>[1])
   const string = (key: string) => args[key] as string
   const number = (key: string) => args[key] as number
   switch (name) {

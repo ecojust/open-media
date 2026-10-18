@@ -1,0 +1,314 @@
+[
+  {
+    "name": "open_media_asset_upload",
+    "description": "分块上传媒体并导入当前工程。begin 提供 name、size（字节）和完整文件 sha256；chunk 提供 uploadId、offset、base64 和分块 sha256；status/commit/abort 提供 uploadId。每块最多 512 KiB，单文件最多 1 GiB；commit 校验完整哈希和真实媒体类型后导入。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "begin",
+            "chunk",
+            "status",
+            "commit",
+            "abort"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "uploadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "base64": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 699052
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_import_url",
+    "description": "从公开 HTTP/HTTPS 直链下载图片、音频或视频并导入工程，保存来源与 SHA-256。校验每次跳转和媒体内容；不允许本机、局域网、保留网络地址或携带账号密码的 URL。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 8192
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824,
+          "default": 1073741824
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "open_media_asset_probe",
+    "description": "读取素材真实编码、显示尺寸、时长、帧率、音轨、旋转角度和 Alpha 通道信息；返回已保存的来源记录。透明通道无法从元数据确认时返回 null。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_get_frame",
+    "description": "按素材源时间提取真实 PNG 帧，返回可读取的图像数据、请求时间和实际帧时间。时间为素材内秒数，不是时间线位置；图片取 time=0。单帧编码结果最多 2 MiB。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1920,
+          "default": 1280
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_storyboard",
+    "description": "生成素材分镜联系表。mode=time按时间均匀抽帧；mode=scene按真实画面差异检测场景，并取每个场景的代表帧（单次范围最多600秒）。count为最多帧数，场景不足时不重复补图；超过上限时按场景顺序均匀选取。返回实际sourceTime、场景边界与检测依据。编码总量最多8 MiB。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "end": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24,
+          "default": 8
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1920,
+          "default": 480
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "time",
+            "scene"
+          ],
+          "default": "time"
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.3,
+          "description": "scene模式画面差异阈值；不表示语义识别。"
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_detect_scenes",
+    "description": "根据真实画面差异检测场景切换，返回源时间、分数、阈值与检测依据。切换分数是技术指标，不代表内容语义判断。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.3
+        },
+        "minInterval": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3600,
+          "default": 0.5
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_detect_idle",
+    "description": "检测真实黑场、画面冻结和静音区间，返回源时间范围、置信依据和检测阈值。结果仅表示技术条件满足，不代表内容没有价值，也不会自动删除片段。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "minDuration": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 3600,
+          "default": 2
+        },
+        "noiseDb": {
+          "type": "number",
+          "minimum": -120,
+          "maximum": 0,
+          "default": -45
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

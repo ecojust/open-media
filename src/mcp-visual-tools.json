@@ -1,0 +1,871 @@
+[
+  {
+    "name": "open_media_clip_keyframes_set",
+    "description": "设置片段关键帧。时间为片段内秒；x/y为项目坐标，scaleX/scaleY为中心缩放倍率，其余为绝对值。替换指定属性，clear可清空全部。每个关键帧的easing控制向下一个关键帧的插值。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "keyframes": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "y": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "scaleX": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "scaleY": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "opacity": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "rotation": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "volume": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_crop",
+    "description": "裁剪视频或图片的源画面，坐标及宽高为0..1归一化值。clear清除源裁剪。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "crop": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_focus_region",
+    "description": "聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像。区域为归一化源坐标，片段须填充整个项目画面。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "region": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "easing": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "step"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId",
+        "region"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_overlay_add",
+    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "arrow",
+            "rectangle",
+            "highlight",
+            "mask",
+            "spotlight",
+            "blur"
+          ]
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 86400
+        },
+        "x": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536
+        },
+        "y": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "strokeWidth": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "blurRadius": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "rotation": {
+          "type": "number",
+          "minimum": -3600,
+          "maximum": 3600
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "kind",
+        "start",
+        "duration",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_title_add",
+    "description": "添加可编辑标题。章节、角标、下三分之一或字幕布局，支持淡入、滑入和缩放动画。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "preset": {
+          "type": "string",
+          "enum": [
+            "chapter",
+            "lower-third",
+            "corner",
+            "subtitle"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "animation": {
+          "type": "string",
+          "enum": [
+            "none",
+            "fade",
+            "slide",
+            "zoom"
+          ]
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "fontSize": {
+          "type": "number",
+          "minimum": 4,
+          "maximum": 2048
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "preset",
+        "text",
+        "start",
+        "duration"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_template_customize",
+    "description": "统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景。可从已有图片素材添加Logo。仅修改明确指定的片段。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "fontSize": {
+          "type": "number",
+          "minimum": 4,
+          "maximum": 2048
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "center",
+            "lower-third",
+            "top-left",
+            "top-right"
+          ]
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "logoAssetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_freeze_frame",
+    "description": "将选中视频片段变为指定源帧的停帧，按duration展示且静音。sourceTime为原视频的绝对秒数。clear恢复原始源片段。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "sourceTime": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_speed_ramp",
+    "description": "设置视频或音频的变速曲线；points覆盖源片段0和1端点，按源位置插值。速度与片段基础速度相乘。preservePitch默认保持音调，clear清除曲线。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "position": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "speed": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 16
+              }
+            },
+            "required": [
+              "position",
+              "speed"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 2,
+          "maxItems": 16
+        },
+        "easing": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "step"
+          ]
+        },
+        "preservePitch": {
+          "type": "boolean"
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_transition_parameters_set",
+    "description": "调整转场方向、缓动、过渡颜色、模糊半径及作用范围。方向用于擦除和滑动，颜色用于淡出淡入；scope控制前段、后段或两侧。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        },
+        "easing": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "step"
+          ]
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "blur": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "both",
+            "outgoing",
+            "incoming"
+          ]
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

@@ -5,6 +5,8 @@ import { applySpeechResults, planSpeech, validateSpeechPlanCapacity, type Speech
 import { getSpeechSettings, validateSpeechSettings, type SpeechSettings } from './speech-settings.ts'
 import { compactVoiceCatalog } from './voice-catalog.ts'
 import { voiceReady } from './voice-downloads.ts'
+import { applySpeechPronunciation } from './speech-pronunciation.ts'
+import { getSpeechAlignment } from './speech-timing.ts'
 
 export interface McpSpeechRequest { clipIds?: string[]; voiceId?: string; rate?: number; alignText?: boolean }
 export interface McpSpeechJob {
@@ -103,7 +105,7 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
     const requestId = crypto.randomUUID()
     operation.nativeJobs.add(requestId)
     operation.currentNativeJob = requestId
-    let job = await options.native.beginSpeechJob({ requestId, text: result.text, voiceId: operation.job.voiceId, speed: operation.job.rate })
+    let job = await options.native.beginSpeechJob({ requestId, text: applySpeechPronunciation(result.text), voiceId: operation.job.voiceId, speed: operation.job.rate })
     if (job.id !== requestId) { operation.nativeJobs.delete(requestId); operation.nativeJobs.add(job.id); operation.currentNativeJob = job.id }
     while (true) {
       check(operation)
@@ -141,7 +143,7 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
         publish(operation)
       }
       check(operation)
-      const edit = applySpeechResults(operation.project, results, { alignText: operation.job.alignText })
+      const edit = applySpeechResults(operation.project, results, { alignText: operation.job.alignText, alignment: getSpeechAlignment() })
       operation.job.cancelable = false
       operation.job.stage = '正在加入时间线'
       publish(operation)

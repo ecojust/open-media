@@ -14,6 +14,7 @@ import ConvertWorkspace from './components/ConvertWorkspace.vue'
 import ExportPanel from './components/ExportPanel.vue'
 import McpPanel from './components/McpPanel.vue'
 import mcpToolCatalog from './mcp-tools.json'
+import { prepareEditorTool, type EditorToolRunner } from './core/editor-tool-service.ts'
 import { createMcpAutomation, type McpPlayback } from './core/mcp-automation.ts'
 import { claimMcpRequest, completeMcpRequest, getMcpServiceEpoch, getMcpStatus, getPendingMcpRequests, onMcpRequest, stopMcpService, type McpPanelJob, type McpRequest, type McpStatus } from './native-mcp.ts'
 import type { ImportedProject, MediaAsset, Project, ProjectHistory, ProjectSummary } from './core/types.ts'
@@ -609,6 +610,38 @@ function cancelMcpPlayback(): void {
   pendingMcpPlayback = undefined
   pending?.pause()
 }
+let guiToolActive = false
+const runEditorTool: EditorToolRunner = async (name, args, options) => {
+  if (destroyed || allowClose || guiToolActive || mcpBusy.value || busy.value || switching.value || browserExporting.value) throw new Error('当前项目正在处理其他操作，请稍后重试。')
+  const source = cloneProject(project.value), revision = projectRevision.value
+  guiToolActive = true
+  videoEditor.value?.pause()
+  try {
+    const prepared = await prepareEditorTool(name, args, { ...options, project: source, revision, blobs: new Map(blobs), source: 'gui', assertCurrent: () => { options.signal.throwIfAborted(); if (destroyed || allowClose || project.value.id !== source.id || projectRevision.value !== revision) throw new Error('项目已变化，请重试。') }, hydrate: async imported => { const result = await hydrate(imported, true); pendingHydration.delete(result); return result } })
+    let committed = false
+    try {
+      if (!prepared.irreversible) {
+        options.signal.throwIfAborted()
+        if (destroyed || allowClose || project.value.id !== source.id || projectRevision.value !== revision) throw new Error('项目已变化，本次操作未写入，请重试。')
+      }
+      if (prepared.project || prepared.accept || prepared.irreversible) options.onProgress({ stage: '正在保存处理结果', progress: 1, cancelable: false })
+      if (prepared.project) {
+        if (!commit(prepared.project, prepared.label || '更新项目')) throw new Error('项目拒绝了本次修改。')
+        committed = true
+      }
+      if (prepared.accept) committed = true
+      try { prepared.assets?.forEach(({ asset, blob }) => { rememberAsset(asset); if (blob) blobs.set(asset.id, blob) }) }
+      finally { await prepared.accept?.() }
+      if (prepared.selection?.clipId) {
+        await nextTick()
+        // The local task lock is released before the editor can accept selection.
+        const clipId = prepared.selection.clipId
+        setTimeout(() => { void videoEditor.value?.setPlayback({ selectedClipId: clipId }).catch(() => {}) }, 0)
+      }
+      return prepared.data
+    } catch (cause) { if (!committed && !prepared.irreversible) await prepared.discard?.(); throw cause }
+  } finally { guiToolActive = false }
+}
 const mcpAutomation = createMcpAutomation({
   getProject: () => project.value,
   getRevision: () => projectRevision.value,
@@ -826,7 +859,7 @@ onBeforeUnmount(() => { destroyed = true; clearMcpToolActivity(); cancelMcpPlayb
           <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button :disabled="mcpBusy" @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" :disabled="mcpBusy" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
-        <VideoEditor ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :mcp-connected="mcpConnected" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
+        <VideoEditor :run-tool="runEditorTool" ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :mcp-connected="mcpConnected" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
         <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>

@@ -6,6 +6,8 @@ import { compactVoiceCatalog } from '../core/voice-catalog'
 import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade } from '../core/voice-downloads'
 import { bundledVoicePreviewUrl, VOICE_PREVIEW_TEXT } from '../core/voice-previews'
 import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../core/speech-settings'
+import { applySpeechPronunciation } from '../core/speech-pronunciation'
+import { getSpeechAlignment } from '../core/speech-timing'
 import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getSpeechJob, getSpeechStatus, repairSpeechModel, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
@@ -197,7 +199,7 @@ async function synthesize(active: Operation, text: string, voice: string, rate: 
   if (generationProgress.value) { generationProgress.value.current = null; generationProgress.value.stage = '正在准备声音' }
   const requestId = crypto.randomUUID()
   active.current = requestId; active.jobs.add(requestId)
-  let job = await beginSpeechJob({ requestId, text, voiceId: voice, speed: rate })
+  let job = await beginSpeechJob({ requestId, text: applySpeechPronunciation(text), voiceId: voice, speed: rate })
   if (job.id !== requestId) { active.jobs.delete(requestId); active.jobs.add(job.id); active.current = job.id }
   if (active.controller.signal.aborted || disposed) { await cancelSpeechJob(job.id).catch(() => {}); checkOperation(active) }
   while (true) {
@@ -261,7 +263,7 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
         if (generationProgress.value) { generationProgress.value.completed = results.length; generationProgress.value.current = null }
       }
       checkOperation(active)
-      const result = applySpeechResults(props.project, results, { alignText: shouldAlign })
+      const result = applySpeechResults(props.project, results, { alignText: shouldAlign, alignment: getSpeechAlignment() })
       active.applying = true; finalizing.value = true
       emit('change', result.project, `已为 ${sources.length} 段文字生成语音`)
       await nextTick()

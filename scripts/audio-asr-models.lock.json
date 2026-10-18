@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "id": "whisper-small-int8-attention-v1",
+  "name": "Whisper Small INT8",
+  "engineVersion": "1.13.8",
+  "modelRevision": "9a896a02c311676d366ebfda3797753df4153fe2",
+  "source": "https://huggingface.co/clairemcw/sherpa-onnx-whisper-small-attention",
+  "originalModel": "https://github.com/openai/whisper",
+  "license": "MIT",
+  "licenseUrl": "https://raw.githubusercontent.com/openai/whisper/86098128c0b4f24f0e2aa2994de830614b474227/LICENSE",
+  "licenseSha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+  "licenseText": "MIT License\n\nCopyright (c) 2022 OpenAI\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+  "downloadSize": 375744699,
+  "installedSize": 375744699,
+  "sampleRate": 16000,
+  "maxChunkSeconds": 30,
+  "hardware": "建议至少 4 GB 可用内存；支持 CPU，运行时可用时优先尝试 GPU。",
+  "files": [
+    {
+      "name": "small-encoder.int8.onnx",
+      "bytes": 112445386,
+      "sha256": "570e2b92cce6a8be62dc37934057b82dd601298ecb3a2a25161542e2b59862aa",
+      "urls": [
+        "https://huggingface.co/clairemcw/sherpa-onnx-whisper-small-attention/resolve/9a896a02c311676d366ebfda3797753df4153fe2/small-encoder.int8.onnx",
+        "https://hf-mirror.com/clairemcw/sherpa-onnx-whisper-small-attention/resolve/9a896a02c311676d366ebfda3797753df4153fe2/small-encoder.int8.onnx"
+      ]
+    },
+    {
+      "name": "small-decoder.int8.onnx",
+      "bytes": 262482583,
+      "sha256": "63233cc33d6c11ae514467a69132de87cc61e6b28d3dab40cdf8b0e3060a3439",
+      "urls": [
+        "https://huggingface.co/clairemcw/sherpa-onnx-whisper-small-attention/resolve/9a896a02c311676d366ebfda3797753df4153fe2/small-decoder.int8.onnx",
+        "https://hf-mirror.com/clairemcw/sherpa-onnx-whisper-small-attention/resolve/9a896a02c311676d366ebfda3797753df4153fe2/small-decoder.int8.onnx"
+      ]
+    },
+    {
+      "name": "small-tokens.txt",
+      "bytes": 816730,
+      "sha256": "b34b360dbb493e781e479794586d661700670d65564001f23024971d1f2fa126",
+      "urls": [
+        "https://huggingface.co/clairemcw/sherpa-onnx-whisper-small-attention/resolve/9a896a02c311676d366ebfda3797753df4153fe2/small-tokens.txt",
+        "https://hf-mirror.com/clairemcw/sherpa-onnx-whisper-small-attention/resolve/9a896a02c311676d366ebfda3797753df4153fe2/small-tokens.txt"
+      ]
+    }
+  ]
+}

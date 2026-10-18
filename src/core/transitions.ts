@@ -1,3 +1,4 @@
+import { easeProgress, visualClipDuration } from './visual-animation.ts'
 import { cloneProject, createTrack, newId, validateProject } from './project.ts'
 import type { Clip, Project, TransitionEffect } from './types.ts'
 
@@ -15,7 +16,7 @@ export const TRANSITION_PRESETS: readonly { id: TransitionEffect; name: string; 
 ]
 
 const EPSILON = 1e-6
-const durationOf = (clip: Clip) => (clip.trimOut - clip.trimIn) / clip.speed
+const durationOf = visualClipDuration
 const endOf = (clip: Clip) => clip.start + durationOf(clip)
 
 export interface TransitionCut {
@@ -154,12 +155,16 @@ export interface TransitionVisual {
   /** Normalized clip-local visible rectangle. */
   mask: { x: number; y: number; width: number; height: number }
   translateX: number
+  translateY: number
+  color?: string
+  blur?: number
+  blurStrength?: number
   scale: number
 }
 
 export function transitionVisual(effect: TransitionEffect, visibility: number): TransitionVisual {
   const v = Math.min(1, Math.max(0, visibility))
-  const result: TransitionVisual = { effect, visibility: v, opacity: 1, mask: { x: 0, y: 0, width: 1, height: 1 }, translateX: 0, scale: 1 }
+  const result: TransitionVisual = { effect, visibility: v, opacity: 1, mask: { x: 0, y: 0, width: 1, height: 1 }, translateX: 0, translateY: 0, scale: 1 }
   switch (effect) {
     case 'fade': result.opacity = v; break
     case 'wipe-up': result.mask = { x: 0, y: 1 - v, width: 1, height: v }; break
@@ -186,7 +191,15 @@ export function transitionVisualAt(project: Project, clipId: string, time: numbe
       const outgoing = binding.fromClipId === clipId
       if ((outgoing && time >= middle) || (!outgoing && time < middle)) continue
       const v = Math.min(1, Math.max(0, (outgoing ? middle - time : time - middle) / (durationOf(clip) / 2)))
-      return transitionVisual(binding.effect, v)
+      if ((binding.scope === 'outgoing' && !outgoing) || (binding.scope === 'incoming' && outgoing)) continue
+      let effect = binding.effect
+      if (binding.direction && effect.startsWith('wipe-')) effect = `wipe-${binding.direction}` as TransitionEffect
+      if (binding.direction && effect.startsWith('slide-')) effect = binding.direction === 'left' || binding.direction === 'up' ? 'slide-left' : 'slide-right'
+      const visual = transitionVisual(effect, easeProgress(v, binding.easing))
+      if (binding.direction && binding.effect.startsWith('slide-') && ['up', 'down'].includes(binding.direction)) { visual.translateY = visual.translateX; visual.translateX = 0 }
+      if (binding.color) visual.color = binding.color
+      if (binding.blur) { visual.blur = binding.blur; visual.blurStrength = 1 - visual.visibility }
+      return visual
     }
   }
   return undefined

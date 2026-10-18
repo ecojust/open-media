@@ -1,0 +1,255 @@
+[
+  {
+    "name": "open_media_timeline_get_frame",
+    "description": "返回指定时间的最终合成PNG画面，包含字幕、水印、滤镜和转场。坐标与时间均使用当前工程；不会改变播放头。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1920
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "time"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_preview_render",
+    "description": "生成指定范围的低清预览视频并返回可分块下载的artifactId。使用正式媒体合成管线，范围最长60秒。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 160,
+          "maximum": 1280
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_preview",
+    "description": "生成指定片段或范围的真实WAV试听。mix混合可听轨道，solo只保留clipIds或trackIds；保留时间线位置与音量处理。返回artifactId。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "mix",
+            "solo"
+          ]
+        },
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "trackIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_artifact_read",
+    "description": "分块读取预览文件的原始二进制数据（base64）。返回总大小、完整文件SHA256、offset和nextOffset；按序拼接即可保存为可播放文件。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 262144
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "artifactId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_ocr",
+    "description": "离线识别素材帧中的简体中文和英文，返回文字、行/词区域及置信度；区域坐标以返回图像像素计。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "zh-en",
+            "en"
+          ]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 1920
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "assetId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_export_validate",
+    "description": "检查缺失素材、字幕越界、配音重叠及无效剪辑。analyzeMedia=true时对所选范围生成真实预览并检测黑帧、削波与解码错误，返回问题证据与检查范围；最长检查60秒。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "analyzeMedia": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

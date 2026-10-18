@@ -1164,20 +1164,6 @@ fn safe_color(value: &str) -> String {
         "#000000".into()
     }
 }
-fn tempo(speed: f64) -> String {
-    let mut speed = speed;
-    let mut result = Vec::new();
-    while speed > 2.0 {
-        result.push("atempo=2".to_string());
-        speed /= 2.0;
-    }
-    while speed < 0.5 {
-        result.push("atempo=0.5".to_string());
-        speed /= 0.5;
-    }
-    result.push(format!("atempo={speed}"));
-    result.join(",")
-}
 fn fade_parameters(clip: &Value, duration: f64) -> Result<(f64, f64, f64)> {
     let fade_in = number(clip, "fadeIn", 0.0, 0.0, duration)?;
     let fade_out = number(clip, "fadeOut", 0.0, 0.0, duration)?;
@@ -1195,6 +1181,7 @@ fn timeline_plan(
     workspace: tempfile::TempDir,
 ) -> Result<RenderPlan> {
     let project = &spec["project"];
+    let audio_only = spec["audioOnly"] == true;
     let config = &spec["config"];
     let width = number(config, "width", 1920.0, 16.0, 7680.0)? as u32;
     let height = number(config, "height", 1080.0, 16.0, 7680.0)? as u32;
@@ -1225,7 +1212,7 @@ fn timeline_plan(
             let speed = number(clip, "speed", 1.0, 0.1, 16.0)?;
             let input = number(clip, "trimIn", 0.0, 0.0, 86400.0)?;
             let output = number(clip, "trimOut", 1.0, input, 86400.0)?;
-            let duration = (output - input) / speed;
+            let duration = crate::clip_animation::duration(clip)?;
             if duration <= 0.0 {
                 continue;
             }
@@ -1250,9 +1237,16 @@ fn timeline_plan(
     );
     let mut filters = vec!["[0:v]format=rgba[base0]".to_string()];
     let mut visuals = 0;
+    let mut input_count = 0;
     let mut audio_labels = Vec::new();
-    for (i, (track, clip, start, trim_in, trim_out, speed, duration)) in clips.iter().enumerate() {
+    for (track, clip, start, _trim_in, trim_out, _speed, duration) in &clips {
         let text = track["kind"] == "text";
+        if audio_only && text { continue; }
+        if text && clip["overlay"]["kind"] == "blur" {
+            crate::clip_animation::append_blur_overlay(clip, &mut filters, visuals, width, height, project_w, project_h, *duration)?;
+            visuals += 1;
+            continue;
+        }
         let asset = if text {
             spec["textAssets"]
                 .get(clip["id"].as_str().unwrap_or_default())
@@ -1264,6 +1258,7 @@ fn timeline_plan(
                 .find(|a| a["id"] == id)
                 .ok_or("片段素材已丢失。")?
         };
+        if audio_only && asset["kind"] == "image" { continue; }
         let path = store.authorized_path(asset)?;
         let image = text || asset["kind"] == "image";
         let loop_audio = if image {
@@ -1276,7 +1271,10 @@ fn timeline_plan(
             if track["kind"] == "audio" {
                 *trim_out > source_duration
             } else {
-                if *trim_out > source_duration + 0.001 {
+                if let Some(freeze) = clip.get("freezeFrame") {
+                    let time = number(freeze, "sourceTime", 0.0, 0.0, source_duration)?;
+                    if time >= source_duration { return Err("定格位置必须位于素材时长内。".into()); }
+                } else if *trim_out > source_duration + 0.001 {
                     return Err("视频片段超出素材原始时长，请缩短片段后导出。".into());
                 }
                 false
@@ -1309,23 +1307,29 @@ fn timeline_plan(
             );
         }
         arg(&mut args, &["-i", &path.to_string_lossy()]);
-        let index = i + 1;
-        if track["kind"] != "audio" && asset["kind"] != "audio" {
+        input_count += 1;
+        let index = input_count;
+        if !audio_only && track["kind"] != "audio" && asset["kind"] != "audio" {
             let cw = (number(clip, "width", project_w, 1.0, 30000.0)? / project_w * width as f64)
                 .round()
                 .max(2.0) as u32;
             let ch = (number(clip, "height", project_h, 1.0, 30000.0)? / project_h * height as f64)
                 .round()
                 .max(2.0) as u32;
-            let x = number(clip, "x", 0.0, -30000.0, 30000.0)? / project_w * width as f64;
-            let y = number(clip, "y", 0.0, -30000.0, 30000.0)? / project_h * height as f64;
+            let x = crate::clip_animation::expression(clip,"x",number(clip, "x", 0.0, -30000.0, 30000.0)?,&format!("t-{start}"))?;
+            let y = crate::clip_animation::expression(clip,"y",number(clip, "y", 0.0, -30000.0, 30000.0)?,&format!("t-{start}"))?;
+            let x = format!("({x})/{project_w}*{width}");
+            let y = format!("({y})/{project_h}*{height}");
             let rotation =
                 number(clip, "rotation", 0.0, -3600.0, 3600.0)? * std::f64::consts::PI / 180.0;
             let (fade_in, fade_out, fade_peak) = fade_parameters(clip, *duration)?;
-            let opacity = number(clip, "opacity", 1.0, 0.0, 1.0)? * fade_peak;
+            let animation = crate::clip_animation::visual_filter(clip,cw,ch,fps)?;
+            let opacity = if animation.is_empty() { number(clip, "opacity", 1.0, 0.0, 1.0)? * fade_peak } else { fade_peak };
             let fit = clip["fit"].as_str().unwrap_or("contain");
             let scale=match fit{"cover"=>format!("scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}"),"fill"=>format!("scale={cw}:{ch}"),_=>format!("scale={cw}:{ch}:force_original_aspect_ratio=decrease,pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")};
-            let mut chain=format!("[{index}:v]trim=start={trim_in}:end={trim_out},setpts=(PTS-STARTPTS)/{speed},format=rgba");
+            let timing=crate::clip_animation::video_timing(clip)?;
+            let mut chain=format!("[{index}:v]{timing},format=rgba");
+            chain += &crate::clip_animation::crop_filter(clip)?;
             if let Some(filter) = &chroma_key {
                 chain = crate::chroma_key::append_graph(chain, &mut filters, index, filter);
             }
@@ -1341,6 +1345,7 @@ fn timeline_plan(
                 ));
                 chain = format!("[filter_color{index}][filter_mask{index}]alphamerge");
             }
+            chain = transitions.append_graph(clip,fps,chain,&mut filters,index);
             chain += &format!(",colorchannelmixer=aa={opacity}");
             if fade_in > 0.0 {
                 chain += &format!(",fade=t=in:st=0:d={fade_in}:alpha=1");
@@ -1351,8 +1356,8 @@ fn timeline_plan(
                     duration - fade_out
                 );
             }
-            chain += &transitions.filter_chain(clip, fps);
-            if rotation != 0.0 {
+            chain += &animation;
+            if rotation != 0.0 && !crate::clip_animation::transformed(clip) {
                 chain +=
                     &format!(",rotate={rotation}:ow=rotw({rotation}):oh=roth({rotation}):c=none");
             }
@@ -1365,10 +1370,11 @@ fn timeline_plan(
             visuals += 1;
         }
         let volume = number(clip, "volume", 1.0, 0.0, 4.0)?;
-        if !image && volume > 0.0 && track["muted"] != true && store.has_audio(runtime, &path) {
+        if !image && clip.get("freezeFrame").is_none() && (volume > 0.0 || crate::clip_animation::has_keyframe(clip,"volume")) && track["muted"] != true && store.has_audio(runtime, &path) {
             let (fade_in, fade_out, fade_peak) = fade_parameters(clip, *duration)?;
-            let volume = volume * fade_peak;
-            let mut chain=format!("[{index}:a]atrim=start={trim_in}:end={trim_out},asetpts=PTS-STARTPTS,{},apad=whole_dur={duration},atrim=duration={duration},volume={volume}",tempo(*speed));
+            let volume = crate::clip_animation::expression(clip,"volume",volume,"t")?;
+            let timing=crate::clip_animation::audio_timing(clip,index,&mut filters)?;
+            let mut chain=format!("{timing},apad=whole_dur={duration},atrim=duration={duration},volume='({volume})*{fade_peak}':eval=frame");
             if fade_in > 0.0 {
                 chain += &format!(",afade=t=in:st=0:d={fade_in}");
             }
@@ -1383,6 +1389,10 @@ fn timeline_plan(
             filters.push(chain);
             audio_labels.push(format!("[a{index}]"));
         }
+    }
+    if audio_only && audio_labels.is_empty() {
+        filters.push(format!("anullsrc=r=48000:cl=stereo,atrim=duration={total}[audio_silence]"));
+        audio_labels.push("[audio_silence]".to_string());
     }
     if format == "gif" {
         filters.push(format!("[base{visuals}]fps={fps},split[pa][pb];[pa]palettegen[p];[pb][p]paletteuse=dither=sierra2_4a[video]"));

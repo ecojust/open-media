@@ -3,7 +3,7 @@ import type { MediaAsset, Project } from './types.ts'
 import { drawTextClip } from './preview.ts'
 import { importBlobAsset } from '../native.ts'
 
-export async function prepareNativeProject(source: Project, signal?: AbortSignal): Promise<{ project: Project; textAssets: Record<string, MediaAsset> }> {
+export async function prepareNativeProject(source: Project, signal?: AbortSignal, options: { skipText?: boolean } = {}): Promise<{ project: Project; textAssets: Record<string, MediaAsset> }> {
   signal?.throwIfAborted()
   const project = cloneProject(source)
   for (const asset of project.assets) {
@@ -19,7 +19,7 @@ export async function prepareNativeProject(source: Project, signal?: AbortSignal
   }
   const textAssets: Record<string, MediaAsset> = {}
   for (const track of project.tracks) {
-    if (track.kind !== 'text') continue
+    if (options.skipText || track.kind !== 'text') continue
     for (const clip of track.clips) {
       signal?.throwIfAborted()
       const width = Math.ceil(clip.width), height = Math.ceil(clip.height)

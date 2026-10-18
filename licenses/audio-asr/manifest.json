@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "modelId": "whisper-small-int8-attention-v1",
+  "modelSource": "https://huggingface.co/clairemcw/sherpa-onnx-whisper-small-attention",
+  "modelRevision": "9a896a02c311676d366ebfda3797753df4153fe2",
+  "originalModel": "https://github.com/openai/whisper",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "LICENSE-MIT.txt",
+      "sha256": "b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d",
+      "source": "https://raw.githubusercontent.com/openai/whisper/86098128c0b4f24f0e2aa2994de830614b474227/LICENSE"
+    }
+  ]
+}

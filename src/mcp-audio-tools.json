@@ -1,0 +1,567 @@
+[
+  {
+    "name": "open_media_speech_generate_preview",
+    "description": "合成一句可试听的配音，不加入时间线。返回异步任务；文本应用读法词典。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "voiceId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_pronunciation_set",
+    "description": "保存当前应用读法词典；按最长原文优先替换，仅影响合成发音，不改字幕文字。空数组清空。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "pronunciation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            },
+            "required": [
+              "text",
+              "pronunciation"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 200
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_timing_plan",
+    "description": "根据文字和标点估算时长及溢出风险。结果明确为estimate，不能代替实际合成时长。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_alignment_set",
+    "description": "设置后续配音对齐策略：subtitle只调整字幕；ripple顺延后续字幕及配音；extend_visual延长覆盖画面（视频减速）并顺延后文。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "subtitle",
+            "ripple",
+            "extend_visual"
+          ]
+        },
+        "gap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_subtitle_import_export",
+    "description": "导入或导出SRT、VTT、ASS字幕，支持按句分段和自动换行。导出返回文件内容；不会自行写入任意路径。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "import",
+            "export"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "srt",
+            "vtt",
+            "ass"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000000
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "maxLineChars": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 80
+        },
+        "splitSentences": {
+          "type": "boolean"
+        },
+        "offset": {
+          "type": "number",
+          "minimum": -86400,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "action",
+        "format"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_loudness_analyze",
+    "description": "实际测量音频片段裁剪、速度和音量处理后的LUFS、响度范围、样本峰值、真峰值及静音区间。削波标记仅为接近满幅的风险提示，非确诊；区间为片段相对秒。返回可取消任务。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_normalize",
+    "description": "按目标LUFS及真峰值做双遍响度归一，生成新本地音频并替换片段，保留原素材供撤销。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "targetLufs": {
+          "type": "number",
+          "minimum": -36,
+          "maximum": -5
+        },
+        "truePeak": {
+          "type": "number",
+          "minimum": -9,
+          "maximum": 0
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_process",
+    "description": "离线处理音频片段：降噪、三段EQ、动态压缩、去齿音、峰值限制。实际生成新音频，保持可撤销。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "denoise": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "eq": {
+          "type": "object",
+          "properties": {
+            "lowGain": {
+              "type": "number",
+              "minimum": -18,
+              "maximum": 18
+            },
+            "midGain": {
+              "type": "number",
+              "minimum": -18,
+              "maximum": 18
+            },
+            "highGain": {
+              "type": "number",
+              "minimum": -18,
+              "maximum": 18
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "compress": {
+          "type": "boolean"
+        },
+        "deess": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "limiter": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_ducking",
+    "description": "在人声轨道片段时段压低选中背景音频，含渐入和恢复；基于时间线区间烘焙新音频，非实时说话检测。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "speechTrackIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "reductionDb": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 48
+        },
+        "attack": {
+          "type": "number",
+          "minimum": 0.005,
+          "maximum": 5
+        },
+        "release": {
+          "type": "number",
+          "minimum": 0.005,
+          "maximum": 5
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_music_fit_duration",
+    "description": "将选中音乐适配目标秒数。可按给定BPM取完整4拍小节循环，连接处短淡化并添加收尾淡出；BPM由用户指定。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "bpm": {
+          "type": "number",
+          "minimum": 20,
+          "maximum": 300
+        },
+        "fadeOut": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId",
+        "duration"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_transcribe",
+    "description": "使用按需下载的离线识别模型生成真实逐句或逐词时间戳。模型缺失时需先download，绝不伪造识别成功。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "status",
+            "download",
+            "cancel",
+            "transcribe"
+          ]
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "granularity": {
+          "type": "string",
+          "enum": [
+            "sentence",
+            "word"
+          ]
+        },
+        "createSubtitles": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jobId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "open_media_speech_pronunciation_get",
+    "description": "读取当前配音读法词典，不修改设置。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_alignment_get",
+    "description": "读取当前配音对齐模式及间隔秒数。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  }
+]

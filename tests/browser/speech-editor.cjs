@@ -418,7 +418,7 @@ async function main() {
     await expect(speechDialog).toBeVisible()
     assert.equal(await speechDialog.evaluate(element => element.tagName === 'DIALOG' && element.matches(':modal')), true)
     await expect(speechDialog.getByTestId('speech-panel')).toBeVisible()
-    await expect(speechDialog.locator('textarea')).toHaveCount(0)
+    await expect(speechDialog.locator('.speech-panel textarea')).toHaveCount(0)
     await expect(speechDialog.getByRole('button', { name: '生成试听', exact: true })).toHaveCount(0)
     await expect(speechDialog.locator('progress, .speech-progress')).toHaveCount(0)
     await expect(speechDialog.getByTestId('speech-generate-selected')).toHaveCount(0)

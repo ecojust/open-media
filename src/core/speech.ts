@@ -1,6 +1,8 @@
 import { cloneProject, createClip, createTrack, MAX_ASSETS, MAX_CLIPS, MAX_PROJECT_DURATION, MAX_TRACKS, validateProject } from './project.ts'
 import { clipDuration, clipEnd, findClip } from './timeline.ts'
 import type { Clip, MediaAsset, Project, Track } from './types.ts'
+import { applySpeechAlignment } from './speech-alignment.ts'
+import type { SpeechAlignmentSettings } from './speech-timing.ts'
 
 export const MAX_SPEECH_TEXT_CHARS = 4000
 const MIN_AUDIO_DURATION = 0.001
@@ -162,7 +164,7 @@ function speechTrack(project: Project, start: number, duration: number, preferre
 }
 
 /** Results are applied atomically so a batch can be one undo operation. */
-export function applySpeechResults(project: Project, results: SpeechResult[], options: { alignText?: boolean } = {}): SpeechEdit {
+export function applySpeechResults(project: Project, results: SpeechResult[], options: { alignText?: boolean; alignment?: SpeechAlignmentSettings } = {}): SpeechEdit {
   if (!results.length) return { project, audioClipIds: [], overlaps: [] }
   validateSpeechPlanCapacity(project, { sources: results.map((result) => result.source), skipped: [] }, new Map(results.map((result) => [result.source.clipId, result.asset.duration])))
   const seen = new Set(results.map((result) => result.source.clipId))
@@ -187,7 +189,8 @@ export function applySpeechResults(project: Project, results: SpeechResult[], op
     }
   }
   copy.updatedAt = new Date().toISOString()
-  const next = validateProject(copy, { trusted: true })
+  const validated = validateProject(copy, { trusted: true })
+  const next = options.alignText !== false && options.alignment ? applySpeechAlignment(validated, results, options.alignment) : validated
   return { project: next, audioClipIds, overlaps: overlaps(next, changedText, new Set(audioClipIds)) }
 }
 

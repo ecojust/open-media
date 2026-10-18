@@ -28,14 +28,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
       - uses: actions/cache/restore@v4
         id: speech-cache
         with:
           path: |
             src-tauri/resources/speech
             .speech-runtime/downloads
-          key: speech-runtime-v1-linux-x64-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
+          key: speech-runtime-v1-linux-x64-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'scripts/audio-asr-runner.c', 'licenses/speech-runtime/manifest.json') }}
           restore-keys: speech-runtime-v1-linux-x64-
       - name: Prepare and verify offline speech runtime
         id: speech-verify
@@ -50,7 +50,7 @@ jobs:
           path: |
             src-tauri/resources/speech
             .speech-runtime/downloads
-          key: speech-runtime-v1-linux-x64-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
+          key: speech-runtime-v1-linux-x64-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'scripts/audio-asr-runner.c', 'licenses/speech-runtime/manifest.json') }}
       - run: npm ci
       - run: npm test
       - name: Verify offline voice selection and inference devices
@@ -293,7 +293,7 @@ jobs:
           path: |
             src-tauri/resources/speech
             .speech-runtime/downloads
-          key: speech-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
+          key: speech-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'scripts/audio-asr-runner.c', 'licenses/speech-runtime/manifest.json') }}
           restore-keys: speech-runtime-v1-${{ matrix.platform }}-
       - name: Prepare native speech compiler on Windows
         if: runner.os == 'Windows'
@@ -322,7 +322,7 @@ jobs:
           path: |
             src-tauri/resources/speech
             .speech-runtime/downloads
-          key: speech-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
+          key: speech-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'scripts/audio-asr-runner.c', 'licenses/speech-runtime/manifest.json') }}
       - name: Install application dependencies
         run: npm ci
       - name: Build application frontend

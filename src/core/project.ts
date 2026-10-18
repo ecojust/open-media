@@ -1,7 +1,8 @@
-import type { Clip, MediaAsset, Project, SubtitleStyle, Track, TrackKind } from './types.ts'
+import type { Clip, MediaAsset, Project, SubtitleStyle, TimelineMarker, Track, TrackKind } from './types.ts'
 import { validateClipFilters } from './clip-filters.ts'
 import { validateChromaKey } from './chroma-key.ts'
 import { normalizeAssetAddedAt } from './asset-times.ts'
+import { validateKeyframes, validateNormalizedRect, validateOverlay, validateSpeedRamp, validateTransitionParameters, visualClipDuration } from './visual-animation.ts'
 import { TRANSITION_PRESETS, validateTransitionBindings } from './transitions.ts'
 
 export const MAX_PROJECT_DURATION = 24 * 60 * 60
@@ -127,6 +128,22 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     const a = record(item, '素材')
     const kind = choice(a.kind, ['video', 'audio', 'image'] as const, '素材类型')
     const asset: MediaAsset = { id: id(a.id), name: text(a.name, '素材名称', 1000), kind, url: '', duration: number(a.duration, '素材时长', kind === 'image' ? 0 : 0.001, MAX_PROJECT_DURATION), width: number(a.width, '素材宽度', kind === 'audio' ? 0 : 1, 65536), height: number(a.height, '素材高度', kind === 'audio' ? 0 : 1, 65536), size: number(a.size, '素材大小', 0, Number.MAX_SAFE_INTEGER), mime: text(a.mime, '素材格式', 200, true) }
+    if (a.provenance !== undefined) {
+      const p = record(a.provenance, '素材来源')
+      const provenance: NonNullable<MediaAsset['provenance']> = { kind: choice(p.kind, ['upload', 'url'], '素材来源类型'), sha256: text(p.sha256, '素材内容校验值', 64), importedAt: number(p.importedAt, '素材导入时间', 0, Number.MAX_SAFE_INTEGER) }
+      if (!/^[0-9a-fA-F]{64}$/.test(provenance.sha256)) throw new Error('素材内容校验值无效。')
+      for (const key of ['url', 'finalUrl'] as const) if (p[key] !== undefined) {
+        const source = text(p[key], '素材来源地址', 32768)
+        let parsed: URL
+        try { parsed = new URL(source) } catch { throw new Error('素材来源地址无效。') }
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('素材来源地址仅允许不含凭据的网页地址。')
+        provenance[key] = parsed.href
+      }
+      if (p.name !== undefined) provenance.name = text(p.name, '素材来源名称', 1000)
+      if (p.mimeType !== undefined) provenance.mimeType = text(p.mimeType, '素材来源格式', 200)
+      if (p.size !== undefined) provenance.size = number(p.size, '素材来源大小', 0, Number.MAX_SAFE_INTEGER)
+      asset.provenance = provenance
+    }
     if (a.addedAt !== undefined) asset.addedAt = normalizeAssetAddedAt(a.addedAt)
     if (a.libraryRole !== undefined) asset.libraryRole = choice(a.libraryRole, ['watermark', 'background-music', 'video-segment'] as const, '素材库用途')
     if (options.trusted) {
@@ -154,15 +171,30 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     const clips = t.clips.map((item): Clip => {
       const c = record(item, '片段')
       const clip: Clip = { id: id(c.id), name: text(c.name, '片段名称', 1000), start: number(c.start, '片段开始时间', 0, MAX_PROJECT_DURATION), trimIn: number(c.trimIn, '片段源起点', 0, MAX_PROJECT_DURATION), trimOut: number(c.trimOut, '片段源终点', 0.001, MAX_PROJECT_DURATION), speed: number(c.speed, '播放速度', 0.1, 16), volume: number(c.volume, '音量', 0, 2), opacity: number(c.opacity, '不透明度', 0, 1), x: number(c.x, '横坐标', -65536, 65536), y: number(c.y, '纵坐标', -65536, 65536), width: number(c.width, '片段宽度', 1, 65536), height: number(c.height, '片段高度', 1, 65536), rotation: number(c.rotation, '旋转角度', -3600, 3600), fit: choice(c.fit, ['contain', 'cover', 'fill'] as const, '画面适配'), fadeIn: number(c.fadeIn ?? 0, '淡入时间', 0, MAX_PROJECT_DURATION), fadeOut: number(c.fadeOut ?? 0, '淡出时间', 0, MAX_PROJECT_DURATION) }
+      if (c.animationOffset !== undefined) clip.animationOffset = number(c.animationOffset, '动画时间偏移', 0, MAX_PROJECT_DURATION)
       if (c.generatedAt !== undefined) clip.generatedAt = iso(c.generatedAt, '片段生成时间')
-      const duration = (clip.trimOut - clip.trimIn) / clip.speed
+      if (c.speedRamp !== undefined) {
+        if (!['video', 'audio'].includes(kind)) throw new Error('变速曲线只适用于媒体片段。')
+        clip.speedRamp = validateSpeedRamp(c.speedRamp)
+      }
+      if (c.freezeFrame !== undefined) {
+        if (kind !== 'video' || clip.speedRamp) throw new Error('停帧仅适用于视频，不能同时使用变速曲线。')
+        const freeze = record(c.freezeFrame, '停帧'), original = record(freeze.original, '原始片段时间')
+        clip.freezeFrame = { sourceTime: number(freeze.sourceTime, '停帧源时间', 0, MAX_PROJECT_DURATION), original: { trimIn: number(original.trimIn, '原始源起点', 0, MAX_PROJECT_DURATION), trimOut: number(original.trimOut, '原始源终点', 0.001, MAX_PROJECT_DURATION), speed: number(original.speed, '原始速度', 0.1, 16), volume: number(original.volume, '原始音量', 0, 2), ...(original.speedRamp !== undefined ? { speedRamp: validateSpeedRamp(original.speedRamp) } : {}) } }
+        if (clip.freezeFrame.original.trimOut <= clip.freezeFrame.original.trimIn) throw new Error('停帧原始时长无效。')
+      }
+      const duration = visualClipDuration(clip)
+      if (c.keyframes !== undefined) {
+        if (kind === 'transition') throw new Error('请使用转场参数设置转场动画。')
+        clip.keyframes = validateKeyframes(c.keyframes, MAX_PROJECT_DURATION)
+      }
       if (duration < 1 / 1000 || clip.start + duration > MAX_PROJECT_DURATION + 1e-6) throw new Error('片段时长无效或时间线超过 24 小时。')
       if (clip.fadeIn > duration + 1e-6 || clip.fadeOut > duration + 1e-6) throw new Error('淡入淡出时间不能超过片段时长。')
       if (c.transition !== undefined && kind !== 'transition') throw new Error('转场信息只能用于转场轨道。')
       if (kind === 'transition') {
         if (c.assetId !== undefined || c.text !== undefined || c.textRole !== undefined) throw new Error('转场轨道不能直接放置媒体或文字片段。')
         const binding = record(c.transition, '转场信息')
-        clip.transition = { effect: choice(binding.effect, TRANSITION_PRESETS.map(preset => preset.id), '转场效果'), fromClipId: text(binding.fromClipId, '转场前片段', 160), toClipId: text(binding.toClipId, '转场后片段', 160) }
+        clip.transition = { effect: choice(binding.effect, TRANSITION_PRESETS.map(preset => preset.id), '转场效果'), fromClipId: text(binding.fromClipId, '转场前片段', 160), toClipId: text(binding.toClipId, '转场后片段', 160), ...validateTransitionParameters(binding) }
         if (clip.fadeIn !== 0 || clip.fadeOut !== 0 || clip.volume !== 0 || clip.opacity !== 1) throw new Error('转场片段不支持独立的淡入淡出或音量。')
       } else if (kind === 'text') {
         if (c.assetId !== undefined) throw new Error('字幕轨道不能引用媒体素材。')
@@ -183,7 +215,17 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
         if (!asset) throw new Error('片段引用的素材不存在。')
         if (kind === 'video' && asset.kind === 'audio') throw new Error('视频轨道不能放置纯音频素材。')
         if (kind === 'audio' && asset.kind === 'image') throw new Error('音频轨道不能放置图片素材。')
-        if (kind !== 'audio' && asset.kind !== 'image' && clip.trimOut > asset.duration + 1e-6) throw new Error('片段裁剪范围超出素材时长。')
+        if (clip.freezeFrame && (asset.kind !== 'video' || clip.freezeFrame.sourceTime >= asset.duration || clip.freezeFrame.original.trimOut > asset.duration + 1e-6)) throw new Error('停帧源位置或原始片段超出视频时长。')
+        if (clip.speedRamp && asset.kind === 'image') throw new Error('图片不支持变速曲线。')
+        if (!clip.freezeFrame && kind !== 'audio' && asset.kind !== 'image' && clip.trimOut > asset.duration + 1e-6) throw new Error('片段裁剪范围超出素材时长。')
+      }
+      if (c.crop !== undefined) {
+        if (kind !== 'video') throw new Error('源画面裁剪只适用于视频或图片。')
+        clip.crop = validateNormalizedRect(c.crop)
+      }
+      if (c.overlay !== undefined) {
+        if (kind !== 'text' || clip.textRole !== 'watermark') throw new Error('视觉标注只能用于文字水印轨道。')
+        clip.overlay = validateOverlay(c.overlay, clip.width, clip.height)
       }
       if (c.speech !== undefined) {
         if (kind !== 'audio' || assetMap.get(clip.assetId!)?.kind !== 'audio') throw new Error('文字配音信息只能用于音频轨道中的音频素材。')
@@ -214,5 +256,15 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     if (speechTextIds.has(textClipId)) throw new Error('同一字幕不能关联多个配音片段。')
     speechTextIds.add(textClipId)
   }
-  return { version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks, ...(root.autoSizeFromVideo !== undefined ? { autoSizeFromVideo: boolean(root.autoSizeFromVideo) } : {}), ...(root.subtitleStyle !== undefined ? { subtitleStyle: validateSubtitleStyle(root.subtitleStyle) } : {}) }
+  let markers: TimelineMarker[] | undefined
+  if (root.markers !== undefined) {
+    if (!Array.isArray(root.markers) || root.markers.length > 1000) throw new Error('时间线标记最多 1000 个。')
+    markers = root.markers.map(item => {
+      const m = record(item, '时间线标记')
+      const marker: TimelineMarker = { id: id(m.id), time: number(m.time, '标记时间', 0, MAX_PROJECT_DURATION), label: text(m.label, '标记名称', 300), kind: choice(m.kind, ['chapter', 'highlight', 'review'], '标记类型') }
+      if (m.color !== undefined) { if (typeof m.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(m.color)) throw new Error('标记颜色无效。'); marker.color = m.color }
+      return marker
+    })
+  }
+  return { ...(markers !== undefined ? { markers } : {}), version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks, ...(root.autoSizeFromVideo !== undefined ? { autoSizeFromVideo: boolean(root.autoSizeFromVideo) } : {}), ...(root.subtitleStyle !== undefined ? { subtitleStyle: validateSubtitleStyle(root.subtitleStyle) } : {}) }
 }

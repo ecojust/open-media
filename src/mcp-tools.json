@@ -2130,5 +2130,2208 @@
       "idempotentHint": false,
       "openWorldHint": false
     }
+  },
+  {
+    "name": "open_media_asset_upload",
+    "description": "分块上传媒体并导入当前工程。begin 提供 name、size（字节）和完整文件 sha256；chunk 提供 uploadId、offset、base64 和分块 sha256；status/commit/abort 提供 uploadId。每块最多 512 KiB，单文件最多 1 GiB；commit 校验完整哈希和真实媒体类型后导入。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "begin",
+            "chunk",
+            "status",
+            "commit",
+            "abort"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "uploadId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "base64": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 699052
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_import_url",
+    "description": "从公开 HTTP/HTTPS 直链下载图片、音频或视频并导入工程，保存来源与 SHA-256。校验每次跳转和媒体内容；不允许本机、局域网、保留网络地址或携带账号密码的 URL。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 8192
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824,
+          "default": 1073741824
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "open_media_asset_probe",
+    "description": "读取素材真实编码、显示尺寸、时长、帧率、音轨、旋转角度和 Alpha 通道信息；返回已保存的来源记录。透明通道无法从元数据确认时返回 null。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_get_frame",
+    "description": "按素材源时间提取真实 PNG 帧，返回可读取的图像数据、请求时间和实际帧时间。时间为素材内秒数，不是时间线位置；图片取 time=0。单帧编码结果最多 2 MiB。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1920,
+          "default": 1280
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_storyboard",
+    "description": "生成素材分镜联系表。mode=time按时间均匀抽帧；mode=scene按真实画面差异检测场景，并取每个场景的代表帧（单次范围最多600秒）。count为最多帧数，场景不足时不重复补图；超过上限时按场景顺序均匀选取。返回实际sourceTime、场景边界与检测依据。编码总量最多8 MiB。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "end": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24,
+          "default": 8
+        },
+        "maxWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1920,
+          "default": 480
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "time",
+            "scene"
+          ],
+          "default": "time"
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.3,
+          "description": "scene模式画面差异阈值；不表示语义识别。"
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_detect_scenes",
+    "description": "根据真实画面差异检测场景切换，返回源时间、分数、阈值与检测依据。切换分数是技术指标，不代表内容语义判断。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.3
+        },
+        "minInterval": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3600,
+          "default": 0.5
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_detect_idle",
+    "description": "检测真实黑场、画面冻结和静音区间，返回源时间范围、置信依据和检测阈值。结果仅表示技术条件满足，不代表内容没有价值，也不会自动删除片段。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assetId"
+      ],
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "minDuration": {
+          "type": "number",
+          "minimum": 0.05,
+          "maximum": 3600,
+          "default": 2
+        },
+        "noiseDb": {
+          "type": "number",
+          "minimum": -120,
+          "maximum": 0,
+          "default": -45
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_generate_preview",
+    "description": "合成一句可试听的配音，不加入时间线。返回异步任务；文本应用读法词典。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "voiceId": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_pronunciation_set",
+    "description": "保存当前应用读法词典；按最长原文优先替换，仅影响合成发音，不改字幕文字。空数组清空。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "pronunciation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              }
+            },
+            "required": [
+              "text",
+              "pronunciation"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 200
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_timing_plan",
+    "description": "根据文字和标点估算时长及溢出风险。结果明确为estimate，不能代替实际合成时长。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_alignment_set",
+    "description": "设置后续配音对齐策略：subtitle只调整字幕；ripple顺延后续字幕及配音；extend_visual延长覆盖画面（视频减速）并顺延后文。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "subtitle",
+            "ripple",
+            "extend_visual"
+          ]
+        },
+        "gap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_subtitle_import_export",
+    "description": "导入或导出SRT、VTT、ASS字幕，支持按句分段和自动换行。导出返回文件内容；不会自行写入任意路径。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "import",
+            "export"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "srt",
+            "vtt",
+            "ass"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000000
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "maxLineChars": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 80
+        },
+        "splitSentences": {
+          "type": "boolean"
+        },
+        "offset": {
+          "type": "number",
+          "minimum": -86400,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "action",
+        "format"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_loudness_analyze",
+    "description": "实际测量音频片段裁剪、速度和音量处理后的LUFS、响度范围、样本峰值、真峰值及静音区间。削波标记仅为接近满幅的风险提示，非确诊；区间为片段相对秒。返回可取消任务。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_normalize",
+    "description": "按目标LUFS及真峰值做双遍响度归一，生成新本地音频并替换片段，保留原素材供撤销。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "targetLufs": {
+          "type": "number",
+          "minimum": -36,
+          "maximum": -5
+        },
+        "truePeak": {
+          "type": "number",
+          "minimum": -9,
+          "maximum": 0
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_process",
+    "description": "离线处理音频片段：降噪、三段EQ、动态压缩、去齿音、峰值限制。实际生成新音频，保持可撤销。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "denoise": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "eq": {
+          "type": "object",
+          "properties": {
+            "lowGain": {
+              "type": "number",
+              "minimum": -18,
+              "maximum": 18
+            },
+            "midGain": {
+              "type": "number",
+              "minimum": -18,
+              "maximum": 18
+            },
+            "highGain": {
+              "type": "number",
+              "minimum": -18,
+              "maximum": 18
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "compress": {
+          "type": "boolean"
+        },
+        "deess": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "limiter": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_ducking",
+    "description": "在人声轨道片段时段压低选中背景音频，含渐入和恢复；基于时间线区间烘焙新音频，非实时说话检测。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "speechTrackIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "reductionDb": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 48
+        },
+        "attack": {
+          "type": "number",
+          "minimum": 0.005,
+          "maximum": 5
+        },
+        "release": {
+          "type": "number",
+          "minimum": 0.005,
+          "maximum": 5
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_music_fit_duration",
+    "description": "将选中音乐适配目标秒数。可按给定BPM取完整4拍小节循环，连接处短淡化并添加收尾淡出；BPM由用户指定。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "bpm": {
+          "type": "number",
+          "minimum": 20,
+          "maximum": 300
+        },
+        "fadeOut": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId",
+        "duration"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_transcribe",
+    "description": "使用按需下载的离线识别模型生成真实逐句或逐词时间戳。模型缺失时需先download，绝不伪造识别成功。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "status",
+            "download",
+            "cancel",
+            "transcribe"
+          ]
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "language": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "granularity": {
+          "type": "string",
+          "enum": [
+            "sentence",
+            "word"
+          ]
+        },
+        "createSubtitles": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jobId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    }
+  },
+  {
+    "name": "open_media_speech_pronunciation_get",
+    "description": "读取当前配音读法词典，不修改设置。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_alignment_get",
+    "description": "读取当前配音对齐模式及间隔秒数。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_timeline_get_frame",
+    "description": "返回指定时间的最终合成PNG画面，包含字幕、水印、滤镜和转场。坐标与时间均使用当前工程；不会改变播放头。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1920
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "time"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_preview_render",
+    "description": "生成指定范围的低清预览视频并返回可分块下载的artifactId。使用正式媒体合成管线，范围最长60秒。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 160,
+          "maximum": 1280
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 30
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_audio_preview",
+    "description": "生成指定片段或范围的真实WAV试听。mix混合可听轨道，solo只保留clipIds或trackIds；保留时间线位置与音量处理。返回artifactId。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "mix",
+            "solo"
+          ]
+        },
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "trackIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_artifact_read",
+    "description": "分块读取预览文件的原始二进制数据（base64）。返回总大小、完整文件SHA256、offset和nextOffset；按序拼接即可保存为可播放文件。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 262144
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "artifactId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_ocr",
+    "description": "离线识别素材帧中的简体中文和英文，返回文字、行/词区域及置信度；区域坐标以返回图像像素计。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "zh-en",
+            "en"
+          ]
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 1920
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "assetId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_export_validate",
+    "description": "检查缺失素材、字幕越界、配音重叠及无效剪辑。analyzeMedia=true时对所选范围生成真实预览并检测黑帧、削波与解码错误，返回问题证据与检查范围；最长检查60秒。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "analyzeMedia": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_timeline_batch_edit",
+    "description": "原子批量编辑时间线与项目。按顺序在隔离副本执行 1 至 100 个同步编辑，任一步失败全部不写入；成功只产生一次撤销记录。dryRun=true 仅预检，返回各操作结果但不提交。不得嵌套批量、导入文件、生成配音或其他异步/外部操作。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "operations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "properties": {
+              "tool": {
+                "type": "string",
+                "enum": [
+                  "open_media_project_update",
+                  "open_media_asset_remove",
+                  "open_media_track_add",
+                  "open_media_track_update",
+                  "open_media_track_remove",
+                  "open_media_track_reorder",
+                  "open_media_clip_add",
+                  "open_media_text_add",
+                  "open_media_clip_update",
+                  "open_media_clip_move",
+                  "open_media_clip_split",
+                  "open_media_clip_trim",
+                  "open_media_clip_duplicate",
+                  "open_media_clip_remove",
+                  "open_media_clip_restore_audio_length",
+                  "open_media_clip_extract_audio",
+                  "open_media_subtitle_apply_style",
+                  "open_media_timeline_close_gaps",
+                  "open_media_transition_add",
+                  "open_media_transition_update",
+                  "open_media_transition_remove",
+                  "open_media_speech_align",
+                  "open_media_timeline_markers_set",
+                  "open_media_clip_keyframes_set",
+                  "open_media_clip_crop",
+                  "open_media_focus_region",
+                  "open_media_overlay_add",
+                  "open_media_title_add",
+                  "open_media_template_customize",
+                  "open_media_clip_freeze_frame",
+                  "open_media_clip_speed_ramp",
+                  "open_media_transition_parameters_set"
+                ]
+              },
+              "arguments": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "tool",
+              "arguments"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [
+        "operations"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_timeline_markers_set",
+    "description": "完整替换当前项目的章节、重点和待检查标记。time 单位为秒；省略 id 时生成新 ID。空数组清除全部标记。标记随项目文件和快照保存。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "markers": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "time": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 86400
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "chapter",
+                  "highlight",
+                  "review"
+                ]
+              },
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{6}$"
+              }
+            },
+            "required": [
+              "time",
+              "label",
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [
+        "markers"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_snapshot",
+    "description": "管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id。创建/恢复含真实媒体的便携包，关闭重开后保留，不依赖临时素材URL。所有工程合计最多100份、1GiB；每份最多256MiB媒体。恢复产生一次可撤销编辑；删除不可撤销。长操作返回 jobId。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "create",
+            "list",
+            "compare",
+            "restore",
+            "delete"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "comparisonId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_keyframes_set",
+    "description": "设置片段关键帧。时间为片段内秒；x/y为项目坐标，scaleX/scaleY为中心缩放倍率，其余为绝对值。替换指定属性，clear可清空全部。每个关键帧的easing控制向下一个关键帧的插值。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "keyframes": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "y": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "scaleX": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "scaleY": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "opacity": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "rotation": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            },
+            "volume": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 86400
+                  },
+                  "value": {
+                    "type": "number",
+                    "minimum": -65536,
+                    "maximum": 65536
+                  },
+                  "easing": {
+                    "type": "string",
+                    "enum": [
+                      "linear",
+                      "ease-in",
+                      "ease-out",
+                      "ease-in-out",
+                      "step"
+                    ]
+                  }
+                },
+                "required": [
+                  "time",
+                  "value"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 128
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_crop",
+    "description": "裁剪视频或图片的源画面，坐标及宽高为0..1归一化值。clear清除源裁剪。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "crop": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_focus_region",
+    "description": "聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像。区域为归一化源坐标，片段须填充整个项目画面。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "region": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "height": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "easing": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "step"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId",
+        "region"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_overlay_add",
+    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "arrow",
+            "rectangle",
+            "highlight",
+            "mask",
+            "spotlight",
+            "blur"
+          ]
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 86400
+        },
+        "x": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536
+        },
+        "y": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "strokeWidth": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "blurRadius": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "rotation": {
+          "type": "number",
+          "minimum": -3600,
+          "maximum": 3600
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "kind",
+        "start",
+        "duration",
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_title_add",
+    "description": "添加可编辑标题。章节、角标、下三分之一或字幕布局，支持淡入、滑入和缩放动画。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "preset": {
+          "type": "string",
+          "enum": [
+            "chapter",
+            "lower-third",
+            "corner",
+            "subtitle"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "animation": {
+          "type": "string",
+          "enum": [
+            "none",
+            "fade",
+            "slide",
+            "zoom"
+          ]
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "fontSize": {
+          "type": "number",
+          "minimum": 4,
+          "maximum": 2048
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "preset",
+        "text",
+        "start",
+        "duration"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_template_customize",
+    "description": "统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景。可从已有图片素材添加Logo。仅修改明确指定的片段。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "fontFamily": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "fontSize": {
+          "type": "number",
+          "minimum": 4,
+          "maximum": 2048
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "center",
+            "lower-third",
+            "top-left",
+            "top-right"
+          ]
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "logoAssetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipIds"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_freeze_frame",
+    "description": "将选中视频片段变为指定源帧的停帧，按duration展示且静音。sourceTime为原视频的绝对秒数。clear恢复原始源片段。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "sourceTime": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 86400
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_speed_ramp",
+    "description": "设置视频或音频的变速曲线；points覆盖源片段0和1端点，按源位置插值。速度与片段基础速度相乘。preservePitch默认保持音调，clear清除曲线。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "position": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "speed": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 16
+              }
+            },
+            "required": [
+              "position",
+              "speed"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 2,
+          "maxItems": 16
+        },
+        "easing": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "step"
+          ]
+        },
+        "preservePitch": {
+          "type": "boolean"
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_transition_parameters_set",
+    "description": "调整转场方向、缓动、过渡颜色、模糊半径及作用范围。方向用于擦除和滑动，颜色用于淡出淡入；scope控制前段、后段或两侧。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        },
+        "easing": {
+          "type": "string",
+          "enum": [
+            "linear",
+            "ease-in",
+            "ease-out",
+            "ease-in-out",
+            "step"
+          ]
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "blur": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "both",
+            "outgoing",
+            "incoming"
+          ]
+        },
+        "clear": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
   }
 ]

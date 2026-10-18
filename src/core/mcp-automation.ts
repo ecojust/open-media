@@ -9,6 +9,7 @@ import { exportProjectFile, importProjectFile } from './project-file.ts'
 import { prepareNativeProject } from './native-project.ts'
 import { executeProjectTool, inspectMcpProject, isProjectTool, validateMcpToolArguments } from './mcp-tools.ts'
 import { createMcpSpeechJobs, type McpSpeechJob } from './mcp-speech-jobs.ts'
+import { isSharedEditorTool, prepareEditorTool } from './editor-tool-service.ts'
 import { getSpeechSettings, updateSpeechSettings } from './speech-settings.ts'
 
 export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
@@ -137,6 +138,28 @@ export function createMcpAutomation(host: McpAutomationHost) {
       }
       if (result.selection?.clipId) void host.setPlayback({ selectedClipId: result.selection.clipId }).catch(() => {})
       return { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : { data: result.data }), projectId: host.getProject().id, revision: host.getRevision() }
+    }
+    if (isSharedEditorTool(name)) {
+      // Chunk transfer and artifact reads are short protocol operations, not editor jobs.
+      if (name === 'open_media_artifact_read' || name === 'open_media_asset_upload' && args.action !== 'commit' || name === 'open_media_audio_transcribe' && ['status', 'cancel'].includes(args.action as string) || ['open_media_speech_pronunciation_get', 'open_media_speech_alignment_get'].includes(name)) {
+        const prepared = await prepareEditorTool(name, args, { project: cloneProject(host.getProject()), revision: host.getRevision(), blobs: host.getBlobs(), source: 'mcp', signal: new AbortController().signal, onProgress: () => {} })
+        return prepared.data
+      }
+      return start('editor-tool', name.replace(/^open_media_/, ''), async operation => {
+        const prepared = await prepareEditorTool(name, args, { project: operation.source, revision: operation.job.revision, blobs: host.getBlobs(), source: 'mcp', hydrate: host.hydrate, assertCurrent: () => check(operation),
+          signal: operation.controller.signal, onProgress: update => changed(operation, update.stage, update.progress) })
+        if (prepared.irreversible) { operation.irrevocable = true; operation.job.cancelable = false }
+        try {
+          if (!prepared.irreversible) check(operation)
+          if (prepared.project) commit(operation, prepared.project, prepared.label || '编辑项目')
+          if (prepared.accept) { operation.irrevocable = true; operation.job.cancelable = false; changed(operation, '正在保存处理结果', 1) }
+          try { prepared.assets?.forEach(({ asset, blob }) => host.ownAsset(asset, blob)) }
+          finally { await prepared.accept?.() }
+          operation.irrevocable = true; operation.job.cancelable = false
+          if (prepared.selection?.clipId) void host.setPlayback({ selectedClipId: prepared.selection.clipId }).catch(() => {})
+          return { ...(prepared.data && typeof prepared.data === 'object' && !Array.isArray(prepared.data) ? prepared.data : { data: prepared.data }), projectId: host.getProject().id, revision: host.getRevision() }
+        } catch (cause) { if (!operation.irrevocable) await prepared.discard?.(); throw cause }
+      })
     }
     switch (name) {
       case 'open_media_project_history': {

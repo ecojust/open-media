@@ -30,6 +30,16 @@ export function resizeProject(project: Project, width: number, height: number): 
       clip.width = clamp(clip.width * sx, 1, 65536); clip.height = clamp(clip.height * sy, 1, 65536)
       if (clip.fontSize !== undefined) clip.fontSize = clamp(clip.fontSize * Math.min(sx, sy), 4, 2048)
     }
+    for (const clip of visuals) {
+      for (const frame of clip.keyframes?.x ?? []) frame.value = clamp(frame.value * sx, -65536, 65536)
+      for (const frame of clip.keyframes?.y ?? []) frame.value = clamp(frame.value * sy, -65536, 65536)
+      if (clip.overlay) {
+        clip.overlay.strokeWidth = clamp(clip.overlay.strokeWidth * Math.min(sx, sy), 1, 100)
+        clip.overlay.blurRadius = clamp(clip.overlay.blurRadius * Math.min(sx, sy), 1, 50)
+        const region = clip.overlay.region
+        if (region) { region.x = clamp(region.x * sx, 0, Math.max(0, clip.width - 1)); region.y = clamp(region.y * sy, 0, Math.max(0, clip.height - 1)); region.width = clamp(region.width * sx, 1, clip.width - region.x); region.height = clamp(region.height * sy, 1, clip.height - region.y) }
+      }
+    }
   }
   return validateProject(next, { trusted: true })
 }

@@ -150,6 +150,13 @@ async function verifyLicenses() {
     if (!lock.sources.some(source => source.id === file.sourceId)) throw new Error(`Unknown license source: ${file.sourceId}`);
     if (await sha256(safePath(directory, file.path)) !== file.sha256) throw new Error(`Original speech license changed: ${file.path}`);
   }
+  const asrDirectory = join(root, 'licenses/audio-asr');
+  const asrInventory = JSON.parse(await readFile(join(asrDirectory, 'manifest.json'), 'utf8'));
+  const asrLock = JSON.parse(await readFile(join(root, 'scripts/audio-asr-models.lock.json'), 'utf8'));
+  if (asrInventory.modelId !== asrLock.id || asrInventory.modelRevision !== asrLock.modelRevision || !asrInventory.files.length) throw new Error('Recognition license provenance does not match the model lock.');
+  for (const file of asrInventory.files) {
+    if (await sha256(safePath(asrDirectory, file.path)) !== file.sha256 || file.sha256 !== asrLock.licenseSha256) throw new Error(`Original recognition license changed: ${file.path}`);
+  }
 }
 async function prepare() {
   await verifyLicenses();
@@ -171,6 +178,7 @@ async function prepare() {
   // The vocoder is a pinned ONNX file, not an archive.
   await copyFile(await download(vocoderSource), join(output, 'model/vocos-16khz-univ.onnx'));
   await cp(join(root, 'licenses/speech-runtime'), join(output, 'licenses'), { recursive: true });
+  await cp(join(root, 'licenses/audio-asr'), join(output, 'licenses/audio-asr'), { recursive: true });
   const libraries = process.platform === 'win32'
     ? ['onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'sherpa-onnx-c-api.dll']
     : process.platform === 'darwin'
@@ -182,9 +190,11 @@ async function prepare() {
     await chmod(destination, 0o755);
   }
   const executable = `runtime/bin/open-media-speech${extension}`;
+  const asrExecutable = `runtime/bin/open-media-asr${extension}`;
   const build = join(cache, 'runner-build', target);
   await mkdir(build, { recursive: true });
   const runner = join(root, 'scripts/speech-runtime-runner.c');
+  const asrRunner = join(root, 'scripts/audio-asr-runner.c');
   if (process.platform === 'win32') {
     run('cl.exe', ['/nologo', '/O2', '/MT', '/utf-8', '/std:c11', `/I${join(source, 'include')}`, runner,
       `/Fe:${join(output, executable)}`, `/Fo:${join(build, 'runner.obj')}`, join(source, 'lib/sherpa-onnx-c-api.lib'),
@@ -196,16 +206,28 @@ async function prepare() {
       '-o', join(output, executable)], { cwd: build });
     await chmod(join(output, executable), 0o755);
   }
+  if (process.platform === 'win32') {
+    run('cl.exe', ['/nologo', '/O2', '/MT', '/utf-8', '/std:c11', `/I${join(source, 'include')}`, asrRunner,
+      `/Fe:${join(output, asrExecutable)}`, `/Fo:${join(build, 'asr-runner.obj')}`, join(source, 'lib/sherpa-onnx-c-api.lib'),
+      '/link', '/MANIFEST:EMBED', `/MANIFESTINPUT:${join(root, 'scripts/speech-runtime-runner.manifest')}`], { cwd: build });
+  } else {
+    run(process.env.CC ?? 'cc', ['-O2', '-std=c11', ...(process.platform === 'darwin' ? ['-mmacosx-version-min=13.0'] : []), '-I', join(source, 'include'), asrRunner,
+      '-L', join(source, 'lib'), '-lsherpa-onnx-c-api',
+      `-Wl,-rpath,${process.platform === 'darwin' ? '@executable_path' : '$ORIGIN'}/../lib`,
+      '-o', join(output, asrExecutable)], { cwd: build });
+    await chmod(join(output, asrExecutable), 0o755);
+  }
   if (process.platform === 'darwin') {
     // Compiler defaults differ between architectures. Sign every nested code
     // object explicitly before the application bundler seals the outer bundle.
-    for (const path of [...libraries.map(name => join(output, 'runtime/lib', name)), join(output, executable)]) {
+    for (const path of [...libraries.map(name => join(output, 'runtime/lib', name)), join(output, executable), join(output, asrExecutable)]) {
       run('codesign', ['--force', '--sign', '-', '--timestamp=none', path]);
       run('codesign', ['--verify', '--strict', path]);
     }
   }
   await writeFile(join(output, 'manifest.json'), JSON.stringify({
     schema: 2, version: lock.engine.version, executable, input: 'utf8-file',
+    asr: { executable: asrExecutable, engine: 'whisper', input: 'mono-pcm16-wave', sampleRate: 16000, maxChunkSeconds: 30 },
     model: { kind: 'matcha', file: 'model/model-steps-3.onnx', vocoder: 'model/vocos-16khz-univ.onnx', tokens: 'model/tokens.txt',
       dataDir: 'model/espeak-ng-data', lexicons: ['model/lexicon.txt'],
       ruleFsts: ['model/phone-zh.fst', 'model/date-zh.fst', 'model/number-zh.fst'], sampleRate: lock.model.sampleRate },
@@ -221,6 +243,7 @@ async function prepare() {
     schema: 1, platform: process.platform, arch: process.arch, model: lock.model,
     sourceLockSha256: await sha256(lockPath), prepareScriptSha256: await sha256(fileURLToPath(import.meta.url)),
     runnerSourceSha256: await sha256(runner), runnerManifestSha256: await sha256(join(root, 'scripts/speech-runtime-runner.manifest')),
+    asrRunnerSourceSha256: await sha256(asrRunner),
     files: inventory, licenses: inventory.filter(file => file.kind === 'license'),
   }, null, 2) + '\n');
   // Upstream archives use owner-only modes; installed shared applications must
@@ -266,7 +289,7 @@ function verifyMacBinary(bytes, path) {
 async function verify() {
   await verifyLicenses();
   const inventory = JSON.parse(await readFile(join(output, 'runtime.json'), 'utf8'));
-  const expected = { sourceLockSha256: await sha256(lockPath), prepareScriptSha256: await sha256(fileURLToPath(import.meta.url)), runnerSourceSha256: await sha256(join(root, 'scripts/speech-runtime-runner.c')), runnerManifestSha256: await sha256(join(root, 'scripts/speech-runtime-runner.manifest')) };
+  const expected = { sourceLockSha256: await sha256(lockPath), prepareScriptSha256: await sha256(fileURLToPath(import.meta.url)), runnerSourceSha256: await sha256(join(root, 'scripts/speech-runtime-runner.c')), runnerManifestSha256: await sha256(join(root, 'scripts/speech-runtime-runner.manifest')), asrRunnerSourceSha256: await sha256(join(root, 'scripts/audio-asr-runner.c')) };
   for (const [key, value] of Object.entries(expected)) if (inventory[key] !== value) throw new Error(`Speech build provenance mismatch: ${key}`);
   if (inventory.platform !== process.platform || inventory.arch !== process.arch) throw new Error('Speech runtime does not match this host.');
   if (JSON.stringify(inventory.model) !== JSON.stringify(lock.model)) throw new Error('Unexpected speech model.');
@@ -286,6 +309,10 @@ async function verify() {
   const manifest = JSON.parse(await readFile(join(output, 'manifest.json'), 'utf8'));
   if (manifest.schema !== 2 || manifest.model.kind !== 'matcha' || manifest.model.sampleRate !== lock.model.sampleRate) throw new Error('Unexpected speech manifest schema or model.');
   if (manifest.voices.length !== lock.voices.length || JSON.stringify(manifest.voices) !== JSON.stringify(lock.voices)) throw new Error('Bundled voice mapping changed.');
+  const expectedAsr = { executable: `runtime/bin/open-media-asr${extension}`, engine: 'whisper', input: 'mono-pcm16-wave', sampleRate: 16000, maxChunkSeconds: 30 };
+  if (JSON.stringify(manifest.asr) !== JSON.stringify(expectedAsr) || !seen.has(manifest.asr.executable)) throw new Error('Offline recognition manifest or inventory is incomplete.');
+  const asr = JSON.parse(run(safePath(executableRoot, manifest.asr.executable), ['--self-test'], { cwd: output, timeout: 15000 }));
+  if (asr.ready !== true || asr.engineVersion !== lock.engine.version || !['cpu', 'coreml', 'cuda'].includes(asr.preferredProvider)) throw new Error('Offline recognition helper self-test failed.');
   const executable = safePath(executableRoot, manifest.executable);
   const directory = join(cache, 'verification', '中文 语音');
   await mkdir(directory, { recursive: true });
@@ -322,12 +349,13 @@ async function sources() {
   await rm(stage, { recursive: true, force: true });
   await mkdir(join(bundle, '.speech-runtime/downloads'), { recursive: true });
   for (const source of lock.sources) await copyFile(join(cache, 'downloads', source.archive), join(bundle, '.speech-runtime/downloads', source.archive));
-  for (const path of ['scripts/speech-runtime.mjs', 'scripts/speech-runtime.lock.json', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'docs/SPEECH_RUNTIME.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE']) {
+  for (const path of ['scripts/speech-runtime.mjs', 'scripts/speech-runtime.lock.json', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'scripts/audio-asr-runner.c', 'scripts/audio-asr-models.lock.json', 'docs/SPEECH_RUNTIME.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE']) {
     await mkdir(dirname(join(bundle, path)), { recursive: true });
     await copyFile(join(root, path), join(bundle, path));
   }
   await cp(join(root, 'licenses/speech-runtime'), join(bundle, 'licenses/speech-runtime'), { recursive: true });
-  await writeFile(join(bundle, 'README.txt'), 'Open Media offline speech: complete corresponding source and build inputs.\n\nAll original engine sources, corresponding upstream build workflows, CPU runtime dependencies, model weights and voice data are supplied in .speech-runtime/downloads. SHA256 values, origin URLs and exact revisions are recorded in scripts/speech-runtime.lock.json. Original license and attribution texts are retained in licenses/speech-runtime and in every source archive.\n\nThe independent speech helper is GPL-3.0-or-later. Its source and exact compiler/linker invocation are included. See docs/SPEECH_RUNTIME.md for rebuilding and installation details. Run node scripts/speech-runtime.mjs prepare followed by verify to reproduce the packaged helper and model resources from the supplied verified runtime archives.\n');
+  await cp(join(root, 'licenses/audio-asr'), join(bundle, 'licenses/audio-asr'), { recursive: true });
+  await writeFile(join(bundle, 'README.txt'), 'Open Media offline speech: complete corresponding source and build inputs.\n\nAll original engine sources, corresponding upstream build workflows, CPU runtime dependencies, bundled model weights and voice data are supplied in .speech-runtime/downloads. SHA256 values, origin URLs and exact revisions are recorded in scripts/speech-runtime.lock.json. Original license and attribution texts are retained in licenses/speech-runtime and in every source archive.\n\nThe independent speech and recognition helpers are GPL-3.0-or-later. Their sources and exact compiler/linker invocations are included. The optional recognition model is downloaded separately on request; its fixed source hashes and original license are in scripts/audio-asr-models.lock.json and licenses/audio-asr. See docs/SPEECH_RUNTIME.md for rebuilding and installation details. Run node scripts/speech-runtime.mjs prepare followed by verify to reproduce the packaged helpers and bundled model resources from the supplied verified runtime archives.\n');
   const destination = resolve(flag('--output', join(root, 'speech-runtime-source.tar.gz')));
   await mkdir(dirname(destination), { recursive: true });
   archive(['-czf', destination, '-C', stage, 'speech-runtime-source']);

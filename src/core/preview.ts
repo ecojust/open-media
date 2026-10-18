@@ -3,6 +3,7 @@ import { isClipFilterIdentity } from './clip-filters.ts'
 import { isChromaKeyEnabled } from './chroma-key.ts'
 import { ClipFilterRenderer } from './filter-renderer.ts'
 import { audioSourceDistance, audioSourceTime } from './audio-loop.ts'
+import { animatedClipAt, drawClipOverlay, playbackSpeedAt } from './visual-animation.ts'
 import { transitionVisualAt } from './transitions.ts'
 
 export { clipOpacityAt } from './timeline.ts'
@@ -22,6 +23,7 @@ export function fitRect(sourceWidth: number, sourceHeight: number, width: number
 
 /** Draw subtitle content in local clip coordinates; used by preview and native export rasterization. */
 export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
+  if (clip.overlay) { drawClipOverlay(ctx, clip); return }
   if (clip.textRole === 'watermark' && clip.background && clip.background !== 'transparent') {
     ctx.fillStyle = clip.background
     ctx.fillRect(0, 0, clip.width, clip.height)
@@ -141,6 +143,9 @@ export class TimelinePreview {
   private project: Project
   private entries = new Map<string, MediaEntry>()
   private filterRenderer?: ClipFilterRenderer
+  private blurCanvas?: HTMLCanvasElement
+  private transitionCanvas?: HTMLCanvasElement
+  private transitionBlurCanvas?: HTMLCanvasElement
   private context: CanvasRenderingContext2D
   private audioContext?: AudioContext
   private destination?: MediaStreamAudioDestinationNode
@@ -300,7 +305,7 @@ export class TimelinePreview {
         const waiting = this.entries.get(clip.id)
         if (!waiting || waiting.active || !(waiting.media instanceof HTMLVideoElement)) continue
         const previous = track.clips.find(candidate => {
-          if (candidate.id === clip.id || candidate.assetId !== clip.assetId || candidate.speed !== clip.speed) return false
+          if (candidate.id === clip.id || candidate.assetId !== clip.assetId || candidate.speed !== clip.speed || candidate.speedRamp || clip.speedRamp || candidate.freezeFrame || clip.freezeFrame) return false
           if (Math.abs(candidate.start + previewClipDuration(candidate) - clip.start) > 1e-8 || Math.abs(candidate.trimOut - clip.trimIn) > 1e-8) return false
           const entry = this.entries.get(candidate.id)
           return entry?.active && entry.key === waiting.key && entry.media instanceof HTMLVideoElement
@@ -314,7 +319,7 @@ export class TimelinePreview {
         this.entries.set(clip.id, continuing)
         this.entries.set(previous.id, waiting)
         waiting.active = false
-        continuing.timing = `${clip.start}:${clip.trimIn}:${clip.trimOut}:${clip.speed}`
+        continuing.timing = `${clip.start}:${clip.trimIn}:${clip.trimOut}:${clip.speed}:${JSON.stringify(clip.speedRamp)}:${JSON.stringify(clip.freezeFrame)}`
         continuing.needsSeek = false
         continuing.lastSync = now
       }
@@ -336,7 +341,7 @@ export class TimelinePreview {
         const media = entry.media
         if (time < clip.start || time >= clip.start + previewClipDuration(clip)) continue
         active.add(clip.id)
-        const timing = `${clip.start}:${clip.trimIn}:${clip.trimOut}:${clip.speed}`
+        const timing = `${clip.start}:${clip.trimIn}:${clip.trimOut}:${clip.speed}:${JSON.stringify(clip.speedRamp)}:${JSON.stringify(clip.freezeFrame)}`
         if (forceSeek || !entry.active || (playing && !wasPlaying) || entry.timing !== timing) {
           entry.needsSeek = true
           entry.lastSync = now
@@ -351,12 +356,14 @@ export class TimelinePreview {
         const unwrappedSourceTime = mediaSourceTime(clip, time)
         const sourceTime = loops ? audioSourceTime(unwrappedSourceTime, sourceDuration) : unwrappedSourceTime
         // Reassigning rate/volume on every paint can restart native audio processing.
-        if (media.playbackRate !== clip.speed) {
-          try { media.playbackRate = clip.speed } catch { this.report(`speed:${clip.id}`, '当前浏览器无法预览此播放速度，请调整速度或使用导出结果') }
+        const rate = playbackSpeedAt(clip, time)
+        if (media.preservesPitch !== (clip.speedRamp?.preservePitch !== false)) media.preservesPitch = clip.speedRamp?.preservePitch !== false
+        if (media.playbackRate !== rate) {
+          try { media.playbackRate = rate } catch { this.report(`speed:${clip.id}`, '当前浏览器无法预览此播放速度，请调整速度或使用导出结果') }
         }
         const canCorrectDrift = playing && !media.paused && !media.seeking && media.readyState >= 3 && !entry.playRequest && now - (entry.lastSync || 0) >= 1000
         const drift = loops ? audioSourceDistance(media.currentTime, sourceTime, sourceDuration) : Math.abs(media.currentTime - sourceTime)
-        const drifted = drift > Math.max(0.25 * clip.speed, 0.08)
+        const drifted = drift > Math.max(0.25 * rate, 0.08)
         if (media.readyState >= 1 && (!media.seeking || forceSeek) && (entry.needsSeek || !playing || (canCorrectDrift && drifted))) {
           const target = Math.min(sourceTime, Number.isFinite(media.duration) ? Math.max(0, media.duration - 0.001) : sourceTime)
           try {
@@ -366,7 +373,7 @@ export class TimelinePreview {
           } catch { /* Metadata can arrive while a source is being replaced. */ }
         }
         const fade = clipOpacityAt({ ...clip, opacity: 1 }, time)
-        const volume = track.muted ? 0 : clip.volume * fade
+        const volume = track.muted || clip.freezeFrame ? 0 : animatedClipAt(clip, time).volume * fade
         if (entry.gain) {
           if (entry.volume !== volume) { entry.gain.gain.value = volume; entry.volume = volume }
           if (media.volume !== 1) media.volume = 1
@@ -375,7 +382,7 @@ export class TimelinePreview {
           if (media.volume !== Math.min(1, volume)) media.volume = Math.min(1, volume)
           if (media.muted !== (volume <= 0)) media.muted = volume <= 0
         }
-        if (playing) this.startEntry(entry, clip.id)
+        if (playing && !clip.freezeFrame) this.startEntry(entry, clip.id)
         else if (entry.wantsPlayback || !media.paused) this.stopEntry(entry)
       }
     }
@@ -449,25 +456,38 @@ export class TimelinePreview {
   private drawClip(clip: Clip, track: Track): void {
     const ctx = this.context
     ctx.save()
-    ctx.globalAlpha = clipOpacityAt(clip, this.lastTime)
-    ctx.translate(clip.x + clip.width / 2, clip.y + clip.height / 2)
-    ctx.rotate(clip.rotation * Math.PI / 180)
+    const animated = animatedClipAt(clip, this.lastTime)
+    ctx.globalAlpha = clipOpacityAt(animated, this.lastTime)
+    ctx.translate(animated.x + animated.width / 2, animated.y + animated.height / 2)
+    ctx.rotate(animated.rotation * Math.PI / 180)
+    ctx.scale(animated.width / clip.width, animated.height / clip.height)
     ctx.translate(-clip.width / 2, -clip.height / 2)
     ctx.beginPath()
     ctx.rect(0, 0, clip.width, clip.height)
     ctx.clip()
     const transition = track.kind === 'video' ? transitionVisualAt(this.project, clip.id, this.lastTime) : undefined
     if (transition) {
-      ctx.globalAlpha *= transition.opacity
+      if (!(transition.color && transition.effect === 'fade')) ctx.globalAlpha *= transition.opacity
       ctx.beginPath()
       ctx.rect(transition.mask.x * clip.width, transition.mask.y * clip.height, transition.mask.width * clip.width, transition.mask.height * clip.height)
       ctx.clip()
-      ctx.translate(transition.translateX * clip.width, 0)
+      ctx.translate(transition.translateX * clip.width, transition.translateY * clip.height)
       ctx.translate(clip.width / 2, clip.height / 2)
       ctx.scale(transition.scale, transition.scale)
       ctx.translate(-clip.width / 2, -clip.height / 2)
     }
-    if (track.kind === 'text' || clip.text !== undefined) {
+    if (clip.overlay?.kind === 'blur') {
+      const snapshot = this.blurCanvas ??= document.createElement('canvas')
+      if (snapshot.width !== this.canvas.width || snapshot.height !== this.canvas.height) { snapshot.width = this.canvas.width; snapshot.height = this.canvas.height }
+      const source = snapshot.getContext('2d')!
+      source.clearRect(0, 0, snapshot.width, snapshot.height); source.drawImage(this.canvas, 0, 0)
+      // Read the already-composited background in project coordinates. The clip
+      // transform and clipping region constrain only where the blur is painted.
+      const scaleX = this.canvas.width / this.project.width, scaleY = this.canvas.height / this.project.height
+      ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0)
+      ctx.filter = `blur(${clip.overlay.blurRadius * Math.max(scaleX, scaleY)}px)`
+      ctx.drawImage(snapshot, 0, 0, snapshot.width, snapshot.height, 0, 0, this.project.width, this.project.height)
+    } else if (track.kind === 'text' || clip.text !== undefined) {
       drawTextClip(ctx, clip)
     } else if (track.kind !== 'audio') {
       const media = this.entries.get(clip.id)?.media
@@ -494,7 +514,24 @@ export class TimelinePreview {
             return
           }
         }
-        ctx.drawImage(source, ...fitRect(width, height, clip.width, clip.height, clip.fit))
+        const crop = clip.crop ?? { x: 0, y: 0, width: 1, height: 1 }
+        const rect = fitRect(width * crop.width, height * crop.height, clip.width, clip.height, clip.fit)
+        rect[0] += width * crop.x; rect[1] += height * crop.y
+        if (transition && ((transition.blur && transition.blurStrength) || (transition.color && transition.effect === 'fade'))) {
+          const layer = this.transitionCanvas ??= document.createElement('canvas'), blurred = this.transitionBlurCanvas ??= document.createElement('canvas')
+          const factor = Math.min(1, 2048 / Math.max(clip.width, clip.height)), w = Math.max(1, Math.ceil(clip.width * factor)), h = Math.max(1, Math.ceil(clip.height * factor))
+          if (layer.width !== w || layer.height !== h) { layer.width = blurred.width = w; layer.height = blurred.height = h }
+          const original = layer.getContext('2d')!, softened = blurred.getContext('2d')!
+          original.setTransform(1, 0, 0, 1, 0, 0); original.clearRect(0, 0, w, h); original.save(); original.scale(factor, factor)
+          if (transition.color && transition.effect === 'fade') { original.fillStyle = transition.color; original.fillRect(0, 0, clip.width, clip.height); original.globalAlpha = transition.opacity }
+          original.drawImage(source, ...rect); original.restore()
+          if (transition.blur && transition.blurStrength) {
+            softened.clearRect(0, 0, w, h); softened.save(); softened.filter = `blur(${transition.blur * factor}px)`; softened.drawImage(layer, 0, 0); softened.restore()
+            // Compose two complete RGBA layers before applying clip opacity.
+            original.save(); original.globalAlpha = transition.blurStrength; original.drawImage(blurred, 0, 0); original.restore()
+          }
+          ctx.drawImage(layer, 0, 0, w, h, 0, 0, clip.width, clip.height)
+        } else ctx.drawImage(source, ...rect)
       }
     }
     ctx.restore()
@@ -521,6 +558,9 @@ export class TimelinePreview {
     this.entries.clear()
     this.filterRenderer?.dispose()
     this.filterRenderer = undefined
+    for (const layer of [this.transitionCanvas, this.transitionBlurCanvas]) if (layer) layer.width = layer.height = 1
+    this.transitionCanvas = this.transitionBlurCanvas = undefined
+    if (this.blurCanvas) { this.blurCanvas.width = this.blurCanvas.height = 1; this.blurCanvas = undefined }
     void this.audioContext?.close().catch(() => {})
   }
 }

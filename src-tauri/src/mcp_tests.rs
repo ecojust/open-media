@@ -896,3 +896,17 @@ fn external_protocol_fixture() {
     }
     manager.stop();
 }
+
+#[test]
+fn media_result_exposes_pixels_as_image_content_without_repeating_base64_in_text() {
+    let frame = json!({"state":"completed","result":{"mimeType":"image/png","base64":"aGVsbG8=","artifactId":"preview-one","width":16,"height":16}});
+    let content = tool_content(&frame, false);
+    assert_eq!(content.len(), 2);
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["data"], "aGVsbG8=");
+    assert!(!content[0]["text"].as_str().unwrap().contains("aGVsbG8="));
+    assert!(content[0]["text"].as_str().unwrap().contains("preview-one"));
+    let chunk = json!({"mimeType":"image/png","encoding":"base64","data":"aGVsbG8=","offset":0});
+    assert!(tool_content(&chunk, false)[0]["text"].as_str().unwrap().contains("aGVsbG8="));
+    assert_eq!(tool_content(&frame, true).len(), 1);
+}

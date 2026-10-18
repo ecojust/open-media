@@ -9,6 +9,8 @@ import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCa
 import { compactVoiceCatalog } from '../src/core/voice-catalog.ts'
 import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade } from '../src/core/voice-downloads.ts'
 import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../src/core/speech-settings.ts'
+import { applySpeechPronunciation } from '../src/core/speech-pronunciation.ts'
+import { getSpeechAlignment } from '../src/core/speech-timing.ts'
 
 const mountedPanels = new Set()
 let previousSettings, previousStorage
@@ -53,6 +55,7 @@ function panel(overrides = {}, options = {}) {
     defineEmits: () => (...event) => { events.push(event); if (event[0] === 'change' && options.applyChanges !== false) props.project = event[1] }, defineExpose: () => {},
     planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade, isDesktop: () => true,
     getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings,
+    applySpeechPronunciation, getSpeechAlignment,
     bundledVoicePreviewUrl: () => undefined,
     VOICE_PREVIEW_TEXT: { zh: '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。', en: '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。' },
     getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }),
