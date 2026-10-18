@@ -1,0 +1,185 @@
+name: Publish verified accelerated speech components
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_build_run:
+        description: Original accelerated runtime build run ID
+        type: string
+        required: true
+      source_commit:
+        description: Full source SHA used by the verified runtime build
+        type: string
+        required: true
+      component_release_id:
+        description: Numeric ID of the existing empty component draft
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optional-speech-cuda-runtime
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish the existing verified component draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_BUILD_RUN: ${{ inputs.source_build_run }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      REQUESTED_RELEASE_ID: ${{ inputs.component_release_id }}
+      COMPONENT_TAG: speech-runtime-cuda-v1
+    steps:
+      - name: Verify original build, artifact and empty component draft
+        shell: python
+        run: |
+          import json, os, re, subprocess
+          from pathlib import Path
+          repo = os.environ['GITHUB_REPOSITORY']
+          run_id = os.environ['SOURCE_BUILD_RUN']
+          commit = os.environ['SOURCE_COMMIT']
+          tag, release_id = os.environ['COMPONENT_TAG'], os.environ['REQUESTED_RELEASE_ID']
+          if (not re.fullmatch(r'[1-9][0-9]*', run_id) or not re.fullmatch(r'[a-f0-9]{40}', commit)
+                  or not re.fullmatch(r'[1-9][0-9]*', release_id)):
+              raise ValueError('Numeric source run and draft IDs and a full lowercase source SHA are required')
+          def api(route):
+              return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/{route}']))
+          run = api(f'actions/runs/{run_id}')
+          if (run['head_sha'] != commit or run['path'] != '.github/workflows/optional-speech-cuda-runtime.yml'
+                  or run['status'] != 'completed' or run.get('conclusion') != 'failure'
+                  or run['event'] != 'workflow_dispatch' or run['head_repository']['full_name'] != repo):
+              raise ValueError('Recovery requires the original completed component build with a failed publication')
+          jobs = api(f'actions/runs/{run_id}/attempts/1/jobs?per_page=100')['jobs']
+          build = [job for job in jobs if job['name'] == 'Build and verify accelerated Windows speech']
+          if len(build) != 1 or build[0]['status'] != 'completed' or build[0]['conclusion'] != 'success':
+              raise ValueError('The original Windows runtime build did not succeed')
+          required = [
+              'Check runtime packaging guardrails',
+              'Build the self-contained accelerated runtime',
+              'Verify real models, relocation, offline CPU fallback and runtime integrity',
+              'Verify all four production voices and actual execution devices',
+              'Verify no installed runtime files changed',
+              'Preserve real inference and build evidence',
+              'Preserve verified runtime parts',
+          ]
+          for name in required:
+              steps = [step for step in build[0]['steps'] if step['name'] == name]
+              if len(steps) != 1 or steps[0]['status'] != 'completed' or steps[0]['conclusion'] != 'success':
+                  raise ValueError(f'Original verification step did not pass: {name}')
+          artifacts = api(f'actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
+          selected = [item for item in artifacts if item['name'] == 'speech-runtime-python-cuda-v1-windows-x64']
+          if (len(selected) != 1 or selected[0]['expired'] or selected[0]['size_in_bytes'] <= 0
+                  or not re.fullmatch(r'sha256:[a-f0-9]{64}', selected[0].get('digest') or '')):
+              raise ValueError('Exactly one intact verified component artifact is required')
+          ref = api(f'git/ref/tags/{tag}')['object']
+          if ref['type'] != 'commit' or ref['sha'] != commit:
+              raise ValueError('The immutable component tag must already point to the verified source SHA')
+          release = api(f'releases/{release_id}')
+          if not release['draft'] or not release['prerelease'] or release['assets'] or release['tag_name'] != tag:
+              raise ValueError('Only the existing empty component draft can be published')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              output.write(f"COMPONENT_RELEASE_ID={release['id']}\n")
+              output.write(f"COMPONENT_ARTIFACT_ID={selected[0]['id']}\n")
+              output.write(f"COMPONENT_ARTIFACT_DIGEST={selected[0]['digest']}\n")
+          print(json.dumps(dict(sourceRun=int(run_id), sourceCommit=commit,
+                               artifactId=selected[0]['id'], releaseId=release['id'], buildVerified=True)))
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit }}
+          persist-credentials: false
+      - name: Download and verify the original artifact archive
+        shell: python
+        run: |
+          import hashlib, os, stat, subprocess, zipfile
+          from pathlib import Path, PurePosixPath
+          archive = Path(os.environ['RUNNER_TEMP']) / 'verified-cuda-components.zip'
+          route = f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/artifacts/{os.environ['COMPONENT_ARTIFACT_ID']}/zip"
+          with archive.open('wb') as output:
+              subprocess.run(['gh', 'api', route], stdout=output, check=True)
+          digest = hashlib.sha256()
+          with archive.open('rb') as stream:
+              for block in iter(lambda: stream.read(4 * 1024**2), b''):
+                  digest.update(block)
+          if 'sha256:' + digest.hexdigest() != os.environ['COMPONENT_ARTIFACT_DIGEST']:
+              raise ValueError('The original Actions artifact SHA-256 does not match')
+          directory = Path('runtime-artifacts')
+          directory.mkdir()
+          with zipfile.ZipFile(archive) as source:
+              entries = source.infolist()
+              names = [entry.filename for entry in entries]
+              if len(entries) > 24 or len(set(names)) != len(names) or sum(entry.file_size for entry in entries) > 6 * 1024**3:
+                  raise ValueError('Unexpected component artifact inventory or size')
+              for entry in entries:
+                  path = PurePosixPath(entry.filename)
+                  if (entry.is_dir() or len(path.parts) != 1 or path.name in ('', '.', '..')
+                          or '\\' in entry.filename or ':' in entry.filename
+                          or stat.S_ISLNK(entry.external_attr >> 16)):
+                      raise ValueError('Unsafe component artifact member')
+              source.extractall(directory)
+          archive.unlink()
+          print('Original artifact digest and safe extraction verified.')
+      - name: Recheck all component parts and real inference evidence
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          python3 scripts/verify-cuda-runtime-artifact.py --phase release \
+            --directory runtime-artifacts --source-commit "$SOURCE_COMMIT"
+      - name: Upload verified assets and publish the existing draft
+        shell: python
+        run: |
+          import hashlib, json, os, re, subprocess
+          from pathlib import Path
+          repo, tag = os.environ['GITHUB_REPOSITORY'], os.environ['COMPONENT_TAG']
+          commit, release_id = os.environ['SOURCE_COMMIT'], os.environ['COMPONENT_RELEASE_ID']
+          def api(route, *options):
+              return json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/{route}', *options]))
+          def current_draft():
+              ref = api(f'git/ref/tags/{tag}')['object']
+              release = api(f'releases/{release_id}')
+              if (ref['type'] != 'commit' or ref['sha'] != commit or not release['draft']
+                      or not release['prerelease'] or release['tag_name'] != tag):
+                  raise ValueError('The existing draft or immutable source tag changed')
+              return release
+          release = current_draft()
+          if release['assets']:
+              raise ValueError('The existing draft is no longer empty; refusing to replace assets')
+          directory = Path('runtime-artifacts')
+          metadata = json.loads((directory / 'runtime-metadata.json').read_text(encoding='utf-8'))
+          names = [part['filename'] for part in metadata['parts']] + [
+              'runtime-metadata.json', 'SHA256SUMS.txt', 'application-validation.json', 'post-application-integrity.json']
+          if len(set(names)) != len(names) or set(names) != {file.name for file in directory.iterdir()}:
+              raise ValueError('Unexpected component release files')
+          expected = {}
+          for name in names:
+              path = directory / name
+              digest = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for block in iter(lambda: stream.read(4 * 1024**2), b''):
+                      digest.update(block)
+              expected[name] = dict(size=path.stat().st_size, digest='sha256:' + digest.hexdigest())
+          subprocess.run(['gh', 'release', 'upload', tag, '--repo', repo,
+                          *(str(directory / name) for name in names)], check=True)
+          release = current_draft()
+          assets = release['assets']
+          if len(assets) != len(expected) or {asset['name'] for asset in assets} != set(expected):
+              raise ValueError('Uploaded component asset inventory differs from the verified files')
+          for asset in assets:
+              verified = expected[asset['name']]
+              if (asset['state'] != 'uploaded' or asset['size'] != verified['size']
+                      or (asset.get('digest') is not None and asset['digest'] != verified['digest'])):
+                  raise ValueError('Uploaded component size, state or SHA-256 mismatch')
+          release = api(f'releases/{release_id}', '--method', 'PATCH', '-f', f'tag_name={tag}',
+                        '-f', f'target_commitish={commit}', '-F', 'draft=false',
+                        '-F', 'prerelease=true', '-f', 'make_latest=false')
+          if release['draft'] or release['tag_name'] != tag or not release['prerelease']:
+              raise ValueError('Component draft publication did not complete')
+          print(json.dumps(dict(url=release['html_url'], sourceCommit=commit,
+                               assets=list(expected), gpuInferenceValidated=metadata['gpuInferenceValidated'])))

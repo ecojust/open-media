@@ -2338,10 +2338,20 @@ mod tests {
 
     #[test]
     fn real_catalog_shares_three_models_between_male_and_female_voices() {
-        let catalog = load_catalog(include_str!("../resources/speech-models.json")).unwrap();
-        assert_eq!(catalog.len(), 3);
-        assert!(catalog.iter().all(|package| package.voices.len() == 2));
-        for package in &catalog {
+        let catalog =
+            load_catalog_with_acceleration(include_str!("../resources/speech-models.json"), false)
+                .unwrap();
+        assert!(catalog
+            .iter()
+            .filter(|package| package.runtime_only)
+            .all(|package| package.voices.is_empty()));
+        let voice_packages: Vec<_> = catalog
+            .iter()
+            .filter(|package| !package.runtime_only)
+            .collect();
+        assert_eq!(voice_packages.len(), 3);
+        assert!(voice_packages.iter().all(|package| package.voices.len() == 2));
+        for package in &voice_packages {
             assert_eq!(package.voices[0].gender.as_deref(), Some("female"));
             assert_eq!(package.voices[1].gender.as_deref(), Some("male"));
             assert!(crate::speech::additional_voice_kind(&package.voices[1].id)
@@ -2349,18 +2359,19 @@ mod tests {
         }
         for kind in [ModelKind::Zipvoice, ModelKind::F5, ModelKind::Qwen3] {
             assert_eq!(
-                catalog
+                voice_packages
                     .iter()
                     .filter(|package| package.model.kind == kind)
                     .count(),
                 1
             );
         }
-        for package in catalog
+        for package in voice_packages
             .iter()
             .filter(|package| package.model.kind != ModelKind::Zipvoice)
         {
             assert_eq!(package.runtime_id, "python-cpu-v1");
+            assert!(package.fallback_runtime.is_none());
         }
     }
 
