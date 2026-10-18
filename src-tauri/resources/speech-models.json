@@ -194,7 +194,8 @@
         "config": "runner-config.json",
         "sampleRate": 24000
       },
-      "runtimeId": "python-cpu-v1"
+      "runtimeId": "python-cpu-v1",
+      "acceleratedRuntimeId": "python-cuda-v1"
     },
     {
       "id": "qwen3-tts-1.7b-serena",
@@ -343,7 +344,8 @@
         "config": "runner-config.json",
         "sampleRate": 24000
       },
-      "runtimeId": "python-cpu-v1"
+      "runtimeId": "python-cpu-v1",
+      "acceleratedRuntimeId": "python-cuda-v1"
     }
   ],
   "runtimes": [
@@ -394,6 +396,88 @@
           ]
         }
       }
+    },
+    {
+      "id": "python-cuda-v1",
+      "version": 1,
+      "platforms": {
+        "windows-x64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip",
+          "size": 3044230657,
+          "unpackedSize": 5090961265,
+          "sha256": "29ca76fbbb839e741f2430da2547470631308eaaee86dc7bccbc8f03bd9ea9b3",
+          "manifestSha256": "74cf4eea34f0d4d003378c3c6d0a334590325bd1f19985c99bff17fae4f3c242",
+          "executable": "python/python.exe",
+          "script": "runner/tts.py",
+          "mirrors": [],
+          "parts": [
+            {
+              "filename": "speech-runtime-python-cuda-v1-windows-x64.zip.part001",
+              "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part001",
+              "size": 1800000000,
+              "sha256": "405424501bdf718f5f04db1c9e20ef3838b127b31cc124092ac461d7be042c25",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part001",
+                "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part001",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part001"
+              ]
+            },
+            {
+              "filename": "speech-runtime-python-cuda-v1-windows-x64.zip.part002",
+              "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part002",
+              "size": 1244230657,
+              "sha256": "c20db3c2a2101bea24d0004ddd3afbd39a5ce08556fe9ed9539e52fd0cad7e16",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part002",
+                "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part002",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part002"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "native-cuda-v1",
+      "version": 1,
+      "platforms": {
+        "windows-x64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip",
+          "size": 1859481904,
+          "unpackedSize": 2772606107,
+          "sha256": "895a3e3bf3c33a24275014008a49530f40ef9025bdd3ec53bd00f5b31d8b3802",
+          "manifestSha256": "352ebb5fa7ed38be45934d28ef32571c47eeae3c39c362f3d64e6233645dac11",
+          "executable": "bin/open-media-speech.exe",
+          "script": "bin/open-media-speech.exe",
+          "mirrors": [],
+          "kind": "native",
+          "parts": [
+            {
+              "filename": "open-media-native-cuda-v1-windows-x64.zip.part001",
+              "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+              "size": 1800000000,
+              "sha256": "5a25cbd05028e190c8f7fbf56b4c32fb8bd3d13bb1d11282b82b3aeb3671b2a3",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+                "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001"
+              ]
+            },
+            {
+              "filename": "open-media-native-cuda-v1-windows-x64.zip.part002",
+              "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+              "size": 59481904,
+              "sha256": "cdba56b3e6f15155e10c34e19d9e920872fc8337dff721d10e3b8cc21b258886",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+                "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002"
+              ]
+            }
+          ]
+        }
+      }
     }
-  ]
+  ],
+  "nativeAccelerationRuntimeId": "native-cuda-v1"
 }
