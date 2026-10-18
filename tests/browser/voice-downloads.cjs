@@ -9,7 +9,7 @@ async function installNativeContract(page) {
       { id: 'f5_zh_female', modelId: 'f5-v1-base-fp32', name: 'F5-TTS v1 Base FP32', modelSize: 1402816013, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC-4.0', usageNote: '模型限非商业用途' },
       { id: 'qwen3_serena', modelId: 'qwen3-tts-1.7b-serena', name: 'Qwen3-TTS 1.7B BF16 · Serena', modelSize: 4520159586, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'Apache-2.0', usageNote: '中文男声与女声；CPU离线合成，建议至少16GB' },
     ].flatMap((voice, index) => [voice, { ...voice, id: ['zipvoice_zh_male', 'f5_zh_male', 'qwen3_uncle_fu'][index], name: `${voice.name.replace(' · Serena', '')} · 男声`, gender: 'male' }])
-    const state = window.voiceDownloadHarness = { calls: [], deferDownload: false, releaseDownload: null, bundledReady: true, sharedRuntimeReady: false, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
+    const state = window.voiceDownloadHarness = { calls: [], deferDownloadDispatch: false, releaseDownloadDispatch: null, deferDownload: false, releaseDownload: null, bundledReady: true, sharedRuntimeReady: false, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
     const catalog = () => ({ ready: state.bundledReady || Object.entries(state.models).some(([id, model]) => model.status === 'ready' && (id === 'zipvoice-distill-fp32' || state.sharedRuntimeReady || model.runtimeStatus === 'ready')), error: state.bundledReady ? undefined : '内置模型完整性校验失败', voices: [
       { id: 'matcha_zh_en_female', name: '温柔女声（中英）', language: 'zh-CN', gender: 'female', status: state.bundledReady ? 'bundled' : 'failed', modelSize: 149227292 },
       ...packs.map(voice => {
@@ -21,6 +21,7 @@ async function installNativeContract(page) {
     window.__TAURI_INTERNALS__ = {
       transformCallback: () => 1, unregisterCallback() {},
       invoke: async (command, args) => {
+        if (command === 'begin_speech_model_download' && state.deferDownloadDispatch) await new Promise(resolve => { state.releaseDownloadDispatch = resolve })
         state.calls.push({ command, args })
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_media_jobs') return []
@@ -134,14 +135,21 @@ async function main() {
     assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.some(call => /begin_speech/.test(call.command))), false, '试听本地音频不能自动下载或合成')
     console.log('PASS 三种模型的男女声原句MP3均可本地播放，试听不下载或合成')
 
-    await page.evaluate(() => { window.voiceDownloadHarness.deferDownload = true })
+    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = true; window.voiceDownloadHarness.deferDownload = true })
     await f5Male.getByRole('button', { name: '下载 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
     await expect(f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
     await expect(f5Male.getByRole('button', { name: '下载 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeDisabled()
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download').length), 1, '男声与女声只能启动一次共享模型下载')
+    await expect.poll(() => page.evaluate(() => typeof window.voiceDownloadHarness.releaseDownloadDispatch), { message: '等待请求进入受控原生桥，禁用按钮不能代表异步调用已经抵达' }).toBe('function')
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download').length), 0, '请求尚未送达时，男女声按钮也应立即共同禁用')
+    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = false; window.voiceDownloadHarness.releaseDownloadDispatch() })
+    await expect.poll(() => page.evaluate(() => ({
+      count: window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download').length,
+      ready: typeof window.voiceDownloadHarness.releaseDownload === 'function',
+    })), { message: '等待唯一共享下载请求完成派发，且响应测试门闩已就绪' }).toEqual({ count: 1, ready: true })
     await page.evaluate(() => { window.voiceDownloadHarness.deferDownload = false; window.voiceDownloadHarness.releaseDownload() })
     await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '0')
     await expect(f5Male.getByRole('progressbar')).toHaveAttribute('value', '0')
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download').length), 1, '男声与女声只能启动一次共享模型下载')
     await expect(close).toBeEnabled()
     await expect(page.getByTestId('save-project')).toBeEnabled()
     await expect(page.getByTestId('nav-record')).toBeEnabled()
