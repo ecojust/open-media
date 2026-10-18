@@ -108,8 +108,37 @@ async function main() {
       }
       await page.keyboard.press('Escape'); await expect(menu).toHaveCount(0)
       const keyboardRow = mode === 'gif' ? older : older.locator('.source-details')
+      if (mode === 'gif') {
+        // Both opening gestures must survive a scroll queued while revealing the source.
+        for (const gesture of ['keyboard', 'mouse']) {
+          const previousHeight = await keyboardRow.evaluate((element, gesture) => {
+            const list = element.closest('.gif-source-list'), previous = list.style.maxHeight
+            list.style.maxHeight = '150px'; list.scrollTop = list.scrollHeight
+            element.focus()
+            if (gesture === 'keyboard') element.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }))
+            else {
+              const bounds = element.getBoundingClientRect()
+              element.dispatchEvent(new MouseEvent('contextmenu', { clientX: bounds.left + 10, clientY: bounds.top + 10, bubbles: true, cancelable: true }))
+            }
+            return previous
+          }, gesture)
+          await expect(menu).toBeVisible()
+          await expect.poll(() => menu.evaluate(element => element.contains(document.activeElement))).toBe(true)
+          await page.keyboard.press('Escape'); await expect(keyboardRow).toBeFocused()
+          await keyboardRow.evaluate((element, height) => { element.closest('.gif-source-list').style.maxHeight = height }, previousHeight)
+        }
+      }
       await keyboardRow.focus(); await page.keyboard.press('Shift+F10')
       await expect(menu).toBeVisible(); await page.keyboard.press('Escape')
+      await expect(keyboardRow).toBeFocused()
+
+      // Escape during keyboard positioning must cancel the pending open as well.
+      await keyboardRow.evaluate(element => {
+        element.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }))
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      })
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      await expect(menu).toHaveCount(0)
       await expect(keyboardRow).toBeFocused()
 
       // Close after insertion but before open() resumes from nextTick: stale focus must not win.

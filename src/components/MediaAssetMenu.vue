@@ -40,13 +40,17 @@ async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset): Promi
   const generation = menuGeneration
   anchor = event.currentTarget as HTMLElement
   portal.value = anchor.closest<HTMLElement>('.app-shell') ?? 'body'
-  const rect = anchor.getBoundingClientRect()
   const mouse = event instanceof MouseEvent && (event.clientX !== 0 || event.clientY !== 0)
-  position.value = { x: mouse ? event.clientX : rect.left, y: mouse ? event.clientY : rect.bottom }
-  selected.value = asset
   document.addEventListener('pointerdown', outside, true)
   document.addEventListener('keydown', keyboard, true)
   window.addEventListener('resize', dismissForViewportChange)
+  // Focusing or revealing a source may queue a scroll before either opening gesture.
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  if (generation !== menuGeneration) return
+  if (!anchor.isConnected) { close(); return }
+  const rect = anchor.getBoundingClientRect()
+  position.value = { x: mouse ? event.clientX : rect.left, y: mouse ? event.clientY : rect.bottom }
+  selected.value = asset
   window.addEventListener('scroll', dismissForViewportChange, true)
   await nextTick()
   if (generation !== menuGeneration || !selected.value || !menu.value?.isConnected) return
