@@ -106,6 +106,12 @@ async function verifyImportedContainer(page, clip, format) {
   console.log(`PASS 根据实际浏览器编码能力预览并导入 ${format.extension.toUpperCase()}，素材名称、MIME 与真实容器字节一致`)
 }
 
+async function selectAllMaterials(page) {
+  await expect(page.getByTestId('watermark-collection-general')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('watermark-collection-all').click()
+  await expect(page.getByTestId('watermark-collection-all')).toHaveAttribute('aria-pressed', 'true')
+}
+
 async function galleryChecks(page, format) {
   const button = page.getByTestId('watermark-open')
   const position = await button.evaluate(element => ({ previous: element.previousElementSibling?.textContent.trim(), svg: element.querySelectorAll('svg').length }))
@@ -116,6 +122,9 @@ async function galleryChecks(page, format) {
   await expect(dialog).toBeVisible()
   const count = await page.locator('[data-watermark-id]').count()
   assert.equal(count, 24, '素材库首屏按 24 个素材分页，避免 500 项同时渲染')
+  assert((await page.locator('[data-watermark-id]').evaluateAll(cards => cards.map(card => card.dataset.watermarkId))).every(id => id.startsWith('general-')), '素材库默认展示通用样式')
+  await selectAllMaterials(page)
+  await expect(page.locator('[data-watermark-id]')).toHaveCount(count)
   for (const category of ['互动贴纸', '装饰动效', '提示标注', '字幕标签', '可编辑文字']) {
     await page.locator(`[data-watermark-category="${category}"]`).click()
     assert(await page.locator('[data-watermark-id]').count() > 1)
@@ -155,6 +164,7 @@ async function galleryChecks(page, format) {
 
 async function addBuiltin(page, id = 'thumb-pulse') {
   await page.getByTestId('watermark-open').click()
+  await selectAllMaterials(page)
   await page.locator(`[data-watermark-add="${id}"]`).click()
   await expect(page.getByRole('dialog', { name: '添加水印', exact: true })).not.toBeVisible()
 }
@@ -311,6 +321,7 @@ async function appChecks(browser, url, productionCsp) {
     await page.getByTestId('watermark-open').click()
     const dialog = page.getByRole('dialog', { name: '添加水印', exact: true })
     await expect(dialog).toBeVisible()
+    await selectAllMaterials(page)
     const dimensions = await dialog.evaluate(element => ({ left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right, width: window.innerWidth, overflowing: element.scrollWidth > element.clientWidth + 1 }))
     assert(dimensions.left >= 0 && dimensions.right <= dimensions.width && !dimensions.overflowing)
     await page.getByTestId('watermark-search').fill('点赞')
@@ -378,6 +389,7 @@ async function staleImportChecks(browser, url, productionCsp) {
       fixture.app.mount('#app')
     })
     await page.getByTestId('watermark-open').click()
+    await selectAllMaterials(page)
     await page.locator('[data-watermark-add="thumb-pulse"]').click()
     await expect.poll(() => page.evaluate(() => window.watermarkBridge.requests.length)).toBe(1)
     await expect(page.getByTestId('watermark-library')).toHaveAttribute('aria-busy', 'true')

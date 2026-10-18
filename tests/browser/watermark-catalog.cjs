@@ -10,6 +10,13 @@ const categories = ['互动贴纸', '装饰动效', '提示标注', '字幕标�
 const dialog = page => page.getByRole('dialog', { name: '添加水印', exact: true })
 const cards = page => page.locator('[data-watermark-id]')
 
+async function openAllMaterials(page) {
+  await page.getByTestId('watermark-open').click()
+  await expect(page.getByTestId('watermark-collection-general')).toHaveAttribute('aria-pressed', 'true')
+  await page.getByTestId('watermark-collection-all').click()
+  await expect(page.getByTestId('watermark-collection-all')).toHaveAttribute('aria-pressed', 'true')
+}
+
 async function projectState(page) {
   return page.evaluate(async () => {
     const { loadProject } = await import('/src/core/storage.ts')
@@ -76,8 +83,7 @@ async function catalogChecks(page) {
   assert.equal(new Set(catalog.map(item => item.id)).size, catalog.length)
   const legacy = ['thumb-pulse', 'star-save', 'follow-pop', 'share-plane', 'heart-wave', 'celebrate', 'sparkle-trail', 'ripple-rings', 'corner-frame', 'loading-dots', 'rec-label', 'notice-bubble', 'cursor-click', 'point-arrow', 'focus-circle', 'chapter-card', 'note-strip', 'thanks-card']
   for (const id of legacy) assert(catalog.some(item => item.id === id && item.kind === 'video'), `旧素材 ${id} 必须保留`)
-  await page.getByTestId('watermark-open').click()
-  await page.getByTestId('watermark-collection-all').click()
+  await openAllMaterials(page)
   await expect(page.locator('[data-watermark-category="全部"]')).toContainText(String(catalog.length))
   const allIds = await allPageIds(page, catalog.length)
   assert.deepEqual(allIds, catalog.map(item => item.id))
@@ -121,7 +127,7 @@ async function catalogChecks(page) {
 }
 
 async function expandedAnimationPreview(page, catalog, materialId = 'motion-farewell') {
-  if (!(await dialog(page).count())) await page.getByTestId('watermark-open').click()
+  if (!(await dialog(page).count())) await openAllMaterials(page)
   const animation = catalog.findLast(item => item.kind === 'video' && item.id === materialId)
   assert(animation, '扩展目录应包含新的真实动画')
   assert.equal(animation.spillSuppression, true, '新增绿幕动效应默认启用去溢色')
@@ -197,9 +203,8 @@ async function setField(page, locator, value) {
 async function editableChecks(page, material) {
   const original = await projectState(page)
   await seek(page, 3.25)
-  await page.getByTestId('watermark-open').click()
+  await openAllMaterials(page)
   await page.locator('[data-watermark-category="可编辑文字"]').click()
-  await page.getByTestId('watermark-collection-all').click()
   await page.getByTestId('watermark-search').fill(material.name)
   await page.locator(`[data-watermark-add="${material.id}"]`).click()
   await expect(dialog(page)).not.toBeVisible()
@@ -279,10 +284,9 @@ async function textAppearanceChecks(page, catalog) {
   ].map(item => { assert(item, '目录应有衬线、等宽、多行、深底与右对齐文字样式'); return [item.id, item] })).values()]
   for (const material of samples) {
     await seek(page, 0.5)
-    await page.getByTestId('watermark-open').click()
+    await openAllMaterials(page)
     await page.locator('[data-watermark-category="可编辑文字"]').click()
-    await page.getByTestId('watermark-collection-all').click()
-  await page.getByTestId('watermark-search').fill(material.name)
+    await page.getByTestId('watermark-search').fill(material.name)
     await page.locator(`[data-watermark-add="${material.id}"]`).click()
     await expect(dialog(page)).not.toBeVisible()
     await expect(page.getByTestId('clip-text-content')).toHaveValue(material.textTemplate.text)
@@ -333,8 +337,7 @@ async function textAppearanceChecks(page, catalog) {
 async function expandedAnimationExport(page, catalog, materialId) {
   const material = catalog.findLast(item => item.kind === 'video' && (materialId ? item.id === materialId : item.id.startsWith('motion-')))
   await seek(page, 0)
-  await page.getByTestId('watermark-open').click()
-  await page.getByTestId('watermark-collection-all').click()
+  await openAllMaterials(page)
   await page.getByTestId('watermark-search').fill(material.name)
   await page.locator(`[data-watermark-add="${material.id}"]`).click()
   await expect(dialog(page)).not.toBeVisible()
