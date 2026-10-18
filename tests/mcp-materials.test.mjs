@@ -81,6 +81,8 @@ test('动画水印使用可播放源并保留抠像及溢色设置，返回原�
   assert.equal(clip.start, 2)
   assert.equal(prepared.assets[0].blob, f.blob)
   assert.equal(prepared.assets[0].asset.nativePath, f.asset.nativePath)
+  assert.equal(prepared.assets[0].asset.libraryRole, 'watermark')
+  assert.equal(prepared.project.assets[0].libraryRole, 'watermark')
   assert.equal(f.notifications.length, 1)
   assert.equal(project.assets.length, 0)
 })
@@ -95,6 +97,8 @@ test('背景音乐放入专用轨道，保留默认音量和淡入淡出', async
   assert.ok(track.clips[0].fadeIn > 0)
   assert.ok(track.clips[0].fadeOut > 0)
   assert.equal(f.requests[0].url, music.url)
+  assert.equal(prepared.assets[0].asset.libraryRole, 'background-music')
+  assert.equal(prepared.project.assets[0].libraryRole, 'background-music')
 })
 
 test('片头标题覆盖后仍可编辑，前插时所有既有片段整体后移', async () => {
@@ -109,6 +113,8 @@ test('片头标题覆盖后仍可编辑，前插时所有既有片段整体后�
   const clip = prepared.project.tracks.flatMap(track => track.clips).find(item => item.id === prepared.selection.clipId)
   assert.equal(clip.start, 0)
   assert.equal(project.tracks[0].clips[0].start, 1)
+  assert.equal(prepared.assets[0].asset.libraryRole, 'video-segment')
+  assert.equal(prepared.project.assets[0].libraryRole, 'video-segment')
 })
 
 test('无效ID、标题、平台及外部素材地址在读取前拒绝', async () => {

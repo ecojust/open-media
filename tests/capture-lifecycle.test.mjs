@@ -38,6 +38,8 @@ function workspace(name, overrides = {}) {
     beginMediaJob: async () => ({ id: 'job', state: 'running', progress: 0, name: 'result.gif' }),
     cancelMediaJob: async () => {}, getMediaJobs: async () => [],
     captureErrorMessage, validateGifSegments, gifFrameCount, recentVideoAssets, videoDuration, videoImportedTime,
+    // Shared-directory scanning has its own composable tests; keep these tests focused on export cancellation.
+    useStoredVideos: source => ({ assets: vue.computed(() => recentVideoAssets(source())), directory: vue.ref(''), loading: vue.ref(false), error: vue.ref(''), warnings: vue.ref([]), preparing: vue.ref(false), refresh: async () => {}, reveal: async () => {}, preparePreview: async () => {} }),
     readMicrophonePreference: () => ({ deviceId: '', name: '' }), writeMicrophonePreference: () => {},
     ...overrides,
   }

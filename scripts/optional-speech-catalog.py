@@ -10,91 +10,88 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / 'scripts/optional-speech-assets'
 RELEASE = 'https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/'
-BENCHMARK = ROOT / 'test/chinese-tts-benchmark/manifests'
 
 
-def local_file(source, destination=None):
-    path = ASSETS / source
-    data = path.read_bytes()
-    return {'path': destination or source, 'url': RELEASE + source, 'embedded': source,
-            'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+def safe_relative(value):
+    if (not isinstance(value, str) or not value or '\\' in value or ':' in value
+            or any(part in ('', '.', '..') for part in value.split('/'))):
+        raise ValueError(f'Unsafe model file path: {value}')
+    return value
 
 
-def remote_file(path, url, size, sha256):
-    return dict(path=path, url=url, size=size, sha256=sha256)
+def checked_url(value):
+    if not isinstance(value, str):
+        raise ValueError('Model download URL must be a string.')
+    parsed = urlsplit(value)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('Model downloads must use public HTTPS URLs.')
 
 
-def package(model_id, name, voice_id, files, model, license, usage_note, runtime=None):
-    result = dict(id=model_id, version=1, license=license, usageNote=usage_note,
-                  modelSize=sum(f['size'] for f in files),
-                  downloadSize=sum(f['size'] for f in files if not f.get('embedded')),
-                  voices=[dict(id=voice_id, name=name, language='zh-CN', gender='female', speakerId=0)],
-                  files=files, model=model)
-    if runtime:
-        result['runtimeId'] = runtime
-    return result
-
-
-def build_models():
-    zip_source = json.loads((BENCHMARK / 'zipvoice-distill-fp32-zh-frontend.json').read_text())
-    zip_files = {f['path']: f for f in zip_source['model_files']}
-    zip_base = 'https://huggingface.co/k2-fsa/ZipVoice/resolve/889dd609a42f0de9cf9aac335eae42677becb1b9/zipvoice_distill/'
-    files = [remote_file(dest, zip_base + source, zip_files[dest]['bytes'], zip_files[dest]['sha256'])
-             for dest, source in [('encoder.onnx', 'text_encoder.onnx'), ('decoder.onnx', 'fm_decoder.onnx'), ('tokens.txt', 'tokens.txt')]]
-    source = zip_source['source']
-    files += [remote_file('vocos_24khz.onnx', source['vocoder'], source['vocoder_bytes'], source['vocoder_sha256']),
-              local_file('zipvoice-lexicon.txt', 'lexicon.txt'),
-              local_file('zipvoice-reference.wav', 'reference.wav'),
-              local_file('zipvoice-reference.txt', 'reference.txt')]
-    zip_model = package('zipvoice-distill-fp32', 'ZipVoice Distill FP32', 'zipvoice_zh_female', files,
-                        dict(kind='zipvoice', encoder='encoder.onnx', decoder='decoder.onnx',
-                             tokens='tokens.txt', vocoder='vocos_24khz.onnx',
-                             dataDir='@bundled/model/espeak-ng-data', lexicons=['lexicon.txt'],
-                             referenceAudio='reference.wav', referenceText='reference.txt', sampleRate=24000),
-                        'CC-BY-NC', '模型权重限非商业用途；固定合成参考音色。')
-
-    f5_source = json.loads((BENCHMARK / 'f5-v1-base-fp32.json').read_text())
-    f5_files = {f['path']: f for f in f5_source['model_files']}
-    f5_base = 'https://huggingface.co/SWivid/F5-TTS/resolve/84e5a410d9cead4de2f847e7c9369a6440bdfaca/F5TTS_v1_Base/'
-    vocos_base = 'https://huggingface.co/charactr/vocos-mel-24khz/resolve/0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21/'
-    files = []
-    for path, key, url in [('model_1250000.safetensors', 'models/f5/model_1250000.safetensors', f5_base + 'model_1250000.safetensors'),
-                           ('vocab.txt', 'models/f5/vocab.txt', f5_base + 'vocab.txt'),
-                           ('vocos/pytorch_model.bin', 'models/vocos/pytorch_model.bin', vocos_base + 'pytorch_model.bin'),
-                           ('vocos/config.yaml', 'models/vocos/config.yaml', vocos_base + 'config.yaml')]:
-        info = f5_files[key]
-        files.append(remote_file(path, url, info['bytes'], info['sha256']))
-    files += [local_file('f5-reference.wav', 'reference.wav'), local_file('f5-reference.txt', 'reference.txt'),
-              local_file('f5-runner-config.json', 'runner-config.json')]
-    f5_model = package('f5-v1-base-fp32', 'F5-TTS v1 Base FP32', 'f5_zh_female', files,
-                       dict(kind='f5', config='runner-config.json', sampleRate=24000),
-                       'CC-BY-NC-4.0', '模型权重限非商业用途；固定合成参考音色。', 'python-cpu-v1')
-
-    qwen_source = json.loads((BENCHMARK / 'qwen3-tts-1.7b-serena.json').read_text())
-    files = [remote_file(f['path'], f['url'], f['bytes'], f['sha256']) for f in qwen_source['model_files']]
-    files.append(local_file('qwen3-runner-config.json', 'runner-config.json'))
-    qwen_model = package('qwen3-tts-1.7b-serena', 'Qwen3-TTS 1.7B BF16 · Serena', 'qwen3_serena', files,
-                        dict(kind='qwen3', config='runner-config.json', sampleRate=24000),
-                        'Apache-2.0', '中文男声与女声；本地离线合成，建议至少 16 GB 内存。', 'python-cpu-v1')
-    models = [zip_model, f5_model, qwen_model]
-    # Both voices use the same verified weights and runtime download. Male
-    # reference audio and speaker selection belong to the application adapter.
-    for model, voice_id, name in [
-        (zip_model, 'zipvoice_zh_male', 'ZipVoice Distill FP32 · 男声'),
-        (f5_model, 'f5_zh_male', 'F5-TTS v1 Base FP32 · 男声'),
-        (qwen_model, 'qwen3_uncle_fu', 'Qwen3-TTS 1.7B BF16 · 男声'),
-    ]:
-        model['voices'].append(dict(id=voice_id, name=name, language='zh-CN', gender='male', speakerId=0))
-    audit = json.loads((ROOT / 'scripts/optional-speech-mirror-audit.json').read_text())
+def build_models(source):
+    """Retain the reviewed production file pins; never reconstruct model provenance."""
+    document = json.loads(source.read_text(encoding='utf-8'))
+    expected = {'zipvoice-distill-fp32': 'zipvoice', 'f5-v1-base-fp32': 'f5',
+                'qwen3-tts-1.7b-serena': 'qwen3'}
+    models = document.get('models', [])
+    if (document.get('schema') != 2 or not isinstance(models, list)
+            or len(models) != len(expected)
+            or {model.get('id') for model in models if isinstance(model, dict)} != set(expected)):
+        raise ValueError('Model catalogue must contain the reviewed production model records.')
+    voice_ids = set()
     for model in models:
-        for file in model['files']:
-            mirrors = audit['mappings'].get(file['url'], [])
-            if mirrors and mirrors[0].startswith('https://modelscope.cn/'):
-                # This source serves the verified files independently of the
-                # original storage CDN, which is unreachable on some networks.
-                file['url'], file['mirrors'] = mirrors[0], [file['url'], *mirrors[1:]]
-            elif mirrors:
-                file['mirrors'] = mirrors
+        config = model.get('model', {})
+        if model.get('version') != 1 or not isinstance(config, dict) or config.get('kind') != expected[model['id']]:
+            raise ValueError(f'Unexpected model identity or implementation: {model["id"]}')
+        if not isinstance(model.get('license'), str) or not model['license']:
+            raise ValueError('Model licence information is required.')
+        files = model.get('files', [])
+        if not isinstance(files, list) or not files:
+            raise ValueError('Model files are required.')
+        paths = set()
+        for file in files:
+            if not isinstance(file, dict):
+                raise ValueError('Model file records must be objects.')
+            path = safe_relative(file.get('path'))
+            if path in paths:
+                raise ValueError(f'Duplicate model file: {path}')
+            paths.add(path)
+            if (type(file.get('size')) is not int or file['size'] <= 0
+                    or not isinstance(file.get('sha256'), str)
+                    or not re.fullmatch('[a-f0-9]{64}', file['sha256'])):
+                raise ValueError(f'Model files require exact byte sizes and integrity digests: {path}')
+            checked_url(file.get('url'))
+            mirrors = file.get('mirrors', [])
+            if not isinstance(mirrors, list):
+                raise ValueError(f'Invalid model alternate sources: {path}')
+            for url in mirrors:
+                checked_url(url)
+            if len(mirrors) != len(set(mirrors)):
+                raise ValueError(f'Duplicate model alternate sources: {path}')
+            if 'embedded' in file:
+                embedded = ASSETS / safe_relative(file['embedded'])
+                data = embedded.read_bytes()
+                if len(data) != file['size'] or hashlib.sha256(data).hexdigest() != file['sha256']:
+                    raise ValueError(f'Embedded model resource differs from its reviewed file pin: {path}')
+        if (model.get('modelSize') != sum(file['size'] for file in files)
+                or model.get('downloadSize') != sum(file['size'] for file in files if not file.get('embedded'))):
+            raise ValueError(f'Model byte totals do not match pinned files: {model["id"]}')
+        lexicons = config.get('lexicons', [])
+        if not isinstance(lexicons, list):
+            raise ValueError('Model lexicons must be a list of pinned paths.')
+        required = ([config.get(key) for key in ['encoder', 'decoder', 'tokens', 'vocoder', 'referenceAudio', 'referenceText']]
+                    + lexicons if config['kind'] == 'zipvoice' else [config.get('config')])
+        if not required or any(not isinstance(path, str) or path not in paths for path in required):
+            raise ValueError(f'Model configuration refers to an unpinned file: {model["id"]}')
+        voices = model.get('voices', [])
+        if not isinstance(voices, list) or not voices:
+            raise ValueError('The reviewed model voices are required.')
+        for voice in voices:
+            if not isinstance(voice, dict):
+                raise ValueError('Model voice records must be objects.')
+            identity = voice.get('id')
+            if not isinstance(identity, str) or not identity or identity in voice_ids:
+                raise ValueError('Model voice identifiers must be present and unique.')
+            voice_ids.add(identity)
     return models
 
 
@@ -179,8 +176,9 @@ def runtime_platforms(source, *, identity="python-cpu-v1", required=None, releas
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--model-catalog', type=Path, required=True,
+                        help='Reviewed production model catalogue with exact existing file pins.')
     parser.add_argument('--runtime-metadata', type=Path,
-                        default=ROOT / 'test/optional-speech-runtime/runtime-metadata.json',
                         help='Verified release metadata JSON or a directory of platform metadata.')
     parser.add_argument('--accelerated-runtime-metadata', type=Path,
                         help='Verified Windows CUDA runtime metadata; existing CPU and MPS runtime records are preserved.')
@@ -190,10 +188,13 @@ def main():
                         help='Bootstrap model records before the first runtime build; not an application-ready catalogue.')
     parser.add_argument('--output', type=Path, default=ROOT / 'src-tauri/resources/speech-models.json')
     args = parser.parse_args()
-    for model, name in [('f5-v1-base-fp32', 'f5'), ('qwen3-tts-1.7b-serena', 'qwen3')]:
-        data = (ROOT / f'scripts/optional-speech-runner/config/{model}.json').read_bytes()
-        (ASSETS / f'{name}-runner-config.json').write_bytes(data)
-    catalogue = dict(schema=2, models=build_models(), runtimes=[])
+    if not args.models_only and args.runtime_metadata is None:
+        parser.error('--runtime-metadata is required for an application-ready catalogue.')
+    source_catalogue = json.loads(args.model_catalog.read_text(encoding='utf-8'))
+    if (not args.models_only and source_catalogue.get('nativeAccelerationRuntimeId')
+            and not args.native_runtime_metadata):
+        parser.error('--native-runtime-metadata is required to retain the existing native acceleration runtime.')
+    catalogue = dict(schema=2, models=build_models(args.model_catalog), runtimes=[])
     if not args.models_only:
         platforms = runtime_platforms(args.runtime_metadata)
         catalogue['runtimes'] = [dict(id='python-cpu-v1', version=1, platforms=platforms)]
@@ -214,6 +215,11 @@ def main():
                                        release='https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/')
             catalogue['runtimes'].append(dict(id=identity, version=1, platforms=native))
             catalogue['nativeAccelerationRuntimeId'] = identity
+        available = {runtime['id'] for runtime in catalogue['runtimes']}
+        for model in catalogue['models']:
+            for field in ['runtimeId', 'acceleratedRuntimeId']:
+                if model.get(field) and model[field] not in available:
+                    raise ValueError(f'Missing verified runtime metadata for {model[field]}.')
 
     args.output.write_text(json.dumps(catalogue, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(f'Wrote {args.output}; runtime metadata: {bool(catalogue["runtimes"])}')

@@ -15,6 +15,8 @@ export interface MediaAsset {
   id: string
   /** Time this asset was added to the project; absent in older documents. */
   addedAt?: string
+  /** Built-in library material role; ordinary imported files have no role. */
+  libraryRole?: 'watermark' | 'background-music' | 'video-segment'
   name: string
   kind: AssetKind
   url: string

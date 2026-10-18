@@ -1,5 +1,0 @@
-loaded 1.6836865790000104
-03 chunk 0 {'text': '你真的准备好了吗？等一下，先别急着按开始。我们再检查一次声音，好吗？嗯，这次听起来清楚多了，可以开始了。', 'seed': 20261317, 'speed': 1.0, 'framesIncludingReference': 1855, 'seconds': 226.08687529499997, 'audioSeconds': 11.050666666666666}
-COMPLETE 03 226.09 s, audio 11.050666666666666 s, peak 0.7696024775505066
-04 chunk 0 {'text': '成功了！我们终于完成了第一个作品！从最初的一个小想法，到现在看得见、听得到的成果，每一步都值得记住。谢谢一直坚持的你！', 'seed': 20261417, 'speed': 1.0, 'framesIncludingReference': 1995, 'seconds': 241.869626708, 'audioSeconds': 12.544}
-COMPLETE 04 241.87 s, audio 12.544 s, peak 0.8016977310180664

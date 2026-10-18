@@ -337,6 +337,32 @@ class NativeSpeechDeviceTests(unittest.TestCase):
         self.assertIn("stage=writing", quiet.stdout)
 
 
+class NativeSmokeSampleTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('rustc'), 'Requires the native text compiler')
+    def test_fixed_smoke_samples_match_the_actual_native_normalizer(self):
+        self.assertEqual([sample['id'] for sample in smoke.SMOKE_SAMPLES], ['01', '09'])
+        self.assertIn('Open Media', smoke.SMOKE_SAMPLES[0]['text'])
+        self.assertIn('80%', smoke.SMOKE_SAMPLES[1]['text'])
+        with tempfile.TemporaryDirectory(prefix='speech-smoke-text-') as temporary:
+            directory = Path(temporary)
+            executable = directory / ('normalizer.exe' if os.name == 'nt' else 'normalizer')
+            command = [shutil.which('rustc'), '--edition=2021']
+            if os.name == 'nt':
+                compiler = shutil.which('cl.exe')
+                linker = Path(compiler).with_name('link.exe') if compiler else None
+                if not linker or not linker.is_file():
+                    self.skipTest('Requires the native compiler developer environment')
+                command += ['-C', f'linker={linker}']
+            compiled = subprocess.run([*command, ROOT / 'scripts/speech-chinese-smoke.rs', '-o', executable],
+                                      capture_output=True, text=True, timeout=120)
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            for sample in smoke.SMOKE_SAMPLES:
+                source, output = directory / '中文 原文.txt', directory / '中文 规范化.txt'
+                source.write_text(sample['text'], encoding='utf-8')
+                subprocess.run([executable, source, output], check=True, timeout=20)
+                self.assertEqual(output.read_text(encoding='utf-8'), sample['normalized_text'])
+
+
 class NativeVerificationTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="speech-verify-test-")

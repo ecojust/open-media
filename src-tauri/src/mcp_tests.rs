@@ -99,6 +99,278 @@ fn rpc(id: u64, method: &str, params: Value) -> String {
     json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string()
 }
 
+fn persistent_client(status: &McpStatus) -> TcpStream {
+    let stream = TcpStream::connect(("127.0.0.1", status.port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+}
+
+fn send_persistent(
+    stream: &mut TcpStream,
+    status: &McpStatus,
+    token: &str,
+    body: &str,
+    extra: &str,
+) {
+    let message = format!("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{extra}\r\n{body}", status.port, body.len());
+    stream.write_all(message.as_bytes()).unwrap();
+}
+
+fn expect_clients(manager: &McpManager, expected: usize) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let status = manager.status();
+        if status.connected_clients == expected {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "expected {expected} connected clients, got {}",
+            status.connected_clients
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn expect_peer_closed(mut stream: TcpStream) {
+    match stream.read(&mut [0_u8; 1]) {
+        Ok(0) => (),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::ConnectionReset | io::ErrorKind::ConnectionAborted
+            ) =>
+        {
+            ()
+        }
+        other => panic!("expected a closed idle connection, got {other:?}"),
+    }
+}
+
+#[test]
+fn connected_clients_requires_authenticated_valid_mcp_and_tracks_open_sockets() {
+    let (_directory, manager) = fixture();
+    assert_eq!(manager.status().connected_clients, 0);
+    assert_eq!(
+        serde_json::to_value(manager.status()).unwrap()["connectedClients"],
+        0
+    );
+    let status = start(&manager, Arc::new(|_| panic!("unexpected editor dispatch")));
+    let token = manager.config().token;
+    assert_eq!(status.connected_clients, 0);
+    let probe = persistent_client(&status);
+    expect_clients(&manager, 0);
+
+    for (supplied, body, extra, code) in [
+        ("invalid", rpc(1, "ping", json!({})), "", 401),
+        (
+            token.as_str(),
+            rpc(1, "ping", json!({})),
+            "Origin: https://untrusted.example\r\n",
+            403,
+        ),
+        (token.as_str(), "{".into(), "", 400),
+        (token.as_str(), "[]".into(), "", 200),
+        (token.as_str(), rpc(1, "unknown", json!({})), "", 200),
+        (
+            token.as_str(),
+            rpc(1, "tools/call", json!({"name":"unknown"})),
+            "",
+            200,
+        ),
+        (
+            token.as_str(),
+            rpc(
+                1,
+                "tools/call",
+                json!({"name":"open_media_echo","arguments":[]}),
+            ),
+            "",
+            200,
+        ),
+        (
+            token.as_str(),
+            json!({"jsonrpc":"2.0","method":"notifications/unknown"}).to_string(),
+            "",
+            202,
+        ),
+    ] {
+        let mut rejected = persistent_client(&status);
+        send_persistent(&mut rejected, &status, supplied, &body, extra);
+        let (http, response) = read_response(&mut rejected).unwrap();
+        assert_eq!(http, code);
+        if http == 200 {
+            assert!(serde_json::from_str::<Value>(&response).unwrap()["error"].is_object());
+        }
+        assert_eq!(manager.status().connected_clients, 0);
+    }
+
+    let mut first = persistent_client(&status);
+    let initialize = rpc(
+        1,
+        "initialize",
+        json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test-client","version":"1"}}),
+    );
+    send_persistent(&mut first, &status, &token, &initialize, "");
+    assert_eq!(read_response(&mut first).unwrap().0, 200);
+    expect_clients(&manager, 1);
+    for method in ["ping", "tools/list"] {
+        send_persistent(&mut first, &status, &token, &rpc(2, method, json!({})), "");
+        assert_eq!(read_response(&mut first).unwrap().0, 200);
+        assert_eq!(manager.status().connected_clients, 1);
+    }
+
+    let mut second = persistent_client(&status);
+    send_persistent(
+        &mut second,
+        &status,
+        &token,
+        &json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string(),
+        "",
+    );
+    assert_eq!(read_response(&mut second).unwrap().0, 202);
+    expect_clients(&manager, 2);
+    drop(probe);
+    drop(first);
+    expect_clients(&manager, 1);
+
+    send_persistent(
+        &mut second,
+        &status,
+        &token,
+        &rpc(3, "ping", json!({})),
+        "Connection: close\r\n",
+    );
+    assert_eq!(read_response(&mut second).unwrap().0, 200);
+    expect_clients(&manager, 0);
+    expect_peer_closed(second);
+    manager.stop();
+}
+
+#[test]
+fn client_count_resets_on_stop_and_old_connections_cannot_affect_restart() {
+    let (_directory, manager) = fixture();
+    let status = start(&manager, Arc::new(|_| Ok(())));
+    let token = manager.config().token;
+    let mut old = persistent_client(&status);
+    send_persistent(&mut old, &status, &token, &rpc(1, "ping", json!({})), "");
+    assert_eq!(read_response(&mut old).unwrap().0, 200);
+    expect_clients(&manager, 1);
+    let stopped = manager.stop();
+    assert!(!stopped.running);
+    assert_eq!(stopped.connected_clients, 0);
+
+    let restarted = manager
+        .start(manager.config(), catalog(), Arc::new(|_| Ok(())))
+        .unwrap();
+    assert_eq!(restarted.connected_clients, 0);
+    let mut current = persistent_client(&restarted);
+    send_persistent(
+        &mut current,
+        &restarted,
+        &token,
+        &rpc(1, "ping", json!({})),
+        "",
+    );
+    assert_eq!(read_response(&mut current).unwrap().0, 200);
+    expect_clients(&manager, 1);
+    expect_peer_closed(old);
+    assert_eq!(manager.status().connected_clients, 1);
+    drop(current);
+    expect_clients(&manager, 0);
+    manager.stop();
+}
+
+#[test]
+fn keepalive_idle_deadline_resets_after_each_completed_request() {
+    let (_directory, mut manager) = fixture();
+    let idle_timeout = Duration::from_millis(500);
+    Arc::get_mut(&mut manager.0)
+        .unwrap()
+        .connection_idle_timeout = idle_timeout;
+    let status = start(&manager, Arc::new(|_| Ok(())));
+    let token = manager.config().token;
+    let mut client = persistent_client(&status);
+    let began = Instant::now();
+    let mut id = 0;
+    while began.elapsed() < idle_timeout * 3 {
+        id += 1;
+        send_persistent(
+            &mut client,
+            &status,
+            &token,
+            &rpc(id, "ping", json!({})),
+            "",
+        );
+        let (http, body) = read_response(&mut client).unwrap();
+        assert_eq!(http, 200);
+        assert_eq!(serde_json::from_str::<Value>(&body).unwrap()["id"], id);
+        assert_eq!(manager.status().connected_clients, 1);
+        thread::sleep(Duration::from_millis(80));
+    }
+    assert!(id > 1);
+    // No more requests: the transport and its connection indicator both expire.
+    expect_clients(&manager, 0);
+    expect_peer_closed(client);
+    manager.stop();
+}
+
+#[test]
+fn idle_deadline_does_not_interrupt_an_active_tool_request() {
+    let (_directory, mut manager) = fixture();
+    let idle_timeout = Duration::from_millis(300);
+    Arc::get_mut(&mut manager.0)
+        .unwrap()
+        .connection_idle_timeout = idle_timeout;
+    let (send, receive) = std::sync::mpsc::channel();
+    let status = start(
+        &manager,
+        Arc::new(move |request| {
+            send.send(request.id).unwrap();
+            Ok(())
+        }),
+    );
+    let token = manager.config().token;
+    let mut client = persistent_client(&status);
+    send_persistent(
+        &mut client,
+        &status,
+        &token,
+        &rpc(1, "tools/call", json!({"name":"open_media_echo"})),
+        "",
+    );
+    let id = receive.recv_timeout(Duration::from_secs(3)).unwrap();
+    expect_clients(&manager, 1);
+    thread::sleep(idle_timeout * 2);
+    assert_eq!(manager.status().connected_clients, 1);
+    assert!(manager.claim(&id));
+    assert!(manager.complete(&id, json!({"finished":true}), false));
+    let (http, body) = read_response(&mut client).unwrap();
+    assert_eq!(http, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&body).unwrap()["result"]["structuredContent"]["finished"],
+        true
+    );
+    assert_eq!(manager.status().connected_clients, 1);
+    // Disconnecting while a later tool waits for the editor must also release
+    // the transport count and cancel that request, without waiting 30 seconds.
+    send_persistent(
+        &mut client,
+        &status,
+        &token,
+        &rpc(2, "tools/call", json!({"name":"open_media_echo"})),
+        "",
+    );
+    let abandoned = receive.recv_timeout(Duration::from_secs(3)).unwrap();
+    drop(client);
+    expect_clients(&manager, 0);
+    assert!(!manager.claim(&abandoned));
+    assert!(manager.pending().is_empty());
+    manager.stop();
+}
+
 #[test]
 fn http_client_accepts_complete_frames_but_rejects_truncated_responses() {
     struct ResetAfterBytes(io::Cursor<Vec<u8>>);
@@ -166,6 +438,194 @@ fn settings_persist_private_token_without_auto_start() {
             0o600
         );
     }
+}
+
+#[test]
+fn occupied_default_port_falls_back_and_persists_the_reusable_listener() {
+    let (directory, manager) = fixture();
+    let initial = manager.config();
+    assert_eq!(initial.port, 39861);
+    let default_owner = match TcpListener::bind(("127.0.0.1", initial.port)) {
+        Ok(listener) => Some(listener),
+        Err(error) if error.kind() == io::ErrorKind::AddrInUse => None,
+        Err(error) => panic!("cannot establish the occupied default-port precondition: {error}"),
+    };
+    let first = manager
+        .start(initial.clone(), catalog(), Arc::new(|_| Ok(())))
+        .unwrap();
+    assert!(first.running);
+    assert_ne!(first.port, 0);
+    // An unrelated owner may release its port before start; only our own held
+    // socket guarantees it remains occupied for the entire assertion window.
+    if default_owner.is_some() {
+        assert_ne!(first.port, initial.port);
+    }
+    assert_eq!(
+        first.url,
+        Some(format!("http://127.0.0.1:{}/mcp", first.port))
+    );
+    assert_eq!(manager.config().port, first.port);
+    assert_eq!(manager.config().token, initial.token);
+    assert!(
+        TcpListener::bind(("127.0.0.1", first.port)).is_err(),
+        "the chosen socket must remain reserved"
+    );
+    let saved = fs::read(directory.path().join("mcp.json")).unwrap();
+    let persisted: McpConfig = serde_json::from_slice(&saved).unwrap();
+    assert_eq!(persisted.port, first.port);
+    assert_eq!(persisted.token, initial.token);
+    assert!(manager
+        .start(manager.config(), catalog(), Arc::new(|_| Ok(())))
+        .is_err());
+    assert_eq!(manager.status().port, first.port);
+    assert_eq!(fs::read(directory.path().join("mcp.json")).unwrap(), saved);
+    manager.stop();
+    drop(manager);
+
+    let restored = McpManager::new(directory.path().join("mcp.json")).unwrap();
+    assert_eq!(restored.config().port, first.port);
+    let reused = restored
+        .start(restored.config(), catalog(), Arc::new(|_| Ok(())))
+        .unwrap();
+    assert_eq!(
+        reused.port, first.port,
+        "an available saved port should be reused after restarting the app"
+    );
+    restored.stop();
+
+    let selected_owner = TcpListener::bind(("127.0.0.1", reused.port)).unwrap();
+    let second = restored
+        .start(restored.config(), catalog(), Arc::new(|_| Ok(())))
+        .unwrap();
+    assert_ne!(second.port, first.port);
+    if default_owner.is_some() {
+        assert_ne!(second.port, initial.port);
+    }
+    assert_eq!(restored.config().port, second.port);
+    assert_eq!(restored.config().token, initial.token);
+    restored.stop();
+    drop(restored);
+    drop(selected_owner);
+    drop(default_owner);
+
+    let final_manager = McpManager::new(directory.path().join("mcp.json")).unwrap();
+    let final_status = final_manager
+        .start(final_manager.config(), catalog(), Arc::new(|_| Ok(())))
+        .unwrap();
+    assert_eq!(
+        final_status.port, second.port,
+        "freeing the default port must not reset the saved choice"
+    );
+    assert_eq!(
+        final_status.url,
+        Some(format!("http://127.0.0.1:{}/mcp", second.port))
+    );
+    let (status, reply) = request(
+        &final_status,
+        Some(&initial.token),
+        &rpc(1, "ping", json!({})),
+        "",
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&reply).unwrap()["result"],
+        json!({})
+    );
+    final_manager.stop();
+}
+
+#[test]
+fn zero_port_start_persists_the_assigned_port_and_keeps_the_token() {
+    let (directory, manager) = fixture();
+    let token = manager.config().token;
+    let status = start(&manager, Arc::new(|_| Ok(())));
+    assert_ne!(status.port, 0);
+    assert_eq!(manager.config().port, status.port);
+    assert_eq!(manager.config().token, token);
+    let saved: McpConfig =
+        serde_json::from_slice(&fs::read(directory.path().join("mcp.json")).unwrap()).unwrap();
+    assert_eq!(saved.port, status.port);
+    manager.stop();
+}
+
+#[test]
+fn unrelated_bind_failure_does_not_change_saved_config_or_start_service() {
+    let (directory, manager) = fixture();
+    let before = fs::read(directory.path().join("mcp.json")).unwrap();
+    let initial = manager.config();
+    let mut invalid = initial.clone();
+    invalid.host = "192.0.2.123".into();
+    invalid.token = "b".repeat(64);
+    assert!(manager
+        .start(invalid, catalog(), Arc::new(|_| Ok(())))
+        .is_err());
+    assert!(!manager.status().running);
+    assert!(manager.status().url.is_none());
+    assert_eq!(manager.config().host, initial.host);
+    assert_eq!(manager.config().port, initial.port);
+    assert_eq!(manager.config().token, initial.token);
+    assert_eq!(fs::read(directory.path().join("mcp.json")).unwrap(), before);
+}
+
+#[test]
+fn persistence_failure_closes_bound_socket_without_half_starting() {
+    let (directory, manager) = fixture();
+    let initial = manager.config();
+    let port_owner = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = port_owner.local_addr().unwrap().port();
+    drop(port_owner);
+    let path = directory.path().join("mcp.json");
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    let mut requested = initial.clone();
+    requested.port = port;
+    requested.token = "b".repeat(64);
+    let failure = manager
+        .start(requested, catalog(), Arc::new(|_| Ok(())))
+        .unwrap_err();
+    assert!(failure.contains("保存 MCP 配置"));
+    assert!(!manager.status().running);
+    assert!(manager.status().url.is_none());
+    assert!(manager.pending().is_empty());
+    assert_eq!(manager.config().port, initial.port);
+    assert_eq!(manager.config().token, initial.token);
+    assert!(path.is_dir());
+    let released =
+        TcpListener::bind(("127.0.0.1", port)).expect("failed startup must release its listener");
+    drop(released);
+    assert_eq!(
+        Arc::strong_count(&manager.0),
+        1,
+        "failed startup must join the unused worker"
+    );
+}
+
+#[test]
+fn another_port_is_only_selected_for_port_specific_bind_errors() {
+    assert!(can_choose_another_port(
+        &io::ErrorKind::AddrInUse.into(),
+        39861
+    ));
+    assert!(!can_choose_another_port(
+        &io::ErrorKind::AddrInUse.into(),
+        0
+    ));
+    assert!(!can_choose_another_port(
+        &io::ErrorKind::AddrNotAvailable.into(),
+        39861
+    ));
+    assert!(!can_choose_another_port(
+        &io::ErrorKind::PermissionDenied.into(),
+        39861
+    ));
+    assert!(!can_choose_another_port(
+        &io::ErrorKind::InvalidInput.into(),
+        39861
+    ));
+    assert_eq!(
+        can_choose_another_port(&io::Error::from_raw_os_error(10013), 39861),
+        cfg!(windows)
+    );
 }
 
 #[test]

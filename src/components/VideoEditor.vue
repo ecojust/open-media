@@ -3,6 +3,9 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Clip, MediaAsset, Project, Track, TrackKind } from '../core/types'
 import { cloneProject, createClip, createSubtitleClip, createTrack, MAX_PROJECT_DURATION, newId, validateProject } from '../core/project'
 import { projectSizeError, videoClipSourceSize } from '../core/project-size'
+import { addEditorAssetToTimeline, projectSourceAssets } from '../core/editor-assets'
+import { useStoredVideos } from '../core/stored-videos'
+import { videoAssetKey } from '../core/video-assets'
 import { isSubtitleClip } from '../core/subtitle-style'
 import { DEFAULT_SUBTITLE_TEXT, trackSubtitleIssues } from '../core/subtitle-validation'
 import { addClip, addTrack, applySubtitleStyleToTrack, clipDuration, clipEnd, deleteClip, duplicateClip, findClip, moveClip, projectDuration, removeTrack, reorderTrack, setTrack, splitClip, updateClip } from '../core/timeline'
@@ -11,6 +14,7 @@ import { planSpeech } from '../core/speech'
 import { voiceModelName } from '../core/voice-catalog'
 import { TimelinePreview } from '../core/preview'
 import Icon from './Icon.vue'
+import VideoLibraryToolbar from './VideoLibraryToolbar.vue'
 import SpeechPanel from './SpeechPanel.vue'
 import EditorDialog from './EditorDialog.vue'
 import TimelineDivider from './TimelineDivider.vue'
@@ -37,10 +41,10 @@ import type { VideoSegmentItem, VideoSegmentPlacement, VideoSegmentCaption } fro
 import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, updateTransition } from '../core/transitions'
 import type { TransitionEffect } from '../core/types'
 import { importMediaFile, mediaKind, revokeMediaAsset } from '../core/media-import'
-import { importBlobAsset, isDesktop } from '../native'
+import { importBlobAsset, isDesktop, prepareStoredVideoPreview } from '../native'
 import type { RecordedMicrophoneAudio } from '../core/microphone-recording'
 
-const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean; automationBusy?: boolean }>()
+const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean; automationBusy?: boolean; mcpConnected?: boolean }>()
 const emit = defineEmits<{ change: [project: Project, label?: string, historyGroup?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; openMcp: []; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const previewSelection = ref<InstanceType<typeof PreviewSelection> | null>(null)
@@ -57,14 +61,16 @@ const preparingPlayback = ref(false)
 const recordingPlayback = ref(false)
 const zoom = ref(44)
 const assetFilter = ref('all')
+const native = isDesktop()
+const assetSource = ref<'recordings' | 'imported'>(native ? 'recordings' : 'imported')
 const search = ref('')
 const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | null>(null)
 const modalOpen = computed(() => editorDialog.value !== null)
 const dialogReturnFocus = ref<HTMLElement | null>(null)
 const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
 const audioClipPlayer = ref<InstanceType<typeof AudioClipPlayer> | null>(null)
-const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false), segmentBusy = ref(false)
-const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value)
+const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false), segmentBusy = ref(false), sourceImportBusy = ref(false)
+const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value || sourceImportBusy.value)
 const editingBusy = computed(() => localEditingBusy.value || !!props.automationBusy)
 const watermarkError = ref(''), watermarkStart = ref(0)
 const watermarkFile = ref<HTMLInputElement>()
@@ -117,11 +123,17 @@ const ticks = computed(() => {
   const end = Math.min(Math.floor(timelineSeconds.value / tickStep.value), Math.ceil((timelineOffset.value + timelineViewport.value) / zoom.value / tickStep.value) + 2)
   return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => (start + index) * tickStep.value)
 })
-const assets = computed(() => activeProject.value.assets.filter(asset => (assetFilter.value === 'all' || asset.kind === assetFilter.value) && asset.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
+const projectSources = computed(() => projectSourceAssets(activeProject.value))
+const projectAssetIds = computed(() => new Set(activeProject.value.assets.map(asset => asset.id)))
+const { recordings, directory: recordingDirectory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, refresh: refreshRecordings, reveal: revealRecordingDirectory } = useStoredVideos(() => projectSources.value, () => native)
+const recordingKeys = computed(() => new Set(recordings.value.map(videoAssetKey)))
+const importedSources = computed(() => projectSources.value.filter(asset => !recordingKeys.value.has(videoAssetKey(asset))))
+const sourceAssets = computed(() => assetSource.value === 'recordings' ? recordings.value : importedSources.value)
+const assets = computed(() => sourceAssets.value.filter(asset => (assetSource.value === 'recordings' || assetFilter.value === 'all' || asset.kind === assetFilter.value) && asset.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
 const assetDateFormat = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
-const assetTimes = computed(() => new Map(activeProject.value.assets.filter(asset => asset.addedAt).map(asset => {
+const assetTimes = computed(() => new Map(sourceAssets.value.filter(asset => asset.addedAt).map(asset => {
   const date = new Date(asset.addedAt!)
-  return [asset.id, { short: assetDateFormat.format(date).replace('/', '-'), full: `加入时间：${generatedDateFormat.format(date)}` }]
+  return [asset.id, { short: assetDateFormat.format(date).replace('/', '-'), full: `${assetSource.value === 'recordings' ? '录屏文件时间' : '加入时间'}：${generatedDateFormat.format(date)}` }]
 })))
 const ratio = computed(() => `${activeProject.value.width} / ${activeProject.value.height}`)
 const selectedLocked = computed(() => selected.value?.track.locked || false)
@@ -168,6 +180,7 @@ const selectedSupportsFilters = computed(() => {
 })
 watch(selectedSupportsFilters, supported => { if (!supported) inspectorTab.value = 'properties' })
 let editorDestroyed = false
+let sourceImportGeneration = 0
 const recordedAssets = new Map<RecordedMicrophoneAudio, MediaAsset>()
 let preview: TimelinePreview | undefined
 let frame = 0
@@ -338,6 +351,7 @@ async function insertSegment(source: VideoSegmentItem | File, placement: VideoSe
       asset = isDesktop()
         ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
         : await importMediaFile(new File([blob], name, { type: blob.type || 'video/mp4' }))
+      if (material) asset = { ...asset, libraryRole: 'video-segment' }
       created = true
       checkCurrent()
     }
@@ -447,6 +461,7 @@ async function insertBackgroundMusic(source: BackgroundMusicItem | File): Promis
       asset = isDesktop()
         ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
         : await importMediaFile(new File([blob], name, { type: blob.type || 'audio/mpeg' }))
+      if (material) asset = { ...asset, libraryRole: 'background-music' }
       created = true
       checkCurrent()
       if (asset.kind !== 'audio') throw new Error('这个文件不包含可用的纯音频，请选择音频文件。')
@@ -528,6 +543,7 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
       asset = desktop
         ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
         : await importMediaFile(new File([blob], name, { type: blob.type }))
+      if (material) asset = { ...asset, libraryRole: 'watermark' }
       if (stale()) return
       result = addWatermark(props.project, asset, start, { placement: material?.placement ?? 'bottom-right', chromaKey: material?.chromaKey ?? removeGreen, spillSuppression: material?.spillSuppression })
       emit('prepared-asset', asset, blob)
@@ -928,16 +944,29 @@ async function setPlayback(patch: Partial<EditorPlayback>): Promise<EditorPlayba
   }
   return getPlayback()
 }
-function addAssetToTimeline(asset: MediaAsset, targetTrackId?: string, time = playhead.value): void {
-  commit(() => {
-    let project = props.project
-    let track = targetTrackId ? project.tracks.find(item => item.id === targetTrackId) : project.tracks.find(item => item.kind === (asset.kind === 'audio' ? 'audio' : 'video') && !item.locked)
-    if (!track) { track = createTrack(asset.kind === 'audio' ? 'audio' : 'video'); project = addTrack(project, track) }
-    const clip = createClip(asset, project, { start: Math.max(0, time) })
-    selectedId.value = clip.id
-    return addClip(project, track.id, clip)
-  }, '添加素材到时间线')
+async function addAssetToTimeline(asset: MediaAsset, targetTrackId?: string, time = playhead.value): Promise<void> {
+  if (editingBusy.value || props.exportDisabled || pendingTrackDelete.value) return
+  const original = props.project, generation = ++sourceImportGeneration
+  const existing = original.assets.find(item => videoAssetKey(item) === videoAssetKey(asset))
+  pause()
+  sourceImportBusy.value = true
+  emit('busy', localEditingBusy.value)
+  try {
+    const prepared = native && asset.nativePath && !existing ? await prepareStoredVideoPreview(asset) : asset
+    if (editorDestroyed || generation !== sourceImportGeneration) return
+    if (props.project !== original) throw new Error('项目已变化，请重新添加所选素材。')
+    const result = addEditorAssetToTimeline(original, prepared, { trackId: targetTrackId, start: Math.max(0, time) })
+    emit('change', result.project, '添加素材到时间线')
+    await nextTick()
+    if (editorDestroyed || generation !== sourceImportGeneration) return
+    if (!findClip(props.project, result.clipId)) throw new Error('素材未能加入项目，请重试。')
+    selectedId.value = result.clipId
+    preview?.seek(playhead.value, false)
+  } catch (cause) { if (!editorDestroyed && generation === sourceImportGeneration) message(cause) }
+  finally { if (generation === sourceImportGeneration) { sourceImportBusy.value = false; emit('busy', localEditingBusy.value) } }
 }
+function importEditorAssets(files?: File[]): void { if (files && !files.length) return; assetSource.value = 'imported'; emit('import', files) }
+function cancelSourceImport(): void { sourceImportGeneration++; if (sourceImportBusy.value) { sourceImportBusy.value = false; emit('busy', localEditingBusy.value) } }
 function addText(): void {
   commit(() => {
     let project = props.project
@@ -1098,12 +1127,12 @@ function onDrop(event: DragEvent, track: Track): void {
   event.preventDefault()
   if (editingBusy.value || track.locked || track.kind === 'transition' || pendingTrackDelete.value) return
   const assetId = event.dataTransfer?.getData('application/x-open-media-asset')
-  const asset = props.project.assets.find(item => item.id === assetId)
+  const asset = recordings.value.find(item => item.id === assetId) ?? props.project.assets.find(item => item.id === assetId)
   if (asset) {
     const row = event.currentTarget as HTMLElement
     const time = Math.max(0, (event.clientX - row.getBoundingClientRect().left) / zoom.value)
     addAssetToTimeline(asset, track.id, Math.round(time * props.project.fps) / props.project.fps)
-  } else if (event.dataTransfer?.files.length) emit('import', [...event.dataTransfer.files])
+  } else if (event.dataTransfer?.files.length) importEditorAssets([...event.dataTransfer.files])
 }
 function setPlayheadFromPointer(event: PointerEvent): void {
   if (event.button !== 0 || editingBusy.value || pendingTrackDelete.value || trackDrag || (event.target as HTMLElement).closest('.timeline-clip')) return
@@ -1218,7 +1247,7 @@ watch(() => props.project, project => {
   if (clipMenu.value && !findClip(project, clipMenu.value.clipId)) closeMenus()
   if (trackMenu.value && !project.tracks.some(track => track.id === trackMenu.value?.trackId)) closeMenus()
 })
-watch(() => props.project.id, () => { cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); musicAssets.clear(); segmentAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
+watch(() => props.project.id, () => { cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); musicAssets.clear(); segmentAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
 watch([editingBusy, modalOpen, () => props.exportDisabled], values => { if (values.some(Boolean)) { cancelTrackDrag(); cancelPreviewPosition() } }, { flush: 'sync' })
 watch(() => props.automationBusy, busy => { if (busy) { pause(); cancelGesture(); closeMenus() } }, { flush: 'sync' })
 watch(selectedId, () => { cancelPreviewPosition(); clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
@@ -1249,7 +1278,7 @@ function cancelSegmentImport(): void {
   segmentAbort = undefined
   if (segmentBusy.value) { segmentBusy.value = false; emit('busy', localEditingBusy.value) }
 }
-onBeforeUnmount(() => { editorDestroyed = true; cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
+onBeforeUnmount(() => { editorDestroyed = true; cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
 defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayback, getInteractionBusy })
 </script>
 
@@ -1257,27 +1286,29 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
   <section ref="editorRoot" class="video-editor" data-testid="video-editor" :inert="pendingTrackDelete ? true : undefined">
     <div class="editor-tools">
       <div class="tool-group" :inert="editingBusy || undefined">
-        <button class="editor-primary" title="导入素材" aria-label="导入素材" @click="emit('import')"><Icon name="import" :size="16" /><span>导入素材</span></button>
+        <button class="editor-primary" title="导入素材" aria-label="导入素材" @click="importEditorAssets()"><Icon name="import" :size="16" /><span>导入素材</span></button>
         <button title="文字转语音" aria-label="文字转语音" :class="{ 'editor-primary': editorDialog === 'speech' }" @click="openSpeech"><Icon name="audio" :size="16" /><span>配音</span></button>
       </div>
       <div class="editor-output-actions">
+        <button class="mcp-service-button" :class="{ connected: mcpConnected }" :title="mcpConnected ? 'MCP 服务 · 客户端已连接' : 'MCP 服务 · 暂无客户端连接'" :aria-label="mcpConnected ? 'MCP 服务，客户端已连接' : 'MCP 服务，暂无客户端连接'" aria-haspopup="dialog" data-testid="editor-mcp-open" @click="emit('openMcp')"><Icon name="mcp" :size="18" /></button>
         <button class="project-settings-button" title="项目设置" aria-label="项目设置" aria-haspopup="dialog" :disabled="editingBusy" @click="openEditorDialog('project')"><Icon name="settings" :size="18" /></button>
         <button class="editor-export" data-testid="export-project" :disabled="!duration || exportDisabled || editingBusy" @click="pause(); emit('export')"><Icon name="export" :size="16" />导出视频</button>
-        <button class="mcp-service-button mcp-compact-entry" title="MCP 服务" aria-label="MCP 服务" aria-haspopup="dialog" data-testid="editor-mcp-open-compact" @click="emit('openMcp')"><Icon name="mcp" :size="18" /></button>
       </div>
     </div>
     <div class="editor-main">
       <aside class="asset-panel" :inert="editingBusy || undefined">
-        <header><strong>项目素材</strong><span class="count">{{ project.assets.length }}</span><button title="导入素材" @click="emit('import')"><Icon name="plus" :size="16" /></button></header>
+        <header><strong>项目素材</strong><span class="count">{{ sourceAssets.length }}</span><button title="导入素材" @click="importEditorAssets()"><Icon name="plus" :size="16" /></button></header>
+        <div v-if="native" class="asset-source-tabs" aria-label="素材来源"><button :aria-pressed="assetSource === 'recordings'" @click="assetSource = 'recordings'">录屏</button><button :aria-pressed="assetSource === 'imported'" @click="assetSource = 'imported'">已导入</button></div>
+        <VideoLibraryToolbar v-if="native && assetSource === 'recordings'" description="仅显示录屏文件 · 最近录屏在前" :directory="recordingDirectory" :loading="libraryLoading" :preparing="sourceImportBusy" :error="libraryError" :warnings="libraryWarnings" :disabled="editingBusy" @refresh="refreshRecordings" @reveal="revealRecordingDirectory" />
         <div class="asset-search"><input v-model="search" aria-label="搜索素材" placeholder="搜索素材" /></div>
-        <div class="asset-filters" aria-label="素材类型"><button v-for="filter in [{ key: 'all', label: '全部' }, { key: 'video', label: '视频' }, { key: 'audio', label: '音频' }, { key: 'image', label: '图片' }]" :key="filter.key" :class="{ active: assetFilter === filter.key }" @click="assetFilter = filter.key">{{ filter.label }}</button></div>
-        <div class="asset-list" @dragover.prevent @drop.prevent="emit('import', [...($event.dataTransfer?.files || [])])">
-          <button v-for="asset in assets" :key="asset.id" class="asset-card" draggable="true" :title="`${asset.name} · ${assetTimes.get(asset.id)?.full || '加入时间未记录'} · 双击添加到播放头位置`" @dragstart="onAssetDrag($event, asset)" @dblclick="addAssetToTimeline(asset)" @keydown.enter.prevent="addAssetToTimeline(asset)">
-            <div class="asset-thumb" :class="asset.kind"><img v-if="asset.kind === 'image'" :src="asset.url" alt="" /><video v-else-if="asset.kind === 'video'" :src="asset.url" preload="metadata" muted /><Icon v-else name="audio" :size="28" /><span v-if="asset.duration">{{ formatTime(asset.duration) }}</span></div>
+        <div v-if="assetSource === 'imported'" class="asset-filters" aria-label="素材类型"><button v-for="filter in [{ key: 'all', label: '全部' }, { key: 'video', label: '视频' }, { key: 'audio', label: '音频' }, { key: 'image', label: '图片' }]" :key="filter.key" :class="{ active: assetFilter === filter.key }" @click="assetFilter = filter.key">{{ filter.label }}</button></div>
+        <div class="asset-list" @dragover.prevent @drop.prevent="importEditorAssets([...($event.dataTransfer?.files || [])])">
+          <button v-for="asset in assets" :key="asset.id" class="asset-card" :data-source-asset-id="asset.id" draggable="true" :title="`${asset.name} · ${assetTimes.get(asset.id)?.full || '加入时间未记录'} · 双击添加到播放头位置`" @dragstart="onAssetDrag($event, asset)" @dblclick="addAssetToTimeline(asset)" @keydown.enter.prevent="addAssetToTimeline(asset)">
+            <div class="asset-thumb" :class="asset.kind"><img v-if="asset.kind === 'image'" :src="asset.url" alt="" /><video v-else-if="asset.kind === 'video' && (assetSource !== 'recordings' || projectAssetIds.has(asset.id))" :src="asset.url" preload="metadata" muted /><Icon v-else :name="asset.kind === 'video' ? 'video' : 'audio'" :size="28" /><span v-if="asset.duration">{{ formatTime(asset.duration) }}</span></div>
             <span class="asset-name">{{ asset.name }}</span><span class="asset-meta">{{ asset.kind === 'audio' ? '音频素材' : `${asset.width} × ${asset.height}` }}</span>
             <time class="asset-added-time" :datetime="asset.addedAt" :title="assetTimes.get(asset.id)?.full || '旧项目未记录素材加入时间'">{{ assetTimes.get(asset.id)?.short || '时间未记录' }}</time>
           </button>
-          <div v-if="!assets.length" class="asset-empty"><Icon name="import" :size="28" /><strong>{{ project.assets.length ? '没有匹配的素材' : '把灵感带进来' }}</strong><span>导入视频、图片或音乐<br />拖入时间线即可开始剪辑</span><button v-if="!project.assets.length" @click="emit('import')">选择素材</button></div>
+          <div v-if="!assets.length" class="asset-empty"><Icon name="import" :size="28" /><strong>{{ sourceAssets.length ? '没有匹配的素材' : assetSource === 'recordings' ? libraryLoading ? '正在读取录屏…' : '暂无录屏文件' : '把灵感带进来' }}</strong><span>{{ assetSource === 'recordings' ? '录屏完成后会显示在这里' : '导入视频、图片或音频，拖入时间线开始剪辑' }}</span><button v-if="!sourceAssets.length" @click="importEditorAssets()">导入素材</button></div>
         </div>
         <footer>双击素材添加 · 拖动调整位置</footer>
       </aside>
@@ -1309,7 +1340,6 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
             <button id="clip-filters-tab" type="button" role="tab" :aria-selected="inspectorTab === 'filters'" aria-controls="clip-filters-panel" :tabindex="inspectorTab === 'filters' ? 0 : -1" @click="inspectorTab = 'filters'"><Icon name="sun" :size="14" />滤镜</button>
           </div>
           <span v-else>片段属性</span>
-          <button class="mcp-service-button mcp-inspector-entry" title="MCP 服务" aria-label="MCP 服务" aria-haspopup="dialog" data-testid="editor-mcp-open" @click="emit('openMcp')"><Icon name="mcp" :size="18" /></button>
         </header>
         <div v-if="selected" class="property-content" :inert="editingBusy && !selectedSpeechBusy || undefined">
           <div class="selected-heading"><Icon :name="selected.track.kind === 'text' ? 'text' : selected.track.kind === 'audio' ? 'audio' : selected.track.kind === 'transition' ? 'transition' : 'video'" :size="16" /><strong>{{ selected.clip.name }}</strong><span v-if="selectedLocked">已锁定</span></div>
@@ -1448,7 +1478,9 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
 </template>
 
 <style scoped>
-.mcp-service-button{width:29px;flex:none;padding:4px;color:var(--ed-muted)}.mcp-inspector-entry{margin-left:auto}.mcp-compact-entry{display:none}@media(max-width:860px){.mcp-inspector-entry{display:none}.mcp-compact-entry{display:inline-flex}}
+.asset-source-tabs{display:flex;gap:4px;padding:0 12px 9px;flex-shrink:0}.asset-source-tabs button{flex:1;font-size:11px;border:1px solid var(--ed-border);color:var(--ed-muted)}.asset-source-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--ed-accent) 10%,transparent);color:var(--ed-accent);border-color:color-mix(in srgb,var(--ed-accent) 35%,var(--ed-border))}.asset-panel>.video-library-toolbar{margin:0 12px 9px;max-height:180px;overflow:auto}
+
+.mcp-service-button{width:32px;height:32px;flex:none;padding:6px;color:var(--ed-text)}.editor-output-actions>.mcp-service-button.connected{border-color:transparent;background:linear-gradient(var(--ed-panel),var(--ed-panel)) padding-box,linear-gradient(110deg,#06b6d4,#8b5cf6,#06b6d4,#8b5cf6,#06b6d4) border-box;background-size:100% 100%,400% 100%;background-position:0 0,0% 50%;box-shadow:0 0 7px #06b6d438,0 0 12px #8b5cf626;animation:mcp-connection-flow 4s linear infinite}.mcp-service-button.connected>svg{filter:drop-shadow(0 0 2px #22d3ee42)}@keyframes mcp-connection-flow{to{background-position:0 0,100% 50%}}@media(prefers-reduced-motion:reduce){.editor-output-actions>.mcp-service-button.connected{animation:none;background-position:0 0,50% 50%}}
 .transition-properties{margin-top:12px}.timeline-clip.transition{background:color-mix(in srgb,var(--ed-accent) 18%,var(--ed-panel));border-color:color-mix(in srgb,var(--ed-accent) 45%,var(--ed-border));cursor:pointer}.timeline-clip.transition::after{content:"";position:absolute;top:0;bottom:0;left:50%;border-left:1px dashed currentColor;opacity:.35;pointer-events:none}
 
 .clip-speech-progress{grid-column:1/-1;display:grid;gap:3px;color:var(--ed-muted);font-size:10px;line-height:1.6;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}

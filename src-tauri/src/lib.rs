@@ -11,6 +11,8 @@ pub mod clip_filters;
 pub mod chroma_key;
 pub mod preview;
 pub mod project_files;
+mod media_metadata;
+pub mod video_library;
 pub mod mcp;
 pub mod mcp_files;
 #[cfg(any(feature = "desktop", test))]
@@ -26,6 +28,8 @@ pub mod screenshot_shortcut;
 pub mod recording_controls;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod recording_store_tests;
 
 #[cfg(feature = "desktop")]
 mod desktop {
@@ -39,6 +43,7 @@ mod desktop {
         preview::{self, PreviewResult},
         project_files::{self, ProjectFile, ProjectFiles, ProjectTarget},
         mcp::{McpConfig, McpManager, McpRequest, McpStatus},
+        video_library::{StoredVideos, VideoLibrary},
         image_clipboard::{self, ImageClipboard},
         recording_controls::{ControlsAction, ControlsManager, ControlsSnapshot},
         speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
@@ -60,6 +65,7 @@ mod desktop {
         runtime: Arc<Mutex<engine::Result<Runtime>>>,
         store: MediaStore,
         jobs: JobManager,
+        video_library: VideoLibrary,
         speech: SpeechManager,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
@@ -197,6 +203,28 @@ mod desktop {
         Runtime::status(&state.runtime.lock().unwrap())
     }
     #[tauri::command]
+    pub async fn list_stored_videos(
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<StoredVideos> {
+        project_files::require_main_window(window.label())?;
+        let state = state.inner().clone();
+        blocking(move || {
+            state.video_library.list(&state.store.recording_store()?, &state.runtime()?)
+        }).await
+    }
+    #[tauri::command]
+    pub async fn open_media_library_directory(
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || {
+            crate::export_files::open_media_library_directory(&store.recording_store()?)
+        }).await
+    }
+    #[tauri::command]
     pub async fn select_runtime(
         app: tauri::AppHandle,
         state: State<'_, MediaState>,
@@ -314,7 +342,7 @@ mod desktop {
                 .ok_or("保存目录无效。")?
                 .canonicalize()
                 .map_err(|e| e.to_string())?;
-            if canonical_parent.starts_with(&state.store.root) {
+            if state.store.is_internal_path(&canonical_parent) {
                 return Err("请选择素材库以外的位置，避免覆盖原始素材。".into());
             }
             state.jobs.begin(&runtime, plan, output).map(Some)
@@ -785,6 +813,7 @@ mod desktop {
                     runtime: Arc::new(Mutex::new(runtime)),
                     store,
                     jobs: JobManager::default(),
+                    video_library: VideoLibrary::new(data.join("stored-recording-index.json")),
                     speech: SpeechManager::new(&data, &resource).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
@@ -831,6 +860,8 @@ mod desktop {
                 mcp_open_project_file,
                 mcp_begin_media_job,
                 get_runtime_status,
+                list_stored_videos,
+                open_media_library_directory,
                 select_runtime,
                 pick_media_assets,
                 import_blob_asset,

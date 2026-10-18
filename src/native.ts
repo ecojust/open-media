@@ -79,6 +79,17 @@ export async function getMediaJobs(): Promise<MediaJob[]> { return isDesktop() ?
 export async function cancelMediaJob(id: string): Promise<void> { return call('cancel_media_job', { id }) }
 export async function revealMediaJobOutput(id: string): Promise<void> { return call('reveal_media_job_output', { id }) }
 export async function revealMediaAsset(asset: MediaAsset): Promise<void> { return call('reveal_media_asset', { asset }) }
+export interface StoredVideoLibrary { directory: string; assets: MediaAsset[]; warnings: string[] }
+export async function listStoredVideos(): Promise<StoredVideoLibrary> {
+  const result = await call<{ directory: string; assets: (Omit<MediaAsset, 'addedAt'> & { addedAt: number })[]; warnings: string[] }>('list_stored_videos')
+  const { convertFileSrc } = await import('@tauri-apps/api/core')
+  return {
+    ...result,
+    assets: result.assets.map(asset => ({ ...asset, addedAt: Number.isFinite(asset.addedAt) ? new Date(asset.addedAt).toISOString() : undefined, url: convertFileSrc(asset.nativePath!) })),
+  }
+}
+export async function openMediaLibraryDirectory(): Promise<void> { return call('open_media_library_directory') }
+export async function prepareStoredVideoPreview(asset: MediaAsset): Promise<MediaAsset> { return ensureMediaPreview(asset, createMediaPreview) }
 export async function getSpeechStatus(): Promise<SpeechStatus> {
   return isDesktop() ? call('get_speech_status') : { ready: false, voices: [], error: '离线文字转语音由桌面端提供，安装包内含语音模型和音色。' }
 }

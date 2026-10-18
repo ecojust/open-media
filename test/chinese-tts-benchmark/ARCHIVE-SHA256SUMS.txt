@@ -1,2 +1,0 @@
-d0c9a4b1bca28e381d0d7ec042f883d9afebc7099923272ccda494a3bbe0548a  Open-Media-Chinese-TTS-Comparison.zip
-5063396599177c06da94120108f429c5a2f44da4f4afae13090c7d9dd1d33a25  Open-Media-Chinese-TTS-Raw-WAV.zip

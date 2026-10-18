@@ -25,6 +25,7 @@ async function installNativeContract(page) {
         state.calls.push({ command, args })
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_media_jobs') return []
+        if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
         if (command === 'plugin:event|listen') return 1
         if (command === 'plugin:event|unlisten') return null
         if (command === 'get_speech_status') return catalog()

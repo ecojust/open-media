@@ -1,7 +1,12 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 const { chromium, expect } = require('@playwright/test')
 
 async function main() {
+  const artifacts = process.env.BROWSER_ARTIFACTS ? path.join(process.env.BROWSER_ARTIFACTS, 'mcp-panel') : fs.mkdtempSync(path.join(os.tmpdir(), 'open-media-mcp-panel-'))
+  fs.mkdirSync(artifacts, { recursive: true })
   const { createServer } = await import('vite')
   const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
   await server.listen()
@@ -18,105 +23,193 @@ async function main() {
       const vueURL = source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
       const { createApp, h, ref } = await import(vueURL)
       const Panel = (await import('/src/components/McpPanel.vue')).default
-      const fixture = window.mcpFixture = { open: ref(true), native: ref(false), calls: [], events: [], clipboard: '', failStatus: false, failStart: false,
-        config: { host: '127.0.0.1', port: 39861, token: 'a'.repeat(64) }, running: false,
+      const fixture = window.mcpFixture = {
+        open: ref(true), native: ref(false), theme: ref('light'), calls: [], events: [], clipboard: '',
+        failStatus: false, failConfig: false, failStart: false, failClipboard: false, failConfigOnStart: false,
+        holdConfig: false, holdStart: false, holdStop: false,
+        config: { host: '127.0.0.1', port: 39861, token: 'a'.repeat(64) }, running: false, nextPort: 41239,
         jobs: ref([{ id: 'speech-1', name: '字幕转语音', state: 'running', progress: .47, stage: '第 2 / 5 段', cancelable: true }]),
       }
       const snapshot = () => ({ running: fixture.running, host: fixture.config.host, port: fixture.config.port,
-        url: fixture.running ? `http://${fixture.config.host === '0.0.0.0' ? '127.0.0.1' : fixture.config.host}:${fixture.config.port}/mcp` : null, pendingRequests: 0 })
-      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { fixture.clipboard = text } } })
+        url: fixture.running ? `http://${fixture.config.host}:${fixture.config.port}/mcp` : null, pendingRequests: 0 })
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => {
+        if (fixture.failClipboard) throw new Error('剪贴板访问被拒绝')
+        fixture.clipboard = text
+      } } })
       window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
         fixture.calls.push({ command, args })
-        if (command === 'mcp_get_config') return { ...fixture.config }
-        if (command === 'mcp_get_status') { if (fixture.failStatus) throw new Error('暂时无法访问'); return snapshot() }
-        if (command === 'mcp_save_config') {
-          if (fixture.running) throw new Error('服务运行中')
-          fixture.config = { ...args.config, token: args.config.token || 'b'.repeat(64) }; return { ...fixture.config }
+        if (command === 'mcp_get_config') {
+          if (fixture.failConfig) throw new Error('本机配置暂时不可读取')
+          if (fixture.holdConfig) return new Promise(resolve => {
+            const saved = { ...fixture.config }
+            fixture.releaseConfig = () => { fixture.holdConfig = false; resolve(saved) }
+          })
+          return { ...fixture.config }
         }
-        if (command === 'mcp_start') { if (fixture.failStart) throw new Error('端口已被占用'); fixture.running = true; return snapshot() }
+        if (command === 'mcp_get_status') { if (fixture.failStatus) throw new Error('暂时无法访问服务状态'); return snapshot() }
+        if (command === 'mcp_start') {
+          if (fixture.failStart) throw new Error('无法建立 MCP 监听')
+          const start = () => {
+            fixture.config.port = fixture.nextPort
+            fixture.running = true
+            if (fixture.failConfigOnStart) fixture.failConfig = true
+            return snapshot()
+          }
+          if (fixture.holdStart) return new Promise(resolve => { fixture.releaseStart = () => { fixture.holdStart = false; resolve(start()) } })
+          return start()
+        }
         if (command === 'mcp_stop') {
-          if (fixture.holdStop) return new Promise(resolve => { fixture.releaseStop = () => { fixture.running = false; resolve(snapshot()) } })
-          fixture.running = false; return snapshot()
+          const stop = () => { fixture.running = false; return snapshot() }
+          if (fixture.holdStop) return new Promise(resolve => { fixture.releaseStop = () => { fixture.holdStop = false; resolve(stop()) } })
+          return stop()
         }
         if (command === 'mcp_pending') return []
         if (command === 'mcp_claim') return args.id === 'request-1'
         if (command === 'mcp_complete') return args.id === 'request-1'
         throw new Error(`未知模拟命令 ${command}`)
       } }
-      fixture.app = createApp({ render: () => h(Panel, { open: fixture.open.value, native: fixture.native.value, jobs: fixture.jobs.value,
+      fixture.app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': fixture.theme.value }, h(Panel, {
+        open: fixture.open.value, native: fixture.native.value, jobs: fixture.jobs.value,
         onClose: () => { fixture.open.value = false }, onStatus: value => fixture.events.push(['status', value]),
         onServiceChange: value => fixture.events.push(['service', value]), onCancelJob: id => fixture.events.push(['cancel', id]),
-      }) })
+      })) })
       fixture.app.mount('#app')
     })
     const dialog = page.getByRole('dialog', { name: 'MCP 服务', exact: true })
+    const toggle = page.getByRole('switch', { name: 'MCP 服务开关', exact: true })
+    const copy = page.getByRole('button', { name: '复制配置', exact: true })
+    const address = page.getByLabel('MCP 连接地址', { exact: true })
+    const token = page.getByLabel('MCP Token', { exact: true })
     await expect(dialog).toContainText('MCP 服务由桌面端提供')
     assert.deepEqual(await page.evaluate(() => window.mcpFixture.calls), [], '网页模式不得调用原生服务')
-    await expect(page.getByTestId('mcp-start')).toHaveCount(0)
+    await expect(toggle).toHaveCount(0)
+    await expect(copy).toHaveCount(0)
+    await expect(dialog.locator('details, progress, pre')).toHaveCount(0)
     await page.evaluate(() => { window.mcpFixture.open.value = false })
     await expect(dialog).not.toBeVisible()
-    await page.evaluate(() => { window.mcpFixture.native.value = true; window.mcpFixture.open.value = true })
-    await expect(dialog).toContainText('服务已停止')
-    await expect(page.getByLabel('MCP 监听 IP', { exact: true })).toHaveValue('127.0.0.1')
-    await expect(page.getByLabel('MCP 端口', { exact: true })).toHaveValue('39861')
-    await expect(page.getByLabel('MCP Token', { exact: true })).toHaveAttribute('type', 'password')
-    await page.getByLabel('MCP 端口', { exact: true }).fill('65536')
-    await expect(page.getByTestId('mcp-start')).toBeDisabled()
-    await page.getByLabel('MCP 端口', { exact: true }).fill('40001')
-    await page.getByLabel('MCP Token', { exact: true }).fill('short')
-    await expect(page.getByTestId('mcp-start')).toBeDisabled()
-    await page.getByLabel('MCP Token', { exact: true }).fill('')
-    await page.getByLabel('MCP 监听 IP', { exact: true }).fill('0.0.0.0')
-    await page.getByTestId('mcp-start').click()
-    await expect(dialog).toContainText('服务运行中')
-    await expect(page.getByLabel('MCP 监听 IP', { exact: true })).toBeDisabled()
-    await expect(page.getByLabel('MCP 连接地址', { exact: true })).toHaveValue('http://127.0.0.1:40001/mcp')
-    await expect(dialog).toContainText('局域网 IP')
-    const mutationCommands = await page.evaluate(() => window.mcpFixture.calls.filter(call => ['mcp_start', 'mcp_save_config'].includes(call.command)))
-    assert.deepEqual(mutationCommands.map(call => call.command), ['mcp_save_config', 'mcp_start'])
-    assert.equal(mutationCommands[0].args.config.token, '')
-    await page.getByRole('button', { name: '复制 MCP 地址', exact: true }).click()
-    assert.equal(await page.evaluate(() => window.mcpFixture.clipboard), 'http://127.0.0.1:40001/mcp')
-    await dialog.locator('summary').filter({ hasText: '客户端配置' }).click()
-    await expect(page.getByTestId('mcp-client-config')).not.toContainText('b'.repeat(64))
-    await page.getByRole('button', { name: '复制配置（含 Token）', exact: true }).click()
+    await page.evaluate(() => { window.mcpFixture.native.value = true; window.mcpFixture.holdConfig = true; window.mcpFixture.open.value = true })
+    await expect(dialog).toContainText('正在读取…')
+    await expect(toggle).toBeDisabled()
+    await expect(copy).toBeDisabled()
+    assert.equal(await page.evaluate(() => window.mcpFixture.calls.some(call => call.command === 'mcp_start')), false, '打开设置不能自动启动服务')
+    await page.waitForFunction(() => typeof window.mcpFixture.releaseConfig === 'function')
+    await page.evaluate(() => window.mcpFixture.releaseConfig())
+    await expect(dialog).toContainText('未启动')
+    await expect(toggle).toBeEnabled()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await expect(copy).toBeDisabled()
+    await expect(address).toHaveValue('http://127.0.0.1:39861/mcp')
+    await expect(token).toHaveValue('a'.repeat(64))
+    await expect(token).toHaveAttribute('type', 'text')
+    await expect(dialog.locator('input')).toHaveCount(2)
+    assert.equal(await address.evaluate(input => input.readOnly), true)
+    assert.equal(await token.evaluate(input => input.readOnly), true)
+    await token.focus()
+    assert.deepEqual(await token.evaluate(input => [input.selectionStart, input.selectionEnd]), [0, 64], '只读Token可选中后手动复制')
+    await expect(page.getByLabel('MCP 监听 IP', { exact: true })).toHaveCount(0)
+    await expect(page.getByLabel('MCP 端口', { exact: true })).toHaveCount(0)
+    await expect(dialog.locator('details, progress, pre')).toHaveCount(0)
+    await expect(dialog).not.toContainText('自动化任务')
+    await expect(dialog).not.toContainText('开放的功能')
+    await expect(dialog).not.toHaveClass(/wide/)
+    const compact = await dialog.boundingBox()
+    assert(compact.width <= 480 && compact.height < 340, `MCP弹窗应保持紧凑：${JSON.stringify(compact)}`)
+    assert((await dialog.evaluate(element => getComputedStyle(element, '::backdrop').backdropFilter)).includes('blur'), '沿用统一毛玻璃遮罩')
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
+    await expect(copy).toBeEnabled()
+    await expect(dialog).toContainText('运行中')
+    await expect(address).toHaveValue('http://127.0.0.1:41239/mcp')
+    const commands = await page.evaluate(() => window.mcpFixture.calls.map(call => call.command))
+    assert.equal(commands.filter(command => command === 'mcp_start').length, 1)
+    assert.equal(commands.includes('mcp_save_config'), false, '面板不再写入用户地址/端口配置')
+    assert(commands.slice(commands.indexOf('mcp_start') + 1).includes('mcp_get_config'), '启动自动选择端口后必须重新读取实际配置')
+    await copy.click()
+    await expect(dialog).toContainText('配置已复制')
     const copied = JSON.parse(await page.evaluate(() => window.mcpFixture.clipboard))
-    assert.equal(copied.mcpServers['open-media'].headers.Authorization, `Bearer ${'b'.repeat(64)}`)
-    assert.equal(copied.mcpServers['open-media'].type, 'http')
-    await page.getByRole('button', { name: '显示 Token', exact: true }).click()
-    await expect(page.getByTestId('mcp-client-config')).toContainText('b'.repeat(64))
-    await expect(dialog.locator('progress')).toHaveAttribute('value', '47')
-    await page.getByRole('button', { name: '取消任务 字幕转语音', exact: true }).click()
-    assert((await page.evaluate(() => window.mcpFixture.events)).some(([name, id]) => name === 'cancel' && id === 'speech-1'))
-    await page.evaluate(() => { window.mcpFixture.jobs.value = [{ ...window.mcpFixture.jobs.value[0], cancelling: true }] })
-    await expect(page.getByRole('button', { name: '取消任务 字幕转语音', exact: true })).toBeDisabled()
+    assert.deepEqual(copied, { mcpServers: { 'open-media': { type: 'http', url: 'http://127.0.0.1:41239/mcp', headers: { Authorization: `Bearer ${'a'.repeat(64)}` } } } })
+    await page.screenshot({ path: path.join(artifacts, 'mcp-compact-desktop.png'), animations: 'disabled' })
+    await page.evaluate(() => { window.mcpFixture.theme.value = 'dark' })
+    await page.screenshot({ path: path.join(artifacts, 'mcp-compact-dark.png'), animations: 'disabled' })
+    await page.setViewportSize({ width: 380, height: 740 })
+    const narrow = await dialog.boundingBox()
+    assert(narrow.width <= 356 && narrow.height < 400)
+    assert.equal(await dialog.evaluate(element => element.scrollWidth > element.clientWidth + 1), false)
+    await page.screenshot({ path: path.join(artifacts, 'mcp-compact-narrow.png'), animations: 'disabled' })
+    await page.setViewportSize({ width: 1280, height: 960 })
+    await page.evaluate(() => { window.mcpFixture.theme.value = 'light'; window.mcpFixture.failClipboard = true })
+    await copy.click()
+    await expect(dialog.getByRole('alert')).toContainText('剪贴板访问被拒绝')
+    await page.evaluate(() => { window.mcpFixture.failClipboard = false })
+    await copy.click()
+    await expect(dialog.getByRole('alert')).toHaveCount(0)
     await page.getByRole('button', { name: '关闭MCP 服务', exact: true }).click()
     assert.equal(await page.evaluate(() => window.mcpFixture.running), true, '关闭弹窗保持服务运行')
     await page.evaluate(() => { window.mcpFixture.open.value = true })
-    await expect(page.getByLabel('MCP Token', { exact: true })).toHaveAttribute('type', 'password')
+    await expect(copy).toBeEnabled()
+    await expect(token).toHaveValue('a'.repeat(64))
+    await expect(address).toHaveValue('http://127.0.0.1:41239/mcp')
     await page.evaluate(() => { window.mcpFixture.failStatus = true })
-    await page.getByRole('button', { name: '刷新 MCP 状态', exact: true }).click()
     await expect(dialog).toContainText('状态暂不可用')
+    await expect(copy).toBeDisabled()
+    await expect(dialog.getByRole('alert')).toContainText('暂时无法访问服务状态')
     await page.evaluate(() => { window.mcpFixture.failStatus = false })
-    await page.getByRole('button', { name: '刷新 MCP 状态', exact: true }).click()
-    await expect(dialog).toContainText('服务运行中')
+    await expect(copy).toBeEnabled()
+    await expect(dialog.getByRole('alert')).toHaveCount(0)
     const beforeStop = await page.evaluate(async () => (await import('/src/native-mcp.ts')).getMcpServiceEpoch())
-    await page.getByTestId('mcp-stop').click()
-    await expect(dialog).toContainText('服务已停止')
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await expect(toggle).toBeEnabled()
+    await expect(copy).toBeDisabled()
+    await expect(address).toHaveValue('http://127.0.0.1:41239/mcp')
     assert((await page.evaluate(async () => (await import('/src/native-mcp.ts')).getMcpServiceEpoch())) > beforeStop)
-    await page.getByLabel('MCP 监听 IP', { exact: true }).fill('127.0.0.1')
-    await page.getByRole('button', { name: '重新生成 Token', exact: true }).click()
-    await expect(page.getByLabel('MCP 监听 IP', { exact: true })).toHaveValue('127.0.0.1')
-    assert.equal(await page.evaluate(() => window.mcpFixture.config.host), '0.0.0.0', 'Token重置不隐式保存其他未保存修改')
-    await expect(dialog).toContainText('上方设置尚未保存')
     await page.evaluate(() => { window.mcpFixture.failStart = true })
-    await page.getByTestId('mcp-start').click()
-    await expect(dialog.getByRole('alert')).toContainText('端口已被占用')
-    await expect(page.getByTestId('mcp-start')).toBeEnabled()
+    await toggle.click()
+    await expect(dialog.getByRole('alert')).toContainText('无法建立 MCP 监听')
+    await expect(toggle).toBeEnabled()
+    await expect(copy).toBeDisabled()
     assert.equal(await page.evaluate(() => window.mcpFixture.running), false)
-    await dialog.locator('summary').filter({ hasText: '开放的功能' }).click()
-    await expect(dialog).toContainText('speech_generate')
-    await expect(dialog).toContainText('track_add')
+    await page.evaluate(() => { window.mcpFixture.failStart = false; window.mcpFixture.failConfigOnStart = true; window.mcpFixture.nextPort = 43105 })
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-checked', 'true')
+    await expect(toggle).toBeEnabled()
+    await expect(address).toHaveValue('http://127.0.0.1:43105/mcp')
+    await expect(token).toHaveValue('')
+    await expect(copy).toBeDisabled()
+    await expect(dialog.getByRole('alert')).toContainText('本机配置暂时不可读取')
+    await page.evaluate(() => { window.mcpFixture.failConfig = false; window.mcpFixture.failConfigOnStart = false })
+    await expect(copy).toBeEnabled()
+    await expect(token).toHaveValue('a'.repeat(64))
+    await copy.click()
+    assert.equal(JSON.parse(await page.evaluate(() => window.mcpFixture.clipboard)).mcpServers['open-media'].url, 'http://127.0.0.1:43105/mcp')
+    console.log('PASS MCP精简面板：只读地址/Token、紧凑开关、默认不启动、fallback实际端口、完整配置复制、桌面限制、状态/配置/剪贴板失败恢复与窄屏布局')
+
+    await page.evaluate(() => { window.mcpFixture.holdStop = true })
+    await toggle.click()
+    await expect(toggle).toBeDisabled()
+    await expect(copy).toBeDisabled()
+    await expect(page.getByRole('button', { name: '关闭MCP 服务', exact: true })).toBeDisabled()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeVisible()
+    await page.waitForFunction(() => typeof window.mcpFixture.releaseStop === 'function')
+    const stopEvents = await page.evaluate(() => window.mcpFixture.events.length)
+    await page.evaluate(() => { window.mcpFixture.open.value = false; window.mcpFixture.releaseStop() })
+    await expect(dialog).not.toBeVisible()
+    await expect.poll(() => page.evaluate(start => window.mcpFixture.events.slice(start).some(([name, status]) => name === 'service' && !status.running), stopEvents)).toBe(true)
+    await page.evaluate(() => { window.mcpFixture.open.value = true })
+    await expect(toggle).toBeEnabled()
+    await expect(toggle).toHaveAttribute('aria-checked', 'false')
+    await page.evaluate(() => { window.mcpFixture.holdStart = true; window.mcpFixture.nextPort = 45017 })
+    await toggle.click()
+    await expect(toggle).toBeDisabled()
+    await page.waitForFunction(() => typeof window.mcpFixture.releaseStart === 'function')
+    const startEvents = await page.evaluate(() => window.mcpFixture.events.length)
+    await page.evaluate(() => { window.mcpFixture.open.value = false; window.mcpFixture.releaseStart() })
+    await expect(dialog).not.toBeVisible()
+    await expect.poll(() => page.evaluate(start => window.mcpFixture.events.slice(start).some(([name, status]) => name === 'service' && status.running && status.port === 45017), startEvents)).toBe(true)
+    await page.evaluate(() => { window.mcpFixture.open.value = true })
+    await expect(copy).toBeEnabled()
+    await expect(address).toHaveValue('http://127.0.0.1:45017/mcp')
     const bridge = await page.evaluate(async () => {
       const api = await import('/src/native-mcp.ts')
       return { pending: await api.getPendingMcpRequests(), claimed: await api.claimMcpRequest('request-1'), completed: await api.completeMcpRequest('request-1', { ok: true }) }
@@ -124,16 +217,17 @@ async function main() {
     assert.deepEqual(bridge, { pending: [], claimed: true, completed: true })
     const stopRace = await page.evaluate(async () => {
       const api = await import('/src/native-mcp.ts'), fixture = window.mcpFixture
-      fixture.holdStop = true
+      fixture.holdStop = true; fixture.releaseStop = undefined
       const before = api.getMcpServiceEpoch(), pending = api.stopMcpService(), immediate = api.getMcpServiceEpoch()
       while (!fixture.releaseStop) await new Promise(resolve => setTimeout(resolve, 0))
       fixture.releaseStop(); await pending
       return { before, immediate }
     })
     assert(stopRace.immediate > stopRace.before, '停服必须在原生请求返回前使已领取请求失效')
-    assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes('b'.repeat(64))), false)
+    assert.equal(await page.evaluate(() => JSON.stringify(localStorage).includes('a'.repeat(64))), false)
     assert.deepEqual(errors, [])
-    console.log('PASS MCP面板交互模拟：桌面限制、配置校验/保存、启停、Token显隐/更新、地址配置复制、状态异常、任务取消与bridge命令（非真实服务测试）')
+    console.log('PASS MCP异步生命周期：忙态保护、外部关闭仍回传实际启停状态、重开读取最新地址、请求桥与停服epoch；原生契约模拟，非真实监听服务测试')
+    console.log(`截图：${artifacts}`)
   } finally { await browser.close(); await server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -164,6 +164,7 @@ export async function prepareMcpMaterial(project: Project, args: McpMaterialArgu
     asset = await native.importBlobAsset(bytes, name)
     options.signal?.throwIfAborted()
     if (asset.kind !== expectedKind || !asset.nativePath) throw new Error('内置素材没有生成有效的本地媒体文件。')
+    asset = { ...asset, libraryRole: args.kind === 'watermark' ? 'watermark' : args.kind === 'music' ? 'background-music' : 'video-segment' }
     const edit = apply(asset)
     options.signal?.throwIfAborted()
     options.onAsset?.(asset, blob)

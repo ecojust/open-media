@@ -23,6 +23,7 @@ async function fixture(browser, url, autoSave = false) {
         if (command === 'plugin:event|unlisten') return null
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
+        if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
         if (command === 'get_media_jobs') {
           if (state.jobsMode === 'fail') throw new Error('无法检查正在处理的任务')
           return structuredClone(state.jobs)

@@ -152,6 +152,69 @@ impl MediaStore {
             root: root.canonicalize().map_err(|e| e.to_string())?,
         })
     }
+    fn checked_root(&self) -> Result<&Path> {
+        let metadata = fs::symlink_metadata(&self.root)
+            .map_err(|error| format!("媒体保存目录不可用：{error}"))?;
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || self
+                .root
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+                != self.root
+        {
+            return Err("媒体保存目录已改变，请重新打开应用。".into());
+        }
+        Ok(&self.root)
+    }
+    /// Recording storage is a fixed sibling of the application's media directory.
+    pub fn recording_root(&self) -> Result<PathBuf> {
+        let root = self.checked_root()?;
+        if !matches!(
+            root.file_name().and_then(|value| value.to_str()),
+            Some("media" | "recordings")
+        ) {
+            return Err("录屏保存目录无效。".into());
+        }
+        let recordings = root
+            .parent()
+            .ok_or("录屏保存目录无效。")?
+            .join("recordings");
+        match fs::symlink_metadata(&recordings) {
+            Ok(metadata) => {
+                if !metadata.is_dir()
+                    || metadata.file_type().is_symlink()
+                    || recordings
+                        .canonicalize()
+                        .map_err(|error| error.to_string())?
+                        != recordings
+                {
+                    return Err("录屏保存目录已改变，请重新打开应用。".into());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("录屏保存目录不可用：{error}")),
+        }
+        Ok(recordings)
+    }
+    pub fn recording_store(&self) -> Result<Self> {
+        let root = self.recording_root()?;
+        match fs::create_dir(&root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(format!("无法创建录屏保存目录：{error}")),
+        }
+        let store = Self { root };
+        store.checked_root()?;
+        Ok(store)
+    }
+    /// Callers pass a canonical existing file or directory.
+    pub fn is_internal_path(&self, path: &Path) -> bool {
+        path.starts_with(&self.root)
+            || self
+                .recording_root()
+                .is_ok_and(|root| path.starts_with(root))
+    }
     pub fn import(&self, runtime: &Runtime, input: &Path, name: Option<&str>) -> Result<Asset> {
         let meta = fs::metadata(input).map_err(|e| format!("无法读取素材：{e}"))?;
         if !meta.is_file() || meta.len() == 0 {
@@ -172,7 +235,10 @@ impl MediaStore {
         let destination = self.root.join(format!("{}.{}", new_id(), ext));
         fs::copy(input, &destination).map_err(|e| format!("无法保存素材：{e}"))?;
         match self.probe(runtime, &destination, &original) {
-            Ok(asset) => Ok(asset),
+            Ok(asset) => {
+                let _ = crate::media_metadata::remember_name(self, &asset);
+                Ok(asset)
+            }
             Err(e) => {
                 let _ = fs::remove_file(destination);
                 Err(e)
@@ -188,6 +254,7 @@ impl MediaStore {
         self.import(runtime, temp.path(), Some(name))
     }
     pub fn authorized_path(&self, asset: &Value) -> Result<PathBuf> {
+        self.checked_root()?;
         let path = asset
             .get("nativePath")
             .and_then(Value::as_str)
@@ -195,7 +262,7 @@ impl MediaStore {
         let path = Path::new(path)
             .canonicalize()
             .map_err(|_| "素材文件已丢失，请重新导入。")?;
-        if !path.starts_with(&self.root) || !path.is_file() {
+        if !self.is_internal_path(&path) || !path.is_file() {
             return Err("只能处理已经导入素材库的文件。".into());
         }
         Ok(path)

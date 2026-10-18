@@ -3,12 +3,6 @@
 licenses/** -text -whitespace
 
 # Preserve the exact bytes of listening samples and their checksummed records.
-test/chinese-tts-benchmark/** -text
-test/chinese-tts-benchmark/licenses/** -whitespace
-test/chinese-tts-benchmark/provenance/** -whitespace
-test/chinese-tts-benchmark/scripts/f5-licenses/** -whitespace
-test/optional-speech-runtime/** -text
-test/optional-speech-runtime/*-application-validation.json whitespace=cr-at-eol
 scripts/optional-speech-assets/** -text
 scripts/optional-speech-runtime-licenses/** -text -whitespace
 src/assets/voice-previews/licenses/** -text -whitespace

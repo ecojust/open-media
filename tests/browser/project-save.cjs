@@ -60,6 +60,8 @@ async function save(page, { saveAs = false, key, result = true } = {}) {
 }
 
 async function addMedia(page) {
+  const imported = page.getByLabel('素材来源', { exact: true }).getByRole('button', { name: '已导入', exact: true })
+  if (await imported.count()) await imported.click()
   const image = Buffer.from(await page.evaluate(() => {
     const canvas = document.createElement('canvas'); canvas.width = 48; canvas.height = 32
     const context = canvas.getContext('2d'); context.fillStyle = '#68a4df'; context.fillRect(0, 0, 48, 32)
@@ -90,6 +92,7 @@ async function nativeChecks(browser, url) {
     await page.exposeBinding('projectNativeInvoke', async (_, command, args) => {
       if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
       if (command === 'get_media_jobs') return []
+      if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
       if (command === 'configure_screenshot_shortcut') return args.shortcut
       if (command === 'plugin:event|listen') return 1
       if (command === 'plugin:event|unlisten') return null

@@ -16,30 +16,33 @@ const httpsSource = source => {
   assert.equal(url.username, '')
   assert.equal(url.password, '')
 }
-const archiveKeys = ['url', 'size', 'unpackedSize', 'sha256', 'manifestSha256', 'executable', 'script']
-const archiveFromMetadata = metadata => ({
-  ...Object.fromEntries(archiveKeys.map(key => [key, metadata[key]])),
-  mirrors: metadata.mirrors ?? [],
-  ...(metadata.kind === 'native' ? { kind: 'native' } : {}),
-  ...(metadata.parts ? { parts: metadata.parts } : {}),
-})
+// Pin the shipped catalogue independently of the removed research archive.
+// These checks protect download identities; they do not claim model execution.
+const publishedArchives = {
+  'python-cpu-v1': {
+    'macos-arm64': '56486d0dcc2d7193df6e869bd1a0dfb97e0ae582779630b9b180723764d3c10b',
+    'macos-x64': '9bee9c08138da6646fb57f3babeca077d0f0ce694021efe9b4e7d23800772e7f',
+    'windows-x64': 'a7a262995383a5357c9b4720e4709dd5d9b10d484c1af256512fb593d62049f2',
+  },
+  'python-cuda-v1': { 'windows-x64': 'e6f17f57481a500fa2c591b65edb8cf4b78d4fe8ad17e42402d686598408e58b' },
+  'native-cuda-v1': { 'windows-x64': '8f7dcdaa183afcbcfef9f07cfce8c7a9e06fb0601bac7f3d90d4a490a976f2af' },
+}
+const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+  ? Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])])) : value
+const verifyArchiveIdentity = (id, platform, archive) => assert.equal(
+  digest(Buffer.from(JSON.stringify(stable(archive)))), publishedArchives[id]?.[platform],
+  'Published package hashes, entry points, download routes and every part must retain their pinned identity',
+)
 
-function verifiedAcceleratedRuntime(id, releaseTag, prefix) {
-  const metadata = JSON.parse(read(`test/optional-speech-runtime/${id}-runtime-metadata.json`))
+function pinnedAcceleratedRuntime(id, releaseTag, prefix) {
   const runtime = catalog.runtimes.find(item => item.id === id)
-  assert.ok(runtime, `Final catalogue must include the reviewed ${id} runtime`)
-  assert.equal(metadata.id, id)
-  assert.equal(metadata.version, 1)
-  assert.equal(metadata.platform, 'windows-x64')
-  assert.equal(metadata.validated, true)
-  assert.match(metadata.sourceCommit, /^[a-f0-9]{40}$/)
-  assert.equal(runtime.version, metadata.version)
-  assert.deepEqual(Object.keys(runtime.platforms), ['windows-x64'], 'Do not advertise an accelerated package for a platform without a verified archive')
+  assert.ok(runtime, `Final catalogue must include the pinned ${id} runtime`)
+  assert.equal(runtime.version, 1)
+  assert.deepEqual(Object.keys(runtime.platforms), ['windows-x64'], 'Do not advertise an accelerated package for a platform without a published archive')
   const archive = runtime.platforms['windows-x64']
-  assert.deepEqual(archive, archiveFromMetadata(metadata), 'Published package hashes, entry points and every part must match the reviewed metadata exactly')
+  verifyArchiveIdentity(id, 'windows-x64', archive)
   const filename = `${prefix}-${id}-windows-x64.zip`
   const release = `https://github.com/ecojust/open-media/releases/download/${releaseTag}/`
-  assert.equal(metadata.filename, filename)
   assert.equal(archive.url, release + filename)
   assert.ok(Number.isSafeInteger(archive.size) && archive.size > 0)
   assert.ok(Number.isSafeInteger(archive.unpackedSize) && archive.unpackedSize >= archive.size)
@@ -61,7 +64,7 @@ function verifiedAcceleratedRuntime(id, releaseTag, prefix) {
     assert.equal(new Set([part.url, ...part.mirrors]).size, 1 + part.mirrors.length)
     for (const source of [part.url, ...part.mirrors]) httpsSource(source)
   }
-  return metadata
+  return archive
 }
 
 test('optional downloads pin independent Chinese models, reference audio and platform runtimes', () => {
@@ -142,17 +145,12 @@ test('model downloads retain independent domestic sources and fallback addresses
   assert.equal(independentFiles, 18)
 })
 
-test('accelerated downloads preserve every reviewed ordinary runtime and both model fallback bindings', () => {
-  const metadata = JSON.parse(read('test/optional-speech-runtime/runtime-metadata.json'))
+test('accelerated downloads preserve every published ordinary runtime and both model fallback bindings', () => {
   const runtime = catalog.runtimes.find(item => item.id === 'python-cpu-v1')
   assert.ok(runtime)
   assert.equal(runtime.version, 1)
   assert.deepEqual(Object.keys(runtime.platforms).sort(), ['macos-arm64', 'macos-x64', 'windows-x64'])
-  for (const record of metadata) {
-    assert.equal(record.id, 'python-cpu-v1')
-    assert.equal(record.validated, true)
-    assert.deepEqual(runtime.platforms[record.platform], archiveFromMetadata(record), 'Acceleration must not replace or change the already published ordinary runtime')
-  }
+  for (const [platform, archive] of Object.entries(runtime.platforms)) verifyArchiveIdentity(runtime.id, platform, archive)
   for (const model of catalog.models.filter(item => item.model.kind !== 'zipvoice')) {
     assert.equal(model.runtimeId, 'python-cpu-v1', `${model.id} retains its ordinary fallback runtime`)
     assert.equal(model.acceleratedRuntimeId, 'python-cuda-v1', `${model.id} shares the reviewed accelerated Python runtime`)
@@ -163,79 +161,19 @@ test('accelerated downloads preserve every reviewed ordinary runtime and both mo
   assert.deepEqual(catalog.runtimes.map(item => item.id).sort(), ['native-cuda-v1', 'python-cpu-v1', 'python-cuda-v1'])
 })
 
-test('native acceleration catalogue pins the published parts and all three verified native voices', () => {
-  const metadata = verifiedAcceleratedRuntime('native-cuda-v1', 'speech-native-cuda-v1', 'open-media')
-  assert.equal(catalog.nativeAccelerationRuntimeId, metadata.id)
-  assert.equal(metadata.kind, 'native')
-  assert.deepEqual([...metadata.validatedModels].sort(), ['matcha-icefall-zh-en', 'zipvoice-distill-fp32'])
-  const voices = ['matcha_zh_en_female', 'zipvoice_zh_female', 'zipvoice_zh_male']
-  assert.deepEqual([...metadata.validatedVoices].sort(), [...voices].sort())
-  assert.equal(metadata.validation.status, 'passed')
-  assert.deepEqual(metadata.validation.voices.map(item => item.voiceId).sort(), [...voices].sort())
-  for (const voice of metadata.validation.voices) {
-    assert.ok(Number.isFinite(voice.rms) && voice.rms > 0.00001)
-    assert.ok(voice.sampleCount > 0)
-    assert.equal(voice.sampleRate, voice.voiceId === 'matcha_zh_en_female' ? 16000 : 24000)
-    assert.match(voice.sha256, /^[a-f0-9]{64}$/)
-    assert.equal(voice.attempts.at(-1).exitCode, 0)
-    assert.equal(voice.attempts.at(-1).backend, voice.actualDevice)
-    if (voice.actualDevice === 'cpu') assert.equal(voice.gpuInferenceVerified, false, 'A successful fallback must never be labelled GPU verification')
-  }
+test('native acceleration catalogue pins its published parts and native entry point', () => {
+  const archive = pinnedAcceleratedRuntime('native-cuda-v1', 'speech-native-cuda-v1', 'open-media')
+  assert.equal(catalog.nativeAccelerationRuntimeId, 'native-cuda-v1')
+  assert.equal(archive.kind, 'native')
+  assert.equal(archive.executable, 'bin/open-media-speech.exe')
+  assert.equal(archive.script, archive.executable)
 })
 
-test('Python acceleration catalogue pins the published parts and all four production voice checks', () => {
-  const metadata = verifiedAcceleratedRuntime('python-cuda-v1', 'speech-runtime-cuda-v1', 'speech-runtime')
-  assert.deepEqual([...metadata.validatedModels].sort(), ['f5-v1-base-fp32', 'qwen3-tts-1.7b-serena'])
-  assert.equal(metadata.productionValidated, true)
-  assert.deepEqual([...metadata.productionVoiceIds].sort(), ['f5_zh_female', 'f5_zh_male', 'qwen3_serena', 'qwen3_uncle_fu'])
-  assert.match(metadata.applicationValidationSha256, /^[a-f0-9]{64}$/)
-  assert.equal(typeof metadata.gpuInferenceValidated, 'boolean')
-  assert.equal(typeof metadata.cudaProbe.cudaAvailable, 'boolean')
-  if (!metadata.cudaProbe.cudaAvailable) assert.equal(metadata.gpuInferenceValidated, false, 'An unavailable accelerator cannot count as tested GPU inference')
-  const evidenceBytes = read('test/optional-speech-runtime/python-cuda-v1-application-validation.json')
-  assert.equal(digest(evidenceBytes), metadata.applicationValidationSha256, 'The public production evidence must remain byte-for-byte identical')
-  const evidence = JSON.parse(evidenceBytes)
-  assert.equal(evidence.schema, 1)
-  assert.equal(evidence.sourceCommit, metadata.sourceCommit)
-  assert.equal(evidence.platform, 'windows-x64')
-  assert.equal(evidence.status, 'passed')
-  assert.equal(evidence.requestedDevice, 'auto')
-  assert.deepEqual(evidence.hardware, metadata.cudaProbe)
-  assert.deepEqual(evidence.voices.map(voice => voice.voiceId), metadata.productionVoiceIds)
-  const audioHashes = new Set()
-  for (const voice of evidence.voices) {
-    assert.equal(voice.status, 'passed')
-    assert.equal(voice.completionVerified, true)
-    assert.equal(voice.productionPath, 'SpeechRuntime::command + generate_wave')
-    assert.equal(voice.requestedDevice, 'auto')
-    assert.ok(['cpu', 'cuda'].includes(voice.backend))
-    assert.equal(voice.gpuInferenceVerified, voice.backend === 'cuda')
-    assert.ok(voice.events.length > 0 && voice.events.every(event => typeof event === 'string'))
-    const lastDevice = voice.events.filter(event => event.startsWith('stage=device,')).at(-1)
-    assert.equal(/(?:^|,)device=([^,\r\n]+)/.exec(lastDevice ?? '')?.[1], voice.backend)
-    assert.match(voice.events.at(-1), /^stage=complete(?:,|$)/)
-    assert.deepEqual(voice.fallback, voice.events.filter(event => event.startsWith('stage=fallback,')))
-    assert.deepEqual(voice.partial, voice.events.filter(event => event.includes('partial=')))
-    if (voice.voiceId.startsWith('qwen3_')) assert.equal(voice.eosVerified, true)
-    if (voice.backend === 'cuda') {
-      assert.equal(metadata.cudaProbe.cudaAvailable, true)
-      assert.ok(metadata.cudaProbe.cudaDeviceCount >= 1)
-    }
-    const audio = voice.audio
-    assert.equal(audio.finite, true)
-    assert.equal(audio.sampleRate, 24000)
-    assert.equal(audio.channels, 1)
-    assert.ok(Number.isSafeInteger(audio.bytes) && audio.bytes > 44)
-    assert.match(audio.sha256, /^[a-f0-9]{64}$/)
-    assert.ok(!audioHashes.has(audio.sha256), 'Each production voice must have its own generated waveform')
-    audioHashes.add(audio.sha256)
-    assert.ok(Number.isFinite(audio.durationSeconds) && audio.durationSeconds >= 0.25 && audio.durationSeconds <= 120)
-    assert.ok(Number.isFinite(audio.peak) && audio.peak > 0.001)
-    assert.ok(Number.isFinite(audio.rms) && audio.rms > 0.00001 && audio.rms <= audio.peak)
-  }
-  const allCuda = evidence.voices.every(voice => voice.backend === 'cuda')
-  assert.equal(evidence.gpuInferenceVerified, allCuda)
-  assert.equal(metadata.gpuInferenceValidated, allCuda)
+test('Python acceleration catalogue pins its published parts and isolated interpreter entry points', () => {
+  const archive = pinnedAcceleratedRuntime('python-cuda-v1', 'speech-runtime-cuda-v1', 'speech-runtime')
+  assert.equal(archive.kind, undefined)
+  assert.equal(archive.executable, 'python/python.exe')
+  assert.equal(archive.script, 'runner/tts.py')
 })
 
 test('optional model publisher notices retain exact originals with distinct model and code licenses', () => {
@@ -252,7 +190,8 @@ test('optional model publisher notices retain exact originals with distinct mode
       const bytes = read(`${base}/${file.path}`)
       assert.equal(bytes.length, file.bytes)
       assert.equal(digest(bytes), file.sha256)
-      assert.deepEqual(bytes, read(file.copiedFrom), 'Publisher text must remain byte-for-byte identical')
+      assert.ok(file.copiedFrom, 'Preserve the historical copy origin even when the research archive is removed')
+      safeRelative(file.copiedFrom)
       if (file.source) httpsSource(file.source)
     }
   }

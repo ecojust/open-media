@@ -3,6 +3,8 @@
 import copy
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +13,64 @@ SPEC = importlib.util.spec_from_file_location('speech_catalog', Path(__file__).w
 CATALOG = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CATALOG)
 BASE = 'https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/'
+
+
+class ProductionModelCatalogTests(unittest.TestCase):
+    def setUp(self):
+        self.source = CATALOG.ROOT / 'src-tauri/resources/speech-models.json'
+        self.document = json.loads(self.source.read_text(encoding='utf-8'))
+
+    def load(self, data):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / 'models.json'
+            source.write_text(json.dumps(data), encoding='utf-8')
+            return CATALOG.build_models(source)
+
+    def test_preserves_existing_model_pins_voices_and_download_sources_exactly(self):
+        self.assertEqual(CATALOG.build_models(self.source), self.document['models'])
+
+    def test_rejects_invalid_pins_paths_embedded_bytes_and_configuration(self):
+        for field, value in [('path', '../outside'), ('size', 0), ('size', True),
+                             ('sha256', 'bad'), ('url', 'http://example.com/model')]:
+            document = copy.deepcopy(self.document)
+            document['models'][0]['files'][0][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                self.load(document)
+        for mutation in ['duplicate-file', 'embedded-hash', 'model-total', 'config-file', 'duplicate-voice']:
+            document = copy.deepcopy(self.document)
+            model = document['models'][0]
+            if mutation == 'duplicate-file':
+                model['files'].append(copy.deepcopy(model['files'][0]))
+            elif mutation == 'embedded-hash':
+                next(file for file in model['files'] if file.get('embedded'))['sha256'] = '0' * 64
+            elif mutation == 'model-total':
+                model['modelSize'] += 1
+            elif mutation == 'config-file':
+                model['model']['encoder'] = 'not-pinned.onnx'
+            else:
+                model['voices'].append(copy.deepcopy(model['voices'][0]))
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                self.load(document)
+
+    def test_cli_requires_explicit_inputs_and_models_only_preserves_pins(self):
+        script = Path(__file__).with_name('optional-speech-catalog.py')
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / 'models-only.json'
+            result = subprocess.run([sys.executable, script, '--model-catalog', self.source, '--output', output],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--runtime-metadata', result.stderr)
+            self.assertFalse(output.exists())
+            result = subprocess.run([sys.executable, script, '--models-only', '--output', output],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--model-catalog', result.stderr)
+            result = subprocess.run([sys.executable, script, '--models-only', '--model-catalog', self.source,
+                                     '--output', output], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            generated = json.loads(output.read_text(encoding='utf-8'))
+            self.assertEqual(generated['models'], self.document['models'])
+            self.assertEqual(generated['runtimes'], [])
 
 
 class CudaCatalogMetadataTests(unittest.TestCase):

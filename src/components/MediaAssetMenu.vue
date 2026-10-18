@@ -20,7 +20,7 @@ function close(restoreFocus = false): void {
   document.removeEventListener('keydown', keyboard, true)
   window.removeEventListener('resize', dismiss)
   window.removeEventListener('scroll', dismiss, true)
-  if (restoreFocus && anchor?.isConnected) anchor.focus()
+  if (restoreFocus && anchor?.isConnected) anchor.focus({ preventScroll: true })
 }
 function dismiss(): void { close() }
 function outside(event: PointerEvent): void { if (!menu.value?.contains(event.target as Node)) close() }
@@ -47,7 +47,7 @@ async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset): Promi
   const bounds = menu.value.getBoundingClientRect()
   position.value = { x: Math.max(8, Math.min(position.value.x, window.innerWidth - bounds.width - 8)), y: Math.max(8, Math.min(position.value.y, window.innerHeight - bounds.height - 8)) }
   const focusTarget = menu.value.querySelector<HTMLElement>('button:not(:disabled)') ?? menu.value
-  focusTarget.focus()
+  focusTarget.focus({ preventScroll: true })
 }
 async function reveal(): Promise<void> {
   const asset = selected.value

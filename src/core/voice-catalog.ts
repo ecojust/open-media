@@ -3,7 +3,6 @@ import { VOICE_PROFILES } from './voice-profiles.ts'
 import { VOICE_GROUPS } from './voice-groups.ts'
 
 // System memory recommendations leave room for the editor and operating system.
-// The optional models' measured process memory is recorded in test/chinese-tts-benchmark.
 // These are configuration suggestions, not measured minimum requirements.
 const VOICE_MODELS: Readonly<Record<string, { name: string; memoryGb: number }>> = {
   matcha_zh_en_female: { name: 'Matcha 中英', memoryGb: 4 },

@@ -128,6 +128,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     const kind = choice(a.kind, ['video', 'audio', 'image'] as const, '素材类型')
     const asset: MediaAsset = { id: id(a.id), name: text(a.name, '素材名称', 1000), kind, url: '', duration: number(a.duration, '素材时长', kind === 'image' ? 0 : 0.001, MAX_PROJECT_DURATION), width: number(a.width, '素材宽度', kind === 'audio' ? 0 : 1, 65536), height: number(a.height, '素材高度', kind === 'audio' ? 0 : 1, 65536), size: number(a.size, '素材大小', 0, Number.MAX_SAFE_INTEGER), mime: text(a.mime, '素材格式', 200, true) }
     if (a.addedAt !== undefined) asset.addedAt = normalizeAssetAddedAt(a.addedAt)
+    if (a.libraryRole !== undefined) asset.libraryRole = choice(a.libraryRole, ['watermark', 'background-music', 'video-segment'] as const, '素材库用途')
     if (options.trusted) {
       const url = text(a.url ?? '', '素材地址', 2 * 1024 * 1024, true)
       if (url && !/^(?:blob:|data:(?:image|video|audio)\/|https?:\/\/|asset:\/\/)/i.test(url)) throw new Error('素材地址协议不受支持。')

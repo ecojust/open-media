@@ -18,6 +18,12 @@ import urllib.request
 import wave
 
 ROOT = Path(__file__).resolve().parents[1]
+SMOKE_SAMPLES = (
+    dict(id='01', text='欢迎使用 Open Media。录制画面，整理素材，添加字幕，让创作更轻松。',
+         normalized_text='欢迎使用 Open Media。录制画面，整理素材，添加字幕，让创作更轻松。'),
+    dict(id='09', text='这个项目包含12个片段，视频时长为3.5分钟，导出进度已经达到80%。',
+         normalized_text='这个项目包含十二个片段，视频时长为三点五分钟，导出进度已经达到百分之八十。'),
+)
 
 
 def digest(path):
@@ -249,15 +255,14 @@ def main():
     command += ['--zipvoice-lexicon=' + ','.join(str(resource(path)) for path in config['lexicons']),
                 f'--reference-audio={resource(config["referenceAudio"])}',
                 f'--reference-text-file={resource(config["referenceText"])}']
-    benchmark = json.loads((ROOT / 'test/chinese-tts-benchmark/manifests/zipvoice-distill-fp32-zh-frontend.json').read_text(encoding='utf-8'))
     proof = dict(schema=1, modelId=model['id'], platform=platform.platform(), machine=platform.machine(),
                  python=platform.python_version(), catalogSha256=digest(args.catalog),
                  runnerSourceSha256=installed['runnerSourceSha256'], runnerSha256=digest(executable),
                  preparedManifestSha256=digest(args.speech_directory / 'runtime.json'),
                  precision='FP32', steps=8, threads=1, pathCoverage='non-ASCII and spaces',
                  files=downloads, samples=[])
-    for sample_id in ['01', '09']:
-        sample = next(item for item in benchmark['samples'] if item['id'] == sample_id)
+    for sample in SMOKE_SAMPLES:
+        sample_id = sample['id']
         original = work / f'{sample_id} 原文.txt'
         normalized = work / f'{sample_id} 规范化.txt'
         audio = work / f'{sample_id} 音频.wav'
@@ -265,7 +270,7 @@ def main():
         run([normalizer, original, normalized], args.output / f'{sample_id}-normalize.log', 30)
         actual_text = normalized.read_text(encoding='utf-8')
         if actual_text != sample['normalized_text']:
-            raise ValueError(f'Native normalization differs from evaluated original: {sample_id}')
+            raise ValueError(f'Native normalization differs from the fixed smoke expectation: {sample_id}')
         started = time.monotonic()
         execution = run_native_speech([*command, f'--text-file={normalized}', f'--output-filename={audio}'],
                                      args.output / f'{sample_id}.log', audio)

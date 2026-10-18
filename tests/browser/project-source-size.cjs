@@ -28,6 +28,7 @@ async function fixture(browser, url, native = false) {
         if (command === 'plugin:event|unlisten') return null
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_media_jobs') return []
+        if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_capture_status') return { state: 'idle', elapsed: 0, segments: 0 }
         if (command === 'pick_media_assets') return window.sizeHarness.assets.splice(0)
@@ -38,6 +39,7 @@ async function fixture(browser, url, native = false) {
   await page.goto(url)
   await expect(page.getByTestId('create-project')).toBeEnabled({ timeout: 15000 }).catch(error => { if (errors.length) error.message += `\n启动错误：${errors.join('\n')}`; throw error })
   await page.getByTestId('nav-edit').click()
+  if (native) await page.getByLabel('素材来源', { exact: true }).getByRole('button', { name: '已导入', exact: true }).click()
   return { page, close: async () => { assert.deepEqual(errors, []); await context.close() } }
 }
 

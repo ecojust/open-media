@@ -43,7 +43,7 @@ pub fn remember_asset_source(store: &MediaStore, asset: &Asset, source: &Path) -
     let source = source
         .canonicalize()
         .map_err(|error| format!("无法读取素材原位置：{error}"))?;
-    if !source.is_file() || source.starts_with(&store.root) {
+    if !source.is_file() || store.is_internal_path(&source) {
         return Ok(());
     }
     let record = origin_record(store, &imported)?;
@@ -76,6 +76,48 @@ fn asset_location(store: &MediaStore, asset: &Value) -> Result<PathBuf> {
 
 pub fn reveal_media_asset(store: &MediaStore, asset: &Value) -> Result<()> {
     reveal(&asset_location(store, asset)?)
+}
+
+fn library_directory(store: &MediaStore) -> Result<PathBuf> {
+    let directory = store
+        .root
+        .canonicalize()
+        .map_err(|error| format!("媒体保存目录不可用：{error}"))?;
+    if directory != store.root || !directory.is_dir() {
+        return Err("媒体保存目录已改变，请重新打开应用。".into());
+    }
+    Ok(directory)
+}
+
+pub fn open_media_library_directory(store: &MediaStore) -> Result<()> {
+    let directory = library_directory(store)?;
+    #[cfg(target_os = "windows")]
+    {
+        let mut child = std::process::Command::new("explorer.exe")
+            .arg(directory)
+            .spawn()
+            .map_err(|error| format!("无法打开媒体保存目录：{error}"))?;
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let program = if cfg!(target_os = "macos") {
+            "/usr/bin/open"
+        } else {
+            "xdg-open"
+        };
+        let status = std::process::Command::new(program)
+            .arg(directory)
+            .status()
+            .map_err(|error| format!("无法打开媒体保存目录：{error}"))?;
+        if !status.success() {
+            return Err("无法打开媒体保存目录，请复制目录地址后手动打开。".into());
+        }
+        Ok(())
+    }
 }
 
 fn reveal(path: &Path) -> Result<()> {
@@ -114,6 +156,15 @@ fn reveal(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_folder_is_fixed_to_the_existing_application_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(directory.path()).unwrap();
+        assert_eq!(library_directory(&store).unwrap(), store.root);
+        fs::remove_dir(&store.root).unwrap();
+        assert!(library_directory(&store).is_err());
+    }
 
     #[test]
     fn only_completed_existing_outputs_can_be_revealed() {

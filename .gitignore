@@ -4,7 +4,6 @@ src-tauri/target/
 src-tauri/gen/
 .DS_Store
 *.log
-!test/chinese-tts-benchmark/provenance/**/*.log
 test-results/
 .release-staging/
 release-output/

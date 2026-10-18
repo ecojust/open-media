@@ -742,7 +742,9 @@ impl CaptureManager {
                 String::from_utf8_lossy(&merged.stderr)
             ));
         }
-        store.import(runtime, &output, Some("屏幕录制.mp4"))
+        store
+            .recording_store()?
+            .import(runtime, &output, Some("屏幕录制.mp4"))
     }
     pub fn abort(&mut self) {
         if let Some(mut active) = self.active.take() {
@@ -2021,6 +2023,21 @@ mod capture_tests {
         assert!(capture.workspace.is_some());
         let asset = capture.stop(&store).unwrap().unwrap();
         let path = asset.native_path.as_str();
+        assert_eq!(
+            Path::new(path).parent(),
+            Some(store.recording_root().unwrap().as_path())
+        );
+        assert_eq!(
+            fs::read_dir(&store.root).unwrap().count(),
+            0,
+            "Recording must not populate the editing media store"
+        );
+        assert_eq!(
+            store
+                .authorized_path(&serde_json::to_value(&asset).unwrap())
+                .unwrap(),
+            Path::new(path)
+        );
         let output = process(&runtime.probe)
             .args([
                 "-v",

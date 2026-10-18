@@ -358,6 +358,7 @@ async function staleImportChecks(browser, url, productionCsp) {
       window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1, unregisterCallback() {}, convertFileSrc: value => value,
         invoke: async (command, args) => {
+          if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
           if (command !== 'import_blob_asset') throw new Error(`未预期原生调用：${command}`)
           const blob = new Blob([new Uint8Array(args.bytes)], { type: 'video/mp4' })
           const asset = { id: `native-watermark-${fixture.requests.length}`, name: args.name, kind: 'video', url: URL.createObjectURL(blob), duration: 4, width: 640, height: 360, size: blob.size, mime: blob.type }

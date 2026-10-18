@@ -13,8 +13,9 @@ import GifWorkspace from './components/GifWorkspace.vue'
 import ConvertWorkspace from './components/ConvertWorkspace.vue'
 import ExportPanel from './components/ExportPanel.vue'
 import McpPanel from './components/McpPanel.vue'
+import mcpToolCatalog from './mcp-tools.json'
 import { createMcpAutomation, type McpPlayback } from './core/mcp-automation.ts'
-import { claimMcpRequest, completeMcpRequest, getMcpServiceEpoch, getPendingMcpRequests, onMcpRequest, stopMcpService, type McpPanelJob, type McpRequest, type McpStatus } from './native-mcp.ts'
+import { claimMcpRequest, completeMcpRequest, getMcpServiceEpoch, getMcpStatus, getPendingMcpRequests, onMcpRequest, stopMcpService, type McpPanelJob, type McpRequest, type McpStatus } from './native-mcp.ts'
 import type { ImportedProject, MediaAsset, Project, ProjectHistory, ProjectSummary } from './core/types.ts'
 import { stampNewAssets } from './core/asset-times.ts'
 import { cloneProject, createClip, createProject, createTrack, validateProject } from './core/project.ts'
@@ -41,6 +42,15 @@ const projectRevision = ref(0)
 watch(project, () => { projectRevision.value++ }, { flush: 'sync' })
 const videoEditor = ref<InstanceType<typeof VideoEditor>>()
 const mcpOpen = ref(false), mcpBusy = ref(false), mcpJobs = shallowRef<McpPanelJob[]>([]), mcpServiceRunning = ref(false)
+const activeMcpJob = computed(() => mcpJobs.value.find(job => job.state === 'running') ?? mcpJobs.value[0])
+const activeMcpProgress = computed(() => activeMcpJob.value ? mcpJobPercent(activeMcpJob.value) : undefined)
+type McpToolActivity = { id: string; tool: string; label: string; state: 'running' | 'completed' | 'failed' }
+const mcpToolActivity = shallowRef<McpToolActivity | null>(null)
+const mcpToolLabels = new Map(mcpToolCatalog.map(tool => [tool.name, tool.description.split(/[。；，]/)[0] || tool.name]))
+const mcpActivityTitle = computed(() => mcpBusy.value ? 'MCP 正在处理' : mcpToolActivity.value?.state === 'running' ? 'MCP 正在调用' : mcpToolActivity.value?.state === 'failed' ? 'MCP 调用失败' : 'MCP 调用完成')
+let mcpActivityDeadlineTimer: ReturnType<typeof setTimeout> | undefined, mcpActivityFeedbackTimer: ReturnType<typeof setTimeout> | undefined
+const mcpConnected = ref(false)
+let mcpStatusRevision = 0, mcpObservedEpoch = getMcpServiceEpoch()
 let mcpBridgeError = ''
 let unlistenMcp: (() => void) | undefined, mcpRequestQueue = Promise.resolve()
 let mcpRequestDeadline: number | undefined, mcpPlaybackVersion = 0
@@ -491,16 +501,33 @@ async function save(saveAs = false, closing = false): Promise<boolean> {
 }
 async function rename() { if (mcpBusy.value) return; renameValue.value = project.value.title; renaming.value = true; await nextTick(); renameInput.value?.focus(); renameInput.value?.select() }
 function finishRename() { if (!renaming.value) return; renaming.value = false; const title = renameValue.value.trim().slice(0, 300); if (title) commit({ ...project.value, title }, '项目已重命名') }
-async function pollJobs() { if (!native) return; try { jobs.value = await getMediaJobs() } catch {} ; jobsTimer = setTimeout(() => void pollJobs(), 1000) }
+async function pollMcpConnection(): Promise<void> {
+  if (!native || destroyed || allowClose) return
+  const revision = mcpStatusRevision
+  try {
+    const next = await getMcpStatus()
+    if (!destroyed && !allowClose && revision === mcpStatusRevision) mcpServiceChanged(next)
+  } catch (cause) {
+    if (!destroyed && revision === mcpStatusRevision && !(cause instanceof Error && cause.name === 'AbortError')) mcpConnected.value = false
+  }
+}
+async function pollJobs() {
+  if (!native || destroyed) return
+  await Promise.allSettled([
+    getMediaJobs().then(next => { if (!destroyed) jobs.value = next }),
+    pollMcpConnection(),
+  ])
+  if (!destroyed) jobsTimer = setTimeout(() => void pollJobs(), 1000)
+}
 async function cancelJob(id: string) { try { await cancelMediaJob(id); jobs.value = await getMediaJobs() } catch (cause) { fail(cause) } }
 async function nativeClose() {
   if (allowClose || switching.value || question.value) return
   if (busy.value || booting.value) { fail('请等待当前操作完成，再关闭应用。'); return }
-  if (mcpBusy.value) { mcpOpen.value = true; fail('请先完成或取消 MCP 任务，再关闭应用。'); return }
+  if (mcpBusy.value) { openJobs(); fail('请在处理任务中完成或取消 MCP 任务，再关闭应用。'); return }
   if (screenshotBusy.value) { fail('请先完成或取消截屏，再关闭应用。'); return }
   if (speechWorking.value) { view.value = 'edit'; fail('请先结束录音或完成、取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
-  if (browserExporting.value || runningJobs.value) { jobsOpen.value = native; fail('请等待导出完成，或先取消正在处理的任务。'); return }
+  if (browserExporting.value || runningJobs.value) { if (native) openJobs(); fail('请等待导出完成，或先取消正在处理的任务。'); return }
   if (pendingMedia.value || imageConverting.value || videoConverting.value || gifConverting.value) { fail('请先完成或取消素材导入及媒体转换，再关闭应用。'); return }
   switching.value = true
   const suspendedDialogs = [...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].map(element => ({ element, inert: element.inert }))
@@ -513,7 +540,7 @@ async function nativeClose() {
     draftGeneration++; cancelDraftCountdown()
     await saveQueue
     jobs.value = await getMediaJobs()
-    if (runningJobs.value) { jobsOpen.value = true; fail('请等待导出完成，或先取消正在处理的任务。'); return }
+    if (runningJobs.value) { openJobs(); fail('请等待导出完成，或先取消正在处理的任务。'); return }
     if (dirty.value) {
       const choice = await ask({
         title: '关闭应用',
@@ -525,8 +552,9 @@ async function nativeClose() {
     }
     allowClose = true
     try {
+      clearMcpToolActivity()
       cancelMcpPlayback()
-      if (mcpServiceRunning.value) { await mcpAutomation.cancelAll(); await stopMcpService(); mcpServiceRunning.value = false }
+      if (mcpServiceRunning.value) { await mcpAutomation.cancelAll(); await stopMcpService(); mcpServiceRunning.value = false; mcpConnected.value = false }
       await closeNativeWindow()
     } catch (cause) { allowClose = false; throw cause }
   } catch (cause) { fail(cause) }
@@ -568,11 +596,12 @@ function mediaChanged(event: MediaQueryListEvent) { systemDark.value = event.mat
 function dropped(event: DragEvent) { event.preventDefault(); const files = [...(event.dataTransfer?.files || [])]; if (files.length === 1 && files[0]!.name.toLowerCase().endsWith('.omedia')) void openProject(files[0]); else if (files.length) void importFiles(files) }
 function mcpLocalInteractionBusy(): boolean {
   // The automation task owns mcpBusy; feeding it back here would block its own commit.
-  if (destroyed || allowClose || booting.value || switching.value || busy.value || localMediaIsWorking() || renaming.value || question.value || exportOpen.value || jobsOpen.value) return true
+  if (destroyed || allowClose || booting.value || switching.value || busy.value || localMediaIsWorking() || renaming.value || question.value || exportOpen.value) return true
   if (videoEditor.value?.getInteractionBusy()) return true
   const active = document.activeElement
   if (active instanceof HTMLElement && active.matches('input,textarea,[contenteditable="true"]') && !active.closest('.mcp-panel')) return true
-  return [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(dialog => !dialog.querySelector('.mcp-panel'))
+  // Viewing or cancelling tasks does not edit the project; all other modals remain blocking.
+  return [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(dialog => !dialog.matches('.jobs-dialog') && !dialog.querySelector('.mcp-panel'))
 }
 function cancelMcpPlayback(): void {
   mcpPlaybackVersion++
@@ -653,13 +682,45 @@ const mcpAutomation = createMcpAutomation({
   onJobsChanged: () => { if (!destroyed) mcpJobs.value = mcpAutomation.list() },
   announce: message => { if (!destroyed) announce(message) },
 })
-function openMcp(): void { mcpOpen.value = true; if (mcpBridgeError) fail(mcpBridgeError) }
+function openJobs(): void {
+  mcpOpen.value = false; jobsOpen.value = true
+  // The closing native dialog restores its opener on the next tick before focus moves here.
+  void nextTick(async () => { await nextTick(); if (jobsOpen.value) document.querySelector<HTMLButtonElement>('.jobs-dialog button')?.focus() })
+}
+function openMcp(): void { jobsOpen.value = false; mcpOpen.value = true; if (mcpBridgeError) fail(mcpBridgeError) }
+function openMcpStatus(): void { if (mcpBusy.value) openJobs(); else openMcp() }
+function mcpJobState(job: McpPanelJob): string { return job.cancelling ? '正在取消' : ({ running: '正在处理', completed: '已完成', failed: '失败', cancelled: '已取消' }[job.state]) }
+function mcpJobPercent(job: McpPanelJob): number | undefined { return typeof job.progress === 'number' && Number.isFinite(job.progress) ? Math.round(Math.max(0, Math.min(1, job.progress)) * 100) : undefined }
 async function cancelMcpJob(id: string): Promise<void> {
   try { await mcpAutomation.cancel(id); mcpJobs.value = mcpAutomation.list() } catch (cause) { fail(cause) }
 }
+function clearMcpToolActivity(id?: string): void {
+  if (id && mcpToolActivity.value?.id !== id) return
+  clearTimeout(mcpActivityDeadlineTimer); clearTimeout(mcpActivityFeedbackTimer)
+  mcpActivityDeadlineTimer = undefined; mcpActivityFeedbackTimer = undefined
+  mcpToolActivity.value = null
+}
+function beginMcpToolActivity(request: McpRequest): void {
+  clearMcpToolActivity()
+  mcpToolActivity.value = { id: request.id, tool: request.tool, label: mcpToolLabels.get(request.tool) || request.tool, state: 'running' }
+  mcpActivityDeadlineTimer = setTimeout(() => clearMcpToolActivity(request.id), Math.max(0, request.deadlineAt - Date.now()))
+}
+function finishMcpToolActivity(id: string, failed: boolean): void {
+  const activity = mcpToolActivity.value
+  if (activity?.id !== id) return
+  clearTimeout(mcpActivityDeadlineTimer); mcpActivityDeadlineTimer = undefined
+  mcpToolActivity.value = { ...activity, state: failed ? 'failed' : 'completed' }
+  // Fast tools retain truthful completion feedback without extending the edit lock.
+  mcpActivityFeedbackTimer = setTimeout(() => clearMcpToolActivity(id), 1200)
+}
 function mcpServiceChanged(next: McpStatus): void {
+  if (destroyed || allowClose) return
+  const changed = mcpServiceRunning.value !== next.running || mcpObservedEpoch !== getMcpServiceEpoch()
+  mcpObservedEpoch = getMcpServiceEpoch(); mcpStatusRevision++
   mcpServiceRunning.value = next.running
-  if (!next.running) { cancelMcpPlayback(); void mcpAutomation.cancelAll() }
+  mcpConnected.value = native && next.running && Number.isFinite(next.connectedClients) && next.connectedClients > 0
+  if (!changed) return
+  if (!next.running) { clearMcpToolActivity(); cancelMcpPlayback(); void mcpAutomation.cancelAll() }
   else void recoverPendingMcpRequests()
 }
 function enqueueMcpRequest(request: McpRequest): void {
@@ -675,12 +736,19 @@ function enqueueMcpRequest(request: McpRequest): void {
     // Claim crosses native IPC. Stop, navigation and expiry must be checked again after it.
     if (!claimed || !current()) return
     mcpRequestDeadline = request.deadlineAt
+    beginMcpToolActivity(request)
+    let failed = false
     try {
       const result = await mcpAutomation.execute(request.tool, request.arguments)
       if (current()) await completeMcpRequest(request.id, result)
     } catch (cause) {
+      failed = true
       if (current()) await completeMcpRequest(request.id, { error: cause instanceof Error ? cause.message : String(cause) }, true)
-    } finally { mcpRequestDeadline = undefined }
+    } finally {
+      mcpRequestDeadline = undefined
+      if (current()) finishMcpToolActivity(request.id, failed)
+      else clearMcpToolActivity(request.id)
+    }
   }
   mcpRequestQueue = mcpRequestQueue.then(run, run).catch(cause => {
     if (!destroyed) { mcpBridgeError = `MCP 请求处理失败：${cause instanceof Error ? cause.message : String(cause)}`; announce(mcpBridgeError) }
@@ -715,7 +783,7 @@ onMounted(async () => {
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { destroyed = true; cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>
@@ -742,6 +810,16 @@ onBeforeUnmount(() => { destroyed = true; cancelMcpPlayback(); unlistenMcp?.(); 
       </div></div>
         <div v-if="error" class="app-error" role="alert"><Icon name="alert" :size="16"/><span>{{ error }}</span><button class="icon-button" aria-label="关闭提示" @click="error=''"><Icon name="close" :size="15"/></button></div>
         <div v-for="item in recoveryRecordings" :key="item.id" class="app-error recording-recovery" role="alert"><Icon name="video" :size="16"/><span>录制尚未加入项目：{{ item.name }}</span><button @click="saveRecoveredRecording(item.id)">保存录制文件</button></div>
+        <section v-if="!booting && (mcpBusy || mcpToolActivity)" class="mcp-processing-banner" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state" :data-call-tool="mcpToolActivity?.tool">
+          <span v-if="mcpBusy || mcpToolActivity?.state==='running'" class="spinner small" aria-hidden="true"/><Icon v-else :name="mcpToolActivity?.state==='failed' ? 'alert' : 'check'" :size="16"/>
+          <div class="mcp-processing-copy" role="status" aria-live="polite">
+            <div class="mcp-processing-heading"><strong>{{ mcpActivityTitle }}</strong><span v-if="mcpBusy && activeMcpJob">{{ activeMcpJob.name }}<template v-if="activeMcpProgress!==undefined"> · {{ activeMcpProgress }}%</template></span><span v-else-if="mcpToolActivity" :title="mcpToolActivity.tool">{{ mcpToolActivity.label }}</span></div>
+            <p v-if="mcpBusy"><span v-if="activeMcpJob?.stage">{{ activeMcpJob.stage }} · </span>编辑暂时锁定，完成后自动恢复。</p>
+            <p v-if="mcpBusy && mcpToolActivity" :title="mcpToolActivity.tool">{{ mcpToolActivity.state==='running' ? '正在调用' : mcpToolActivity.state==='failed' ? '调用失败' : '最近调用已完成' }}：{{ mcpToolActivity.label }}</p>
+            <p v-else-if="mcpToolActivity">{{ mcpToolActivity.state==='running' ? '正在执行工具调用。' : mcpToolActivity.state==='failed' ? '本次调用失败，具体原因已返回客户端。' : '本次工具调用已完成。' }}</p>
+          </div>
+          <div v-if="mcpBusy" class="mcp-processing-actions"><button data-testid="mcp-processing-tasks" @click="openJobs"><Icon name="layers" :size="14"/>查看任务</button><button v-if="activeMcpJob?.state==='running' && activeMcpJob.cancelable!==false" data-testid="mcp-processing-cancel" :disabled="activeMcpJob.cancelling" @click="cancelMcpJob(activeMcpJob.id)">{{ activeMcpJob.cancelling ? '正在取消…' : '取消任务' }}</button></div>
+        </section>
         <div v-if="booting" class="boot-loading"><span class="spinner"/>正在恢复工作台…</div>
         <section v-else-if="view==='home'" class="home-workspace" data-testid="home-workspace">
           <div class="home-intro"><div class="eyebrow"><span/>YOUR LOCAL CREATIVE STUDIO</div><h1>把灵感，剪成作品。</h1><p>录下屏幕，整理片段，转换媒体。<br/>让每一次创作，都从这里开始。</p><div class="home-actions"><button class="primary" data-testid="create-project" :disabled="switching || booting || speechWorking || screenshotBusy || mcpBusy" @click="newProject"><Icon name="plus"/>新建剪辑项目</button><button :disabled="switching || booting || speechWorking || screenshotBusy || mcpBusy" @click="openProject()"><Icon name="folder"/>打开项目</button></div><div class="hero-art" aria-hidden="true"><div class="art-window"><div class="art-dots"><i/><i/><i/></div><svg viewBox="0 0 260 120"><path d="M0 85 40 65 75 80 130 32 180 60 220 25 260 45v75H0Z" fill="#dce8ff"/><path d="M0 105 60 80 105 95 155 65 210 88 260 64v56H0Z" fill="#b9d0ff"/><circle cx="130" cy="60" r="25" fill="white"/><path d="m124 48 19 12-19 12z" fill="#4b7deb"/></svg></div><div class="art-timeline"><i/><i/><i/><i/><b/></div><div class="art-note"><Icon name="audio" :size="20"/><span><i/><i/><i/><i/><i/><i/><i/></span></div></div></div>
@@ -749,20 +827,42 @@ onBeforeUnmount(() => { destroyed = true; cancelMcpPlayback(); unlistenMcp?.(); 
           <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button :disabled="mcpBusy" @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" :disabled="mcpBusy" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
-        <VideoEditor ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
+        <VideoEditor ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :mcp-connected="mcpConnected" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
         <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
       </main>
     </div>
-    <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/><span class="status-message">{{ busy || status }}</span><time v-if="lastSaveAt" class="last-save-time" data-testid="last-save-time" :datetime="lastSaveAt" :title="lastSaveTitle">上次保存 {{ savedTime(lastSaveAt) }}</time></span><span v-if="native" class="status-tasks"><button v-if="mcpBusy || mcpServiceRunning" class="job-status" aria-label="MCP 任务" @click="openMcp"><Icon name="mcp" :size="13"/><span>{{ mcpBusy ? 'MCP 正在处理' : 'MCP 服务' }}</span></button><button class="job-status" aria-label="处理任务" title="查看视频导出与媒体转换任务" @click="jobsOpen=true"><Icon name="layers" :size="13"/><span>处理任务</span><b v-if="runningJobs">{{ runningJobs }}</b></button></span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>
+    <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/><span class="status-message">{{ busy || status }}</span><time v-if="lastSaveAt" class="last-save-time" data-testid="last-save-time" :datetime="lastSaveAt" :title="lastSaveTitle">上次保存 {{ savedTime(lastSaveAt) }}</time></span><span v-if="native" class="status-tasks"><button v-if="mcpBusy || mcpServiceRunning" class="job-status" aria-label="MCP 任务" @click="openMcpStatus"><Icon name="mcp" :size="13"/><span>{{ mcpBusy ? 'MCP 正在处理' : 'MCP 服务' }}</span></button><button class="job-status" aria-label="处理任务" title="查看媒体处理与 MCP 任务" @click="openJobs"><Icon name="layers" :size="13"/><span>处理任务</span><b v-if="runningJobs">{{ runningJobs }}</b></button></span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>
     <input ref="mediaInput" class="sr-only" type="file" accept="video/*,audio/*,image/*,.mkv,.mov,.avi,.flac,.ogg" multiple data-testid="media-input" @change="importFiles([...(($event.target as HTMLInputElement).files || [])]); ($event.target as HTMLInputElement).value=''"/>
     <input ref="projectInput" class="sr-only" type="file" accept=".omedia" data-testid="project-input" @change="openProject(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value=''"/>
     <ScreenshotPicker ref="screenshotPicker"/>
     <ExportPanel :open="exportOpen" :project="project" :native="native" @close="exportOpen=false" @status="announce" @busy="browserExporting=$event"/>
-    <McpPanel :open="mcpOpen" :native="native" :jobs="mcpJobs" @close="mcpOpen=false" @status="announce" @cancel-job="cancelMcpJob" @service-change="mcpServiceChanged"/>
+    <McpPanel :open="mcpOpen" :native="native" @close="mcpOpen=false" @status="announce" @service-change="mcpServiceChanged"/>
     <EditorDialog :open="!!question" :title="question?.title || '确认操作'" icon="alert" class="app-confirm" @close="answer('cancel')"><div class="dialog-content"><p>{{ question?.text }}</p></div><template #footer><div class="confirmation-actions"><button v-for="choice in question?.choices" :key="choice.id" :class="{primary:choice.primary}" @click="answer(choice.id)">{{ choice.label }}</button></div></template></EditorDialog>
-    <div v-if="jobsOpen" class="modal-shade" @click.self="jobsOpen=false"><section class="dialog jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="jobs-title"><header><span><Icon name="layers"/><strong id="jobs-title">处理任务</strong></span><button class="icon-button" aria-label="关闭任务" @click="jobsOpen=false"><Icon name="close"/></button></header><div class="dialog-content"><p v-if="!jobs.length" class="muted">还没有处理任务。</p><article v-for="job in [...jobs].reverse()" :key="job.id" class="job-item"><div><strong>{{ job.name }}</strong><span>{{ ({running:'正在处理',completed:'已完成',failed:'失败',cancelled:'已取消'})[job.state] }}</span></div><div v-if="job.state==='running'" class="progress-track"><i :style="{width:`${job.progress*100}%`}"/></div><p v-if="job.outputPath">{{ job.outputPath }}</p><p v-if="job.error" class="error-message">{{ job.error }}</p><button v-if="job.state==='running'" @click="cancelJob(job.id)">取消任务</button></article></div><footer><button @click="jobsOpen=false">关闭</button></footer></section></div>
+    <div v-if="jobsOpen" class="modal-shade" @click.self="jobsOpen=false">
+      <section class="dialog jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="jobs-title">
+        <header><span><Icon name="layers"/><strong id="jobs-title">处理任务</strong></span><button class="icon-button" aria-label="关闭任务" @click="jobsOpen=false"><Icon name="close"/></button></header>
+        <div class="dialog-content">
+          <p v-if="!jobs.length && !mcpJobs.length" class="muted">还没有处理任务。</p>
+          <h3 v-if="jobs.length && mcpJobs.length">媒体处理</h3>
+          <article v-for="job in [...jobs].reverse()" :key="job.id" class="job-item" :data-media-job-id="job.id">
+            <div><strong>{{ job.name }}</strong><span>{{ ({running:'正在处理',completed:'已完成',failed:'失败',cancelled:'已取消'})[job.state] }}</span></div>
+            <div v-if="job.state==='running'" class="progress-track"><i :style="{width:`${job.progress*100}%`}"/></div>
+            <p v-if="job.outputPath">{{ job.outputPath }}</p><p v-if="job.error" class="error-message">{{ job.error }}</p>
+            <button v-if="job.state==='running'" @click="cancelJob(job.id)">取消任务</button>
+          </article>
+          <h3 v-if="mcpJobs.length">MCP 任务</h3>
+          <article v-for="job in mcpJobs" :key="job.id" class="job-item mcp-task-item" :data-mcp-job-id="job.id">
+            <div><strong>{{ job.name }}</strong><span>{{ mcpJobState(job) }}<template v-if="mcpJobPercent(job)!==undefined"> · {{ mcpJobPercent(job) }}%</template></span></div>
+            <progress v-if="job.state==='running'" :value="mcpJobPercent(job)" max="100" :aria-label="`${job.name}进度`"/>
+            <p v-if="job.error || job.stage" :class="{ 'error-message': job.state==='failed' }">{{ job.error || job.stage }}</p>
+            <button v-if="job.state==='running' && job.cancelable!==false" :disabled="job.cancelling" :aria-label="`取消 MCP 任务 ${job.name}`" @click="cancelMcpJob(job.id)">{{ job.cancelling ? '正在取消…' : '取消任务' }}</button>
+          </article>
+        </div>
+        <footer><button @click="jobsOpen=false">关闭</button></footer>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -774,4 +874,9 @@ onBeforeUnmount(() => { destroyed = true; cancelMcpPlayback(); unlistenMcp?.(); 
 .app-confirm{--ed-border:var(--ui-line);--ed-panel:var(--ui-surface);--ed-text:var(--ui-text);--ed-accent:var(--ui-accent);--ed-muted:var(--ui-muted);--ed-bg:var(--ui-hover)}
 .confirmation-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px}
 .confirmation-actions button{font-size:12px}
+.mcp-task-item progress{display:block;width:100%;height:5px;accent-color:var(--ui-accent)}
+.mcp-task-item .error-message{color:var(--ui-danger)}
+.mcp-processing-banner{display:flex;align-items:center;gap:12px;flex-shrink:0;padding:10px 16px;border-bottom:1px solid color-mix(in srgb,var(--ui-accent) 20%,var(--ui-line));background:color-mix(in srgb,var(--ui-accent) 7%,var(--ui-surface));color:var(--ui-text)}
+.mcp-processing-banner>.spinner{flex:none}.mcp-processing-copy{flex:1;min-width:0}.mcp-processing-heading{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px 12px;font-size:12px}.mcp-processing-heading strong{color:var(--ui-accent)}.mcp-processing-heading span{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.mcp-processing-copy p{margin:4px 0 0;font-size:11px;line-height:1.5;color:var(--ui-muted);overflow-wrap:anywhere}.mcp-processing-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex-shrink:0}.mcp-processing-actions button{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:4px 9px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-text);font:inherit;font-size:11px;cursor:pointer}.mcp-processing-actions button:hover:not(:disabled){border-color:var(--ui-accent);color:var(--ui-accent)}.mcp-processing-actions button:disabled{opacity:.5;cursor:wait}
+@media(max-width:700px){.mcp-processing-banner{gap:8px;padding:9px 12px;flex-wrap:wrap}.mcp-processing-actions{margin-left:auto}}
 </style>

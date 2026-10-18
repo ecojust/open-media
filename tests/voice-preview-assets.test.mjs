@@ -154,8 +154,7 @@ test('previous auditions and their original provenance remain byte-for-byte arch
     }
   }
   const old = JSON.parse(readFileSync(new URL('optional-manifest.json', archive), 'utf8'))
-  const corpus = JSON.parse(readFileSync(new URL('../test/chinese-tts-benchmark/corpus.json', import.meta.url), 'utf8'))
-  assert.equal(old.text, corpus.find(sample => sample.id === '01').text)
+  assert.equal(old.text, '这是一款全程由AI接管并生成的软件')
   assert.notEqual(old.text, PREVIEW_TEXT)
   for (const preview of old.previews) assert.equal(digest(readFileSync(new URL(preview.file, archive))), preview.sha256)
 })

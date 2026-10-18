@@ -73,7 +73,7 @@ fn input_path(raw: &str, extensions: &[&str]) -> Result<PathBuf> {
 fn output_path(
     raw: &str,
     extensions: &[&str],
-    protected: &Path,
+    store: &MediaStore,
     overwrite: bool,
 ) -> Result<PathBuf> {
     let path = checked_path(raw, extensions)?;
@@ -82,7 +82,7 @@ fn output_path(
         .ok_or("保存目录无效。")?
         .canonicalize()
         .map_err(|error| format!("保存目录不存在或不可访问：{error}"))?;
-    if !parent.is_dir() || parent.starts_with(protected) {
+    if !parent.is_dir() || store.is_internal_path(&parent) {
         return Err("请选择媒体素材库以外的现有保存目录。".into());
     }
     let path = parent.join(path.file_name().ok_or("保存文件名无效。")?);
@@ -135,7 +135,7 @@ pub fn save_project(
         return files.save_registered(token, bytes);
     }
     let path = path.ok_or("项目尚未选择保存位置，请明确提供 .omedia 文件的绝对路径。")?;
-    let path = output_path(path, &["omedia"], &store.root, overwrite)?;
+    let path = output_path(path, &["omedia"], store, overwrite)?;
     files.save_selected_with_overwrite(path, bytes, overwrite)
 }
 
@@ -159,7 +159,7 @@ pub fn begin_export(
         .extension()
         .and_then(|value| value.to_str())
         .ok_or("导出格式无效。")?;
-    let output = output_path(output, &[extension], &store.root, overwrite)?;
+    let output = output_path(output, &[extension], store, overwrite)?;
     let plan = engine::build_plan(store, runtime, spec)?;
     jobs.begin_with_overwrite(runtime, plan, output, overwrite)
 }
@@ -262,11 +262,15 @@ mod tests {
         let store = MediaStore::new(folder.path()).unwrap();
         let path = folder.path().join("output.mp4");
         fs::write(&path, b"preserve").unwrap();
-        assert!(output_path(path.to_str().unwrap(), &["mp4"], &store.root, false).is_err());
-        assert!(output_path(path.to_str().unwrap(), &["mp4"], &store.root, true).is_ok());
+        assert!(output_path(path.to_str().unwrap(), &["mp4"], &store, false).is_err());
+        assert!(output_path(path.to_str().unwrap(), &["mp4"], &store, true).is_ok());
         let inside = store.root.join("source.mp4");
-        assert!(output_path(inside.to_str().unwrap(), &["mp4"], &store.root, true).is_err());
-        assert!(output_path(path.to_str().unwrap(), &["webm"], &store.root, true).is_err());
+        assert!(output_path(inside.to_str().unwrap(), &["mp4"], &store, true).is_err());
+        let recorded = store.recording_store().unwrap().root.join("recorded.mp4");
+        fs::write(&recorded, b"preserve recording").unwrap();
+        assert!(output_path(recorded.to_str().unwrap(), &["mp4"], &store, true).is_err());
+        assert_eq!(fs::read(recorded).unwrap(), b"preserve recording");
+        assert!(output_path(path.to_str().unwrap(), &["webm"], &store, true).is_err());
     }
 
     #[test]
@@ -382,13 +386,13 @@ mod tests {
         fs::write(&original, b"preserve").unwrap();
         let alias = folder.path().join("alias.mp4");
         std::os::unix::fs::symlink(&original, &alias).unwrap();
-        assert!(output_path(alias.to_str().unwrap(), &["mp4"], &store.root, true).is_err());
+        assert!(output_path(alias.to_str().unwrap(), &["mp4"], &store, true).is_err());
         let alias_dir = folder.path().join("library");
         std::os::unix::fs::symlink(&store.root, &alias_dir).unwrap();
         assert!(output_path(
             alias_dir.join("source.mp4").to_str().unwrap(),
             &["mp4"],
-            &store.root,
+            &store,
             true
         )
         .is_err());

@@ -5,7 +5,7 @@ use hyper::{
     service::service_fn,
     Method, Request, Response, StatusCode,
 };
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -16,8 +16,8 @@ use std::{
     net::{IpAddr, SocketAddr, TcpListener},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc, Condvar, Mutex,
     },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -27,6 +27,7 @@ use tokio::sync::{oneshot, Semaphore};
 const MAX_BODY: usize = 1_048_576;
 const MAX_CONNECTIONS: usize = 32;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECTION_IDLE_TIMEOUT: Duration = Duration::from_secs(40);
 const PROTOCOLS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
 pub type Dispatch = Arc<dyn Fn(McpRequest) -> Result<(), String> + Send + Sync>;
 
@@ -46,6 +47,8 @@ pub struct McpStatus {
     pub port: u16,
     pub url: Option<String>,
     pub pending_requests: usize,
+    /// Authenticated open HTTP transports, not unique agents or recent requests.
+    pub connected_clients: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -67,6 +70,7 @@ struct Pending {
 struct Running {
     address: SocketAddr,
     stopped: Arc<AtomicBool>,
+    connected_clients: Arc<AtomicUsize>,
     thread: thread::JoinHandle<()>,
 }
 struct Inner {
@@ -76,6 +80,7 @@ struct Inner {
     pending: Mutex<HashMap<String, Pending>>,
     sequence: AtomicU64,
     request_timeout: Duration,
+    connection_idle_timeout: Duration,
 }
 #[derive(Clone)]
 pub struct McpManager(Arc<Inner>);
@@ -133,6 +138,14 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn can_choose_another_port(error: &std::io::Error, requested_port: u16) -> bool {
+    requested_port != 0
+        && (error.kind() == std::io::ErrorKind::AddrInUse
+            // A reserved or exclusively owned Windows port can report WSAEACCES.
+            // Retry only this port-specific case on the same listening address.
+            || cfg!(windows) && error.raw_os_error() == Some(10013))
+}
+
 impl McpManager {
     pub fn new(path: PathBuf) -> Result<Self, String> {
         let config = if path.exists() {
@@ -160,6 +173,7 @@ impl McpManager {
             pending: Mutex::new(HashMap::new()),
             sequence: AtomicU64::new(1),
             request_timeout: REQUEST_TIMEOUT,
+            connection_idle_timeout: CONNECTION_IDLE_TIMEOUT,
         })))
     }
     pub fn config(&self) -> McpConfig {
@@ -200,6 +214,10 @@ impl McpManager {
                     format!("http://{address}/mcp")
                 }),
             pending_requests: self.0.pending.lock().unwrap().len(),
+            connected_clients: running
+                .as_ref()
+                .filter(|r| !r.stopped.load(Ordering::Acquire))
+                .map_or(0, |r| r.connected_clients.load(Ordering::Acquire)),
         }
     }
     pub fn start(
@@ -213,7 +231,7 @@ impl McpManager {
         if running.is_some() {
             return Err("MCP 服务已经启动。".into());
         }
-        let config = validate_config(config, cfg!(test))?;
+        let mut config = validate_config(config, cfg!(test))?;
         if tools.is_empty()
             || tools.len() > 200
             || serde_json::to_vec(&tools).map_err(|e| e.to_string())?.len() > MAX_BODY
@@ -235,16 +253,35 @@ impl McpManager {
             }
         }
         let address = SocketAddr::new(config.host.parse().unwrap(), config.port);
-        let listener = TcpListener::bind(address).map_err(|e| format!("无法启动 MCP 服务：{e}"))?;
+        // Keep the actual listener bound throughout startup. Probing and closing
+        // a free port first would let another process claim it before we start.
+        let listener = match TcpListener::bind(address) {
+            Ok(listener) => listener,
+            Err(error) if can_choose_another_port(&error, address.port()) => {
+                TcpListener::bind(SocketAddr::new(address.ip(), 0))
+                    .map_err(|e| format!("无法选择可用的 MCP 端口：{e}"))?
+            }
+            Err(error) => return Err(format!("无法启动 MCP 服务：{error}")),
+        };
         listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let address = listener.local_addr().map_err(|e| e.to_string())?;
+        config.port = address.port();
         // Build the runtime before reporting success, so setup failures are visible to the caller.
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|e| e.to_string())?;
+        let listener = {
+            let _context = runtime.enter();
+            tokio::net::TcpListener::from_std(listener).map_err(|e| e.to_string())?
+        };
+        let startup = Arc::new((Mutex::new(None::<bool>), Condvar::new()));
+        let wait_for_startup = startup.clone();
         let stopped = Arc::new(AtomicBool::new(false));
         let stop = stopped.clone();
+        let connected_clients = Arc::new(AtomicUsize::new(0));
+        let clients = connected_clients.clone();
+        let idle_timeout = self.0.connection_idle_timeout;
         let server = Server {
             manager: self.clone(),
             config: config.clone(),
@@ -252,18 +289,22 @@ impl McpManager {
             dispatch,
             stopped: stop.clone(),
         };
-        if config.port != 0 {
-            save_config(&self.0.path, &config)?;
-        }
-        *self.0.config.lock().unwrap() = config;
         let thread = thread::Builder::new()
             .name("media-mcp".into())
             .spawn(move || {
+                // No requests are accepted until both the worker and the atomic
+                // configuration write succeed. Failed writes release the socket.
+                let (lock, ready) = &*wait_for_startup;
+                let mut start = lock.lock().unwrap();
+                while start.is_none() {
+                    start = ready.wait(start).unwrap();
+                }
+                let allowed = *start == Some(true);
+                drop(start);
+                if !allowed {
+                    return;
+                }
                 runtime.block_on(async move {
-                    let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
-                        stop.store(true, Ordering::Release);
-                        return;
-                    };
                     let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
                     while !stop.load(Ordering::Acquire) {
                         match tokio::time::timeout(Duration::from_millis(100), listener.accept())
@@ -278,19 +319,24 @@ impl McpManager {
                                     continue;
                                 };
                                 let server = server.clone();
+                                let connection = Arc::new(ClientConnection {
+                                    authenticated: AtomicBool::new(false),
+                                    clients: clients.clone(),
+                                });
                                 tokio::spawn(async move {
                                     let _permit = permit;
                                     let service = service_fn(move |request| {
-                                        handle(request, server.clone(), local)
+                                        handle(request, server.clone(), local, connection.clone())
                                     });
-                                    let _ = tokio::time::timeout(
-                                        Duration::from_secs(40),
-                                        hyper::server::conn::http1::Builder::new()
-                                            .keep_alive(false)
-                                            .max_buf_size(32 * 1024)
-                                            .serve_connection(TokioIo::new(stream), service),
-                                    )
-                                    .await;
+                                    // Reset the idle/header timeout for each request; an
+                                    // active request must not inherit a connection deadline.
+                                    let _ = hyper::server::conn::http1::Builder::new()
+                                        .keep_alive(true)
+                                        .timer(TokioTimer::new())
+                                        .header_read_timeout(idle_timeout)
+                                        .max_buf_size(32 * 1024)
+                                        .serve_connection(TokioIo::new(stream), service)
+                                        .await;
                                 });
                             }
                             Ok(Err(_)) => break,
@@ -301,11 +347,21 @@ impl McpManager {
                 });
             })
             .map_err(|e| format!("无法启动 MCP 服务：{e}"))?;
+        if let Err(error) = save_config(&self.0.path, &config) {
+            *startup.0.lock().unwrap() = Some(false);
+            startup.1.notify_one();
+            let _ = thread.join();
+            return Err(error);
+        }
+        *self.0.config.lock().unwrap() = config;
         *running = Some(Running {
             address,
             stopped,
+            connected_clients,
             thread,
         });
+        *startup.0.lock().unwrap() = Some(true);
+        startup.1.notify_one();
         drop(running);
         Ok(self.status())
     }
@@ -373,6 +429,28 @@ struct Server {
     dispatch: Dispatch,
     stopped: Arc<AtomicBool>,
 }
+
+struct ClientConnection {
+    authenticated: AtomicBool,
+    // This counter belongs to one service generation. Old sockets cannot
+    // decrement a newly started service's count.
+    clients: Arc<AtomicUsize>,
+}
+impl ClientConnection {
+    fn authenticate(&self) {
+        if !self.authenticated.swap(true, Ordering::AcqRel) {
+            self.clients.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+}
+impl Drop for ClientConnection {
+    fn drop(&mut self) {
+        if self.authenticated.load(Ordering::Acquire) {
+            self.clients.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+}
+
 type HttpResponse = Response<Full<Bytes>>;
 fn response(status: StatusCode, value: Value) -> HttpResponse {
     let mut result = Response::new(Full::new(Bytes::from(value.to_string())));
@@ -431,6 +509,7 @@ async fn handle(
     request: Request<Incoming>,
     server: Server,
     local: SocketAddr,
+    connection: Arc<ClientConnection>,
 ) -> Result<HttpResponse, Infallible> {
     if !valid_host(&request, local) || request.headers().contains_key("origin") {
         return Ok(response(
@@ -553,17 +632,21 @@ async fn handle(
             error(Value::Null, -32600, "JSON-RPC 请求无效。"),
         ));
     }
-    if !message.as_object().unwrap().contains_key("id") {
-        return Ok(empty(StatusCode::ACCEPTED));
-    }
     if server.stopped.load(Ordering::Acquire) {
         return Ok(response(
             StatusCode::SERVICE_UNAVAILABLE,
             error(id, -32000, "MCP 服务已停止。"),
         ));
     }
+    if !message.as_object().unwrap().contains_key("id") {
+        if message["method"] == "notifications/initialized" {
+            connection.authenticate();
+        }
+        return Ok(empty(StatusCode::ACCEPTED));
+    }
     let result = match message["method"].as_str().unwrap() {
         "initialize" => {
+            connection.authenticate();
             let requested = message["params"]["protocolVersion"].as_str().unwrap_or("");
             let version = if PROTOCOLS.contains(&requested) {
                 requested
@@ -575,8 +658,14 @@ async fn handle(
                 json!({"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"Open Media","version":env!("CARGO_PKG_VERSION")},"instructions":"通过工具编辑当前桌面工程。长任务返回 jobId，请使用任务查询工具读取进度；修改会同步到桌面，保存需调用保存工具。"}),
             )
         }
-        "ping" => success(id, json!({})),
-        "tools/list" => success(id, json!({"tools":server.tools.as_ref()})),
+        "ping" => {
+            connection.authenticate();
+            success(id, json!({}))
+        }
+        "tools/list" => {
+            connection.authenticate();
+            success(id, json!({"tools":server.tools.as_ref()}))
+        }
         "tools/call" => {
             let name = message["params"]["name"].as_str().unwrap_or("");
             let arguments = message["params"]
@@ -586,6 +675,7 @@ async fn handle(
             if !server.tools.iter().any(|t| t["name"] == name) || !arguments.is_object() {
                 error(id, -32602, "工具名称或参数无效。")
             } else {
+                connection.authenticate();
                 dispatch_tool(&server, id, name.to_owned(), arguments).await
             }
         }

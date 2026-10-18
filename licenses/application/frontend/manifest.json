@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "17826cc1a5bf498d6ffa2dc22f67119a41504e7036ccdf21cca80ea215c5a7ec",
-      "reviewMethod": "Application version updated to 0.1.15 with browser regressions for live dimensions, subtitle backgrounds, transitions, opening and ending segments, and MCP automation. Production dependency versions and original license texts are unchanged."
+      "sha256": "3662a8451f6698be6f67b8ff07bb9ef5a2e0c1ad24e984a02cd8e85c53513580",
+      "reviewMethod": "Application version updated to 0.1.16; editor recording-library browser regression added. Production dependencies, versions and original license texts are unchanged."
     },
     {
       "path": "package-lock.json",
-      "sha256": "891e2c5d659f567d0597f7a5654e744d9ccdd54683b0ac9275b40a4032c95887",
-      "reviewMethod": "Application version updated to 0.1.15 with browser regressions for live dimensions, subtitle backgrounds, transitions, opening and ending segments, and MCP automation. Production dependency versions and original license texts are unchanged."
+      "sha256": "2294bfbcf7a4c4204fb70044deec00636b3b654a1856f7c86d45012574439ab5",
+      "reviewMethod": "Application version updated to 0.1.16; editor recording-library browser regression added. Production dependencies, versions and original license texts are unchanged."
     },
     {
       "path": "vite.config.ts",

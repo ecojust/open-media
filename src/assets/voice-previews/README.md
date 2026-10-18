@@ -27,4 +27,4 @@ ZipVoice 与 F5 的女声参考沿用已核验的合成参考。男声参考由 
 
 内置女声使用 `scripts/generate-voice-previews.py --wav-dir <工作目录>`。六种可选声音使用 `scripts/generate-optional-voice-previews.py`，传入已有 `--python`、`--qwen-model`、`--f5-config`、`--zip-model`、`--runtime-script`、`--speech-root` 和 `--work` 路径。脚本验证模型文件后生成，不下载权重、不构建应用；可通过 `--voices` 选择声音。全部完成后，用相同路径参数加 `--assemble-only` 校验并汇总清单。
 
-旧试听、三份原始清单及生成器逐字节归档于 `provenance/pre-introduction-20261018/`，校验表为 `archive-index.json`。原男声参考生成代码仍在 `provenance/male-20261018/`。新可选试听分别保存实际生成时的脚本快照于 `provenance/introduction-20261018/`，避免把历史音频归属于后来修改的代码。旧中文对比资料包保持原样。
+旧试听、三份原始清单及生成器逐字节归档于 `provenance/pre-introduction-20261018/`，校验表为 `archive-index.json`。原男声参考生成代码仍在 `provenance/male-20261018/`。新可选试听分别保存实际生成时的脚本快照于 `provenance/introduction-20261018/`，避免把历史音频归属于后来修改的代码。旧中文对比实验资料已移除；历史清单中的原始路径仅记录生成时的来源，不是当前文件依赖。

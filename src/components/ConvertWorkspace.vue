@@ -4,11 +4,13 @@ import { zipSync } from 'fflate'
 import Icon from './Icon.vue'
 import RuntimeCheck from './RuntimeCheck.vue'
 import MediaAssetMenu from './MediaAssetMenu.vue'
+import VideoLibraryToolbar from './VideoLibraryToolbar.vue'
 import EditorDialog from './EditorDialog.vue'
 import ImageCropEditor from './ImageCropEditor.vue'
 import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import type { MediaAsset } from '../core/types'
-import { recentVideoAssets, videoImportedTime } from '../core/video-assets'
+import { videoImportedTime } from '../core/video-assets'
+import { useStoredVideos } from '../core/stored-videos'
 import { convertImage, convertedImageName, getSupportedImageFormats, imageDefaults, imageDimensions, imageFormatOptions, standardIconSizes, type ImageConvertOptions } from '../core/image-convert'
 import { validateImageCrop, type ImageCrop } from '../core/image-crop'
 import { cloneImageAnnotations, validateImageAnnotations, type ImageAnnotation } from '../core/image-annotations'
@@ -25,12 +27,14 @@ interface Result {
   state: 'waiting' | 'running' | 'done' | 'error' | 'cancelled'
   progress: number; blob?: Blob; url?: string; path?: string; message?: string; width?: number; height?: number
 }
-const available = computed(() => props.mode === 'image' ? props.assets.filter(asset => asset.kind === 'image') : recentVideoAssets(props.assets))
+const { assets: storedVideos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useStoredVideos(() => props.assets, () => props.native && props.mode === 'video')
+const available = computed(() => props.mode === 'image' ? props.assets.filter(asset => asset.kind === 'image') : storedVideos.value)
 const assetMenu = ref<InstanceType<typeof MediaAssetMenu>>()
 const selectedIds = ref<string[]>([])
 const selected = computed(() => available.value.filter(asset => selectedIds.value.includes(asset.id)))
 const activeId = ref('')
 const active = computed(() => available.value.find(asset => asset.id === activeId.value) ?? selected.value[0] ?? available.value[0])
+watch(() => props.native && props.mode === 'video' ? active.value : undefined, asset => { if (asset) void preparePreview(asset).catch(cause => emit('status', cause instanceof Error ? cause.message : String(cause))) }, { immediate: true })
 const busy = ref(false)
 const message = ref('')
 const copyingImage = ref(false)
@@ -82,6 +86,7 @@ let nativeJobId: string | null = null
 let currentBatch = new Set<string>()
 let destroyed = false
 let knownAssetIds = new Set<string>()
+let videoSelectionInitialized = false
 let focusedAssetId = ''
 const outputAssetIds = new Set<string>()
 const resultPreviewUrls = new Set<string>()
@@ -100,7 +105,12 @@ onMounted(async () => {
 watch(available, assets => {
   const ids = new Set(assets.map(asset => asset.id))
   selectedIds.value = selectedIds.value.filter(id => ids.has(id))
-  for (const asset of assets) if (!knownAssetIds.has(asset.id) && !outputAssetIds.has(asset.id) && !(busy.value && props.focusAssetId === asset.id)) selectedIds.value.push(asset.id)
+  const importedIds = new Set(props.assets.map(asset => asset.id))
+  for (const asset of assets) if (!knownAssetIds.has(asset.id) && !outputAssetIds.has(asset.id) && !(busy.value && props.focusAssetId === asset.id) && (props.mode === 'image' || importedIds.has(asset.id))) selectedIds.value.push(asset.id)
+  if (props.mode === 'video' && !videoSelectionInitialized && assets.length) {
+    if (!selectedIds.value.length) selectedIds.value = [assets[0]!.id]
+    videoSelectionInitialized = true
+  }
   knownAssetIds = ids
   if (!ids.has(activeId.value)) activeId.value = assets[0]?.id ?? ''
   for (const id of Object.keys(imageCrops)) if (!ids.has(id)) delete imageCrops[id]
@@ -409,11 +419,12 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
     <div class="convert-layout">
       <aside class="convert-sources" aria-label="待转换素材">
         <div class="convert-section-title"><h2>{{ mode === 'image' ? '素材' : '视频' }} <span>{{ available.length }}</span></h2><button :disabled="busy || !available.length" @click="selectAll">{{ selected.length === available.length && available.length ? '取消全选' : '全选' }}</button></div>
+        <VideoLibraryToolbar v-if="native && mode === 'video'" :directory="directory" :loading="libraryLoading" :preparing="previewPreparing" :error="libraryError" :warnings="libraryWarnings" :disabled="busy" @refresh="refreshVideos" @reveal="revealVideoDirectory" />
         <div v-if="!available.length" class="convert-empty"><Icon :name="mode === 'image' ? 'image' : 'video'" :size="36" /><p>拖入文件开始转换</p><button class="convert-button" @click="emit('import')">选择文件</button></div>
         <div v-for="asset in available" :key="asset.id" class="convert-source" :class="{ active: active?.id === asset.id }" :data-source-asset-id="asset.id" @click="selectSource(asset.id)" @contextmenu="mode === 'video' && assetMenu?.open($event, asset)">
           <input type="checkbox" :checked="selectedIds.includes(asset.id)" :aria-label="`选择 ${asset.name}`" :disabled="busy" @click.stop @change="toggle(asset.id)">
           <img v-if="asset.kind === 'image'" :src="asset.url" alt="" loading="lazy"><span v-else class="source-icon"><Icon :name="asset.kind === 'audio' ? 'audio' : 'video'" /></span>
-          <button class="source-details" :title="asset.name" :disabled="busy" @click="selectSource(asset.id)" @keydown.shift.f10="mode === 'video' && assetMenu?.open($event, asset)" @keydown.context-menu="mode === 'video' && assetMenu?.open($event, asset)"><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : duration(asset.duration) }} · {{ fileSize(asset.size) }}</small><time v-if="mode === 'video'" class="source-imported-time" :datetime="asset.addedAt" :title="`导入时间：${videoImportedTime(asset)}`">{{ videoImportedTime(asset) }}</time><small v-if="imageCrops[asset.id]" class="source-cropped">已框选 {{ imageCrops[asset.id]!.width }} × {{ imageCrops[asset.id]!.height }}</small></button>
+          <button class="source-details" :title="asset.name" :disabled="busy" @click="selectSource(asset.id)" @keydown.shift.f10="mode === 'video' && assetMenu?.open($event, asset)" @keydown.context-menu="mode === 'video' && assetMenu?.open($event, asset)"><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : duration(asset.duration) }} · {{ fileSize(asset.size) }}</small><time v-if="mode === 'video'" class="source-imported-time" :datetime="asset.addedAt" :title="`视频时间：${videoImportedTime(asset)}`">{{ videoImportedTime(asset) }}</time><small v-if="imageCrops[asset.id]" class="source-cropped">已框选 {{ imageCrops[asset.id]!.width }} × {{ imageCrops[asset.id]!.height }}</small></button>
         </div>
         <p v-if="available.length" class="source-selection">已选 {{ selected.length }} 项</p>
       </aside>
@@ -520,6 +531,7 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
 </template>
 
 <style scoped>
+.convert-sources>.video-library-toolbar{margin:0 5px 10px}@media(max-width:800px){.convert-sources:has(>.video-library-toolbar){min-height:106px;max-height:106px}.convert-sources>.video-library-toolbar{flex:0 0 205px;margin:0;max-height:85px;overflow:auto}}
 .source-imported-time{font-size:9px;white-space:nowrap;color:var(--ui-muted,#959aad);font-variant-numeric:tabular-nums}.source-details:disabled{cursor:not-allowed}
 .convert-workspace{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--ui-text,#e5e7ef);background:var(--ui-bg,#11131b)}
 .convert-toolbar{display:flex;align-items:center;gap:16px;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--ui-line,#2a2d3a)}
