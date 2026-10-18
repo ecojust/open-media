@@ -142,7 +142,9 @@ mod desktop {
                 .into_iter()
                 .map(|p| {
                     let path = p.into_path().map_err(|_| "请选择本机媒体文件。")?;
-                    state.store.import(&runtime, &path, None)
+                    let asset = state.store.import(&runtime, &path, None)?;
+                    crate::export_files::remember_asset_source(&state.store, &asset, &path)?;
+                    Ok(asset)
                 })
                 .collect()
         })
@@ -228,6 +230,16 @@ mod desktop {
         project_files::require_main_window(window.label())?;
         let jobs = state.jobs.list();
         blocking(move || crate::export_files::reveal_job_output(&jobs, &id)).await
+    }
+    #[tauri::command]
+    pub async fn reveal_media_asset(
+        window: tauri::Window,
+        asset: Value,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || crate::export_files::reveal_media_asset(&store, &asset)).await
     }
     #[tauri::command]
     pub async fn get_speech_status(state: State<'_, MediaState>) -> engine::Result<SpeechStatus> {
@@ -705,6 +717,7 @@ mod desktop {
                 get_media_jobs,
                 cancel_media_job,
                 reveal_media_job_output,
+                reveal_media_asset,
                 get_speech_status,
                 begin_speech_model_download,
                 cancel_speech_model_download,

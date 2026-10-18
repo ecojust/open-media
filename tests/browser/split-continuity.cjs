@@ -8,8 +8,10 @@ const { chromium } = require('@playwright/test')
 async function main() {
   const directory = process.env.BROWSER_ARTIFACTS ? path.join(process.env.BROWSER_ARTIFACTS, 'split-continuity') : fs.mkdtempSync(path.join(os.tmpdir(), 'open-media-split-'))
   fs.mkdirSync(directory, { recursive: true })
-  const source = path.join(directory, 'source.mp4')
-  execFileSync(process.env.OPEN_MEDIA_FFMPEG || 'ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0xe04020:s=160x96:r=30:d=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', source])
+  // Use the same open video codec supported by the CI browser and browser export.
+  // The native export regression separately checks the packaged H.264 encoder.
+  const source = path.join(directory, 'source.webm')
+  execFileSync(process.env.OPEN_MEDIA_FFMPEG || 'ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0xe04020:s=160x96:r=30:d=3', '-c:v', 'libvpx', '-pix_fmt', 'yuv420p', source])
   const { createServer } = await import('vite')
   const server = await createServer({ server: { host: '127.0.0.1', port: 0, hmr: false, watch: null }, logLevel: 'error' })
   await server.listen()
@@ -22,9 +24,9 @@ async function main() {
       const { exportTimelineWebM } = await import('/src/core/browser-export.ts')
       const { createProject, createClip } = await import('/src/core/project.ts')
       const { addAsset, addClip, splitClip, updateClip } = await import('/src/core/timeline.ts')
-      const blob = new Blob([Uint8Array.from(atob(base64), char => char.charCodeAt(0))], { type: 'video/mp4' })
+      const blob = new Blob([Uint8Array.from(atob(base64), char => char.charCodeAt(0))], { type: 'video/webm' })
       const url = URL.createObjectURL(blob)
-      const asset = { id: 'continuous-source', name: 'source.mp4', kind: 'video', url, duration: 3, width: 160, height: 96, size: blob.size, mime: 'video/mp4' }
+      const asset = { id: 'continuous-source', name: 'source.webm', kind: 'video', url, duration: 3, width: 160, height: 96, size: blob.size, mime: 'video/webm' }
       const results = []
       let exportProject
       for (const speed of [1, 1.25]) {

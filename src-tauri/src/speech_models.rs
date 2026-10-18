@@ -2493,7 +2493,17 @@ mod tests {
 
     #[test]
     fn gpu_upgrade_preserves_verified_cpu_voice_on_failure_cancel_and_switches_when_ready() {
-        let root = tempfile::tempdir().unwrap();
+        let parent = tempfile::tempdir().unwrap();
+        let store = parent.path().join("store");
+        fs::create_dir(&store).unwrap();
+        // Exercise alias ancestors on Unix, including macOS /var -> /private/var.
+        #[cfg(unix)]
+        let store = {
+            let alias = parent.path().join("store-alias");
+            std::os::unix::fs::symlink(&store, &alias).unwrap();
+            alias
+        };
+        let root = tempfile::tempdir_in(store).unwrap();
         let (mut package, bundled) = fixture_package(root.path());
         package.model.kind = ModelKind::F5;
         package.model.config = "model.onnx".into();
@@ -2508,17 +2518,21 @@ mod tests {
             &AtomicBool::new(false),
         )
         .unwrap();
-        assert!(cpu.executable.starts_with(runtime_packages::path(
+        let cpu_directory = runtime_packages::path(
             root.path(),
-            package.fallback_runtime.as_ref().unwrap()
-        )));
+            package.fallback_runtime.as_ref().unwrap(),
+        )
+        .canonicalize()
+        .unwrap();
+        assert!(cpu.executable.starts_with(&cpu_directory));
         let mut entry = Entry::default();
         entry.state = State::Ready;
         entry.runtime = Some(cpu.clone());
         entry.stamps = stamps;
         let manager = SpeechModels {
             catalog: Arc::new(vec![package.clone()]),
-            root: root.path().into(),
+            // Match the production with_catalog constructor's normalized store.
+            root: root.path().canonicalize().unwrap(),
             bundled: Ok(bundled),
             owner: Arc::new(Owner {
                 downloads: Arc::new(Mutex::new(Downloads {
@@ -2574,10 +2588,12 @@ mod tests {
         );
         installed_test_runtime(root.path(), "python-cuda-v1", true);
         let gpu = manager.runtime_for_voice("extra_voice").unwrap();
-        assert!(gpu.executable.starts_with(runtime_packages::path(
-            root.path(),
-            package.runtime.as_ref().unwrap()
-        )));
+        let gpu_directory = runtime_packages::path(root.path(), package.runtime.as_ref().unwrap())
+            .canonicalize()
+            .unwrap();
+        assert!(gpu.executable.starts_with(&gpu_directory));
+        assert!(!gpu.executable.starts_with(&cpu_directory));
+        assert!(!cpu.executable.starts_with(&gpu_directory));
         assert_eq!(manager.voices()[0].runtime_status.as_deref(), Some("ready"));
         let fallback = gpu
             .python_cpu_fallback

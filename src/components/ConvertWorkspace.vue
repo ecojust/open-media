@@ -3,10 +3,12 @@ import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, react
 import { zipSync } from 'fflate'
 import Icon from './Icon.vue'
 import RuntimeCheck from './RuntimeCheck.vue'
+import MediaAssetMenu from './MediaAssetMenu.vue'
 import EditorDialog from './EditorDialog.vue'
 import ImageCropEditor from './ImageCropEditor.vue'
 import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import type { MediaAsset } from '../core/types'
+import { recentVideoAssets, videoImportedTime } from '../core/video-assets'
 import { convertImage, convertedImageName, getSupportedImageFormats, imageDefaults, imageDimensions, imageFormatOptions, standardIconSizes, type ImageConvertOptions } from '../core/image-convert'
 import { validateImageCrop, type ImageCrop } from '../core/image-crop'
 import { cloneImageAnnotations, validateImageAnnotations, type ImageAnnotation } from '../core/image-annotations'
@@ -23,7 +25,8 @@ interface Result {
   state: 'waiting' | 'running' | 'done' | 'error' | 'cancelled'
   progress: number; blob?: Blob; url?: string; path?: string; message?: string; width?: number; height?: number
 }
-const available = computed(() => props.assets.filter(asset => props.mode === 'image' ? asset.kind === 'image' : asset.kind === 'video' || asset.kind === 'audio'))
+const available = computed(() => props.mode === 'image' ? props.assets.filter(asset => asset.kind === 'image') : recentVideoAssets(props.assets))
+const assetMenu = ref<InstanceType<typeof MediaAssetMenu>>()
 const selectedIds = ref<string[]>([])
 const selected = computed(() => available.value.filter(asset => selectedIds.value.includes(asset.id)))
 const activeId = ref('')
@@ -120,6 +123,7 @@ function toggle(id: string) {
   selectedIds.value = selectedIds.value.includes(id) ? selectedIds.value.filter(value => value !== id) : [...selectedIds.value, id]
   activeId.value = id
 }
+function selectSource(id: string): void { if (!busy.value) activeId.value = id }
 function selectAll() { selectedIds.value = selected.value.length === available.value.length ? [] : available.value.map(asset => asset.id) }
 function imageSettings(asset: MediaAsset): ImageConvertOptions {
   return { ...image, iconSizes: [...iconSizes.value], width: sizeWidth.value === '' ? undefined : Number(sizeWidth.value), height: sizeHeight.value === '' ? undefined : Number(sizeHeight.value), crop: imageCrops[asset.id] ? { ...imageCrops[asset.id]! } : undefined, annotations: cloneImageAnnotations(imageAnnotations[asset.id] ?? []) }
@@ -400,16 +404,16 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
   <section class="convert-workspace" :class="{ 'is-dragging': dragging }" data-testid="convert-workspace" @dragover.prevent="dragging = true" @dragleave.self="dragging = false" @drop.prevent="drop">
     <header class="convert-toolbar">
       <div><h1>{{ mode === 'image' ? '图片编辑' : '视频转换' }}</h1><p>{{ mode === 'image' ? '文字标注、自由绘制、裁剪与格式导出' : '转换格式、压缩画质或提取音频' }}</p></div>
-      <button class="convert-button" :disabled="busy" @click="emit('import')"><Icon name="upload" />导入{{ mode === 'image' ? '图片' : '媒体' }}</button>
+      <button class="convert-button" :disabled="busy" @click="emit('import')"><Icon name="upload" />导入{{ mode === 'image' ? '图片' : '视频' }}</button>
     </header>
     <div class="convert-layout">
       <aside class="convert-sources" aria-label="待转换素材">
-        <div class="convert-section-title"><h2>素材 <span>{{ available.length }}</span></h2><button :disabled="busy || !available.length" @click="selectAll">{{ selected.length === available.length && available.length ? '取消全选' : '全选' }}</button></div>
+        <div class="convert-section-title"><h2>{{ mode === 'image' ? '素材' : '视频' }} <span>{{ available.length }}</span></h2><button :disabled="busy || !available.length" @click="selectAll">{{ selected.length === available.length && available.length ? '取消全选' : '全选' }}</button></div>
         <div v-if="!available.length" class="convert-empty"><Icon :name="mode === 'image' ? 'image' : 'video'" :size="36" /><p>拖入文件开始转换</p><button class="convert-button" @click="emit('import')">选择文件</button></div>
-        <div v-for="asset in available" :key="asset.id" class="convert-source" :class="{ active: active?.id === asset.id }" @click="activeId = asset.id">
+        <div v-for="asset in available" :key="asset.id" class="convert-source" :class="{ active: active?.id === asset.id }" :data-source-asset-id="asset.id" @click="selectSource(asset.id)" @contextmenu="mode === 'video' && assetMenu?.open($event, asset)">
           <input type="checkbox" :checked="selectedIds.includes(asset.id)" :aria-label="`选择 ${asset.name}`" :disabled="busy" @click.stop @change="toggle(asset.id)">
           <img v-if="asset.kind === 'image'" :src="asset.url" alt="" loading="lazy"><span v-else class="source-icon"><Icon :name="asset.kind === 'audio' ? 'audio' : 'video'" /></span>
-          <button class="source-details" :title="asset.name" @click="activeId = asset.id"><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : duration(asset.duration) }} · {{ fileSize(asset.size) }}</small><small v-if="imageCrops[asset.id]" class="source-cropped">已框选 {{ imageCrops[asset.id]!.width }} × {{ imageCrops[asset.id]!.height }}</small></button>
+          <button class="source-details" :title="asset.name" :disabled="busy" @click="selectSource(asset.id)" @keydown.shift.f10="mode === 'video' && assetMenu?.open($event, asset)" @keydown.context-menu="mode === 'video' && assetMenu?.open($event, asset)"><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : duration(asset.duration) }} · {{ fileSize(asset.size) }}</small><time v-if="mode === 'video'" class="source-imported-time" :datetime="asset.addedAt" :title="`导入时间：${videoImportedTime(asset)}`">{{ videoImportedTime(asset) }}</time><small v-if="imageCrops[asset.id]" class="source-cropped">已框选 {{ imageCrops[asset.id]!.width }} × {{ imageCrops[asset.id]!.height }}</small></button>
         </div>
         <p v-if="available.length" class="source-selection">已选 {{ selected.length }} 项</p>
       </aside>
@@ -511,10 +515,12 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
       <p v-if="annotationsError" class="annotation-apply-error" role="alert">{{ annotationsError }}</p>
       <template #footer><button @click="annotationsOpen = false">取消</button><button class="primary" data-testid="image-annotations-apply" @click="applyAnnotations">应用编辑</button></template>
     </EditorDialog>
+    <MediaAssetMenu ref="assetMenu" :native="native" @error="message = $event" />
   </section>
 </template>
 
 <style scoped>
+.source-imported-time{font-size:9px;white-space:nowrap;color:var(--ui-muted,#959aad);font-variant-numeric:tabular-nums}.source-details:disabled{cursor:not-allowed}
 .convert-workspace{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--ui-text,#e5e7ef);background:var(--ui-bg,#11131b)}
 .convert-toolbar{display:flex;align-items:center;gap:16px;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--ui-line,#2a2d3a)}
 .convert-toolbar h1{font-size:18px;margin:0 0 5px;font-weight:650}.convert-toolbar p{font-size:12px;margin:0;color:var(--ui-muted,#959aad)}

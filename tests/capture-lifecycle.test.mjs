@@ -6,6 +6,7 @@ import * as vue from 'vue'
 import { captureErrorMessage } from '../src/core/capture.ts'
 import { recordingClock } from '../src/core/capture-controls.ts'
 import { validateGifSegments, gifFrameCount } from '../src/core/gif.ts'
+import { recentVideoAssets, videoDuration, videoImportedTime } from '../src/core/video-assets.ts'
 
 function deferred() {
   let resolve, reject
@@ -36,7 +37,7 @@ function workspace(name, overrides = {}) {
     resumeCapture: async () => ({ state: 'recording', elapsed: 1, segments: 1 }), stopCapture: async () => null, cancelCaptureStart: async () => {},
     beginMediaJob: async () => ({ id: 'job', state: 'running', progress: 0, name: 'result.gif' }),
     cancelMediaJob: async () => {}, getMediaJobs: async () => [],
-    captureErrorMessage, validateGifSegments, gifFrameCount,
+    captureErrorMessage, validateGifSegments, gifFrameCount, recentVideoAssets, videoDuration, videoImportedTime,
     readMicrophonePreference: () => ({ deviceId: '', name: '' }), writeMicrophonePreference: () => {},
     ...overrides,
   }

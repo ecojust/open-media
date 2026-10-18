@@ -78,6 +78,7 @@ export async function beginMediaJob(spec: MediaJobSpec): Promise<MediaJob | null
 export async function getMediaJobs(): Promise<MediaJob[]> { return isDesktop() ? call('get_media_jobs') : [] }
 export async function cancelMediaJob(id: string): Promise<void> { return call('cancel_media_job', { id }) }
 export async function revealMediaJobOutput(id: string): Promise<void> { return call('reveal_media_job_output', { id }) }
+export async function revealMediaAsset(asset: MediaAsset): Promise<void> { return call('reveal_media_asset', { asset }) }
 export async function getSpeechStatus(): Promise<SpeechStatus> {
   return isDesktop() ? call('get_speech_status') : { ready: false, voices: [], error: '离线文字转语音由桌面端提供，安装包内含语音模型和音色。' }
 }

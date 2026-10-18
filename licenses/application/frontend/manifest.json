@@ -5,8 +5,8 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "2b47510af72bb41754a9326987f396c7b235e71638d878c01f58d2fad8a8ba46",
-      "reviewMethod": "Added browser regressions for continuous split playback and shared dialog backdrops. Dependency versions, locked package records and original license texts are unchanged."
+      "sha256": "78f95414cb14795986ee8e6b11f042dafe38f1e880159677e5b5eeff3c7ea079",
+      "reviewMethod": "Added browser regressions for editor new-project protection and save-target isolation, and video source filtering, ordering, folder actions and selection. Production dependencies and original license texts are unchanged."
     },
     {
       "path": "package-lock.json",
