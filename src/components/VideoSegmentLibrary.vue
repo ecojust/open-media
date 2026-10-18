@@ -73,7 +73,7 @@ onBeforeUnmount(() => {
   <section class="segment-library" data-testid="video-segment-library" :data-placement="placement" :aria-busy="busy" :aria-label="`${segmentTitle}素材库`">
     <div class="segment-toolbar">
       <div><strong>{{ placement === 'prepend' ? '用精彩开场开启故事' : '为故事留下动人余韵' }}</strong><span>{{ items.length }} 款原创{{ segmentTitle }}模板 · 离线可用 · 标题可编辑</span></div>
-      <button type="button" class="segment-import" :disabled="busy" data-testid="video-segment-import-local" @click="importLocal"><Icon name="upload" :size="15" />导入视频</button>
+      <button type="button" class="segment-import" :disabled="busy" data-testid="video-segment-import-local" @click="importLocal"><Icon name="upload" :size="15" />导入{{ segmentTitle }}</button>
     </div>
     <div class="segment-body">
       <div class="segment-grid" role="group" :aria-label="`选择${segmentTitle}模板`">
