@@ -48,6 +48,10 @@ async function fixture(browser, url, autoSave = false) {
   await expect(page.getByTestId('create-project')).toBeEnabled()
   await page.waitForFunction(() => window.closeHarness.ready())
   await page.getByTestId('nav-edit').click()
+  await expect(page.locator('.statusbar > *')).toHaveCount(2)
+  await expect(page.locator('.statusbar > .status-main')).toBeVisible()
+  await expect(page.locator('.statusbar > button')).toBeVisible()
+  await expect(page.locator('.statusbar .status-tasks')).toHaveCount(0)
   return { page, errors, finish: async () => { assert.deepEqual(errors, []); await context.close() } }
 }
 async function rename(page, title) {
@@ -116,7 +120,13 @@ async function main() {
       await expect(dialog(page)).toContainText('输入中也要保存')
       await dialog(page).getByRole('button', { name: '取消', exact: true }).click()
       for (const title of ['关于 Open Media', '项目设置', '处理任务']) {
-        await page.getByRole('button', { name: title, exact: true }).click()
+        if (title === '处理任务') {
+          await setMode(page, 'jobs', [{ id: 'underlying-export', name: '待完成导出', state: 'running', progress: 0.5 }])
+          await close(page)
+          await expect(page.getByRole('dialog', { name: title, exact: true })).toBeVisible()
+          await setMode(page, 'jobs', [{ id: 'underlying-export', name: '待完成导出', state: 'completed', progress: 1 }])
+          await page.waitForFunction(() => document.querySelector('#app').__vue_app__._instance.setupState.runningJobs === 0)
+        } else await page.getByRole('button', { name: title, exact: true }).click()
         const underlying = page.getByRole('dialog', { name: title, exact: true })
         await expect(underlying).toBeVisible()
         await close(page)
