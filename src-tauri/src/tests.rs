@@ -1043,6 +1043,141 @@ fn timeline_exports_ten_centered_transition_effects_without_changing_duration() 
 }
 
 #[test]
+fn gentle_zoom_fades_export_eighty_percent_scale_fixed_anchors_and_independent_opacity() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let width = 240;
+    let height = 180;
+    let frame_size = width * height * 3;
+    for (effect, anchor_x, anchor_y) in [
+        ("zoom-fade", 0.5, 0.5),
+        ("zoom-fade-left", 0.0, 0.5),
+        ("zoom-fade-right", 1.0, 0.5),
+        ("zoom-fade-up", 0.5, 0.0),
+        ("zoom-fade-down", 0.5, 1.0),
+    ] {
+        let mut spec = transition_spec(&asset, effect);
+        spec["project"]["width"] = json!(width);
+        spec["project"]["height"] = json!(height);
+        spec["config"]["width"] = json!(width);
+        spec["config"]["height"] = json!(height);
+        // A direction left over from a different preset must not override
+        // these presets' anchors. Non-origin clips must retain their position.
+        spec["project"]["tracks"][0]["clips"][0]["transition"]["direction"] = json!("down");
+        for clip in spec["project"]["tracks"][1]["clips"].as_array_mut().unwrap() {
+            clip["x"] = json!(40);
+            clip["y"] = json!(30);
+        }
+        let filename = format!("gentle-{effect}.mp4");
+        let (_, probe) = run(temp.path(), &rt, spec, &filename);
+        let duration: f64 = probe["format"]["duration"].as_str().unwrap().parse().unwrap();
+        assert!((duration - 2.0).abs() < 0.01, "{effect}: changed source timing");
+        let decoded = decoded_video(&rt, &temp.path().join(filename));
+        assert_eq!(decoded.len(), 40 * frame_size, "{effect}: dropped output frames");
+        for (frame_number, channel, visibility) in [
+            (8, 0, 1.0),
+            (14, 0, 0.75),
+            (16, 0, 0.5),
+            (18, 0, 0.25),
+            (20, 2, 0.0),
+            (22, 2, 0.25),
+            (24, 2, 0.5),
+            (26, 2, 0.75),
+            (32, 2, 1.0),
+        ] {
+            let frame = &decoded[frame_number * frame_size..(frame_number + 1) * frame_size];
+            let pixel = |x: usize, y: usize| &frame[(y * width + x) * 3..][..3];
+            let center = pixel(120, 90);
+            assert!((center[channel] as f64 - 255.0 * visibility).abs() < 15.0,
+                "{effect}: opacity at frame {frame_number} is {center:?}, expected {visibility}");
+            assert!((center[1] as f64 - 255.0 * (1.0 - visibility)).abs() < 15.0,
+                "{effect}: background blend at frame {frame_number} is {center:?}");
+            // Far outside the original clip rectangle stays green throughout.
+            for (x, y) in [(20, 90), (220, 90), (120, 10), (120, 170)] {
+                let outside = pixel(x, y);
+                assert!(outside[1] > 230 && outside[channel] < 15,
+                    "{effect}: changed clip placement at ({x}, {y}): {outside:?}");
+            }
+            if visibility == 0.0 {
+                assert!(frame.chunks_exact(3).all(|p| p[1] > 230 && p[channel] < 15),
+                    "{effect}: midpoint is not fully transparent");
+                continue;
+            }
+            let scale = 0.8 + 0.2 * visibility;
+            let expected_left = 40.0 + 160.0 * (1.0 - scale) * anchor_x;
+            let expected_top = 30.0 + 120.0 * (1.0 - scale) * anchor_y;
+            let expected_right = expected_left + 160.0 * scale;
+            let expected_bottom = expected_top + 120.0 * scale;
+            let threshold = (255.0 * visibility * 0.5) as u8;
+            let horizontal: Vec<_> = (0..width).filter(|x| pixel(*x, 90)[channel] > threshold).collect();
+            let vertical: Vec<_> = (0..height).filter(|y| pixel(120, *y)[channel] > threshold).collect();
+            let actual = [horizontal[0] as f64, (horizontal.last().unwrap() + 1) as f64,
+                vertical[0] as f64, (vertical.last().unwrap() + 1) as f64];
+            let expected = [expected_left, expected_right, expected_top, expected_bottom];
+            for (measured, wanted) in actual.into_iter().zip(expected) {
+                assert!((measured - wanted).abs() <= 2.0,
+                    "{effect}: wrong 80%–100% scale/anchor at frame {frame_number}: {actual:?}, expected {expected:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn gentle_zoom_fade_range_and_exact_frame_use_global_transition_clock() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let store = MediaStore::new(temp.path()).unwrap();
+    let jobs = JobManager::default();
+    let mut project = transition_spec(&asset, "zoom-fade-right")["project"].clone();
+    project["fps"] = json!(20);
+    project["tracks"][0]["clips"][0]["transition"]["easing"] = json!("ease-in");
+    for track in project["tracks"].as_array_mut().unwrap() {
+        for clip in track["clips"].as_array_mut().unwrap() {
+            clip["start"] = json!(clip["start"].as_f64().unwrap() + 4.0);
+        }
+    }
+    let check = |frame: &[u8], time: f64| {
+        let channel = if time < 5.0 { 0 } else { 2 };
+        let visibility = ((time - 5.0).abs() / 0.4).clamp(0.0, 1.0).powi(2);
+        let center = &frame[(60 * 160 + 80) * 3..][..3];
+        assert!((center[channel] as f64 - 255.0 * visibility).abs() < 15.0,
+            "range/frame lost easing or global time at {time}: {center:?}, expected visibility {visibility}");
+        if visibility > 0.05 {
+            let threshold = (255.0 * visibility * 0.5) as u8;
+            let occupied: Vec<_> = (0..160).filter(|x| frame[(60 * 160 + *x) * 3 + channel] > threshold).collect();
+            let expected_left = 160.0 * 0.2 * (1.0 - visibility);
+            assert!((occupied[0] as f64 - expected_left).abs() <= 2.0,
+                "range/frame lost gentle scale at {time}: left {}, expected {expected_left}", occupied[0]);
+            assert_eq!(occupied.last(), Some(&159), "right anchor moved at {time}");
+        }
+    };
+    let mut spec = json!({"project":project,"start":4.75,"end":5.25,"width":160,"fps":20});
+    let job = crate::preview_tools::begin(&store, &rt, &jobs, &spec).unwrap();
+    assert_eq!(wait(&jobs, &job.id).state, "completed");
+    let result = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+    assert!((result.duration - 0.5).abs() < 0.01);
+    let decoded = decoded_video(&rt, Path::new(&result.native_path));
+    assert_eq!(decoded.len(), 10 * 160 * 120 * 3);
+    for (index, frame) in decoded.chunks_exact(160 * 120 * 3).enumerate() {
+        check(frame, 4.75 + index as f64 / 20.0);
+    }
+    crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+    spec["frameOnly"] = json!(true);
+    for time in [4.817, 5.183] {
+        spec["start"] = json!(time);
+        let job = crate::preview_tools::begin(&store, &rt, &jobs, &spec).unwrap();
+        assert_eq!(wait(&jobs, &job.id).state, "completed");
+        let result = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+        let decoded = decoded_video(&rt, Path::new(&result.native_path));
+        assert_eq!(decoded.len(), 160 * 120 * 3);
+        check(&decoded, time);
+        crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+    }
+}
+
+#[test]
 fn muted_transition_does_not_affect_export_and_invalid_anchors_are_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let rt = runtime();

@@ -20,6 +20,7 @@ export interface ClipOverlay {
 export interface TimelineMarker { id: string; time: number; label: string; kind: 'chapter' | 'highlight' | 'review'; color?: string }
 
 export type TransitionEffect = 'fade' | 'wipe-up' | 'wipe-down' | 'wipe-left' | 'wipe-right' | 'close-vertical' | 'close-horizontal' | 'slide-left' | 'slide-right' | 'zoom'
+  | 'zoom-fade' | 'zoom-fade-left' | 'zoom-fade-right' | 'zoom-fade-up' | 'zoom-fade-down'
 
 /** A transition is anchored to the shared cut of two adjacent video clips. */
 export interface ClipTransition {

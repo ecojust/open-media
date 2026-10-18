@@ -18,7 +18,7 @@ function tick(time: number): void {
 function demo(effect: TransitionEffect): Record<string, string | number> {
   const p = phase.value, v = p < .2 || p > .8 ? 1 : p < .5 ? (.5 - p) / .3 : (p - .5) / .3
   const visual = transitionVisual(effect, v), mask = visual.mask
-  return { opacity: visual.opacity, clipPath: `inset(${mask.y * 100}% ${(1 - mask.x - mask.width) * 100}% ${(1 - mask.y - mask.height) * 100}% ${mask.x * 100}%)`, transform: `translateX(${visual.translateX * 100}%) scale(${visual.scale})` }
+  return { opacity: visual.opacity, clipPath: `inset(${mask.y * 100}% ${(1 - mask.x - mask.width) * 100}% ${(1 - mask.y - mask.height) * 100}% ${mask.x * 100}%)`, transform: `translate(${visual.translateX * 100}%, ${visual.translateY * 100}%) scale(${visual.scale})` }
 }
 onMounted(() => {
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) animation = requestAnimationFrame(tick)

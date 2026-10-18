@@ -222,6 +222,8 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"open_media_transition_add","arguments":{"time":10,"effect":"fade","duration":1,"expectedRevision":10}}}
 ```
 
+缩放淡入淡出使用 `zoom-fade`，或 `zoom-fade-left`、`zoom-fade-right`、`zoom-fade-up`、`zoom-fade-down` 固定对应边缘。前半段从 100% 缩至 80% 并淡出，后半段从 80% 放至 100% 并淡入；每半段各占转场时长的一半。
+
 先查询片头片尾模板，再使用返回的素材 ID 前插，并编辑标题：
 
 ```json

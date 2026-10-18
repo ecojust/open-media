@@ -1360,7 +1360,7 @@
   },
   {
     "name": "open_media_transition_list",
-    "description": "列出十种转场预设、当前转场；可传time查找最近可用视频切点。\n执行方式：同步返回最终结果。",
+    "description": "列出转场预设（含 80%–100% 缩放淡入淡出）、当前转场；可传time查找最近可用视频切点。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1421,7 +1421,12 @@
             "close-horizontal",
             "slide-left",
             "slide-right",
-            "zoom"
+            "zoom",
+            "zoom-fade",
+            "zoom-fade-left",
+            "zoom-fade-right",
+            "zoom-fade-up",
+            "zoom-fade-down"
           ]
         },
         "duration": {
@@ -1485,7 +1490,12 @@
             "close-horizontal",
             "slide-left",
             "slide-right",
-            "zoom"
+            "zoom",
+            "zoom-fade",
+            "zoom-fade-left",
+            "zoom-fade-right",
+            "zoom-fade-up",
+            "zoom-fade-down"
           ]
         },
         "duration": {

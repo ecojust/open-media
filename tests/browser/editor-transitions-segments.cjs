@@ -68,7 +68,11 @@ async function main() {
     await expect(page.getByLabel('项目宽度', { exact: true })).toBeVisible()
     await page.getByTestId('transition-open').click()
     const gallery = page.getByRole('dialog', { name: '转场', exact: true })
-    await expect(gallery.getByRole('radio')).toHaveCount(10)
+    await expect(gallery.getByRole('radio')).toHaveCount(15)
+    for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down']) {
+      await expect(gallery.locator(`input[value="${effect}"]`)).toHaveCount(1)
+    }
+    await page.screenshot({ path: '/tmp/open-media-transition-library.png' })
     await expect(gallery).toContainText('切点 2.50 秒')
     await gallery.locator('.transition-card').filter({ hasText: '纵向开合' }).click()
     await gallery.getByLabel('转场时长', { exact: true }).fill('1.2')
@@ -103,7 +107,24 @@ async function main() {
     assert.equal((await read(page)).tracks.find(track => track.kind === 'transition').muted, true)
     await page.getByRole('button', { name: '启用转场', exact: true }).click()
     assert.equal((await read(page)).tracks.find(track => track.kind === 'transition').muted, false)
-    console.log('PASS 转场库10效果、切点居中、属性修改、禁止自由拖动/复制、撤销重做')
+    await page.getByTestId('transition-open').click()
+    await gallery.locator('.transition-card').filter({ has: page.locator('input[value="zoom-fade"]') }).click()
+    await gallery.getByLabel('转场时长', { exact: true }).fill('1.2')
+    await gallery.getByTestId('transition-apply').click()
+    await expect(gallery).toHaveCount(0)
+    assert.equal(effects(await read(page)).length, 1, '同一个切点应用新转场应替换效果')
+    assert.equal(effects(await read(page))[0].transition.effect, 'zoom-fade')
+    for (const effectId of ['zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down']) {
+      await page.getByLabel('片段转场效果').selectOption(effectId)
+      assert.equal(effects(await read(page))[0].transition.effect, effectId)
+    }
+    await page.evaluate(() => window.cutFixture.undo())
+    assert.equal(effects(await read(page))[0].transition.effect, 'zoom-fade-up')
+    await page.evaluate(() => window.cutFixture.redo())
+    assert.equal(effects(await read(page))[0].transition.effect, 'zoom-fade-down')
+    assert.equal(effects(await read(page))[0].start, 1.9)
+    assert.equal(effects(await read(page))[0].trimOut, 1.2)
+    console.log('PASS 转场库15效果、5种缩放淡化应用及修改、切点居中、禁止自由拖动/复制、撤销重做')
 
     await page.getByTestId('video-segment-intro-open').click()
     const segments = page.getByRole('dialog', { name: '片头', exact: true })

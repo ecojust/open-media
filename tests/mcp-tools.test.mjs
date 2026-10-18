@@ -161,6 +161,22 @@ test('transitions use nearest cut and reconcile deletion, with locked affected t
   assertUnchangedAfterFailure(project, 'transition_remove', { clipId: 'first' }, /不是转场/)
 })
 
+test('MCP discovers, adds and updates every gentle zoom fade preset with matching schema choices', () => {
+  const { project } = fixture()
+  const presets = exec(project, 'transition_list').data.presets
+  for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down']) {
+    assert.ok(presets.some(preset => preset.id === effect))
+    validateMcpToolArguments('open_media_transition_add', { time: 5, effect, duration: 2 })
+    const added = exec(project, 'transition_add', { time: 5, effect, duration: 2 })
+    const clip = findClip(added.project, added.selection.clipId).clip
+    assert.equal(clip.transition.effect, effect)
+    assert.equal(clip.start, 4)
+    const args = { clipId: clip.id, effect, duration: 1 }
+    validateMcpToolArguments('open_media_transition_update', args)
+    assert.equal(findClip(exec(added.project, 'transition_update', args).project, clip.id).clip.trimOut, 1)
+  }
+})
+
 test('audio loops can be lengthened and restored, ripple and global gaps preserve common occupancy', () => {
   const { project, audioId } = fixture()
   const added = exec(project, 'clip_add', { trackId: audioId, assetId: 'audio-source', options: { start: 15, trimOut: 12 } })

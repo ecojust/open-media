@@ -34,10 +34,10 @@ test('降低项目帧率会将最短转场扩至新帧率的两帧，锁定转�
   assert.equal(effectClips(locked)[0].trimOut, 2 / 60)
 })
 
-test('十种转场绑定最近切点，居中且不改变时间线总长度', () => {
+test('转场预设绑定最近切点，居中且不改变时间线总长度', () => {
   const { project, trackId } = fixture()
-  assert.equal(TRANSITION_PRESETS.length, 10)
-  assert.equal(new Set(TRANSITION_PRESETS.map(item => item.id)).size, 10)
+  assert.equal(TRANSITION_PRESETS.length, 15)
+  assert.equal(new Set(TRANSITION_PRESETS.map(item => item.id)).size, 15)
   assert.deepEqual(findTransitionCut(project, 3.7), { trackId, fromClipId: 'first', toClipId: 'second', time: 4, maxDuration: 4 })
   for (const preset of TRANSITION_PRESETS) {
     const edited = addTransition(project, 5, preset.id, 2)
@@ -151,7 +151,7 @@ test('保存校验拒绝无效引用、脱离切点、超时长及重复切点',
   assert.throws(() => validateProject(misplaced), /只能用于转场轨道/)
 })
 
-test('预览的十种数学效果、边界和静音开关正确，转场不成为预览选择对象', () => {
+test('预览效果、边界和静音开关正确，转场不成为预览选择对象', () => {
   const { project } = fixture()
   for (const { id } of TRANSITION_PRESETS) {
     const edited = addTransition(project, 4, id, 2)
@@ -171,6 +171,38 @@ test('预览的十种数学效果、边界和静音开关正确，转场不成�
   assert.deepEqual(up.mask, { x: 0, y: 0.5, width: 1, height: 0.5 })
   const zoom = transitionVisualAt(addTransition(project, 4, 'zoom', 2), 'first', 3.5)
   assert.equal(zoom.opacity, 0.5); assert.equal(zoom.scale, 0.5)
+})
+
+test('缩放淡化在两侧严格保持80%至100%，固定锚边且支持缓动与保存重开', () => {
+  const { project } = fixture()
+  for (const id of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down']) {
+    const edited = validateProject(JSON.parse(JSON.stringify(addTransition(project, 4, id, 2))))
+    const start = transitionVisualAt(edited, 'first', 3)
+    const cut = transitionVisualAt(edited, 'second', 4)
+    assert.equal(start.scale, 1); assert.equal(start.opacity, 1)
+    assert.equal(cut.scale, 0.8); assert.equal(cut.opacity, 0)
+    for (const time of [3.25, 3.5, 3.75, 3.99]) {
+      const out = transitionVisualAt(edited, 'first', time)
+      const incoming = transitionVisualAt(edited, 'second', 8 - time)
+      assert.deepEqual(out, incoming, '切点两侧相同时距应有相同尺寸与透明度')
+      assert.ok(out.scale >= 0.8 && out.scale <= 1)
+      const left = (1 - out.scale) / 2 + out.translateX
+      const top = (1 - out.scale) / 2 + out.translateY
+      if (id.endsWith('-left')) assert.ok(Math.abs(left) < 1e-10)
+      if (id.endsWith('-right')) assert.ok(Math.abs(left + out.scale - 1) < 1e-10)
+      if (id.endsWith('-up')) assert.ok(Math.abs(top) < 1e-10)
+      if (id.endsWith('-down')) assert.ok(Math.abs(top + out.scale - 1) < 1e-10)
+    }
+    const mid = transitionVisualAt(edited, 'first', 3.5)
+    assert.equal(mid.scale, 0.9); assert.equal(mid.opacity, 0.5)
+    effectClips(edited)[0].transition.easing = 'ease-in'
+    const eased = transitionVisualAt(edited, 'second', 4.5)
+    assert.equal(eased.opacity, 0.25)
+    assert.ok(Math.abs(eased.scale - 0.85) < 1e-10)
+    effectClips(edited)[0].transition.scope = 'outgoing'
+    assert.equal(transitionVisualAt(edited, 'second', 4.5), undefined)
+    assert.equal(projectDuration(edited), projectDuration(project))
+  }
 })
 
 test('一次添加/调整可撤销和重做，历史保留完整转场引用', () => {

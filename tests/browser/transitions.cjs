@@ -46,7 +46,7 @@ async function main() {
     project.tracks[1].clips = project.assets.map((asset, index) => createClip(asset, project, { id: `${asset.id}-clip`, start: index * 2, trimOut: 2, volume: 0 }))
     const source = validateProject(project, { trusted: true })
     const canvas = document.querySelector('canvas'), preview = new TimelinePreview(canvas, source)
-    const points = [[16, 9], [48, 27], [80, 45], [112, 63], [144, 81], [16, 81], [144, 9]]
+    const points = [[16, 9], [48, 27], [80, 45], [112, 63], [144, 81], [16, 81], [144, 9], [4, 45], [20, 45], [140, 45], [156, 45], [80, 1], [80, 12], [80, 78], [80, 89]]
     const pixels = () => points.map(([x, y]) => [...canvas.getContext('2d').getImageData(x, y, 1, 1).data])
     await preview.prepare()
     const frames = {}
@@ -54,16 +54,21 @@ async function main() {
       const next = addTransition(source, 2, id, 1)
       preview.setProject(next)
       frames[id] = []
-      for (const time of [1.75, 2.25]) {
+      const times = id.startsWith('zoom-fade') ? [1.625, 1.75, 1.875, 2.125, 2.25, 2.375] : [1.75, 2.25]
+      for (const time of times) {
         await preview.seekReady(time)
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
         preview.render(time)
-        frames[id].push(pixels())
+        frames[id].push({ time, pixels: pixels() })
       }
     }
     preview.dispose()
-    const output = await exportTimelineWebM(addTransition(source, 2, 'fade', 1), { fps: 20, videoBitsPerSecond: 1000000 })
-    return { frames, points, bytes: [...new Uint8Array(await output.arrayBuffer())] }
+    const exports = {}
+    for (const effect of ['fade', 'zoom-fade', 'zoom-fade-left']) {
+      const output = await exportTimelineWebM(addTransition(source, 2, effect, 1), { fps: 20, videoBitsPerSecond: 1000000 })
+      exports[effect] = [...new Uint8Array(await output.arrayBuffer())]
+    }
+    return { frames, points, exports }
   })
   const background = [16, 32, 48]
   const effects = {
@@ -78,17 +83,28 @@ async function main() {
     'slide-right': x => ({ visible: x >= 80 }),
     zoom: (x, y) => ({ visible: x >= 40 && x < 120 && y >= 22.5 && y < 67.5, alpha: 0.5 }),
   }
-  for (const [effect, frames] of Object.entries(result.frames)) for (const [side, pixels] of frames.entries()) {
-    const source = side ? [40, 200, 200] : [200, 40, 40]
+  assert.equal(Object.keys(result.frames).length, 15, '保留原有 10 种转场并加入 5 种缩放淡化')
+  for (const [effect, frames] of Object.entries(result.frames)) for (const { time, pixels } of frames) {
+    const side = time >= 2, source = side ? [40, 200, 200] : [200, 40, 40]
+    const visibility = Math.abs(time - 2) / .5
     pixels.forEach((pixel, index) => {
-      const transform = effects[effect](...result.points[index])
+      const [x, y] = result.points[index]
+      let transform
+      if (effect.startsWith('zoom-fade')) {
+        // At half visibility the image is 90% of its original dimensions,
+        // and the direction pins the corresponding image edge in place.
+        const scale = .8 + .2 * visibility, width = 160 * scale, height = 90 * scale
+        const left = effect.endsWith('-left') ? 0 : effect.endsWith('-right') ? 160 - width : (160 - width) / 2
+        const top = effect.endsWith('-up') ? 0 : effect.endsWith('-down') ? 90 - height : (90 - height) / 2
+        transform = { visible: x >= left && x < left + width && y >= top && y < top + height, alpha: visibility }
+      } else transform = effects[effect](x, y)
       const alpha = transform.visible ? transform.alpha ?? 1 : 0
       const expected = source.map((value, channel) => value * alpha + background[channel] * (1 - alpha))
-      assert(pixel.slice(0, 3).every((value, channel) => Math.abs(value - expected[channel]) <= 5), `${effect} side=${side} point=${result.points[index]} actual=${pixel} expected=${expected}`)
+      assert(pixel.slice(0, 3).every((value, channel) => Math.abs(value - expected[channel]) <= 5), `${effect} time=${time} point=${result.points[index]} actual=${pixel} expected=${expected}`)
     })
   }
-  const output = path.join(folder, 'transition-browser-export.webm')
-  await fs.writeFile(output, Buffer.from(result.bytes))
+  const output = path.join(folder, 'transition-browser-fade.webm')
+  await fs.writeFile(output, Buffer.from(result.exports.fade))
   const probe = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', output], { encoding: 'utf8' }))
   assert(probe.streams.some(stream => stream.codec_type === 'video' && stream.width === 160 && stream.height === 90))
   const raw = execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', output, '-vf', 'fps=20,scale=1:1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1e6 })
@@ -98,7 +114,32 @@ async function main() {
   const cut = luminance.slice(30, 51)
   assert(Math.min(...cut) < 140, `导出应实际淡出至项目背景色：${cut}`)
   assert(luminance.slice(0, 25).some(value => value > 250) && luminance.slice(55).some(value => value > 400), '切点前后必须保留两段实际视频')
-  console.log(`PASS 10 种转场双侧真实 Canvas 像素 + 浏览器 WebM 导出并解码验证；文件 ${output}`)
+  for (const effect of ['zoom-fade', 'zoom-fade-left']) {
+    const output = path.join(folder, `transition-browser-${effect}.webm`)
+    await fs.writeFile(output, Buffer.from(result.exports[effect]))
+    const decoded = execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', output, '-vf', 'fps=20', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 5e6 })
+    const frameBytes = 160 * 90 * 3, frameCount = decoded.length / frameBytes
+    assert(frameCount >= 70, `${effect} 导出必须包含完整视频帧`)
+    const pixelAt = (frame, x, y) => [...decoded.subarray(frame * frameBytes + (y * 160 + x) * 3, frame * frameBytes + (y * 160 + x) * 3 + 3)]
+    const close = (actual, expected, tolerance = 9) => actual.every((value, channel) => Math.abs(value - expected[channel]) <= tolerance)
+    for (const [time, source] of [[1.75, [200, 40, 40]], [2.25, [40, 200, 200]]]) {
+      // Browser capture is real time: match a nearby encoded frame, then infer
+      // its opacity from the center before checking spatial edges separately.
+      const candidates = [Math.round(time * 20) - 1, Math.round(time * 20), Math.round(time * 20) + 1]
+      assert(candidates.some(frame => {
+        const center = pixelAt(frame, 80, 45)
+        const channel = time < 2 ? 0 : 1
+        const alpha = (center[channel] - background[channel]) / (source[channel] - background[channel])
+        if (alpha < .3 || alpha > .7) return false
+        const foreground = source.map((value, index) => value * alpha + background[index] * (1 - alpha))
+        return close(center, foreground)
+          && close(pixelAt(frame, 20, 45), foreground)
+          && close(pixelAt(frame, 4, 45), effect === 'zoom-fade-left' ? foreground : background)
+          && close(pixelAt(frame, 156, 45), background)
+      }), `${effect} 在 ${time} 秒导出后应保留 80%–100% 缩放、透明度与对应的方向边缘`)
+    }
+  }
+  console.log(`PASS 15 种转场双侧真实 Canvas 像素，新缩放淡化三个进度；淡入淡出、居中及靠左缩放的真实 WebM 导出并解码；文件 ${folder}`)
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => { await browser?.close(); server?.kill() })

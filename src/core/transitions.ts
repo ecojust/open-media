@@ -13,6 +13,11 @@ export const TRANSITION_PRESETS: readonly { id: TransitionEffect; name: string; 
   { id: 'slide-left', name: '向左滑动', description: '前段滑向左侧，后段从左侧滑入' },
   { id: 'slide-right', name: '向右滑动', description: '前段滑向右侧，后段从右侧滑入' },
   { id: 'zoom', name: '缩放显现', description: '前段缩小淡出，后段从中心放大显现' },
+  { id: 'zoom-fade', name: '缩放淡入淡出', description: '居中缩放：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
+  { id: 'zoom-fade-left', name: '靠左缩放淡化', description: '固定左侧：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
+  { id: 'zoom-fade-right', name: '靠右缩放淡化', description: '固定右侧：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
+  { id: 'zoom-fade-up', name: '靠上缩放淡化', description: '固定顶部：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
+  { id: 'zoom-fade-down', name: '靠下缩放淡化', description: '固定底部：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
 ]
 
 const EPSILON = 1e-6
@@ -176,6 +181,18 @@ export function transitionVisual(effect: TransitionEffect, visibility: number): 
     case 'slide-left': result.translateX = -(1 - v); break
     case 'slide-right': result.translateX = 1 - v; break
     case 'zoom': result.scale = v; result.opacity = v; break
+    case 'zoom-fade':
+    case 'zoom-fade-left':
+    case 'zoom-fade-right':
+    case 'zoom-fade-up':
+    case 'zoom-fade-down':
+      result.scale = 0.8 + 0.2 * v
+      result.opacity = v
+      if (effect === 'zoom-fade-left') result.translateX = -0.1 * (1 - v)
+      if (effect === 'zoom-fade-right') result.translateX = 0.1 * (1 - v)
+      if (effect === 'zoom-fade-up') result.translateY = -0.1 * (1 - v)
+      if (effect === 'zoom-fade-down') result.translateY = 0.1 * (1 - v)
+      break
   }
   return result
 }

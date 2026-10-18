@@ -111,11 +111,27 @@ async function editorGeometry(page) {
 async function assertFloatingBar(page, width) {
   const geometry = await page.getByTestId('mcp-processing-banner').evaluate(element => {
     const { x, y, width, height } = element.getBoundingClientRect()
-    return { x, y, width, height, position: getComputedStyle(element).position, viewport: innerWidth }
+    const header = document.querySelector('.topbar').getBoundingClientRect()
+    const brand = document.querySelector('.brand').getBoundingClientRect()
+    const controls = document.querySelector('.topbar-end').getBoundingClientRect()
+    const detail = element.querySelector('.mcp-processing-details')?.getBoundingClientRect()
+    return { x, y, width, height, position: getComputedStyle(element).position, viewport: innerWidth,
+      headerBottom: header.bottom, brandRight: brand.right, controlsLeft: controls.left,
+      detail: detail ? { top: detail.top, bottom: detail.bottom } : null, viewportHeight: innerHeight }
   })
   assert.equal(geometry.position, 'fixed')
   assert.equal(geometry.height, 44)
   assert.ok(geometry.x >= 0 && geometry.x + geometry.width <= geometry.viewport, JSON.stringify(geometry))
+  if (geometry.viewport > 700) {
+    assert.ok(geometry.y >= 0 && geometry.y + geometry.height <= geometry.headerBottom, '宽屏状态条位于全局顶栏内')
+    assert.ok(geometry.x > geometry.brandRight && geometry.x + geometry.width < geometry.controlsLeft, '状态条不遮挡品牌和主题按钮')
+  } else {
+    assert.equal(geometry.y, geometry.headerBottom + 8, '窄屏状态条置于顶栏下方')
+  }
+  if (geometry.detail) {
+    assert.ok(geometry.detail.top >= geometry.y + geometry.height, '详情向下展开')
+    assert.ok(geometry.detail.bottom <= geometry.viewportHeight, '详情不超出窗口底部')
+  }
   if (width) assert.equal(geometry.viewport, width)
 }
 

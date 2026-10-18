@@ -19,6 +19,11 @@ enum Effect {
     SlideLeft,
     SlideRight,
     Zoom,
+    ZoomFade,
+    ZoomFadeLeft,
+    ZoomFadeRight,
+    ZoomFadeUp,
+    ZoomFadeDown,
 }
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -304,6 +309,31 @@ impl Transitions {
                 Effect::Zoom => {
                     sample_x = format!("(X-W/2)/max({v},0.000001)+W/2");
                     sample_y = format!("(Y-H/2)/max({v},0.000001)+H/2");
+                    format!(
+                        "gte({sample_x},0)*lt({sample_x},W)*gte({sample_y},0)*lt({sample_y},H)*{v}"
+                    )
+                }
+                Effect::ZoomFade
+                | Effect::ZoomFadeLeft
+                | Effect::ZoomFadeRight
+                | Effect::ZoomFadeUp
+                | Effect::ZoomFadeDown => {
+                    // Keep the preset's anchor fixed inside the clip rectangle.
+                    // Visibility controls alpha independently from the gentle
+                    // 100%–80% scale; existing Zoom retains its 100%–0% range.
+                    let anchor_x = match effect {
+                        Effect::ZoomFadeLeft => "0",
+                        Effect::ZoomFadeRight => "W",
+                        _ => "W/2",
+                    };
+                    let anchor_y = match effect {
+                        Effect::ZoomFadeUp => "0",
+                        Effect::ZoomFadeDown => "H",
+                        _ => "H/2",
+                    };
+                    let scale = format!("(0.8+0.2*{v})");
+                    sample_x = format!("(X-({anchor_x}))/{scale}+({anchor_x})");
+                    sample_y = format!("(Y-({anchor_y}))/{scale}+({anchor_y})");
                     format!(
                         "gte({sample_x},0)*lt({sample_x},W)*gte({sample_y},0)*lt({sample_y},H)*{v}"
                     )
