@@ -83,10 +83,22 @@ export function addClip(project: Project, trackId: string, clip: Clip): Project 
 export function addClips(project: Project, trackId: string, clips: Clip[]): Project {
   return edit(project, (copy) => { const track = trackById(copy, trackId); editable(track); track.clips.push(...clips.map((clip) => ({ ...clip }))) })
 }
-export function updateClip(project: Project, clipId: string, patch: Partial<Omit<Clip, 'id' | 'assetId'>>): Project {
+export interface ClipUpdateOptions { translatePositionKeyframes?: boolean }
+export function updateClip(project: Project, clipId: string, patch: Partial<Omit<Clip, 'id' | 'assetId'>>, options: ClipUpdateOptions = {}): Project {
   return edit(project, (copy) => {
     const { clip, track } = requireClip(copy, clipId)
     if (track.kind === 'transition') throw new Error('请通过转场属性调整效果和时长，转场会固定在视频切点。')
+    // Position curves contain absolute project coordinates. Move the entire
+    // curve by the base-position delta only when explicitly requested.
+    if (options.translatePositionKeyframes) {
+      if (patch.keyframes !== undefined) throw new Error('同步位置关键帧与替换关键帧不能同时进行。')
+      for (const axis of ['x', 'y'] as const) {
+        const position = patch[axis], frames = clip.keyframes?.[axis]
+        if (position === undefined || !frames?.length) continue
+        const delta = position - clip[axis]
+        clip.keyframes![axis] = frames.map(frame => ({ ...frame, value: frame.value + delta }))
+      }
+    }
     const textChanged = track.kind === 'text' && patch.text !== undefined && patch.text !== clip.text
     const subtitleStyleChanged = isSubtitleClip(track, clip) && SUBTITLE_STYLE_KEYS.some(key => patch[key] !== undefined && patch[key] !== clip[key])
     const oldId = clip.id

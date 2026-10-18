@@ -5,7 +5,7 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "83fdaf57a273fcbc6f65428afdacb045ba7ebd133210941d84d98adeba25546e",
+      "sha256": "972684c75b733113cae8a05e166d5caaab231d90ebf25a0b914bd0f747829efb",
       "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives."
     },
     {

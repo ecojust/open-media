@@ -897,6 +897,162 @@ fn external_protocol_fixture() {
     manager.stop();
 }
 
+/// A real TCP listener bridged to the production browser editor by the external
+/// SDK verifier. Only IPC delivery and an explicit native completion barrier are
+/// fixtures; media import/probing and project writes use production native code.
+#[test]
+#[ignore = "external production editor protocol fixture"]
+fn external_editor_protocol_fixture() {
+    use crate::{
+        engine::{MediaStore, Runtime},
+        project_files::ProjectFiles,
+    };
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+    fn publish(path: &Path, value: &Value) {
+        let temporary = path.with_extension("partial");
+        fs::write(&temporary, serde_json::to_vec(value).unwrap()).unwrap();
+        fs::rename(temporary, path).unwrap();
+    }
+    let directory = PathBuf::from(std::env::var("OPEN_MEDIA_MCP_EDITOR_DIRECTORY").unwrap());
+    let queue = directory.join("requests");
+    let native = directory.join("native");
+    fs::create_dir_all(&queue).unwrap();
+    fs::create_dir_all(&native).unwrap();
+    let mut manager = McpManager::new(directory.join("mcp.json")).unwrap();
+    Arc::get_mut(&mut manager.0).unwrap().request_timeout = Duration::from_secs(5);
+    let mut config = manager.config();
+    config.port = 0;
+    let catalog: Vec<Value> =
+        serde_json::from_str(include_str!("../../src/mcp-tools.json")).unwrap();
+    let delivery = queue.clone();
+    let status = manager
+        .start(
+            config,
+            catalog,
+            Arc::new(move |request| {
+                publish(
+                    &delivery.join(format!("{}.request.json", request.id)),
+                    &serde_json::to_value(request).unwrap(),
+                );
+                Ok(())
+            }),
+        )
+        .unwrap();
+    let store = MediaStore::new(&directory.join("library")).unwrap();
+    let runtime = Runtime::discover(None, None).unwrap();
+    let files = ProjectFiles::default();
+    publish(
+        &directory.join("handshake.json"),
+        &json!({"url":status.url,"token":manager.config().token}),
+    );
+    let mut claimed = HashSet::new();
+    let mut completed = HashSet::new();
+    let mut native_started = HashSet::new();
+    let mut native_pending = HashMap::new();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    while !directory.join("stop").exists() && Instant::now() < deadline {
+        for entry in fs::read_dir(&queue).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(id) = name.strip_suffix(".claim.json") {
+                if claimed.insert(id.to_owned()) {
+                    publish(
+                        &queue.join(format!("{id}.claimed.json")),
+                        &json!({"claimed":manager.claim(id)}),
+                    );
+                }
+            }
+            if let Some(id) = name.strip_suffix(".response.json") {
+                if completed.insert(id.to_owned()) {
+                    let response: Value =
+                        serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
+                    let accepted = manager.complete(
+                        id,
+                        response["result"].clone(),
+                        response["isError"] == true,
+                    );
+                    publish(
+                        &queue.join(format!("{id}.completed.json")),
+                        &json!({"accepted":accepted}),
+                    );
+                }
+            }
+        }
+        for entry in fs::read_dir(&native).unwrap().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(id) = name.strip_suffix(".request.json") else {
+                continue;
+            };
+            if !native_started.insert(id.to_owned()) {
+                continue;
+            }
+            let request: Value = serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
+            let args = &request["args"];
+            let result: crate::engine::Result<Value> =
+                (|| match request["command"].as_str().unwrap_or("") {
+                    "mcp_import_media_paths" => {
+                        let paths: Vec<String> = serde_json::from_value(args["paths"].clone())
+                            .map_err(|error| error.to_string())?;
+                        if paths
+                            .iter()
+                            .any(|path| !Path::new(path).starts_with(&directory))
+                        {
+                            return Err("fixture path outside temporary directory".into());
+                        }
+                        serde_json::to_value(crate::mcp_files::import_media_paths(
+                            &store, &runtime, &paths,
+                        )?)
+                        .map_err(|error| error.to_string())
+                    }
+                    "mcp_save_project_file" => {
+                        let bytes: Vec<u8> = serde_json::from_value(args["bytes"].clone())
+                            .map_err(|error| error.to_string())?;
+                        let path = args["path"].as_str();
+                        if path.is_some_and(|path| !Path::new(path).starts_with(&directory)) {
+                            return Err("fixture path outside temporary directory".into());
+                        }
+                        serde_json::to_value(crate::mcp_files::save_project(
+                            &files,
+                            &store,
+                            &bytes,
+                            args["token"].as_str(),
+                            path,
+                            args["overwrite"] == true,
+                        )?)
+                        .map_err(|error| error.to_string())
+                    }
+                    command => Err(format!("Unsupported fixture native command: {command}")),
+                })();
+            let response = match result {
+                Ok(value) => json!({"result":value}),
+                Err(error) => json!({"error":error}),
+            };
+            publish(
+                &native.join(format!("{id}.executed.json")),
+                &json!({"executed":true}),
+            );
+            native_pending.insert(id.to_owned(), response);
+        }
+        let ready = native_pending
+            .keys()
+            .filter(|id| !native.join(format!("{id}.hold")).exists())
+            .cloned()
+            .collect::<Vec<_>>();
+        for id in ready {
+            publish(
+                &native.join(format!("{id}.response.json")),
+                &native_pending.remove(&id).unwrap(),
+            );
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    manager.stop();
+    assert!(
+        directory.join("stop").exists(),
+        "external editor verifier exceeded its deadline"
+    );
+}
+
 #[test]
 fn media_result_exposes_pixels_as_image_content_without_repeating_base64_in_text() {
     let frame = json!({"state":"completed","result":{"mimeType":"image/png","base64":"aGVsbG8=","artifactId":"preview-one","width":16,"height":16}});
@@ -907,6 +1063,9 @@ fn media_result_exposes_pixels_as_image_content_without_repeating_base64_in_text
     assert!(!content[0]["text"].as_str().unwrap().contains("aGVsbG8="));
     assert!(content[0]["text"].as_str().unwrap().contains("preview-one"));
     let chunk = json!({"mimeType":"image/png","encoding":"base64","data":"aGVsbG8=","offset":0});
-    assert!(tool_content(&chunk, false)[0]["text"].as_str().unwrap().contains("aGVsbG8="));
+    assert!(tool_content(&chunk, false)[0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("aGVsbG8="));
     assert_eq!(tool_content(&frame, true).len(), 1);
 }

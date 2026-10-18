@@ -8,6 +8,9 @@ export interface McpPanelJob {
   name: string
   state: 'running' | 'completed' | 'failed' | 'cancelled'
   progress?: number
+  encodedFrames?: number
+  outputTime?: number
+  elapsedSeconds?: number
   stage?: string
   error?: string
   cancelable?: boolean

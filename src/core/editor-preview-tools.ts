@@ -4,6 +4,7 @@ import { trackSubtitleIssues } from './subtitle-validation.ts'
 import type { MediaAsset, Project } from './types.ts'
 import type { EditorToolContext, PreparedEditorTool } from './editor-tool-service.ts'
 import { base64Blob, bytesBase64, storeToolArtifact } from './tool-artifacts.ts'
+import { mediaToolError, type MediaToolResource } from './media-tool-error.ts'
 
 export interface ExportIssue { severity: 'error' | 'warning'; code: string; message: string; clipId?: string; trackId?: string; time?: number }
 export function inspectExportStructure(project: Project): ExportIssue[] {
@@ -57,9 +58,8 @@ export async function artifactFromAsset(asset: MediaAsset, context: EditorToolCo
   context.signal.throwIfAborted()
   return storeToolArtifact(blob.type ? blob : new Blob([blob], { type: asset.mime }), asset.name, context.signal)
 }
-function frameError(stage: string, cause: unknown): Error {
-  if (cause && typeof cause === 'object' && 'name' in cause && cause.name === 'AbortError') return cause as Error
-  return new Error(`时间线取帧（${stage}）失败：${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+function frameError(stage: string, cause: unknown, time: number, width: number, relatedResources?: MediaToolResource[]): Error {
+  return mediaToolError(stage, cause, { context: { time, width }, relatedResources }, `时间线取帧（${stage}）`)
 }
 async function frameFonts(signal: AbortSignal): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -75,7 +75,13 @@ export async function timelineFrame(context: EditorToolContext, time: number, wi
   if (!Number.isFinite(time) || time < 0 || time >= projectDuration(context.project)) throw new Error('取帧时间必须位于时间线内。')
   if (!Number.isFinite(width) || width < 16 || width > 1920) throw new Error('取帧宽度需介于 16 和 1920 之间。')
   context.signal.throwIfAborted()
-  try { await frameFonts(context.signal) } catch (cause) { throw frameError('字体准备', cause) }
+  const active = context.project.tracks.flatMap(track => track.kind === 'audio' || track.kind === 'transition' ? [] : track.clips).filter(clip => clip.start <= time && clipEnd(clip) > time)
+  const relatedResources: MediaToolResource[] = [...new Map(active.map(clip => {
+    const asset = context.project.assets.find(asset => asset.id === clip.assetId)
+    const resource = asset ? { assetId: asset.id, name: asset.name } : { clipId: clip.id, name: clip.name }
+    return [clip.assetId ?? clip.id, resource] as const
+  })).values()]
+  try { await frameFonts(context.signal) } catch (cause) { throw frameError('字体准备', cause, time, width) }
   const { isDesktop } = await import('../native.ts')
   if (isDesktop()) {
     const { runTimelineFrame } = await import('../native-preview-tools.ts')
@@ -89,9 +95,9 @@ export async function timelineFrame(context: EditorToolContext, time: number, wi
       stage = '预览缓存'
       const artifact = await storeToolArtifact(blob, `时间线-${time.toFixed(3)}秒.png`, context.signal)
       return { ...artifact, time, width: rendered.asset.width, height: rendered.asset.height, base64: rendered.pngBase64 }
-    } catch (cause) { failed = true; throw frameError(stage, cause) }
+    } catch (cause) { failed = true; throw frameError(stage, cause, time, width, stage === '原生合成' ? relatedResources : undefined) }
     finally {
-      try { await rendered?.discard() } catch (cause) { if (!failed) throw frameError('临时文件清理', cause) }
+      try { await rendered?.discard() } catch (cause) { if (!failed) throw frameError('临时文件清理', cause, time, width) }
     }
   }
   const { TimelinePreview } = await import('./preview.ts')
@@ -113,7 +119,7 @@ export async function timelineFrame(context: EditorToolContext, time: number, wi
     const artifact = await storeToolArtifact(blob, `时间线-${time.toFixed(3)}秒.png`, context.signal)
     stage = 'PNG 字节读取'
     return { ...artifact, time, width: canvas.width, height: canvas.height, base64: bytesBase64(new Uint8Array(await blob.arrayBuffer())) }
-  } catch (cause) { throw frameError(stage, cause) }
+  } catch (cause) { throw frameError(stage, cause, time, width, stage === '画面合成' || stage === '画布 PNG 导出' ? relatedResources : undefined) }
   finally { preview?.dispose(); canvas.width = canvas.height = 1 }
 }
 export async function storyboardSheet(frames: { base64: string; requestedTime: number; width: number; height: number }[], context: EditorToolContext) {

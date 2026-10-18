@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_clip_keyframes_set",
-    "description": "设置片段关键帧。时间为片段内秒；x/y为项目坐标，scaleX/scaleY为中心缩放倍率，其余为绝对值。替换指定属性，clear可清空全部。每个关键帧的easing控制向下一个关键帧的插值。",
+    "description": "设置片段关键帧。时间为片段内秒；x/y为项目坐标，scaleX/scaleY为中心缩放倍率，其余为绝对值。替换指定属性，clear可清空全部。每个关键帧的easing控制向下一个关键帧的插值。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -281,11 +281,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_crop",
-    "description": "裁剪视频或图片的源画面，坐标及宽高为0..1归一化值。clear清除源裁剪。",
+    "description": "裁剪视频或图片的源画面，坐标及宽高为0..1归一化值。clear清除源裁剪。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -345,11 +351,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_focus_region",
-    "description": "聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像。区域为归一化源坐标，片段须填充整个项目画面。",
+    "description": "聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像。区域为归一化源坐标，片段须填充整个项目画面。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -427,11 +439,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_overlay_add",
-    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。",
+    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -527,11 +545,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_title_add",
-    "description": "添加可编辑标题。章节、角标、下三分之一或字幕布局，支持淡入、滑入和缩放动画。",
+    "description": "添加可编辑标题。章节、角标、下三分之一或字幕布局，支持淡入、滑入和缩放动画。可用 x/y/width/height 覆盖布局位置与尺寸（项目像素）；动画围绕最终位置生成。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -595,6 +619,30 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "x": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536,
+          "description": "标题左上角横坐标，默认按布局计算。"
+        },
+        "y": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536,
+          "description": "标题左上角纵坐标，滑入动画以此处为结束位置。"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536,
+          "description": "标题区域宽度；未提供时保留布局默认值。"
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536,
+          "description": "标题区域高度；未提供时保留布局默认值。"
         }
       },
       "required": [
@@ -610,11 +658,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_template_customize",
-    "description": "统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景。可从已有图片素材添加Logo。仅修改明确指定的片段。",
+    "description": "统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景。可从已有图片素材添加Logo。仅修改明确指定的片段。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -686,11 +740,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_freeze_frame",
-    "description": "将选中视频片段变为指定源帧的停帧，按duration展示且静音。sourceTime为原视频的绝对秒数。clear恢复原始源片段。",
+    "description": "将选中视频片段变为指定源帧的停帧，按duration展示且静音。sourceTime为原视频的绝对秒数。clear恢复原始源片段。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -728,11 +788,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_speed_ramp",
-    "description": "设置视频或音频的变速曲线；points覆盖源片段0和1端点，按源位置插值。速度与片段基础速度相乘。preservePitch默认保持音调，clear清除曲线。",
+    "description": "设置视频或音频的变速曲线；points覆盖源片段0和1端点，按源位置插值。速度与片段基础速度相乘。preservePitch默认保持音调，clear清除曲线。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -798,11 +864,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_transition_parameters_set",
-    "description": "调整转场方向、缓动、过渡颜色、模糊半径及作用范围。方向用于擦除和滑动，颜色用于淡出淡入；scope控制前段、后段或两侧。",
+    "description": "调整转场方向、缓动、过渡颜色、模糊半径及作用范围。方向用于擦除和滑动，颜色用于淡出淡入；scope控制前段、后段或两侧。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -866,6 +938,12 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   }
 ]

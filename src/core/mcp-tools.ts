@@ -225,7 +225,7 @@ export function executeProjectTool(project: Project, name: string, rawArgs: unkn
       if (args.filterPreset) patch.filters = { ...CLIP_FILTER_PRESETS.find(preset => preset.id === args.filterPreset)!.filters }
       if (Object.hasOwn(input, 'filters')) patch.filters = input.filters === null ? undefined : { ...DEFAULT_CLIP_FILTERS, ...clip.filters, ...patch.filters, ...(input.filters as Partial<ClipFilters>) }
       if (Object.hasOwn(input, 'chromaKey')) patch.chromaKey = input.chromaKey === null ? undefined : { ...DEFAULT_CHROMA_KEY, ...clip.chromaKey, ...(input.chromaKey as Partial<ClipChromaKey>) }
-      return editedClip(updateClip(project, clip.id, patch), clip.id, '更新片段属性')
+      return editedClip(updateClip(project, clip.id, patch, { translatePositionKeyframes: args.translatePositionKeyframes === true }), clip.id, '更新片段属性')
     }
     case 'open_media_clip_move': return editedClip(moveClip(project, string('clipId'), string('trackId'), number('start')), string('clipId'), '移动片段')
     case 'open_media_clip_split': case 'open_media_clip_duplicate': {

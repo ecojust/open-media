@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_timeline_batch_edit",
-    "description": "原子批量编辑时间线与项目。按顺序在隔离副本执行 1 至 100 个同步编辑，任一步失败全部不写入；成功只产生一次撤销记录。dryRun=true 仅预检，返回各操作结果但不提交。不得嵌套批量、导入文件、生成配音或其他异步/外部操作。",
+    "description": "原子批量编辑时间线与项目。按顺序在隔离副本执行 1 至 100 个同步编辑，任一步失败全部不写入；成功只产生一次撤销记录。dryRun=true 仅预检，返回各操作结果但不提交。不得嵌套批量、导入文件、生成配音或其他异步/外部操作。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -81,11 +81,28 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_timeline_markers_set",
-    "description": "完整替换当前项目的章节、重点和待检查标记。time 单位为秒；省略 id 时生成新 ID。空数组清除全部标记。标记随项目文件和快照保存。",
+    "description": "完整替换当前项目的章节、重点和待检查标记。time 单位为秒；省略 id 时生成新 ID。空数组清除全部标记。标记随项目文件和快照保存。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -149,11 +166,17 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_project_snapshot",
-    "description": "管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id。创建/恢复含真实媒体的便携包，关闭重开后保留，不依赖临时素材URL。所有工程合计最多100份、1GiB；每份最多256MiB媒体。恢复产生一次可撤销编辑；删除不可撤销。长操作返回 jobId。",
+    "description": "管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id。创建/恢复含真实媒体的便携包，关闭重开后保留，不依赖临时素材URL。所有工程合计最多100份、1GiB；每份最多256MiB媒体。恢复产生一次可撤销编辑；删除不可撤销。长操作返回 jobId。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -201,6 +224,23 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   }
 ]

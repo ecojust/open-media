@@ -1,6 +1,6 @@
 import type { ImportedProject, MediaAsset, Project } from './types.ts'
 
-export interface EditorToolProgress { stage: string; progress?: number; cancelable?: boolean }
+export interface EditorToolProgress { stage: string; progress?: number; cancelable?: boolean; encodedFrames?: number; outputTime?: number; elapsedSeconds?: number }
 export interface EditorToolRunOptions {
   signal: AbortSignal
   onProgress: (update: EditorToolProgress) => void

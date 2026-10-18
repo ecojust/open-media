@@ -102,6 +102,23 @@ async function tool(page, name, args = {}) {
   return result.result
 }
 
+async function editorGeometry(page) {
+  return page.evaluate(() => Object.fromEntries(['[data-testid="video-editor"]', '#editor-timeline'].map(selector => {
+    const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect()
+    return [selector, { x, y, width, height }]
+  })))
+}
+async function assertFloatingBar(page, width) {
+  const geometry = await page.getByTestId('mcp-processing-banner').evaluate(element => {
+    const { x, y, width, height } = element.getBoundingClientRect()
+    return { x, y, width, height, position: getComputedStyle(element).position, viewport: innerWidth }
+  })
+  assert.equal(geometry.position, 'fixed')
+  assert.equal(geometry.height, 44)
+  assert.ok(geometry.x >= 0 && geometry.x + geometry.width <= geometry.viewport, JSON.stringify(geometry))
+  if (width) assert.equal(geometry.viewport, width)
+}
+
 async function main() {
   const { createServer } = await import('vite')
   const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
@@ -350,7 +367,11 @@ async function main() {
     await expect(processingBanner).toContainText('MCP 正在处理')
     await expect(processingBanner).toContainText('导入素材')
     await expect(processingBanner).toContainText('正在读取和准备媒体')
-    await expect(processingBanner).toContainText('编辑暂时锁定，完成后自动恢复。')
+    await assertFloatingBar(page)
+    const runningGeometry = await editorGeometry(page)
+    await page.getByTestId('mcp-processing-details').click()
+    await expect(page.getByTestId('mcp-processing-detail-panel')).toContainText('编辑暂时锁定，完成后自动恢复。')
+    assert.deepEqual(await editorGeometry(page), runningGeometry, '悬浮详情展开不能推移编辑器或时间线')
     await expect(page.getByTestId('mcp-processing-cancel')).toBeEnabled()
     await expect(page.getByTestId('editor-mcp-open')).toBeEnabled()
     await expect(page.getByRole('dialog', { name: '处理任务', exact: true })).not.toBeVisible()
@@ -360,6 +381,17 @@ async function main() {
     await expect(processingBanner).toContainText('导入素材')
     await expect(processingBanner).toContainText('正在读取和准备媒体')
     await expect(processingBanner).toContainText('最近调用已完成：读取当前工程')
+    assert.deepEqual(await editorGeometry(page), runningGeometry, '工具状态及详情文字更新不能改变编辑器或时间线位置')
+    await assertFloatingBar(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await assertFloatingBar(page, 390)
+    const compactDetail = await page.getByTestId('mcp-processing-detail-panel').boundingBox()
+    assert.ok(compactDetail && compactDetail.x >= 0 && compactDetail.x + compactDetail.width <= 390)
+    await page.screenshot({ path: '/tmp/open-media-mcp-floating-mobile.png', fullPage: true })
+    await page.setViewportSize({ width: 1500, height: 1000 })
+    await expect.poll(() => editorGeometry(page), { message: '恢复窗口尺寸后悬浮栏不保留布局占位' }).toEqual(runningGeometry)
+    await page.getByTestId('mcp-processing-details').click()
+    await expect(page.getByTestId('mcp-processing-detail-panel')).not.toBeVisible()
     const subtitleButton = await page.locator('button[title="添加字幕"]').boundingBox()
     assert(subtitleButton)
     await page.mouse.click(subtitleButton.x + subtitleButton.width / 2, subtitleButton.y + subtitleButton.height / 2)
@@ -401,9 +433,12 @@ async function main() {
     assert.equal(await page.evaluate(() => window.mcpAppFixture.calls.some(call => call.command === 'close_native_window')), false)
     await tasks.getByRole('button', { name: '关闭任务', exact: true }).click()
     await expect(processingBanner).toBeVisible()
+    const beforeCancelGeometry = await editorGeometry(page)
     await page.getByTestId('mcp-processing-cancel').click()
     await expect(page.getByTestId('mcp-processing-cancel')).toBeDisabled()
     await expect(processingBanner).toContainText('正在取消')
+    assert.deepEqual(await editorGeometry(page), beforeCancelGeometry, '取消阶段文案变化不能推移编辑器或时间线')
+    await assertFloatingBar(page)
     await page.getByTestId('mcp-processing-tasks').click()
     await expect(cancelRow).toContainText('正在取消')
     await expect(cancelRow.getByRole('button', { name: /取消 MCP 任务/ })).toBeDisabled()
@@ -413,7 +448,7 @@ async function main() {
     await expect(processingBanner).not.toBeVisible()
     assert.equal((await tool(page, 'job_get', { id: cancelling.jobId })).state, 'cancelled')
     assert.equal((await tool(page, 'asset_list')).assets.some(asset => asset.id === 'cancelled-import'), false)
-    console.log('PASS MCP处理提示：任务名与阶段清楚可见，不自动打开弹窗，保留编辑锁定，取消可达，完成或取消后自动消失')
+    console.log('PASS MCP全局悬浮状态：固定44px，工具/阶段与取消状态变化不推移编辑器及时间线，详情浮层与390px窄屏不溢出，取消可达')
     await page.evaluate(() => window.mcpAppFixture.close())
     const closeDialog = page.getByRole('dialog', { name: '关闭应用', exact: true })
     await expect(closeDialog).toBeVisible()

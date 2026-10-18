@@ -480,6 +480,8 @@ pub struct MediaJob {
     pub backend: Option<String>,
     pub stage: String,
     pub fallback_reason: Option<String>,
+    pub encoded_frames: u64,
+    pub output_time: f64,
 }
 struct JobEntry {
     job: MediaJob,
@@ -580,6 +582,8 @@ impl JobManager {
             backend: None,
             stage: "正在准备导出".into(),
             fallback_reason: None,
+            encoded_frames: 0,
+            output_time: 0.0,
         };
         let cancelled = Arc::new(AtomicBool::new(false));
         {
@@ -629,7 +633,7 @@ impl JobManager {
                     }
                     update_export_job(&jobs, &id, |job| {
                         job.backend = Some(encoder.label().into());
-                        job.stage = "正在导出".into();
+                        job.stage = "正在解码并合成画面".into();
                     });
                     loop {
                         if cancelled.load(Ordering::SeqCst) {
@@ -644,6 +648,7 @@ impl JobManager {
                             &args,
                             &plan.format,
                             plan.duration,
+                            plan.video.as_ref().map(|target|target.fps),
                             staging.path(),
                             &jobs,
                             &id,
@@ -670,6 +675,8 @@ impl JobManager {
                             encoder = export_acceleration::Encoder::Cpu;
                             update_export_job(&jobs, &id, |job| {
                                 job.progress = 0.0;
+                                job.encoded_frames = 0;
+                                job.output_time = 0.0;
                                 job.backend = Some("CPU".into());
                                 job.stage = "硬件编码不可用，正在使用 CPU 导出".into();
                                 job.fallback_reason = Some(reason);
@@ -681,6 +688,7 @@ impl JobManager {
                     if cancelled.load(Ordering::SeqCst) {
                         return Err("cancelled".into());
                     }
+                    update_export_job(&jobs,&id,|job|job.stage="正在写入输出文件".into());
                     staging
                         .as_file()
                         .sync_all()
@@ -764,6 +772,7 @@ fn run_export_attempt(
     args: &[String],
     format: &str,
     duration: f64,
+    frame_rate: Option<f64>,
     output: &Path,
     jobs: &Arc<Mutex<HashMap<String, JobEntry>>>,
     id: &str,
@@ -783,7 +792,7 @@ fn run_export_attempt(
             "1",
         ])
         .args(args)
-        .args(["-progress", "pipe:1", "-nostats", "-f", format])
+        .args(["-progress", "pipe:1", "-stats_period", "0.25", "-nostats", "-f", format])
         .arg(output)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -815,16 +824,21 @@ fn run_export_attempt(
             .lines()
             .map_while(std::result::Result::ok)
         {
-            if let Some(time) = line
-                .strip_prefix("out_time_us=")
-                .and_then(|value| value.parse::<f64>().ok())
-                .filter(|value| value.is_finite())
-            {
-                if duration > 0.0 {
-                    update_export_job(&progress_jobs, &progress_id, |job| {
-                        job.progress = (time / 1_000_000.0 / duration).clamp(0.0, 0.99)
-                    });
-                }
+            if let Some(frames) = line.strip_prefix("frame=").and_then(|value|value.trim().parse::<u64>().ok()) {
+                update_export_job(&progress_jobs,&progress_id,|job| {
+                    job.encoded_frames=frames;
+                    if frames>0 { job.stage="正在编码输出".into(); }
+                    if let Some(rate)=frame_rate.filter(|rate|*rate>0.0) {
+                        job.progress=job.progress.max((frames as f64/(duration*rate).max(1.0)).clamp(0.0,0.99));
+                    }
+                });
+            }
+            if let Some(time) = line.strip_prefix("out_time_us=").and_then(|value|value.parse::<f64>().ok()).filter(|value|value.is_finite()) {
+                update_export_job(&progress_jobs,&progress_id,|job| {
+                    job.output_time=(time/1_000_000.0).max(0.0);
+                    if job.output_time>0.0 { job.stage="正在编码输出".into(); }
+                    if duration>0.0 { job.progress=job.progress.max((job.output_time/duration).clamp(0.0,0.99)); }
+                });
             }
         }
     });
@@ -1183,6 +1197,9 @@ fn timeline_plan(
     let project = &spec["project"];
     let audio_only = spec["audioOnly"] == true;
     let frame_time = if spec["frameOnly"] == true { Some(number(spec, "frameTime", 0.0, 0.0, 86400.0)?) } else { None };
+    let render_start = if frame_time.is_some() { frame_time.unwrap() } else { number(spec, "renderStart", 0.0, 0.0, 86400.0)? };
+    let requested_end = spec.get("renderEnd").and_then(Value::as_f64);
+    let windowed = frame_time.is_some() || requested_end.is_some();
     let config = &spec["config"];
     let min_dimension = if frame_time.is_some() { 1.0 } else { 16.0 };
     let max_dimension = if frame_time.is_some() { 1920.0 } else { 7680.0 };
@@ -1227,7 +1244,9 @@ fn timeline_plan(
     if clips.is_empty() || clips.len() > 500 || total > 86400.0 {
         return Err("项目需要包含 1 至 500 个有效片段，时长不超过 24 小时。".into());
     }
-    if frame_time.is_some_and(|time| time >= total) { return Err("取帧时间必须位于时间线内。".into()); }
+    let render_end = if frame_time.is_some() { (render_start + 1.0/fps).min(total) } else { requested_end.unwrap_or(total) };
+    if !render_end.is_finite() || render_start >= total || render_end > total + 0.000001 || render_end <= render_start { return Err("预览区间超出工程时长。".into()); }
+    let render_duration = render_end - render_start;
     let background = safe_color(project["background"].as_str().unwrap_or("#101114"));
     let mut args = Vec::new();
     arg(
@@ -1236,17 +1255,23 @@ fn timeline_plan(
             "-f",
             "lavfi",
             "-i",
-            &format!("color=c={background}:s={width}x{height}:r={fps}:d={total}{}", if frame_time.is_some() { ",format=rgba" } else { "" }),
+            &format!("color=c={background}:s={width}x{height}:r={fps}:d={render_duration}{}", if frame_time.is_some() { ",format=rgba" } else { "" }),
         ],
     );
     // A still starts at the exact requested timestamp, not the nearest output frame.
-    let mut filters = vec![match frame_time { Some(time) => format!("[0:v]format=rgba,settb=AVTB,setpts=PTS+{time}/TB[base0]"), None => "[0:v]format=rgba[base0]".to_string() }];
+    let mut filters = vec![if windowed { format!("[0:v]format=rgba,settb=AVTB,setpts=PTS+{render_start}/TB[base0]") } else { "[0:v]format=rgba[base0]".to_string() }];
     let mut visuals = 0;
     let mut input_count = 0;
     let mut audio_labels = Vec::new();
     for (track, clip, start, _trim_in, trim_out, _speed, duration) in &clips {
         let text = track["kind"] == "text";
-        if frame_time.is_some_and(|time| track["kind"] == "audio" || time < *start || time >= start + duration) { continue; }
+        if let Some(time) = frame_time {
+            if track["kind"] == "audio" || time < *start || time >= start+duration { continue; }
+        } else if windowed && (*start >= render_end || start+duration <= render_start) { continue; }
+        let active_from = (render_start-start).max(0.0);
+        let active_to = (render_end-start).min(*duration);
+        let local_from = if windowed { (active_from-0.25).max(0.0) } else { 0.0 };
+        let local_to = if windowed { (active_to+0.25).min(*duration) } else { *duration };
         if audio_only && text { continue; }
         if text && clip["overlay"]["kind"] == "blur" {
             crate::clip_animation::append_blur_overlay(clip, &mut filters, visuals, width, height, project_w, project_h, *duration)?;
@@ -1312,6 +1337,14 @@ fn timeline_plan(
                 ],
             );
         }
+        let input_seek = if windowed && !image && !loop_audio {
+            (crate::clip_animation::source_time(clip,local_from)? - 0.25).max(0.0)
+        } else { 0.0 };
+        if input_seek > 0.0 { arg(&mut args, &["-ss",&input_seek.to_string()]); }
+        if windowed && !image && !loop_audio {
+            let source_to = crate::clip_animation::source_time(clip,local_to)?;
+            arg(&mut args, &["-t", &(source_to-input_seek+0.5).max(0.5).to_string()]);
+        }
         arg(&mut args, &["-i", &path.to_string_lossy()]);
         input_count += 1;
         let index = input_count;
@@ -1337,11 +1370,14 @@ fn timeline_plan(
                 if fade_out > 0.0 { opacity *= ((start+duration-time)/fade_out).clamp(0.0,1.0); }
             }
             let fit = clip["fit"].as_str().unwrap_or("contain");
-            let scale=match fit{"cover"=>format!("scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}"),"fill"=>format!("scale={cw}:{ch}"),_=>format!("scale={cw}:{ch}:force_original_aspect_ratio=decrease,pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")};
-            let timing=crate::clip_animation::video_timing(clip)?;
-            let mut chain=format!("[{index}:v]{timing},format=rgba");
+            let scale=match fit{"cover"=>format!("scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}:exact=1,format=rgba"),"fill"=>format!("scale={cw}:{ch},format=rgba"),_=>format!("scale={cw}:{ch}:force_original_aspect_ratio=decrease,format=rgba,pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")};
+            let timing=if windowed && image && asset["mime"] != "image/gif" {
+                format!("trim=duration={},settb=AVTB,setpts=PTS-STARTPTS+{local_from}/TB",local_to-local_from)
+            } else if windowed { crate::clip_animation::video_timing_window(clip,local_from,local_to,input_seek)? } else { crate::clip_animation::video_timing(clip)? };
+            let mut chain=format!("[{index}:v]{timing}");
             chain += &crate::clip_animation::crop_filter(clip)?;
             if let Some(filter) = &chroma_key {
+                chain += ",format=rgba";
                 chain = crate::chroma_key::append_graph(chain, &mut filters, index, filter);
             }
             chain += &format!(",{scale},setsar=1");
@@ -1383,34 +1419,40 @@ fn timeline_plan(
         let volume = number(clip, "volume", 1.0, 0.0, 4.0)?;
         if frame_time.is_none() && !image && clip.get("freezeFrame").is_none() && (volume > 0.0 || crate::clip_animation::has_keyframe(clip,"volume")) && track["muted"] != true && store.has_audio(runtime, &path) {
             let (fade_in, fade_out, fade_peak) = fade_parameters(clip, *duration)?;
-            let volume = crate::clip_animation::expression(clip,"volume",volume,"t")?;
-            let timing=crate::clip_animation::audio_timing(clip,index,&mut filters)?;
-            let mut chain=format!("{timing},apad=whole_dur={duration},atrim=duration={duration},volume='({volume})*{fade_peak}':eval=frame");
-            if fade_in > 0.0 {
-                chain += &format!(",afade=t=in:st=0:d={fade_in}");
+            let clock = if windowed { format!("t+{local_from}") } else { "t".to_string() };
+            let volume = crate::clip_animation::expression(clip,"volume",volume,&clock)?;
+            let timing=if windowed {
+                let trimmed=crate::clip_animation::window_clip(clip,local_from,local_to)?;
+                crate::clip_animation::audio_timing_seek(&trimmed,index,&mut filters,input_seek)?
+            } else { crate::clip_animation::audio_timing(clip,index,&mut filters)? };
+            let audio_duration=if windowed { local_to-local_from } else { *duration };
+            let mut gain=format!("({volume})*{fade_peak}");
+            if windowed {
+                if fade_in>0.0 { gain += &format!("*clip(({clock})/{fade_in},0,1)"); }
+                if fade_out>0.0 { gain += &format!("*clip(({duration}-({clock}))/{fade_out},0,1)"); }
             }
-            if fade_out > 0.0 {
-                chain += &format!(",afade=t=out:st={}:d={fade_out}", duration - fade_out);
-            }
-            chain += &format!(
-                ",adelay={}|{}[a{index}]",
-                (start * 1000.0).round(),
-                (start * 1000.0).round()
-            );
+            let mut chain=format!("{timing},apad=whole_dur={audio_duration},atrim=duration={audio_duration},volume='{gain}':eval=frame");
+            if !windowed && fade_in > 0.0 { chain += &format!(",afade=t=in:st=0:d={fade_in}"); }
+            if !windowed && fade_out > 0.0 { chain += &format!(",afade=t=out:st={}:d={fade_out}", duration-fade_out); }
+            let delay=if windowed {
+                chain += &format!(",atrim=start={}:duration={},asetpts=PTS-STARTPTS",active_from-local_from,active_to-active_from);
+                (start+active_from-render_start).max(0.0)
+            } else { *start };
+            chain += &format!(",adelay={}|{}[a{index}]",(delay*1000.0).round(),(delay*1000.0).round());
             filters.push(chain);
             audio_labels.push(format!("[a{index}]"));
         }
     }
     if audio_only && audio_labels.is_empty() {
-        filters.push(format!("anullsrc=r=48000:cl=stereo,atrim=duration={total}[audio_silence]"));
+        filters.push(format!("anullsrc=r=48000:cl=stereo,atrim=duration={render_duration}[audio_silence]"));
         audio_labels.push("[audio_silence]".to_string());
     }
     if frame_time.is_some() {
         filters.push(format!("[base{visuals}]setpts=PTS-STARTPTS,format=rgba[video]"));
     } else if format == "gif" {
-        filters.push(format!("[base{visuals}]fps={fps},split[pa][pb];[pa]palettegen[p];[pb][p]paletteuse=dither=sierra2_4a[video]"));
+        filters.push(format!("[base{visuals}]setpts=PTS-{render_start}/TB,fps={fps},split[pa][pb];[pa]palettegen[p];[pb][p]paletteuse=dither=sierra2_4a[video]"));
     } else {
-        filters.push(format!("[base{visuals}]format=yuv420p[video]"));
+        filters.push(format!("[base{visuals}]setpts=PTS-{render_start}/TB,format=yuv420p[video]"));
     }
     if !audio_labels.is_empty() && format != "gif" {
         filters.push(format!("{}amix=inputs={}:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.95[audio]",audio_labels.join(""),audio_labels.len()));
@@ -1440,10 +1482,10 @@ fn timeline_plan(
     if format == "gif" {
         arg(&mut args, &["-loop", "0"]);
     }
-    arg(&mut args, &["-t", &total.to_string()]);
+    arg(&mut args, &["-t", &render_duration.to_string()]);
     Ok(RenderPlan {
         args,
-        duration: total,
+        duration: render_duration,
         format: format.into(),
         video: Some(VideoTarget {
             width,

@@ -16,6 +16,7 @@ import McpPanel from './components/McpPanel.vue'
 import mcpToolCatalog from './mcp-tools.json'
 import { prepareEditorTool, type EditorToolRunner } from './core/editor-tool-service.ts'
 import { createMcpAutomation, type McpPlayback } from './core/mcp-automation.ts'
+import { serializeMcpError } from './core/mcp-response.ts'
 import { claimMcpRequest, completeMcpRequest, getMcpServiceEpoch, getMcpStatus, getPendingMcpRequests, onMcpRequest, stopMcpService, type McpPanelJob, type McpRequest, type McpStatus } from './native-mcp.ts'
 import type { ImportedProject, MediaAsset, Project, ProjectHistory, ProjectSummary } from './core/types.ts'
 import { stampNewAssets } from './core/asset-times.ts'
@@ -49,6 +50,9 @@ type McpToolActivity = { id: string; tool: string; label: string; state: 'runnin
 const mcpToolActivity = shallowRef<McpToolActivity | null>(null)
 const mcpToolLabels = new Map(mcpToolCatalog.map(tool => [tool.name, tool.description.split(/[。；，]/)[0] || tool.name]))
 const mcpActivityTitle = computed(() => mcpBusy.value ? 'MCP 正在处理' : mcpToolActivity.value?.state === 'running' ? 'MCP 正在调用' : mcpToolActivity.value?.state === 'failed' ? 'MCP 调用失败' : 'MCP 调用完成')
+const mcpDetailsOpen = ref(false)
+const mcpCompactStatus = computed(() => mcpBusy.value && activeMcpJob.value ? `${activeMcpJob.value.name} · ${activeMcpJob.value.stage}` : mcpToolActivity.value?.label || '')
+watch(() => mcpBusy.value || !!mcpToolActivity.value, visible => { if (!visible) mcpDetailsOpen.value = false })
 let mcpActivityDeadlineTimer: ReturnType<typeof setTimeout> | undefined, mcpActivityFeedbackTimer: ReturnType<typeof setTimeout> | undefined
 const mcpConnected = ref(false)
 let mcpStatusRevision = 0, mcpObservedEpoch = getMcpServiceEpoch()
@@ -646,6 +650,8 @@ const mcpAutomation = createMcpAutomation({
   getProject: () => project.value,
   getRevision: () => projectRevision.value,
   isBusy: mcpLocalInteractionBusy,
+  getBlockingOperation: () => ({ jobId: null, kind: guiToolActive ? 'gui-tool' : busy.value || localMediaIsWorking() ? 'local-media' : 'local-interaction',
+    name: guiToolActive ? '本地编辑工具' : busy.value || localMediaIsWorking() ? '本地媒体处理' : '本地界面交互', state: 'running', cancelable: false, poll: null, cancel: null, source: 'local' }),
   isDirty: () => dirty.value,
   getBlobs: () => new Map(blobs),
   getSaveTarget: () => {
@@ -716,13 +722,16 @@ const mcpAutomation = createMcpAutomation({
   announce: message => { if (!destroyed) announce(message) },
 })
 function openJobs(): void {
-  mcpOpen.value = false; jobsOpen.value = true
+  mcpDetailsOpen.value = false; mcpOpen.value = false; jobsOpen.value = true
   // The closing native dialog restores its opener on the next tick before focus moves here.
   void nextTick(async () => { await nextTick(); if (jobsOpen.value) document.querySelector<HTMLButtonElement>('.jobs-dialog button')?.focus() })
 }
 function openMcp(): void { jobsOpen.value = false; mcpOpen.value = true; if (mcpBridgeError) fail(mcpBridgeError) }
 function mcpJobState(job: McpPanelJob): string { return job.cancelling ? '正在取消' : ({ running: '正在处理', completed: '已完成', failed: '失败', cancelled: '已取消' }[job.state]) }
 function mcpJobPercent(job: McpPanelJob): number | undefined { return typeof job.progress === 'number' && Number.isFinite(job.progress) ? Math.round(Math.max(0, Math.min(1, job.progress)) * 100) : undefined }
+function mcpJobMetrics(job: McpPanelJob): string {
+  return [job.encodedFrames !== undefined ? `已处理 ${job.encodedFrames} 帧` : '', job.outputTime !== undefined ? `输出 ${job.outputTime.toFixed(1)} 秒` : '', job.elapsedSeconds !== undefined ? `已用 ${job.elapsedSeconds.toFixed(1)} 秒` : ''].filter(Boolean).join(' · ')
+}
 async function cancelMcpJob(id: string): Promise<void> {
   try { await mcpAutomation.cancel(id); mcpJobs.value = mcpAutomation.list() } catch (cause) { fail(cause) }
 }
@@ -775,7 +784,7 @@ function enqueueMcpRequest(request: McpRequest): void {
       if (current()) await completeMcpRequest(request.id, result)
     } catch (cause) {
       failed = true
-      if (current()) await completeMcpRequest(request.id, { error: cause instanceof Error ? cause.message : String(cause) }, true)
+      if (current()) await completeMcpRequest(request.id, serializeMcpError(cause), true)
     } finally {
       mcpRequestDeadline = undefined
       if (current()) finishMcpToolActivity(request.id, failed)
@@ -824,6 +833,23 @@ onBeforeUnmount(() => { destroyed = true; clearMcpToolActivity(); cancelMcpPlayb
       <button class="brand" :disabled="speechWorking || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
     </header>
+    <section v-if="!booting && (mcpBusy || mcpToolActivity)" class="mcp-processing-banner" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state" :data-call-tool="mcpToolActivity?.tool" @keydown.esc.stop="mcpDetailsOpen=false">
+      <span v-if="mcpBusy || mcpToolActivity?.state==='running'" class="spinner small" aria-hidden="true"/><Icon v-else :name="mcpToolActivity?.state==='failed' ? 'alert' : 'check'" :size="16"/>
+      <div class="mcp-processing-copy" role="status" aria-live="polite" :title="`${mcpActivityTitle} · ${mcpCompactStatus}`"><strong>{{ mcpActivityTitle }}</strong><span>{{ mcpCompactStatus }}</span></div>
+      <span v-if="mcpBusy && activeMcpProgress!==undefined" class="mcp-processing-percent">{{ activeMcpProgress }}%</span>
+      <div class="mcp-processing-actions">
+        <button class="mcp-processing-detail-button" data-testid="mcp-processing-details" title="查看 MCP 状态详情" aria-label="查看 MCP 状态详情" :aria-expanded="mcpDetailsOpen" aria-controls="mcp-processing-details" @click="mcpDetailsOpen=!mcpDetailsOpen"><Icon name="info" :size="15"/></button>
+        <button v-if="mcpBusy" data-testid="mcp-processing-tasks" title="查看任务" aria-label="查看任务" @click="openJobs"><Icon name="layers" :size="14"/><span class="mcp-action-label">查看任务</span></button>
+        <button v-if="mcpBusy && activeMcpJob?.state==='running' && activeMcpJob.cancelable!==false" data-testid="mcp-processing-cancel" :disabled="activeMcpJob.cancelling" :title="activeMcpJob.cancelling ? '正在取消任务' : '取消任务'" :aria-label="activeMcpJob.cancelling ? '正在取消任务' : '取消任务'" @click="cancelMcpJob(activeMcpJob.id)"><Icon name="close" :size="14"/><span class="mcp-action-label">{{ activeMcpJob.cancelling ? '正在取消…' : '取消任务' }}</span></button>
+      </div>
+      <div v-if="mcpBusy && activeMcpProgress!==undefined" class="mcp-processing-progress" role="progressbar" aria-label="MCP 任务进度" :aria-valuenow="activeMcpProgress" aria-valuemin="0" aria-valuemax="100"><i :style="{width:`${activeMcpProgress}%`}"/></div>
+      <div v-if="mcpDetailsOpen" id="mcp-processing-details" class="mcp-processing-details" data-testid="mcp-processing-detail-panel">
+        <strong>{{ mcpActivityTitle }}</strong><p>{{ mcpCompactStatus }}</p>
+        <p v-if="mcpBusy && activeMcpJob && mcpJobMetrics(activeMcpJob)">{{ mcpJobMetrics(activeMcpJob) }}</p>
+        <p v-if="mcpBusy">编辑暂时锁定，完成后自动恢复。可查看任务进度或取消尚未提交的任务。</p>
+        <p v-if="mcpToolActivity" :title="mcpToolActivity.tool">{{ mcpToolActivity.state==='running' ? '正在调用' : mcpToolActivity.state==='failed' ? '调用失败' : '最近调用已完成' }}：{{ mcpToolActivity.label }}</p>
+      </div>
+    </section>
     <div class="workbench-body" :inert="switching || booting">
       <aside class="sidebar" :class="{collapsed}">
         <div class="sidebar-heading"><span v-if="!collapsed">工作台</span><button class="icon-button" :title="collapsed?'展开侧栏':'折叠侧栏'" :aria-label="collapsed?'展开侧栏':'折叠侧栏'" @click="collapsed=!collapsed"><Icon name="panel" :size="17"/></button></div>
@@ -842,16 +868,6 @@ onBeforeUnmount(() => { destroyed = true; clearMcpToolActivity(); cancelMcpPlayb
       </div></div>
         <div v-if="error" class="app-error" role="alert"><Icon name="alert" :size="16"/><span>{{ error }}</span><button class="icon-button" aria-label="关闭提示" @click="error=''"><Icon name="close" :size="15"/></button></div>
         <div v-for="item in recoveryRecordings" :key="item.id" class="app-error recording-recovery" role="alert"><Icon name="video" :size="16"/><span>录制尚未加入项目：{{ item.name }}</span><button @click="saveRecoveredRecording(item.id)">保存录制文件</button></div>
-        <section v-if="!booting && (mcpBusy || mcpToolActivity)" class="mcp-processing-banner" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state" :data-call-tool="mcpToolActivity?.tool">
-          <span v-if="mcpBusy || mcpToolActivity?.state==='running'" class="spinner small" aria-hidden="true"/><Icon v-else :name="mcpToolActivity?.state==='failed' ? 'alert' : 'check'" :size="16"/>
-          <div class="mcp-processing-copy" role="status" aria-live="polite">
-            <div class="mcp-processing-heading"><strong>{{ mcpActivityTitle }}</strong><span v-if="mcpBusy && activeMcpJob">{{ activeMcpJob.name }}<template v-if="activeMcpProgress!==undefined"> · {{ activeMcpProgress }}%</template></span><span v-else-if="mcpToolActivity" :title="mcpToolActivity.tool">{{ mcpToolActivity.label }}</span></div>
-            <p v-if="mcpBusy"><span v-if="activeMcpJob?.stage">{{ activeMcpJob.stage }} · </span>编辑暂时锁定，完成后自动恢复。</p>
-            <p v-if="mcpBusy && mcpToolActivity" :title="mcpToolActivity.tool">{{ mcpToolActivity.state==='running' ? '正在调用' : mcpToolActivity.state==='failed' ? '调用失败' : '最近调用已完成' }}：{{ mcpToolActivity.label }}</p>
-            <p v-else-if="mcpToolActivity">{{ mcpToolActivity.state==='running' ? '正在执行工具调用。' : mcpToolActivity.state==='failed' ? '本次调用失败，具体原因已返回客户端。' : '本次工具调用已完成。' }}</p>
-          </div>
-          <div v-if="mcpBusy" class="mcp-processing-actions"><button data-testid="mcp-processing-tasks" @click="openJobs"><Icon name="layers" :size="14"/>查看任务</button><button v-if="activeMcpJob?.state==='running' && activeMcpJob.cancelable!==false" data-testid="mcp-processing-cancel" :disabled="activeMcpJob.cancelling" @click="cancelMcpJob(activeMcpJob.id)">{{ activeMcpJob.cancelling ? '正在取消…' : '取消任务' }}</button></div>
-        </section>
         <div v-if="booting" class="boot-loading"><span class="spinner"/>正在恢复工作台…</div>
         <section v-else-if="view==='home'" class="home-workspace" data-testid="home-workspace">
           <div class="home-intro"><div class="eyebrow"><span/>YOUR LOCAL CREATIVE STUDIO</div><h1>把灵感，剪成作品。</h1><p>录下屏幕，整理片段，转换媒体。<br/>让每一次创作，都从这里开始。</p><div class="home-actions"><button class="primary" data-testid="create-project" :disabled="switching || booting || speechWorking || screenshotBusy || mcpBusy" @click="newProject"><Icon name="plus"/>新建剪辑项目</button><button :disabled="switching || booting || speechWorking || screenshotBusy || mcpBusy" @click="openProject()"><Icon name="folder"/>打开项目</button></div><div class="hero-art" aria-hidden="true"><div class="art-window"><div class="art-dots"><i/><i/><i/></div><svg viewBox="0 0 260 120"><path d="M0 85 40 65 75 80 130 32 180 60 220 25 260 45v75H0Z" fill="#dce8ff"/><path d="M0 105 60 80 105 95 155 65 210 88 260 64v56H0Z" fill="#b9d0ff"/><circle cx="130" cy="60" r="25" fill="white"/><path d="m124 48 19 12-19 12z" fill="#4b7deb"/></svg></div><div class="art-timeline"><i/><i/><i/><i/><b/></div><div class="art-note"><Icon name="audio" :size="20"/><span><i/><i/><i/><i/><i/><i/><i/></span></div></div></div>
@@ -889,6 +905,7 @@ onBeforeUnmount(() => { destroyed = true; clearMcpToolActivity(); cancelMcpPlayb
             <div><strong>{{ job.name }}</strong><span>{{ mcpJobState(job) }}<template v-if="mcpJobPercent(job)!==undefined"> · {{ mcpJobPercent(job) }}%</template></span></div>
             <progress v-if="job.state==='running'" :value="mcpJobPercent(job)" max="100" :aria-label="`${job.name}进度`"/>
             <p v-if="job.error || job.stage" :class="{ 'error-message': job.state==='failed' }">{{ job.error || job.stage }}</p>
+            <p v-if="mcpJobMetrics(job)" class="mcp-job-metrics">{{ mcpJobMetrics(job) }}</p>
             <button v-if="job.state==='running' && job.cancelable!==false" :disabled="job.cancelling" :aria-label="`取消 MCP 任务 ${job.name}`" @click="cancelMcpJob(job.id)">{{ job.cancelling ? '正在取消…' : '取消任务' }}</button>
           </article>
         </div>
@@ -908,7 +925,10 @@ onBeforeUnmount(() => { destroyed = true; clearMcpToolActivity(); cancelMcpPlayb
 .confirmation-actions button{font-size:12px}
 .mcp-task-item progress{display:block;width:100%;height:5px;accent-color:var(--ui-accent)}
 .mcp-task-item .error-message{color:var(--ui-danger)}
-.mcp-processing-banner{display:flex;align-items:center;gap:12px;flex-shrink:0;padding:10px 16px;border-bottom:1px solid color-mix(in srgb,var(--ui-accent) 20%,var(--ui-line));background:color-mix(in srgb,var(--ui-accent) 7%,var(--ui-surface));color:var(--ui-text)}
-.mcp-processing-banner>.spinner{flex:none}.mcp-processing-copy{flex:1;min-width:0}.mcp-processing-heading{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px 12px;font-size:12px}.mcp-processing-heading strong{color:var(--ui-accent)}.mcp-processing-heading span{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}.mcp-processing-copy p{margin:4px 0 0;font-size:11px;line-height:1.5;color:var(--ui-muted);overflow-wrap:anywhere}.mcp-processing-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;flex-shrink:0}.mcp-processing-actions button{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:4px 9px;border:1px solid var(--ui-line);border-radius:6px;background:var(--ui-surface);color:var(--ui-text);font:inherit;font-size:11px;cursor:pointer}.mcp-processing-actions button:hover:not(:disabled){border-color:var(--ui-accent);color:var(--ui-accent)}.mcp-processing-actions button:disabled{opacity:.5;cursor:wait}
-@media(max-width:700px){.mcp-processing-banner{gap:8px;padding:9px 12px;flex-wrap:wrap}.mcp-processing-actions{margin-left:auto}}
+.mcp-processing-banner{position:fixed;z-index:90;bottom:calc(40px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);width:min(780px,calc(100vw - 24px));height:44px;display:flex;align-items:center;gap:9px;padding:0 11px;border:1px solid color-mix(in srgb,var(--ui-accent) 25%,var(--ui-line));border-radius:9px;background:var(--ui-surface);box-shadow:0 5px 24px #0002;color:var(--ui-text)}
+.mcp-processing-banner>.spinner{flex:none}.mcp-processing-copy{display:flex;align-items:center;gap:10px;flex:1;min-width:0;white-space:nowrap;font-size:11px;line-height:18px}.mcp-processing-copy strong{flex:none;color:var(--ui-accent);font-weight:600}.mcp-processing-copy>span{min-width:0;overflow:hidden;text-overflow:ellipsis}.mcp-processing-percent{flex:none;font-size:11px;width:4ch;text-align:right;font-variant-numeric:tabular-nums}.mcp-processing-actions{display:flex;gap:5px;flex:none}.mcp-processing-actions button{display:inline-flex;align-items:center;gap:4px;height:28px;min-width:28px;padding:0 7px;border:1px solid var(--ui-line);border-radius:5px;background:var(--ui-surface);color:var(--ui-text);font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}.mcp-processing-actions .mcp-processing-detail-button{padding:0;width:28px;border-color:transparent}.mcp-processing-actions button:hover:not(:disabled){border-color:var(--ui-accent);color:var(--ui-accent)}.mcp-processing-actions button:disabled{opacity:.5;cursor:wait}
+.mcp-processing-progress{position:absolute;bottom:0;left:8px;right:8px;height:2px;overflow:hidden;border-radius:2px}.mcp-processing-progress i{display:block;height:100%;background:var(--ui-accent)}.mcp-processing-details{position:absolute;bottom:52px;right:0;width:min(440px,100%);max-height:min(280px,calc(100dvh - 128px));overflow:auto;padding:14px;border:1px solid var(--ui-line);border-radius:9px;background:var(--ui-surface);box-shadow:var(--ui-shadow);font-size:12px;line-height:1.6;overflow-wrap:anywhere}.mcp-processing-details p{margin:7px 0 0;color:var(--ui-muted);font-size:11px}.mcp-job-metrics{font-variant-numeric:tabular-nums}
+@media(max-width:700px){.mcp-processing-banner{gap:6px;padding:0 8px}.mcp-processing-copy{gap:6px}.mcp-processing-copy strong{font-size:10px}.mcp-action-label{display:none}.mcp-processing-actions button{width:28px;padding:0}.mcp-processing-percent{font-size:10px}}
+@media(prefers-reduced-motion:reduce){.mcp-processing-banner>.spinner{animation:none}}
+
 </style>

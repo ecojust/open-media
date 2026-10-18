@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_project_get",
-    "description": "读取当前工程、画面设置、全部轨道和片段ID、素材元数据、字幕问题及总时长。时间单位为秒，坐标为项目像素，轨道顺序从前景到背景。不返回文件路径或内部URL。",
+    "description": "读取当前工程、画面设置、全部轨道和片段ID、素材元数据、字幕问题及总时长。时间单位为秒，坐标为项目像素，轨道顺序从前景到背景。不返回文件路径或内部URL。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -20,11 +20,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_project_validate",
-    "description": "校验当前项目引用、时间、转场及字幕空值或默认文字；返回具体问题。",
+    "description": "校验当前项目引用、时间、转场及字幕空值或默认文字；返回具体问题。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -43,11 +49,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_project_update",
-    "description": "修改当前工程设置。宽高修改同时按比例调整视觉片段及字幕默认样式；帧率修改重新校验转场。",
+    "description": "修改当前工程设置。宽高修改同时按比例调整视觉片段及字幕默认样式；帧率修改重新校验转场。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -102,11 +114,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_asset_list",
-    "description": "列出当前工程已有素材的ID、类型、尺寸、时长、大小与导入时间，不返回内部URL或文件路径。",
+    "description": "列出当前工程已有素材的ID、类型、尺寸、时长、大小与导入时间，不返回内部URL或文件路径。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -133,11 +151,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_asset_remove",
-    "description": "移除当前工程中未被片段使用的素材引用；不删除磁盘文件。",
+    "description": "移除当前工程中未被片段使用的素材引用；不删除磁盘文件。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -164,11 +188,17 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_track_add",
-    "description": "新增视频、音频、字幕或转场轨道。返回新轨道ID。",
+    "description": "新增视频、音频、字幕或转场轨道。返回新轨道ID。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -208,11 +238,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_track_update",
-    "description": "修改轨道名称、静音/隐藏或锁定状态。解除锁定后才能编辑该轨道。",
+    "description": "修改轨道名称、静音/隐藏或锁定状态。解除锁定后才能编辑该轨道。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -259,11 +295,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_track_remove",
-    "description": "删除轨道及其中所有片段；被锁定轨道不可删除，关联配音与转场会校验。",
+    "description": "删除轨道及其中所有片段；被锁定轨道不可删除，关联配音与转场会校验。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -290,11 +332,17 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_track_reorder",
-    "description": "移动轨道到指定的从0开始位置；顺序由前景到背景。",
+    "description": "移动轨道到指定的从0开始位置；顺序由前景到背景。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -327,11 +375,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_add",
-    "description": "将已导入素材添加到指定视频或音频轨道。start为项目时间，trimIn/trimOut为源媒体时间。音频允许延长以循环播放。",
+    "description": "将已导入素材添加到指定视频或音频轨道。start为项目时间，trimIn/trimOut为源媒体时间。音频允许延长以循环播放。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -450,11 +504,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_text_add",
-    "description": "添加可编辑字幕或文字水印。字幕默认沿用最近使用样式，duration为时间线时长。",
+    "description": "添加可编辑字幕或文字水印。字幕默认沿用最近使用样式，duration为时间线时长。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -599,11 +659,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_update",
-    "description": "修改片段时间、画面位置尺寸、音量速度、字幕文字/样式、滤镜或抠像。filters/chromaKey部分字段合并，null清除；语音来源不可伪造，转场使用专用工具。",
+    "description": "修改片段时间、画面位置尺寸、音量速度、字幕文字/样式、滤镜或抠像。filters/chromaKey部分字段合并，null清除；语音来源不可伪造，转场使用专用工具。位置关键帧为绝对坐标：移动动画片段时传 translatePositionKeyframes=true，以基础位置变化量同步平移对应 x/y 关键帧；默认 false 保持已有关键帧。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -865,6 +931,10 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        },
+        "translatePositionKeyframes": {
+          "type": "boolean",
+          "description": "默认 false。为 true 时，按 patch.x/y 与原基础位置的差值平移对应轴的现有位置关键帧；不改变时间、缓动或其他属性，不创建新曲线。"
         }
       },
       "required": [
@@ -877,11 +947,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_move",
-    "description": "将片段移动到兼容轨道及指定项目时间；会校验轨道锁和关联转场。",
+    "description": "将片段移动到兼容轨道及指定项目时间；会校验轨道锁和关联转场。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -921,11 +997,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_split",
-    "description": "在指定项目时间分割片段。返回新增片段ID，不改变媒体源。",
+    "description": "在指定项目时间分割片段。返回新增片段ID，不改变媒体源。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -958,11 +1040,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_trim",
-    "description": "设置片段源起止时间。更改trimIn不会自动移动项目开始时间；若需按播放头裁剪使用side和time。",
+    "description": "设置片段源起止时间。更改trimIn不会自动移动项目开始时间；若需按播放头裁剪使用side和time。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1011,11 +1099,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_duplicate",
-    "description": "复制片段到同轨道，默认紧接原片段，也可指定start。",
+    "description": "复制片段到同轨道，默认紧接原片段，也可指定start。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1047,11 +1141,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_remove",
-    "description": "删除片段。ripple=true时只接拢被删除区间内所有轨道共同空白，锁定轨道导致原子拒绝。",
+    "description": "删除片段。ripple=true时只接拢被删除区间内所有轨道共同空白，锁定轨道导致原子拒绝。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1081,11 +1181,17 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_restore_audio_length",
-    "description": "恢复音频片段至完整源长度，保留位置和播放速度，解除字幕关联。",
+    "description": "恢复音频片段至完整源长度，保留位置和播放速度，解除字幕关联。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1112,11 +1218,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_extract_audio",
-    "description": "将视频片段的声音分离到音频轨道，保留剪辑位置、源起止、音量和速度，并将原视频静音。优先使用未锁定的音频轨道，否则创建新轨道；作为一次可撤销修改。",
+    "description": "将视频片段的声音分离到音频轨道，保留剪辑位置、源起止、音量和速度，并将原视频静音。优先使用未锁定的音频轨道，否则创建新轨道；作为一次可撤销修改。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1143,11 +1255,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_subtitle_apply_style",
-    "description": "把当前字幕的全部视觉属性应用到同一轨道的其他字幕，保留各自文字和时间。",
+    "description": "把当前字幕的全部视觉属性应用到同一轨道的其他字幕，保留各自文字和时间。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1174,11 +1292,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_timeline_close_gaps",
-    "description": "接拢时间线上所有轨道均为空白的区间；保留各轨道同步关系。",
+    "description": "接拢时间线上所有轨道均为空白的区间；保留各轨道同步关系。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1197,11 +1321,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_filter_list",
-    "description": "列出可用于clip_update的预设滤镜及完整色彩参数。",
+    "description": "列出可用于clip_update的预设滤镜及完整色彩参数。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1220,11 +1350,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_transition_list",
-    "description": "列出十种转场预设、当前转场；可传time查找最近可用视频切点。",
+    "description": "列出十种转场预设、当前转场；可传time查找最近可用视频切点。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1254,11 +1390,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_transition_add",
-    "description": "在靠近time的两个首尾相接视频片段切点添加转场，时长前后各半，自动创建转场轨道。同一切点再次添加会替换效果。",
+    "description": "在靠近time的两个首尾相接视频片段切点添加转场，时长前后各半，自动创建转场轨道。同一切点再次添加会替换效果。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1311,11 +1453,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_transition_update",
-    "description": "修改转场效果与总时长，保留所绑定视频切点；时长受相邻片段限制。",
+    "description": "修改转场效果与总时长，保留所绑定视频切点；时长受相邻片段限制。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1364,11 +1512,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_transition_remove",
-    "description": "删除指定转场。",
+    "description": "删除指定转场。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1395,11 +1549,17 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_speech_plan",
-    "description": "检查指定字幕是否可生成配音；不传clipIds时检查全部文字片段，返回待生成及跳过原因，不启动模型。",
+    "description": "检查指定字幕是否可生成配音；不传clipIds时检查全部文字片段，返回待生成及跳过原因，不启动模型。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1430,11 +1590,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_speech_align",
-    "description": "让指定字幕时长与已关联配音对齐；不传clipIds时处理所有已配音字幕。字幕文字必须与配音文本一致。",
+    "description": "让指定字幕时长与已关联配音对齐；不传clipIds时处理所有已配音字幕。字幕文字必须与配音文本一致。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1465,11 +1631,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_project_new",
-    "description": "创建新工程并设为当前工程。有未保存修改时需要显式discardUnsaved=true。",
+    "description": "创建新工程并设为当前工程。有未保存修改时需要显式discardUnsaved=true。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1517,11 +1689,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_project_open",
-    "description": "打开本机项目文件并切换到该工程。有未保存修改时需要显式discardUnsaved=true。",
+    "description": "打开本机项目文件并切换到该工程。有未保存修改时需要显式discardUnsaved=true。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1550,11 +1739,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_project_save",
-    "description": "保存当前工程，已有保存位置时直接覆盖；新位置使用path，覆盖其他现有文件需overwrite=true。",
+    "description": "保存当前工程，已有保存位置时直接覆盖；新位置使用path，覆盖其他现有文件需overwrite=true。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1581,11 +1787,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_project_history",
-    "description": "对当前项目撤销或重做一步修改。",
+    "description": "对当前项目撤销或重做一步修改。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1613,11 +1836,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_asset_import",
-    "description": "将本机媒体文件导入当前工程，返回异步jobId，使用job_get查看结果。",
+    "description": "将本机媒体文件导入当前工程，返回异步jobId，使用job_get查看结果。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1649,11 +1878,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_playback_get",
-    "description": "读取预览播放头、播放状态与当前选中片段。",
+    "description": "读取预览播放头、播放状态与当前选中片段。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1672,11 +1918,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_playback_set",
-    "description": "控制预览时间、播放状态或选中片段。选中片段需传已有clipId。",
+    "description": "控制预览时间、播放状态或选中片段。选中片段需传已有clipId。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1709,11 +1961,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_speech_voices",
-    "description": "列出实际可用及可按需下载的声音、模型状态、硬件要求。",
+    "description": "列出实际可用及可按需下载的声音、模型状态、硬件要求。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1732,11 +1990,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_speech_settings_get",
-    "description": "读取当前配音音色、语速与字幕对齐设置。",
+    "description": "读取当前配音音色、语速与字幕对齐设置。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1755,11 +2019,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_speech_settings_set",
-    "description": "更新公共配音设置，不生成音频。",
+    "description": "更新公共配音设置，不生成音频。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1791,11 +2061,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_speech_generate",
-    "description": "为指定字幕生成配音，不传clipIds则批量处理全部字幕；使用已下载模型，返回异步jobId，可查询进度及取消。",
+    "description": "为指定字幕生成配音，不传clipIds则批量处理全部字幕；使用已下载模型，返回异步jobId，可查询进度及取消。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1839,11 +2115,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_speech_model",
-    "description": "查询模型安装状态，或按需下载、取消、修复模型。下载与修复返回任务状态。",
+    "description": "查询模型安装状态，或按需下载、取消、修复模型。下载与修复返回任务状态。\n执行方式：download/repair 启动后台模型下载或修复并返回当前模型状态，不创建编辑任务 jobId；以 action=status 查询该 modelId 的下载进度，以 action=cancel 和 modelId 取消。status/cancel 返回本次操作的模型状态。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1878,11 +2171,32 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "conditional",
+        "responseType": "model-status",
+        "asynchronousWhen": {
+          "action": [
+            "download",
+            "repair"
+          ]
+        },
+        "pollingTool": "open_media_speech_model",
+        "pollingArguments": {
+          "action": "status"
+        },
+        "cancelTool": "open_media_speech_model",
+        "cancelArguments": {
+          "action": "cancel",
+          "modelId": "<requested modelId>"
+        }
+      }
     }
   },
   {
     "name": "open_media_job_list",
-    "description": "列出当前会话的任务、进度与结果。",
+    "description": "列出当前会话的任务、进度与结果。\n执行方式：立即返回任务状态；state=completed 后 result 才是原操作的最终结果，failed 时读取 errorDetails；running 时按 pollAfterMs 继续查询。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1901,11 +2215,19 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "job-list",
+        "resultField": "result",
+        "errorField": "errorDetails"
+      }
     }
   },
   {
     "name": "open_media_job_get",
-    "description": "读取异步任务状态、进度、错误或最终结果。",
+    "description": "读取异步任务状态、进度、错误或最终结果。\n执行方式：立即返回任务状态；state=completed 后 result 才是原操作的最终结果，failed 时读取 errorDetails；running 时按 pollAfterMs 继续查询。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1932,11 +2254,19 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "job-status",
+        "resultField": "result",
+        "errorField": "errorDetails"
+      }
     }
   },
   {
     "name": "open_media_job_cancel",
-    "description": "请求取消异步任务并清理临时资源。",
+    "description": "请求取消异步任务并清理临时资源。\n执行方式：立即返回任务状态；state=completed 后 result 才是原操作的最终结果，failed 时读取 errorDetails；running 时按 pollAfterMs 继续查询。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1963,11 +2293,19 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "job-status",
+        "resultField": "result",
+        "errorField": "errorDetails"
+      }
     }
   },
   {
     "name": "open_media_material_list",
-    "description": "分页浏览内置水印、背景音乐或片头片尾模板。返回material_add所需的id。",
+    "description": "分页浏览内置水印、背景音乐或片头片尾模板。返回material_add所需的id。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2011,11 +2349,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_material_add",
-    "description": "添加指定内置素材，返回异步jobId。视频片段placement为prepend或append，支持heading/subheading编辑标题；其他素材start为项目时间。",
+    "description": "添加指定内置素材，返回异步jobId。视频片段placement为prepend或append，支持heading/subheading编辑标题；其他素材start为项目时间。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2073,11 +2417,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_export_start",
-    "description": "导出当前项目到本机路径，返回异步jobId，查询进度、耗时和完成路径。尺寸固定使用项目设置，已有文件需overwrite=true。",
+    "description": "导出当前项目到本机路径，返回异步jobId，查询进度、耗时和完成路径。尺寸固定使用项目设置，已有文件需overwrite=true。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2129,11 +2490,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_asset_upload",
-    "description": "分块上传媒体并导入当前工程。begin 提供 name、size（字节）和完整文件 sha256；chunk 提供 uploadId、offset、base64 和分块 sha256；status/commit/abort 提供 uploadId。每块最多 512 KiB，单文件最多 1 GiB；commit 校验完整哈希和真实媒体类型后导入。",
+    "description": "分块上传媒体并导入当前工程。begin 提供 name、size（字节）和完整文件 sha256；chunk 提供 uploadId、offset、base64 和分块 sha256；status/commit/abort 提供 uploadId。每块最多 512 KiB，单文件最多 1 GiB；commit 校验完整哈希和真实媒体类型后导入。\n执行方式：begin/chunk/status/abort 同步返回；commit 异步返回 jobId，使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可使用 open_media_job_cancel 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2191,11 +2569,41 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "conditional",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "asynchronousWhen": {
+          "action": [
+            "commit"
+          ]
+        },
+        "synchronousWhen": {
+          "action": [
+            "begin",
+            "chunk",
+            "status",
+            "abort"
+          ]
+        }
+      }
     }
   },
   {
     "name": "open_media_asset_import_url",
-    "description": "从公开 HTTP/HTTPS 直链下载图片、音频或视频并导入工程，保存来源与 SHA-256。校验每次跳转和媒体内容；不允许本机、局域网、保留网络地址或携带账号密码的 URL。",
+    "description": "从公开 HTTP/HTTPS 直链下载图片、音频或视频并导入工程，保存来源与 SHA-256。校验每次跳转和媒体内容；不允许本机、局域网、保留网络地址或携带账号密码的 URL。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2230,11 +2638,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": true
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_asset_probe",
-    "description": "读取素材真实编码、显示尺寸、时长、帧率、音轨、旋转角度和 Alpha 通道信息；返回已保存的来源记录。透明通道无法从元数据确认时返回 null。",
+    "description": "读取素材真实编码、显示尺寸、时长、帧率、音轨、旋转角度和 Alpha 通道信息；返回已保存的来源记录。透明通道无法从元数据确认时返回 null。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2258,11 +2683,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_asset_get_frame",
-    "description": "按素材源时间提取真实 PNG 帧，返回可读取的图像数据、请求时间和实际帧时间。时间为素材内秒数，不是时间线位置；图片取 time=0。单帧编码结果最多 2 MiB。",
+    "description": "按素材源时间提取真实 PNG 帧，返回可读取的图像数据、请求时间和实际帧时间。时间为素材内秒数，不是时间线位置；图片取 time=0。单帧编码结果最多 2 MiB。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2297,11 +2739,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_asset_storyboard",
-    "description": "生成素材分镜联系表。mode=time按时间均匀抽帧；mode=scene按真实画面差异检测场景，并取每个场景的代表帧（单次范围最多600秒）。count为最多帧数，场景不足时不重复补图；超过上限时按场景顺序均匀选取。返回实际sourceTime、场景边界与检测依据。编码总量最多8 MiB。",
+    "description": "生成素材分镜联系表。mode=time按时间均匀抽帧；mode=scene按真实画面差异检测场景，并取每个场景的代表帧（单次范围最多600秒）。count为最多帧数，场景不足时不重复补图；超过上限时按场景顺序均匀选取。返回实际sourceTime、场景边界与检测依据。编码总量最多8 MiB。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2361,11 +2820,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_asset_detect_scenes",
-    "description": "根据真实画面差异检测场景切换，返回源时间、分数、阈值与检测依据。切换分数是技术指标，不代表内容语义判断。",
+    "description": "根据真实画面差异检测场景切换，返回源时间、分数、阈值与检测依据。切换分数是技术指标，不代表内容语义判断。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2401,11 +2877,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_asset_detect_idle",
-    "description": "检测真实黑场、画面冻结和静音区间，返回源时间范围、置信依据和检测阈值。结果仅表示技术条件满足，不代表内容没有价值，也不会自动删除片段。",
+    "description": "检测真实黑场、画面冻结和静音区间，返回源时间范围、置信依据和检测阈值。结果仅表示技术条件满足，不代表内容没有价值，也不会自动删除片段。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -2441,11 +2934,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_speech_generate_preview",
-    "description": "合成一句可试听的配音，不加入时间线。返回异步任务；文本应用读法词典。",
+    "description": "合成一句可试听的配音，不加入时间线。返回异步任务；文本应用读法词典。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2479,11 +2989,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_speech_pronunciation_set",
-    "description": "保存当前应用读法词典；按最长原文优先替换，仅影响合成发音，不改字幕文字。空数组清空。",
+    "description": "保存当前应用读法词典；按最长原文优先替换，仅影响合成发音，不改字幕文字。空数组清空。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2527,11 +3054,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_speech_timing_plan",
-    "description": "根据文字和标点估算时长及溢出风险。结果明确为estimate，不能代替实际合成时长。",
+    "description": "根据文字和标点估算时长及溢出风险。结果明确为estimate，不能代替实际合成时长。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2565,11 +3109,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_speech_alignment_set",
-    "description": "设置后续配音对齐策略：subtitle只调整字幕；ripple顺延后续字幕及配音；extend_visual延长覆盖画面（视频减速）并顺延后文。",
+    "description": "设置后续配音对齐策略：subtitle只调整字幕；ripple顺延后续字幕及配音；extend_visual延长覆盖画面（视频减速）并顺延后文。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2602,11 +3163,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_subtitle_import_export",
-    "description": "导入或导出SRT、VTT、ASS字幕，支持按句分段和自动换行。导出返回文件内容；不会自行写入任意路径。",
+    "description": "导入或导出SRT、VTT、ASS字幕，支持按句分段和自动换行。导出返回文件内容；不会自行写入任意路径。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2664,11 +3242,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_audio_loudness_analyze",
-    "description": "实际测量音频片段裁剪、速度和音量处理后的LUFS、响度范围、样本峰值、真峰值及静音区间。削波标记仅为接近满幅的风险提示，非确诊；区间为片段相对秒。返回可取消任务。",
+    "description": "实际测量音频片段裁剪、速度和音量处理后的LUFS、响度范围、样本峰值、真峰值及静音区间。削波标记仅为接近满幅的风险提示，非确诊；区间为片段相对秒。返回可取消任务。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2693,11 +3288,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_audio_normalize",
-    "description": "按目标LUFS及真峰值做双遍响度归一，生成新本地音频并替换片段，保留原素材供撤销。",
+    "description": "按目标LUFS及真峰值做双遍响度归一，生成新本地音频并替换片段，保留原素材供撤销。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2732,11 +3344,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_audio_process",
-    "description": "离线处理音频片段：降噪、三段EQ、动态压缩、去齿音、峰值限制。实际生成新音频，保持可撤销。",
+    "description": "离线处理音频片段：降噪、三段EQ、动态压缩、去齿音、峰值限制。实际生成新音频，保持可撤销。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2799,11 +3428,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_audio_ducking",
-    "description": "在人声轨道片段时段压低选中背景音频，含渐入和恢复；基于时间线区间烘焙新音频，非实时说话检测。",
+    "description": "在人声轨道片段时段压低选中背景音频，含渐入和恢复；基于时间线区间烘焙新音频，非实时说话检测。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2854,11 +3500,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_music_fit_duration",
-    "description": "将选中音乐适配目标秒数。可按给定BPM取完整4拍小节循环，连接处短淡化并添加收尾淡出；BPM由用户指定。",
+    "description": "将选中音乐适配目标秒数。可按给定BPM取完整4拍小节循环，连接处短淡化并添加收尾淡出；BPM由用户指定。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2899,11 +3562,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_audio_transcribe",
-    "description": "使用按需下载的离线识别模型生成真实逐句或逐词时间戳。模型缺失时需先download，绝不伪造识别成功。",
+    "description": "使用按需下载的离线识别模型生成真实逐句或逐词时间戳。模型缺失时需先download，绝不伪造识别成功。\n执行方式：status/cancel 同步返回模型操作状态；transcribe/download 异步返回 jobId，使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可使用 open_media_job_cancel 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2966,11 +3646,40 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": true
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "conditional",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "synchronousWhen": {
+          "action": [
+            "status",
+            "cancel"
+          ]
+        },
+        "asynchronousWhen": {
+          "action": [
+            "transcribe",
+            "download"
+          ]
+        }
+      }
     }
   },
   {
     "name": "open_media_speech_pronunciation_get",
-    "description": "读取当前配音读法词典，不修改设置。",
+    "description": "读取当前配音读法词典，不修改设置。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2986,11 +3695,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_speech_alignment_get",
-    "description": "读取当前配音对齐模式及间隔秒数。",
+    "description": "读取当前配音对齐模式及间隔秒数。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3006,11 +3721,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_timeline_get_frame",
-    "description": "返回指定时间的最终合成PNG画面，包含字幕、水印、滤镜和转场。坐标与时间均使用当前工程；不会改变播放头。",
+    "description": "返回指定时间的最终合成PNG画面，包含字幕、水印、滤镜和转场。坐标与时间均使用当前工程；不会改变播放头。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3039,11 +3760,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_preview_render",
-    "description": "生成指定范围的低清预览视频并返回可分块下载的artifactId。使用正式媒体合成管线，范围最长60秒。",
+    "description": "生成指定范围的低清预览视频并返回可分块下载的artifactId。使用正式媒体合成管线，范围最长60秒。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3083,11 +3821,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_audio_preview",
-    "description": "生成指定片段或范围的真实WAV试听。mix混合可听轨道，solo只保留clipIds或trackIds；保留时间线位置与音量处理。返回artifactId。",
+    "description": "生成指定片段或范围的真实WAV试听。mix混合可听轨道，solo只保留clipIds或trackIds；保留时间线位置与音量处理。返回artifactId。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3143,11 +3898,28 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_artifact_read",
-    "description": "分块读取预览文件的原始二进制数据（base64）。返回总大小、完整文件SHA256、offset和nextOffset；按序拼接即可保存为可播放文件。",
+    "description": "分块读取预览文件的原始二进制数据（base64）。返回总大小、完整文件SHA256、offset和nextOffset；按序拼接即可保存为可播放文件。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3180,11 +3952,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_asset_ocr",
-    "description": "离线识别素材帧中的简体中文和英文，返回文字、行/词区域及置信度；区域坐标以返回图像像素计。",
+    "description": "离线识别素材帧中的简体中文和英文，返回文字、行/词区域及置信度；区域坐标以返回图像像素计。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3225,11 +4003,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_export_validate",
-    "description": "检查缺失素材、字幕越界、配音重叠及无效剪辑。analyzeMedia=true时对所选范围生成真实预览并检测黑帧、削波与解码错误，返回问题证据与检查范围；最长检查60秒。",
+    "description": "检查缺失素材、字幕越界、配音重叠及无效剪辑。analyzeMedia=true时对所选范围生成真实预览并检测黑帧、削波与解码错误，返回问题证据与检查范围；最长检查60秒。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3259,11 +4054,28 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_timeline_batch_edit",
-    "description": "原子批量编辑时间线与项目。按顺序在隔离副本执行 1 至 100 个同步编辑，任一步失败全部不写入；成功只产生一次撤销记录。dryRun=true 仅预检，返回各操作结果但不提交。不得嵌套批量、导入文件、生成配音或其他异步/外部操作。",
+    "description": "原子批量编辑时间线与项目。按顺序在隔离副本执行 1 至 100 个同步编辑，任一步失败全部不写入；成功只产生一次撤销记录。dryRun=true 仅预检，返回各操作结果但不提交。不得嵌套批量、导入文件、生成配音或其他异步/外部操作。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3343,11 +4155,28 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_timeline_markers_set",
-    "description": "完整替换当前项目的章节、重点和待检查标记。time 单位为秒；省略 id 时生成新 ID。空数组清除全部标记。标记随项目文件和快照保存。",
+    "description": "完整替换当前项目的章节、重点和待检查标记。time 单位为秒；省略 id 时生成新 ID。空数组清除全部标记。标记随项目文件和快照保存。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3411,11 +4240,17 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_project_snapshot",
-    "description": "管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id。创建/恢复含真实媒体的便携包，关闭重开后保留，不依赖临时素材URL。所有工程合计最多100份、1GiB；每份最多256MiB媒体。恢复产生一次可撤销编辑；删除不可撤销。长操作返回 jobId。",
+    "description": "管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id。创建/恢复含真实媒体的便携包，关闭重开后保留，不依赖临时素材URL。所有工程合计最多100份、1GiB；每份最多256MiB媒体。恢复产生一次可撤销编辑；删除不可撤销。长操作返回 jobId。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3463,11 +4298,28 @@
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
     }
   },
   {
     "name": "open_media_clip_keyframes_set",
-    "description": "设置片段关键帧。时间为片段内秒；x/y为项目坐标，scaleX/scaleY为中心缩放倍率，其余为绝对值。替换指定属性，clear可清空全部。每个关键帧的easing控制向下一个关键帧的插值。",
+    "description": "设置片段关键帧。时间为片段内秒；x/y为项目坐标，scaleX/scaleY为中心缩放倍率，其余为绝对值。替换指定属性，clear可清空全部。每个关键帧的easing控制向下一个关键帧的插值。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3747,11 +4599,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_crop",
-    "description": "裁剪视频或图片的源画面，坐标及宽高为0..1归一化值。clear清除源裁剪。",
+    "description": "裁剪视频或图片的源画面，坐标及宽高为0..1归一化值。clear清除源裁剪。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3811,11 +4669,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_focus_region",
-    "description": "聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像。区域为归一化源坐标，片段须填充整个项目画面。",
+    "description": "聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像。区域为归一化源坐标，片段须填充整个项目画面。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3893,11 +4757,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_overlay_add",
-    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。",
+    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3993,11 +4863,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_title_add",
-    "description": "添加可编辑标题。章节、角标、下三分之一或字幕布局，支持淡入、滑入和缩放动画。",
+    "description": "添加可编辑标题。章节、角标、下三分之一或字幕布局，支持淡入、滑入和缩放动画。可用 x/y/width/height 覆盖布局位置与尺寸（项目像素）；动画围绕最终位置生成。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4061,6 +4937,30 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "x": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536,
+          "description": "标题左上角横坐标，默认按布局计算。"
+        },
+        "y": {
+          "type": "number",
+          "minimum": -65536,
+          "maximum": 65536,
+          "description": "标题左上角纵坐标，滑入动画以此处为结束位置。"
+        },
+        "width": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536,
+          "description": "标题区域宽度；未提供时保留布局默认值。"
+        },
+        "height": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 65536,
+          "description": "标题区域高度；未提供时保留布局默认值。"
         }
       },
       "required": [
@@ -4076,11 +4976,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_template_customize",
-    "description": "统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景。可从已有图片素材添加Logo。仅修改明确指定的片段。",
+    "description": "统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景。可从已有图片素材添加Logo。仅修改明确指定的片段。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4152,11 +5058,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_freeze_frame",
-    "description": "将选中视频片段变为指定源帧的停帧，按duration展示且静音。sourceTime为原视频的绝对秒数。clear恢复原始源片段。",
+    "description": "将选中视频片段变为指定源帧的停帧，按duration展示且静音。sourceTime为原视频的绝对秒数。clear恢复原始源片段。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4194,11 +5106,17 @@
       "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_clip_speed_ramp",
-    "description": "设置视频或音频的变速曲线；points覆盖源片段0和1端点，按源位置插值。速度与片段基础速度相乘。preservePitch默认保持音调，clear清除曲线。",
+    "description": "设置视频或音频的变速曲线；points覆盖源片段0和1端点，按源位置插值。速度与片段基础速度相乘。preservePitch默认保持音调，clear清除曲线。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4264,11 +5182,17 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   },
   {
     "name": "open_media_transition_parameters_set",
-    "description": "调整转场方向、缓动、过渡颜色、模糊半径及作用范围。方向用于擦除和滑动，颜色用于淡出淡入；scope控制前段、后段或两侧。",
+    "description": "调整转场方向、缓动、过渡颜色、模糊半径及作用范围。方向用于擦除和滑动，颜色用于淡出淡入；scope控制前段、后段或两侧。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4332,6 +5256,12 @@
       "destructiveHint": false,
       "idempotentHint": true,
       "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
     }
   }
 ]

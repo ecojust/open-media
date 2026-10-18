@@ -230,7 +230,8 @@ impl Transitions {
         // Apply animated masks at the project's actual frame times. Evaluating
         // them on the source frame grid makes slowed or low-rate sources hold
         // stale mask positions across the cut. Preserve fractional clip offsets.
-        chain += &format!(",settb=AVTB,setpts=PTS+{clip_start}/TB,fps={fps},settb=AVTB");
+        let resample = if frame_time.is_some() { String::new() } else { format!(",fps={fps}") };
+        chain += &format!(",settb=AVTB,setpts=PTS+{clip_start}/TB{resample},settb=AVTB");
         let clock = frame_time.map_or_else(|| "T".to_string(), |time| time.to_string());
         let enabled_clock = frame_time.map_or_else(|| "t".to_string(), |time| time.to_string());
         for (part, half) in halves.iter().enumerate() {

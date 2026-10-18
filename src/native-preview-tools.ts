@@ -2,13 +2,15 @@ import type { MediaAsset, Project } from './core/types'
 import { cloneProject } from './core/project'
 import { prepareNativeProject } from './core/native-project'
 import { cancelMediaJob, getMediaJobs, isDesktop, type MediaJob } from './native'
+import { mediaToolError } from './core/media-tool-error'
+import type { EditorToolProgress } from './core/editor-tool-service'
 
 export interface TimelinePreviewOptions {
   audioOnly?: boolean
   width?: number
   fps?: number
   signal?: AbortSignal
-  onProgress?: (update: { progress?: number; stage: string }) => void
+  onProgress?: (update: EditorToolProgress) => void
 }
 export interface TimelinePreviewArtifact { asset: MediaAsset; discard: () => Promise<void> }
 export interface TimelineFrameArtifact extends TimelinePreviewArtifact { pngBase64: string }
@@ -42,7 +44,12 @@ async function runPreview(project: Project, start: number, end: number, options:
   // Text/annotation layers contain no audio; omit rasterization for audio-only
   // requests while retaining video clips because they may contain source audio.
   let prepared: Awaited<ReturnType<typeof prepareNativeProject>>
-  try { prepared = await prepareNativeProject(source, signal, { skipText: options.audioOnly }) }
+  const maxEdge = frameOnly ? 1920 : 1280
+  const rasterScale = Math.min(1, (options.width ?? Math.min(640, project.width)) / project.width, maxEdge / project.height, maxEdge / project.width)
+  try { prepared = await prepareNativeProject(source, signal, {
+    skipText: options.audioOnly, visualOnly: frameOnly, range: { start, ...(frameOnly ? {} : { end }) }, rasterScale,
+    onProgress: update => onProgress?.({ ...update, progress: (update.progress ?? 0) * .1 }),
+  }) }
   catch (cause) { throw previewError('素材及字幕准备', cause) }
   signal?.throwIfAborted()
   let jobId: string | undefined
@@ -51,6 +58,7 @@ async function runPreview(project: Project, start: number, end: number, options:
   signal?.addEventListener('abort', cancel, { once: true })
   let stage = '原生画面合成'
   try {
+    onProgress?.({ progress: .1, stage: '正在建立区间合成任务' })
     const job = await call<MediaJob>('begin_tool_preview', { spec: { ...prepared, start, ...(frameOnly ? { frameOnly: true } : { end }), audioOnly: options.audioOnly ?? false, ...(options.width !== undefined ? { width: options.width } : {}), ...(options.fps !== undefined ? { fps: options.fps } : {}) } })
     jobId = job.id
     signal?.throwIfAborted()
@@ -59,7 +67,11 @@ async function runPreview(project: Project, start: number, end: number, options:
     while (current.state === 'running') {
       signal?.throwIfAborted()
       if (Date.now() > deadline) throw new Error('区间预览处理超时，请缩短区间后重试。')
-      onProgress?.({ progress: Math.max(0, Math.min(.99, current.progress)), stage: current.stage || '正在生成预览' })
+      onProgress?.({ progress: .1 + .89 * Math.max(0, Math.min(1, current.progress)), stage: current.stage || '正在生成预览',
+        ...(current.encodedFrames !== undefined ? { encodedFrames: current.encodedFrames } : {}),
+        ...(current.outputTime !== undefined ? { outputTime: current.outputTime } : {}),
+        ...(current.elapsedSeconds !== undefined ? { elapsedSeconds: current.elapsedSeconds } : {}),
+      })
       await abortableDelay(signal)
       current = (await getMediaJobs()).find(item => item.id === job.id) ?? (() => { throw new Error('预览任务已丢失。') })()
     }
@@ -77,7 +89,11 @@ async function runPreview(project: Project, start: number, end: number, options:
       if (!asset.nativePath) throw new Error('预览文件路径缺失。')
       asset.url = convertFileSrc(asset.nativePath)
     }
-    onProgress?.({ progress: 1, stage: '预览已就绪' })
+    onProgress?.({ progress: 1, stage: '预览已就绪',
+      ...(current.encodedFrames !== undefined ? { encodedFrames: current.encodedFrames } : {}),
+      ...(current.outputTime !== undefined ? { outputTime: current.outputTime } : {}),
+      ...(current.elapsedSeconds !== undefined ? { elapsedSeconds: current.elapsedSeconds } : {}),
+    })
     accepted = true
     let discarded = false
     return { asset, ...(frameOnly ? { pngBase64 } : {}), discard: async () => { if (discarded) return; await call('tool_preview_discard', { id: job.id }); discarded = true } }
@@ -88,6 +104,5 @@ async function runPreview(project: Project, start: number, end: number, options:
 }
 
 function previewError(stage: string, cause: unknown): Error {
-  if (cause && typeof cause === 'object' && 'name' in cause && cause.name === 'AbortError') return cause as Error
-  return new Error(`${stage}失败：${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+  return mediaToolError(stage, cause)
 }

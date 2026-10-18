@@ -130,11 +130,8 @@ fn make_plan(store: &MediaStore, runtime: &Runtime, spec: &Value) -> Result<Rend
     let mut plan = engine::build_plan(
         store,
         runtime,
-        &json!({ "kind":"timeline", "project":project, "audioOnly":audio_only,"frameOnly":frame_only,"frameTime":start, "textAssets":spec.get("textAssets").cloned().unwrap_or_else(||json!({})), "config":{"format":"mp4","width":width,"height":height,"fps":fps,"quality":"draft"} }),
+        &json!({ "kind":"timeline", "project":project, "audioOnly":audio_only,"frameOnly":frame_only,"frameTime":start,"renderStart":start,"renderEnd":end, "textAssets":spec.get("textAssets").cloned().unwrap_or_else(||json!({})), "config":{"format":"mp4","width":width,"height":height,"fps":fps,"quality":"draft"} }),
     )?;
-    if start >= plan.duration || end > plan.duration + 1e-6 {
-        return Err("预览区间超出工程时长。".into());
-    }
     if frame_only {
         let first_map = plan
             .args
@@ -214,14 +211,7 @@ fn make_plan(store: &MediaStore, runtime: &Runtime, spec: &Value) -> Result<Rend
         plan.format = "wav".into();
         plan.video = None;
     }
-    // Output seeking retains every upstream compositing and audio filter, including
-    // effects that begin before the requested range. Encoding is bounded to 60 s.
-    plan.args.extend([
-        "-ss".into(),
-        start.to_string(),
-        "-t".into(),
-        (end - start).to_string(),
-    ]);
+    // The composition graph and source decoders already start at the requested range.
     plan.duration = end - start;
     Ok(plan)
 }
@@ -564,6 +554,7 @@ mod tests {
         spec["frameOnly"] = json!(true);
         spec["start"] = json!(2.0); // subtitle's endpoint is exclusive
         spec["width"] = json!(161);
+        spec["project"]["tracks"][1]["clips"][0]["fit"] = json!("cover");
         let jobs = JobManager::default();
         let job = begin(&store, &runtime, &jobs, &spec).unwrap();
         finish(&jobs, &job.id);
@@ -574,6 +565,11 @@ mod tests {
         assert!(
             pixel[2] > 200 && pixel[1] < 10,
             "subtitle must end at 2.0: {pixel:?}"
+        );
+        let bottom = &rgb[(90 * 161 + 80) * 3..(90 * 161 + 80) * 3 + 3];
+        assert!(
+            bottom[2] > 200 && bottom[1] < 10,
+            "odd cover must fill bottom row: {bottom:?}"
         );
         discard(&store, &jobs, &job.id).unwrap();
         spec["project"]["width"] = json!(16);
@@ -700,3 +696,7 @@ mod tests {
         assert!(store.root.join("ordinary.mp4").exists());
     }
 }
+
+#[cfg(test)]
+#[path = "preview_performance_tests.rs"]
+mod performance_tests;

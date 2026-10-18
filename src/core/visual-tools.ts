@@ -5,6 +5,10 @@ import { ANIMATION_EASINGS, validateKeyframes, validateNormalizedRect, validateS
 import type { Clip, ClipKeyframes, Project, Track } from './types.ts'
 
 export interface VisualToolResult { project: Project; data: Record<string, unknown>; label: string; selection?: string }
+export type TitlePreset = 'chapter' | 'lower-third' | 'corner' | 'subtitle'
+export function titleBoundsForPreset(project: Pick<Project, 'width' | 'height'>, preset: TitlePreset): Pick<Clip, 'x' | 'y' | 'width' | 'height'> {
+  return { x: project.width * 0.08, y: project.height * (preset === 'chapter' ? 0.39 : preset === 'corner' ? 0.06 : 0.72), width: project.width * 0.84, height: project.height * 0.22 }
+}
 function requiredText(value: unknown, label: string, max = 160): string { if (typeof value !== 'string' || !value.trim() || value.length > max || value.includes('\0')) throw new Error(`${label}无效。`); return value }
 function target(project: Project, value: unknown): { clip: Clip; track: Track } {
   const found = findClip(project, requiredText(value, '片段标识'))
@@ -95,8 +99,11 @@ export function executeVisualTool(project: Project, name: string, value: unknown
     track.clips.push(clip); selection = clip.id; label = '添加视觉标注'; data = { clipId: clip.id, trackId: track.id }
   } else if (tool === 'title_add') {
     const preset = visualChoice(args.preset, ['chapter', 'lower-third', 'corner', 'subtitle'], '标题类型'), duration = visualNumber(args.duration, '标题时长', 0.01, 86400)
+    const bounds = titleBoundsForPreset(next, preset)
+    for (const axis of ['x', 'y'] as const) if (args[axis] !== undefined) bounds[axis] = visualNumber(args[axis], axis === 'x' ? '标题横坐标' : '标题纵坐标', -65536, 65536)
+    for (const dimension of ['width', 'height'] as const) if (args[dimension] !== undefined) bounds[dimension] = visualNumber(args[dimension], dimension === 'width' ? '标题宽度' : '标题高度', 1, 65536)
     const track = textTrack(next, args.trackId, preset === 'subtitle' ? '字幕轨道' : '标题轨道')
-    const clip = createTextClip(next, { text: requiredText(args.text, '标题文字', 20000), name: { chapter: '章节标题', 'lower-third': '下三分之一标题', corner: '角标', subtitle: '字幕' }[preset], start: visualNumber(args.start, '开始时间', 0, 86400), trimOut: duration, x: next.width * 0.08, width: next.width * 0.84, height: next.height * 0.22, y: next.height * (preset === 'chapter' ? 0.39 : preset === 'corner' ? 0.06 : 0.72), fontSize: visualNumber(args.fontSize ?? Math.max(4, next.height * (preset === 'chapter' ? 0.09 : 0.05)), '字号', 4, 2048), fontFamily: args.fontFamily === undefined ? 'sans-serif' : requiredText(args.fontFamily, '字体', 200), color: visualColor(args.color ?? '#ffffff'), background: args.background === undefined ? 'transparent' : visualColor(args.background), textRole: preset === 'subtitle' ? 'subtitle' : 'watermark', textAlign: preset === 'corner' || preset === 'lower-third' ? 'left' : 'center' })
+    const clip = createTextClip(next, { text: requiredText(args.text, '标题文字', 20000), name: { chapter: '章节标题', 'lower-third': '下三分之一标题', corner: '角标', subtitle: '字幕' }[preset], start: visualNumber(args.start, '开始时间', 0, 86400), trimOut: duration, ...bounds, fontSize: visualNumber(args.fontSize ?? Math.max(4, next.height * (preset === 'chapter' ? 0.09 : 0.05)), '字号', 4, 2048), fontFamily: args.fontFamily === undefined ? 'sans-serif' : requiredText(args.fontFamily, '字体', 200), color: visualColor(args.color ?? '#ffffff'), background: args.background === undefined ? 'transparent' : visualColor(args.background), textRole: preset === 'subtitle' ? 'subtitle' : 'watermark', textAlign: preset === 'corner' || preset === 'lower-third' ? 'left' : 'center' })
     const animation = visualChoice(args.animation ?? 'fade', ['none', 'fade', 'slide', 'zoom'], '标题动画'), enter = Math.min(0.5, duration / 3)
     if (animation !== 'none') clip.keyframes = { opacity: [{ time: 0, value: 0 }, { time: enter, value: 1 }, { time: duration - enter, value: 1 }, { time: duration, value: 0 }] }
     if (animation === 'slide') clip.keyframes!.y = [{ time: 0, value: clip.y + next.height * 0.05, easing: 'ease-out' }, { time: enter, value: clip.y }]

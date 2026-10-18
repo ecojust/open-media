@@ -139,7 +139,11 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 
 上传通过 `asset_upload` 的 `begin → chunk → commit` 流程：开始时提供文件名称、总大小和 SHA-256，每块携带 offset、base64 数据和分块 SHA-256；支持 status 查询与 abort 清理。每块最大 512 KiB，单文件最大 1 GiB；提交会核对全文件哈希并探测真实媒体类型。上传和网址导入成功后返回可用于剪辑的 assetId，并在工程中保存来源信息。
 
-视频与音频预览每次最多 60 秒，视频预览宽度最多 1280 像素。结果的 artifactId 可通过 `artifact_read` 分块下载；响应包含总大小和完整 SHA-256。缓存单个文件最大 64 MiB，最多保留 20 个／256 MiB，24 小时过期；请及时下载需要保留的结果。预览与取帧不会改变播放头或向工程添加素材。
+视频与音频预览每次最多 60 秒，视频预览宽度最多 1280 像素。只准备与请求范围相交的素材和字幕，合成保留原时间线的动画时刻；任务返回实际编码帧数 `encodedFrames`、已输出时长 `outputTime`（秒）和已用时间 `elapsedSeconds`。这些值与 `stage` 一起用于区分素材准备、合成和文件写入阶段。结果的 artifactId 可通过 `artifact_read` 分块下载；响应包含总大小和完整 SHA-256。缓存单个文件最大 64 MiB，最多保留 20 个／256 MiB，24 小时过期；请及时下载需要保留的结果。预览与取帧不会改变播放头或向工程添加素材。
+
+桌面端 `timeline_get_frame` 使用原生合成并经内部通信返回 PNG，不从原生媒体画布读取像素。失败任务的 `errorDetails` 保留结构化错误，其中 `details.stage` 标明具体阶段，能定位到素材或字幕时返回 `details.resource` 的标识与名称；`details.relatedResources` 仅表示相关输入，并不表示它们全部出错。`details.context` 保留请求时间和宽度，便于复现。
+
+创建动画标题时，可在 `title_add` 中直接指定 `x`、`y`、`width`、`height`，进入动画以最终位置为基准。移动已有动画片段时，在 `clip_update` 顶层传 `translatePositionKeyframes: true`，按基础位置变化量同步平移 X/Y 关键帧；省略或设为 false 时保留已有关键帧绝对坐标。该选项不能与显式替换 `patch.keyframes` 同时使用。
 
 `timeline_batch_edit` 只接受工具清单中的同步工程编辑操作，最多 100 项；可先 dryRun，带 expectedRevision 校验，任何一项失败都不会写入部分修改，成功后共用一个撤销步骤。`project_snapshot` 保存包含素材的命名版本，可比较、恢复、删除；本地最多 100 个版本、总容量 1 GiB，恢复也可撤销。
 
@@ -153,13 +157,28 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 
 `open_media_project_get` 返回当前 `projectId` 和 `revision`。写操作建议带上 `expectedRevision`，防止把基于旧画面的修改应用到用户刚编辑过的工程。版本不匹配时工具会返回错误，应重新读取工程并据此重试，而不是直接去掉版本参数。
 
-导入、打开、新建、保存、添加内置素材、配音、媒体分析、预览、版本操作和导出采用异步任务。上传的 begin／chunk／status／abort 以及 artifact_read 直接返回协议结果，commit 返回导入任务。调用返回相同值的 `id` 和 `jobId`，查询及取消工具的参数名为 `id`。用 `open_media_job_get` 查询，或在“处理任务”中查看进度；`state` 为 `running`、`completed`、`failed` 或 `cancelled`。只有 `completed` 表示操作完成，仍应检查 `result`；创建任务本身不代表已经生成音频或视频。配音提供当前阶段、完成数量及可用的百分比，其他任务按实际能力返回进度。
+导入、打开、新建、保存、添加内置素材、配音、媒体分析、取帧、预览、批量编辑、版本操作、导出检查和导出采用异步任务。上传的 begin／chunk／status／abort 以及 artifact_read 直接返回协议结果，commit 返回导入任务。调用返回相同值的 `id` 和 `jobId`，查询及取消工具的参数名为 `id`。用 `open_media_job_get` 查询，或在“处理任务”中查看进度；`state` 为 `running`、`completed`、`failed` 或 `cancelled`。只有 `completed` 表示操作完成，仍应检查 `result`；创建任务本身不代表已经生成音频或视频。配音提供当前阶段、完成数量及可用的百分比，其他任务按实际能力返回进度。
 
-调用工具时，界面显示当前工具名称，短调用完成后短暂显示结果状态。长任务继续显示“MCP 正在处理”、任务名称、阶段和可用的进度，并提供查看任务和取消入口。
+任务响应保留原有 `id/state/result`，同时明确返回以下字段。同步操作返回 `responseType: "result"`、`execution: "synchronous"`、`final: true`；为保持兼容，任务列表仍是数组，其中每个任务都包含完整查询契约。
+
+`tools/list` 中每个工具的 `_meta["openmedia/execution"]` 说明同步、异步或随 action 变化的执行方式，并提供查询工具、结果字段与终止状态；客户端可在调用前读取这份契约。
+
+| 字段 | 含义 |
+| --- | --- |
+| `responseType: "job"`、`execution: "asynchronous"` | 本次结果是异步任务 |
+| `jobId`、`status` | 与原字段 `id`、`state` 相同 |
+| `final` | 是否已经结束；失败和取消也属于结束，不能当作成功 |
+| `poll` | 可直接调用的 `{tool, arguments}` 查询信息 |
+| `pollAfterMs` | 建议查询间隔；结束后为 0 |
+| `cancel` | 可直接调用的取消信息；不可取消或已结束时为 null |
+
+调用工具时，全局悬浮状态条显示当前工具名称，短调用完成后短暂显示结果状态。长任务继续显示“MCP 正在处理”、任务名称、阶段和可用的进度，并提供查看任务和取消入口。状态条和展开的任务详情不参与编辑器布局，文字或进度更新不会推移画布与时间线。
 
 同一工程同时只运行一个需要占用编辑状态的自动化任务；查询进度和取消仍可进行。长任务的提示会说明暂时锁定编辑，结束后自动恢复；普通状态查询不额外锁定工程；取帧、媒体分析及预览任务使用稳定的工程快照并暂时锁定编辑。异步编辑在写入前再次校验工程和版本，避免将旧任务结果加入新的工程。批量配音完成后统一提交时间线；中途失败或取消时不提交部分配音。
 
-关闭服务会拒绝新的调用，并取消尚可取消的自动化任务。已经完成的编辑保留在工程中；进入最终文件写入阶段的任务会显示不可取消。关闭 M 弹窗不会停止服务。模型下载使用独立状态：通过 `open_media_speech_model` 的 `action: "status"` 查询、`action: "cancel"` 取消，不使用剪辑任务 ID。
+写操作遇到阻塞时返回 `code: "PROJECT_BUSY"`、`retryable: true` 和 `blockingJob`，包含阻塞任务的 `jobId`、`kind`、工具名称、阶段及 `poll/cancel` 信息。客户端应先查询或取消该任务，再用最新工程版本重试；若阻塞来自本地交互且没有任务标识，则 `jobId` 和查询／取消入口为 null，不会虚构可取消任务。
+
+关闭服务会拒绝新的调用，并取消尚可取消的自动化任务。已经完成的编辑保留在工程中；进入最终文件写入阶段的任务会显示不可取消。关闭 M 弹窗不会停止服务。模型下载和修复使用独立状态：`download`、`repair` 接受后返回 `responseType: "model-status"` 与 `final: false`，通过响应的查询／取消链接调用 `open_media_speech_model` 的 `action: "status"` 或 `action: "cancel"`，不使用剪辑任务 ID。
 
 工具参数错误或执行失败会通过 JSON-RPC 错误或 `isError: true` 返回；客户端应读取具体说明。编辑器请求等待上限为 30 秒，长操作通过任务查询继续跟踪。没有收到确认时，先重新读取工程或任务状态，避免盲目重复执行新增、删除、导出等操作。
 

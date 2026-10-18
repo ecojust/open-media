@@ -327,6 +327,37 @@ pub(crate) fn video_timing(clip: &Value) -> Result<String> {
         first.source_start, last.source_end
     ))
 }
+pub(crate) fn source_time(clip: &Value, time: f64) -> Result<f64> {
+    if let Some(freeze) = clip.get("freezeFrame") { return number(freeze, "sourceTime", 0.0, 0.0, 86400.0); }
+    let segments = speed_segments(clip)?;
+    let segment = segments.iter().find(|segment| time < segment.time_end).or_else(|| segments.last()).ok_or("片段时间无效。")?;
+    Ok((segment.source_start + (time-segment.time_start).clamp(0.0, segment.time_end-segment.time_start)*segment.speed).min(segment.source_end))
+}
+/// Decode only the source interval, retaining the clip's original local clock.
+pub(crate) fn video_timing_window(clip: &Value, from: f64, to: f64, input_seek: f64) -> Result<String> {
+    if clip.get("freezeFrame").is_some() {
+        let source = source_time(clip, from)? - input_seek;
+        return Ok(format!("trim=start={source},select='eq(n,0)',setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={},trim=duration={},settb=AVTB,setpts=PTS+{from}/TB",to-from,to-from));
+    }
+    let source_from = source_time(clip,from)? - input_seek;
+    let source_to = source_time(clip,to)? - input_seek;
+    let segments = speed_segments(clip)?;
+    let last = segments.last().ok_or("片段时间无效。")?;
+    let mut mapping = format!("{}+(T+{input_seek}-{})/{}",last.time_start,last.source_start,last.speed);
+    for segment in segments.iter().rev().skip(1) {
+        mapping = format!("if(lt(T+{input_seek},{}),{}+(T+{input_seek}-{})/{},{mapping})",segment.source_end,segment.time_start,segment.source_start,segment.speed);
+    }
+    Ok(format!("trim=start={source_from}:end={source_to},settb=AVTB,setpts='({mapping})/TB'"))
+}
+pub(crate) fn window_clip(clip: &Value, from: f64, to: f64) -> Result<Value> {
+    let mut trimmed = clip.clone();
+    if trimmed.get("speedRamp").is_some() && trimmed["speedRamp"].get("sourceRange").is_none() {
+        trimmed["speedRamp"]["sourceRange"] = serde_json::json!({"start":clip["trimIn"],"end":clip["trimOut"]});
+    }
+    trimmed["trimIn"] = serde_json::json!(source_time(clip,from)?);
+    trimmed["trimOut"] = serde_json::json!(source_time(clip,to)?);
+    Ok(trimmed)
+}
 fn tempo(mut speed: f64) -> String {
     let mut filters = Vec::new();
     while speed > 2.0 {
@@ -345,6 +376,13 @@ pub(crate) fn audio_timing(
     index: usize,
     filters: &mut Vec<String>,
 ) -> Result<String> {
+    audio_timing_seek(clip,index,filters,0.0)
+}
+pub(crate) fn audio_timing_seek(clip: &Value, index: usize, filters: &mut Vec<String>, input_seek: f64) -> Result<String> {
+    let input = if input_seek > 0.0 {
+        filters.push(format!("[{index}:a]asetpts=PTS+{input_seek}/TB[seek_audio{index}]"));
+        format!("[seek_audio{index}]")
+    } else { format!("[{index}:a]") };
     let mut segments: Vec<Segment> = Vec::new();
     for segment in speed_segments(clip)? {
         if let Some(previous) = segments.last_mut().filter(|previous| {
@@ -371,7 +409,7 @@ pub(crate) fn audio_timing(
             format!("aresample=48000,asetrate=48000*{},aresample=48000", s.speed)
         };
         return Ok(format!(
-            "[{index}:a]atrim=start={}:end={},asetpts=PTS-STARTPTS,{rate}",
+            "{input}atrim=start={}:end={},asetpts=PTS-STARTPTS,{rate}",
             s.source_start, s.source_end
         ));
     }
@@ -379,7 +417,7 @@ pub(crate) fn audio_timing(
         .map(|i| format!("[ramp{index}_in{i}]"))
         .collect::<String>();
     filters.push(format!(
-        "[{index}:a]asplit={}{input_labels}",
+        "{input}asplit={}{input_labels}",
         segments.len()
     ));
     if segments
@@ -409,7 +447,9 @@ pub(crate) fn audio_timing(
         let before = if i > 0 { overlaps[i - 1] / 2.0 } else { 0.0 };
         let after = overlaps.get(i).copied().unwrap_or(0.0) / 2.0;
         let wanted_start = s.source_start - before * s.speed;
-        let source_start = (wanted_start - context).max(0.0);
+        // A range decoder may begin inside the normal tempo preroll. Compute
+        // the trim offset from the samples actually available after input seek.
+        let source_start = (wanted_start - context).max(input_seek).max(0.0);
         let source_end = s.source_end + after * s.speed + context;
         let offset = (wanted_start - source_start) / s.speed;
         let length = s.time_end - s.time_start + before + after;
@@ -449,7 +489,26 @@ pub(crate) fn visual_filter_at(clip: &Value, cw: u32, ch: u32, fps: f64, frame_t
         number(clip, "animationOffset", 0.0, 0.0, 86400.0)?
     );
     let alpha = expression_for(frames.get("opacity"), opacity, &clock);
-    let mut prefix = format!(",settb=AVTB,setpts=PTS+{start}/TB,fps={fps},settb=AVTB,format=rgba");
+    let resample = if frame_time.is_some() { String::new() } else { format!(",fps={fps}") };
+    let mut prefix = format!(",settb=AVTB,setpts=PTS+{start}/TB{resample},settb=AVTB,format=rgba");
+    let rotation = number(clip,"rotation",0.0,-3600.0,3600.0)?;
+    let scale_only = rotation == 0.0 && frames.get("rotation").is_none_or(|list| list.iter().all(|frame|frame.value==0.0));
+    if transformed && scale_only {
+        // Native scaling is vectorized; a square affine canvas evaluates millions
+        // of transparent pixels per frame for ordinary focus/zoom animation.
+        let max_scale = |name: &str| frames.get(name).map(|list|list.iter().map(|frame|frame.value).fold(1.0,f64::max)).unwrap_or(1.0);
+        let max_w = cw as f64 * max_scale("scaleX"); let max_h = ch as f64 * max_scale("scaleY");
+        if max_w>16384.0 || max_h>16384.0 || max_w*max_h>32_000_000.0 { return Err("动画中间画布超过3200万像素，请减小片段尺寸或缩放关键帧。".into()); }
+        let scale_clock = clock.replace('T', "t");
+        let sx = expression_for(frames.get("scaleX"),1.0,&scale_clock);
+        let sy = expression_for(frames.get("scaleY"),1.0,&scale_clock);
+        prefix += &format!(",scale=w='max(1,round({cw}*({sx})))':h='max(1,round({ch}*({sy})))':eval=frame:flags=bilinear,setsar=1");
+        if frames.contains_key("opacity") {
+            prefix += &format!(",format=gbrap,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({alpha})',format=rgba");
+        } else { prefix += &format!(",colorchannelmixer=aa={opacity}"); }
+        prefix += &format!(",setpts=PTS-{start}/TB");
+        return Ok(prefix);
+    }
     let (x, y, mask) = if transformed {
         let max_x = frames
             .get("scaleX")
