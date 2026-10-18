@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AssetVideoThumbnail from './AssetVideoThumbnail.vue'
 import type { Clip, MediaAsset, Project, Track, TrackKind } from '../core/types'
 import { cloneProject, createClip, createSubtitleClip, createTrack, MAX_PROJECT_DURATION, newId, validateProject } from '../core/project'
 import { projectSizeError, videoClipSourceSize } from '../core/project-size'
@@ -37,10 +38,12 @@ import ProjectToolsPanel from './editor-tools/ProjectToolsPanel.vue'
 import VisualElementsPanel from './editor-tools/VisualElementsPanel.vue'
 import PreviewToolsPanel from './editor-tools/PreviewToolsPanel.vue'
 import type { AssetToolAction, EditorToolRunner } from './editor-tools/types'
+import OverlayProperties from './editor-tools/OverlayProperties.vue'
+import MotionPresetControls from './editor-tools/MotionPresetControls.vue'
 import ChromaKeyPanel from './ChromaKeyPanel.vue'
 import PreviewSelection from './PreviewSelection.vue'
 import type { PreviewPosition } from '../core/preview-position'
-import { addTextWatermark, addWatermark } from '../core/watermark-track'
+import { addTextWatermark, addWatermark, type TextWatermarkOptions } from '../core/watermark-track'
 import type { WatermarkMaterial } from '../core/watermark-library'
 import { chooseWatermarkSource } from '../core/watermark-source'
 import { addRecordedAudio } from '../core/recording-track'
@@ -48,7 +51,7 @@ import { addBackgroundMusic } from '../core/background-music-track'
 import type { BackgroundMusicItem } from '../core/background-music-catalog'
 import { insertVideoSegment } from '../core/video-segment-track'
 import type { VideoSegmentItem, VideoSegmentPlacement, VideoSegmentCaption } from '../core/video-segment-catalog'
-import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, updateTransition } from '../core/transitions'
+import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, updateTransition, type TransitionParameters } from '../core/transitions'
 import type { TransitionEffect } from '../core/types'
 import { importMediaFile, mediaKind, revokeMediaAsset } from '../core/media-import'
 import { importBlobAsset, isDesktop, prepareStoredVideoPreview } from '../native'
@@ -423,11 +426,11 @@ function openTransitions(): void {
   transitionError.value = ''
   openEditorDialog('transition')
 }
-async function insertTransition(effect: TransitionEffect, length: number): Promise<void> {
+async function insertTransition(effect: TransitionEffect, length: number, parameters?: TransitionParameters): Promise<void> {
   if (editingBusy.value || props.exportDisabled || !transitionCut.value) return
   const cut = transitionCut.value
   try {
-    const project = addTransition(props.project, cut.time, effect, length, cut.trackId)
+    const project = addTransition(props.project, cut.time, effect, length, cut.trackId, parameters)
     const clip = project.tracks.flatMap(track => track.clips).find(item => item.transition?.fromClipId === cut.fromClipId && item.transition.toClipId === cut.toClipId)
     emit('change', project, '已应用转场')
     editorDialog.value = null
@@ -545,7 +548,9 @@ function localWatermarkChosen(event: Event): void {
   input.value = ''
   if (file) void insertWatermark(file, watermarkLocalGreen)
 }
-async function insertWatermark(source: WatermarkMaterial | File, removeGreen = false): Promise<void> {
+async function insertWatermark(source: WatermarkMaterial | File, optionsOrRemoveGreen: TextWatermarkOptions | boolean = false): Promise<void> {
+  const removeGreen = optionsOrRemoveGreen === true
+  const textOptions = typeof optionsOrRemoveGreen === 'object' ? optionsOrRemoveGreen : undefined
   if (editingBusy.value || props.exportDisabled || editorDialog.value !== 'watermark') return
   const projectId = props.project.id, start = watermarkStart.value
   const abort = new AbortController()
@@ -563,7 +568,7 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
     const material = source instanceof File ? undefined : source
     let result: ReturnType<typeof addWatermark>
     if (material?.kind === 'text') {
-      result = addTextWatermark(props.project, material, start)
+      result = addTextWatermark(props.project, material, start, textOptions)
     } else {
       const desktop = isDesktop()
       const materialUrl = material ? (desktop ? material.url : chooseWatermarkSource(material)) : ''
@@ -1058,7 +1063,7 @@ function pictureInPicture(): void {
   updateSelected({ x: props.project.width - width - margin, y: props.project.height - height - margin, width, height }, '设为画中画')
 }
 function updateSelected(patch: Partial<Clip>, label = '调整片段'): void {
-  if (selected.value) commit(() => updateClip(props.project, selectedId.value, patch, { translatePositionKeyframes: translatePositionKeyframes.value }), label)
+  if (selected.value) commit(() => updateClip(props.project, selectedId.value, patch, { translatePositionKeyframes: translatePositionKeyframes.value && patch.keyframes === undefined }), label)
 }
 function updateTextContent(change: { projectId: string; clipId: string; text: string; historyGroup: string }): void {
   if (editingBusy.value || change.projectId !== props.project.id) return
@@ -1351,7 +1356,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
         <div v-if="assetSource === 'imported'" class="asset-filters" aria-label="素材类型"><button v-for="filter in [{ key: 'all', label: '全部' }, { key: 'video', label: '视频' }, { key: 'audio', label: '音频' }, { key: 'image', label: '图片' }]" :key="filter.key" :class="{ active: assetFilter === filter.key }" @click="assetFilter = filter.key">{{ filter.label }}</button></div>
         <div class="asset-list" @dragover.prevent @drop.prevent="importEditorAssets([...($event.dataTransfer?.files || [])])">
           <button v-for="asset in assets" :key="asset.id" class="asset-card" :data-source-asset-id="asset.id" draggable="true" :title="`${asset.name} · ${assetTimes.get(asset.id)?.full || '加入时间未记录'} · 双击添加到播放头位置`" @dragstart="onAssetDrag($event, asset)" @dblclick="addAssetToTimeline(asset)" @keydown.enter.prevent="addAssetToTimeline(asset)" @contextmenu="openAssetMenu($event, asset)" @keydown.shift.f10="openAssetMenu($event, asset)">
-            <div class="asset-thumb" :class="asset.kind"><img v-if="asset.kind === 'image'" :src="asset.url" alt="" /><video v-else-if="asset.kind === 'video' && (assetSource !== 'recordings' || projectAssetIds.has(asset.id))" :src="asset.url" preload="metadata" muted /><Icon v-else :name="asset.kind === 'video' ? 'video' : 'audio'" :size="28" /><span v-if="asset.duration">{{ formatTime(asset.duration) }}</span></div>
+            <div class="asset-thumb" :class="asset.kind"><img v-if="asset.kind === 'image'" :src="asset.url" alt="" /><AssetVideoThumbnail v-else-if="asset.kind === 'video' && (assetSource !== 'recordings' || projectAssetIds.has(asset.id))" :src="asset.url" /><Icon v-else :name="asset.kind === 'video' ? 'video' : 'audio'" :size="28" /><span v-if="asset.duration">{{ formatTime(asset.duration) }}</span></div>
             <span class="asset-name">{{ asset.name }}</span><span class="asset-meta">{{ asset.kind === 'audio' ? '音频素材' : `${asset.width} × ${asset.height}` }}</span>
             <time class="asset-added-time" :datetime="asset.addedAt" :title="assetTimes.get(asset.id)?.full || '旧项目未记录素材加入时间'">{{ assetTimes.get(asset.id)?.short || '时间未记录' }}</time>
           </button>
@@ -1398,7 +1403,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
           <template v-else>
           <section v-show="inspectorTab === 'properties'" id="clip-properties-panel" :role="selectedSupportsFilters ? 'tabpanel' : undefined" :aria-labelledby="selectedSupportsFilters ? 'clip-properties-tab' : undefined" :tabindex="selectedSupportsFilters ? 0 : undefined">
           <AudioClipPlayer v-if="selectedSupportsAudioPlayback" :key="`${project.id}:${selected.clip.id}`" ref="audioClipPlayer" :project="activeProject" :clip="selected.clip" :disabled="editingBusy || modalOpen || !!exportDisabled" @play-request="pauseTimeline" @status="message" />
-          <div v-if="selected.track.kind === 'text'" class="clip-speech-actions">
+          <div v-if="selected.track.kind === 'text' && !selected.clip.overlay" class="clip-speech-actions">
             <button class="selected-speech" :disabled="editingBusy || !selectedSpeechPlan.sources.length" :title="selectedSpeechPlan.skipped[0]?.reason" :aria-busy="selectedSpeechBusy" data-testid="speech-generate-selected" @click="generateTextSpeech(selected.clip.id)"><template v-if="selectedSpeechBusy"><span class="clip-speech-spinner" />{{ speechPanel?.generationLabel || '正在生成…' }}</template><template v-else><Icon name="audio" :size="13" />文字转语音</template></button>
             <button :disabled="editingBusy || !!selectedSpeechAlignmentError" :title="selectedSpeechAlignmentError || '按关联语音的起点和时长对齐文字'" data-testid="speech-align-selected" @click="alignTextSpeech(selected.clip.id)"><Icon name="clock" :size="13" />对齐语音</button>
             <div v-if="selectedSpeechBusy && speechPanel?.generationProgress" class="clip-speech-progress" data-testid="clip-speech-progress">
@@ -1411,11 +1416,13 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
           </div>
           <fieldset :disabled="selectedLocked || editingBusy">
             <ChromaKeyPanel v-if="selectedSupportsFilters" :value="selected.clip.chromaKey" :disabled="selectedLocked || editingBusy" @change="(chromaKey, label) => updateSelected({ chromaKey }, label)" />
-            <template v-if="selected.clip.text !== undefined"><h3>{{ !isSubtitleClip(selected.track, selected.clip) ? '文字水印' : '文本' }}</h3><ClipTextInput :key="`${project.id}:${selected.clip.id}`" :project-id="project.id" :clip-id="selected.clip.id" :model-value="selected.clip.text" :label="!isSubtitleClip(selected.track, selected.clip) ? '水印文字' : '字幕内容'" @edit="updateTextContent" /><p v-if="subtitleIssuesByClip.has(selected.clip.id)" class="subtitle-issue-note" role="status"><Icon name="alert" :size="13" />{{ subtitleIssuesByClip.get(selected.clip.id)?.message }}，请输入实际字幕。</p><div class="property-grid"><label>字号<input type="number" min="4" max="2048" :value="selected.clip.fontSize" @change="updateSelected({ fontSize: numberValue($event) })" /></label><label>颜色<input type="color" :value="selected.clip.color" @change="updateSelected({ color: stringValue($event) })" /></label></div><label>字体<select :value="selected.clip.fontFamily" @change="updateSelected({ fontFamily: stringValue($event) })"><option value="sans-serif">无衬线</option><option value="serif">衬线</option><option value="monospace">等宽</option></select></label><label>文字底色<div class="text-background"><input type="color" :value="selected.clip.background === 'transparent' ? '#000000' : selected.clip.background" aria-label="文字底色" @change="updateSelected({ background: stringValue($event) })" /><button :class="{ active: selected.clip.background === 'transparent' }" @click="updateSelected({ background: 'transparent' })">透明</button></div></label><label>横向对齐<select aria-label="字幕横向对齐" :value="selected.clip.textAlign" @change="updateSelected({ textAlign: stringValue($event) as Clip['textAlign'] })"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><label>纵向对齐<select aria-label="字幕纵向对齐" :value="selected.clip.textVerticalAlign || 'middle'" @change="updateSelected({ textVerticalAlign: stringValue($event) as Clip['textVerticalAlign'] })"><option value="top">上对齐</option><option value="middle">居中</option><option value="bottom">下对齐</option></select></label><label>字重<select :value="selected.clip.fontWeight" @change="updateSelected({ fontWeight: numberValue($event) })"><option :value="400">常规</option><option :value="600">半粗</option><option :value="700">粗体</option></select></label></template>
+            <OverlayProperties v-if="selected.clip.overlay" :clip="selected.clip" :disabled="selectedLocked || editingBusy" @change="updateSelected" />
+            <template v-if="selected.clip.text !== undefined && !selected.clip.overlay"><h3>{{ !isSubtitleClip(selected.track, selected.clip) ? '文字水印' : '文本' }}</h3><ClipTextInput :key="`${project.id}:${selected.clip.id}`" :project-id="project.id" :clip-id="selected.clip.id" :model-value="selected.clip.text" :label="!isSubtitleClip(selected.track, selected.clip) ? '水印文字' : '字幕内容'" @edit="updateTextContent" /><p v-if="subtitleIssuesByClip.has(selected.clip.id)" class="subtitle-issue-note" role="status"><Icon name="alert" :size="13" />{{ subtitleIssuesByClip.get(selected.clip.id)?.message }}，请输入实际字幕。</p><div class="property-grid"><label>字号<input type="number" min="4" max="2048" :value="selected.clip.fontSize" @change="updateSelected({ fontSize: numberValue($event) })" /></label><label>颜色<input type="color" :value="selected.clip.color" @change="updateSelected({ color: stringValue($event) })" /></label></div><label>字体<select :value="selected.clip.fontFamily" @change="updateSelected({ fontFamily: stringValue($event) })"><option value="sans-serif">无衬线</option><option value="serif">衬线</option><option value="monospace">等宽</option></select></label><label>文字底色<div class="text-background"><input type="color" :value="selected.clip.background === 'transparent' ? '#000000' : selected.clip.background" aria-label="文字底色" @change="updateSelected({ background: stringValue($event) })" /><button :class="{ active: selected.clip.background === 'transparent' }" @click="updateSelected({ background: 'transparent' })">透明</button></div></label><label>横向对齐<select aria-label="字幕横向对齐" :value="selected.clip.textAlign" @change="updateSelected({ textAlign: stringValue($event) as Clip['textAlign'] })"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><label>纵向对齐<select aria-label="字幕纵向对齐" :value="selected.clip.textVerticalAlign || 'middle'" @change="updateSelected({ textVerticalAlign: stringValue($event) as Clip['textVerticalAlign'] })"><option value="top">上对齐</option><option value="middle">居中</option><option value="bottom">下对齐</option></select></label><label>字重<select :value="selected.clip.fontWeight" @change="updateSelected({ fontWeight: numberValue($event) })"><option :value="400">常规</option><option :value="600">半粗</option><option :value="700">粗体</option></select></label></template>
             <h3>时间</h3><div class="property-grid"><label>开始 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.start.toFixed(3))" aria-label="片段开始时间" @change="updateSelected({ start: numberValue($event) })" /></label><label>时长 / 秒<input type="number" min="0.04" step="0.1" :value="Number(clipDuration(selected.clip).toFixed(3))" aria-label="片段时长" @change="updateSelected({ trimOut: selected!.clip.trimIn + numberValue($event) * selected!.clip.speed })" /></label><label>源起点 / 秒<input type="number" min="0" step="0.1" :value="Number(selected.clip.trimIn.toFixed(3))" @change="updateSelected({ trimIn: numberValue($event) })" /></label><label>源终点 / 秒<input type="number" min="0.001" step="0.1" :value="Number(selected.clip.trimOut.toFixed(3))" @change="updateSelected({ trimOut: numberValue($event) })" /></label></div>
             <label>播放速度<select :value="selected.clip.speed" aria-label="播放速度" @change="updateSelected({ speed: numberValue($event) })"><option v-for="speed in [0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4, 8, 16]" :key="speed" :value="speed">{{ speed }}×</option></select></label>
             <template v-if="selected.track.kind !== 'text'"><h3>声音</h3><button v-if="selected.track.kind === 'video' && project.assets.find(asset => asset.id === selected!.clip.assetId)?.kind === 'video'" class="separate-audio" @click="separateAudio"><Icon name="audio" :size="13" />分离到音轨</button><label>音量 <output>{{ Math.round(selected.clip.volume * 100) }}%</output><input type="range" min="0" max="2" step="0.05" :value="selected.clip.volume" aria-label="音量" @change="updateSelected({ volume: numberValue($event) })" /></label></template>
             <h3>淡入淡出</h3><div class="property-grid"><label>淡入 / 秒<input type="number" min="0" :max="clipDuration(selected.clip)" step="0.1" :value="selected.clip.fadeIn" @change="updateSelected({ fadeIn: numberValue($event) })" /></label><label>淡出 / 秒<input type="number" min="0" :max="clipDuration(selected.clip)" step="0.1" :value="selected.clip.fadeOut" @change="updateSelected({ fadeOut: numberValue($event) })" /></label></div>
+            <MotionPresetControls v-if="selected.track.kind !== 'audio'" :clip="selected.clip" :disabled="selectedLocked || editingBusy" @change="updateSelected" />
             <template v-if="selected.track.kind !== 'audio'"><h3>画面变换</h3><label v-if="selectedHasPositionKeyframes" class="position-keyframes-toggle" title="修改 X/Y 或在预览中移动时，同步平移已有位置动画；关闭后只改基础位置。"><input v-model="translatePositionKeyframes" type="checkbox" aria-label="移动时同步位置关键帧" />移动时同步位置关键帧</label><div class="transform-presets"><button @click="pictureInPicture">画中画</button><button @click="updateSelected({ x: 0, y: 0, width: project.width, height: project.height, rotation: 0 })">铺满画布</button></div><div class="property-grid"><label>X<input type="number" :value="Number(selected.clip.x.toFixed(1))" @change="updateSelected({ x: numberValue($event) })" /></label><label>Y<input type="number" :value="Number(selected.clip.y.toFixed(1))" @change="updateSelected({ y: numberValue($event) })" /></label><label>宽度<input type="number" min="1" :value="Number(selected.clip.width.toFixed(1))" @change="updateSelected({ width: numberValue($event) })" /></label><label>高度<input type="number" min="1" :value="Number(selected.clip.height.toFixed(1))" @change="updateSelected({ height: numberValue($event) })" /></label></div><label>旋转 / 度<input type="number" min="-3600" max="3600" step="1" :value="selected.clip.rotation" @change="updateSelected({ rotation: numberValue($event) })" /></label><label>不透明度 <output>{{ Math.round(selected.clip.opacity * 100) }}%</output><input type="range" min="0" max="1" step="0.05" :value="selected.clip.opacity" @change="updateSelected({ opacity: numberValue($event) })" /></label><label v-if="selected.clip.text === undefined">画面适配<select :value="selected.clip.fit" @change="updateSelected({ fit: stringValue($event) as Clip['fit'] })"><option value="contain">完整显示</option><option value="cover">裁切填满</option><option value="fill">拉伸填满</option></select></label></template>
           </fieldset>
           </section>
@@ -1465,7 +1472,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
               <span v-if="!track.clips.length" class="track-hint">{{ track.kind === 'text' ? '点击时间线工具栏「字幕」添加文字' : track.kind === 'audio' ? '拖入音乐或视频的声音' : track.kind === 'transition' ? '在转场库中选择效果，自动对齐视频切点' : '拖入视频或图片' }}</span>
               <button v-for="clip in track.clips" :key="clip.id" class="timeline-clip" :class="[track.kind, { selected: selectedId === clip.id, 'subtitle-invalid': subtitleIssuesByClip.has(clip.id) }]" :style="{ left: `${clip.start * zoom}px`, width: `${Math.max(10, clipDuration(clip) * zoom)}px` }" :title="timelineClipTitle(clip)" :data-clip-id="clip.id" @pointerdown="startGesture($event, clip, track, 'move')" @click.stop="selectedId = clip.id" @contextmenu="openClipMenu($event, clip, track)">
                 <span v-if="track.kind !== 'transition'" class="trim-handle start" title="拖动裁剪开头" @pointerdown.stop="startGesture($event, clip, track, 'trim-start')" />
-                <span class="clip-title"><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : track.kind === 'transition' ? 'transition' : 'video'" :size="12" />{{ clip.text ?? clip.name }}</span>
+                <span class="clip-title"><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : track.kind === 'transition' ? 'transition' : 'video'" :size="12" />{{ clip.overlay ? clip.name : clip.text ?? clip.name }}</span>
                 <span class="clip-detail-row"><span class="clip-detail">{{ clip.speed !== 1 ? `${clip.speed}× · ` : '' }}{{ clipDuration(clip).toFixed(1) }}s</span><span v-if="clip.generatedAt || (track.kind === 'audio' && clip.speech)" class="clip-metadata"><span v-if="track.kind === 'audio' && clip.speech" class="clip-speech-model" data-testid="clip-speech-model" :title="`配音模型：${clipSpeechModel(clip)} · ${clip.speech.voiceId}`">{{ clipSpeechModel(clip) }}</span><time v-if="clip.generatedAt" class="clip-generated-time" data-testid="clip-generated-time" :datetime="clip.generatedAt" :title="generatedTimes.get(clip.generatedAt)?.full">{{ generatedTimes.get(clip.generatedAt)?.short }}</time></span></span>
                 <span v-if="track.kind !== 'transition'" class="trim-handle end" title="拖动裁剪结尾" @pointerdown.stop="startGesture($event, clip, track, 'trim-end')" />
               </button>
@@ -1492,7 +1499,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
       <BackgroundMusicLibrary v-if="editorDialog === 'music'" :busy="musicBusy" :error="musicError" @select="insertBackgroundMusic" @import-local="importLocalMusic" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'watermark'" title="添加水印" icon="sticker" wide :busy="watermarkBusy" busy-message="正在添加水印素材…" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
-      <WatermarkLibrary v-if="editorDialog === 'watermark'" :busy="watermarkBusy" :error="watermarkError" @select="insertWatermark" @import-local="importLocalWatermark" />
+      <WatermarkLibrary v-if="editorDialog === 'watermark'" :project-width="project.width" :project-height="project.height" :busy="watermarkBusy" :error="watermarkError" @select="insertWatermark" @import-local="importLocalWatermark" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'speech'" title="文字转语音" icon="audio" wide :busy="editingBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <div :inert="toolBusy || undefined"><SpeechPanel ref="speechPanel" :active="editorDialog === 'speech'" in-dialog :project="project" @change="(next, label) => emit('change', next, label)" @status="emit('status', $event)" @busy="setSpeechBusy" /></div>

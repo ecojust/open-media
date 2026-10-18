@@ -2,8 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createProject, createClip, validateProject } from '../src/core/project.ts'
 import { clipDuration, sourceTimeAt, createHistory, commitHistory, undoHistory } from '../src/core/timeline.ts'
-import { animatedClipAt, easeProgress, speedSegments } from '../src/core/visual-animation.ts'
+import { animatedClipAt, easeProgress, speedSegments, OVERLAY_PRESETS } from '../src/core/visual-animation.ts'
 import { executeVisualTool as run } from '../src/core/visual-tools.ts'
+import { executeProjectTool, validateMcpToolArguments } from '../src/core/mcp-tools.ts'
+import { exportProjectFile, importProjectFile } from '../src/core/project-file.ts'
 import { addTransition, transitionVisualAt } from '../src/core/transitions.ts'
 
 function fixture() {
@@ -98,4 +100,38 @@ test('素材来源持久化且拒绝凭据/非网页URL/错误校验值',()=>{
  p.assets[0].provenance.url='https://user:password@example.com/video';assert.throws(()=>validateProject(p),/凭据/)
  p.assets[0].provenance.url='file:///tmp/media.mp4';assert.throws(()=>validateProject(p),/网页/)
  p.assets[0].provenance.url='https://example.com';p.assets[0].provenance.sha256='wrong';assert.throws(()=>validateProject(p),/校验/)
+})
+
+
+test('十二类标注可经MCP添加、编辑样式、存档并整体撤销，保留默认静态行为', async () => {
+ let p=createProject('通用标注',{width:640,height:360});const initial=structuredClone(p)
+ for(const {id:kind} of OVERLAY_PRESETS) {
+  const args={kind,start:0,duration:2,x:20,y:30,width:160,height:80,color:'#65e2cc',strokeWidth:7}
+  validateMcpToolArguments('open_media_overlay_add',args)
+  const result=executeProjectTool(p,'open_media_overlay_add',args);p=result.project
+  const c=p.tracks.flatMap(t=>t.clips).find(c=>c.id===result.selection.clipId)
+  assert.equal(c.overlay.kind,kind);assert.equal(c.text,'');assert.equal(c.textRole,'watermark');assert.equal(c.keyframes,undefined)
+  const patch={overlay:{...c.overlay,color:'#aabbcc',strokeWidth:9}}
+  validateMcpToolArguments('open_media_clip_update',{clipId:c.id,patch})
+  p=executeProjectTool(p,'open_media_clip_update',{clipId:c.id,patch}).project
+  assert.equal(p.tracks.flatMap(t=>t.clips).find(c=>c.id===result.selection.clipId).overlay.strokeWidth,9)
+ }
+ assert.equal(p.tracks.flatMap(t=>t.clips).filter(c=>c.overlay).length,12)
+ const saved=await exportProjectFile(p),opened=await importProjectFile(saved)
+ assert.deepEqual(opened.project.tracks,p.tracks)
+ assert.deepEqual(undoHistory(commitHistory(createHistory(initial),p)).present,initial)
+ assert.throws(()=>executeProjectTool(p,'open_media_overlay_add',{kind:'not-a-shape',start:0,duration:2,x:0,y:0,width:20,height:20}),/选项/)
+})
+
+test('通用标注入退场围绕用户位置生成，中段保持静止且可继续移动', () => {
+ const p=createProject('动态标注',{width:640,height:360})
+ for(const animation of ['none','fade','slide-up','slide-down','slide-left','slide-right','push-in','pull-back']) {
+  const args={kind:'brackets',start:5,duration:4,x:100,y:60,width:180,height:90,opacity:.7,animation}
+  const result=executeProjectTool(p,'open_media_overlay_add',args),c=result.project.tracks.flatMap(t=>t.clips).find(c=>c.id===result.selection.clipId)
+  const middle=animatedClipAt(c,7)
+  assert.equal(middle.x,100);assert.equal(middle.y,60);assert.equal(middle.width,180);assert.equal(middle.opacity,.7)
+  if(animation==='none')assert.equal(c.keyframes,undefined)
+  else {assert.equal(animatedClipAt(c,5).opacity,0);assert.equal(animatedClipAt(c,9).opacity,0)}
+  assert.deepEqual(validateProject(JSON.parse(JSON.stringify(result.project))).tracks,result.project.tracks)
+ }
 })

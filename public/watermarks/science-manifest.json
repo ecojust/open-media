@@ -1,0 +1,512 @@
+{
+  "version": 1,
+  "origin": "Original Open Media procedural graphics. No external footage or artwork.",
+  "generator": "scripts/generate-science-watermarks.py",
+  "illustrative": true,
+  "materials": [
+    {
+      "id": "science-measurement",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-measurement.mp4",
+          "bytes": 21246,
+          "sha256": "94c3078ce248e2d88e211bc66b7fed5091b05104fae5c8f83536375288cca13d"
+        },
+        {
+          "file": "science-measurement.webm",
+          "bytes": 17555,
+          "sha256": "2a66bc50b995de676a85676365e4d98763195802a428b77167a9a2bb999a01e8"
+        },
+        {
+          "file": "science-measurement.png",
+          "bytes": 23593,
+          "sha256": "f0e0f1f6590c8ec93d3419cfc87c9b925cc65cd8194490476e9a406243664a0a"
+        }
+      ]
+    },
+    {
+      "id": "science-orbit",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-orbit.mp4",
+          "bytes": 44786,
+          "sha256": "b4ac54bd07b08e73304d2f261d5b322e0228d7cfa4ce819ded71978f14053e52"
+        },
+        {
+          "file": "science-orbit.webm",
+          "bytes": 32067,
+          "sha256": "db66428378b2c248ace6de9ad1a5f4b2ae34e1374b7ada1f8d33c34307fec4be"
+        },
+        {
+          "file": "science-orbit.png",
+          "bytes": 26236,
+          "sha256": "a408ce9569ea37f92cec7dce391a279377bf37397e78e0beed88a2cee0932446"
+        }
+      ]
+    },
+    {
+      "id": "science-brackets",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-brackets.mp4",
+          "bytes": 13366,
+          "sha256": "96e24ecab73041a5e4520535e4411f9e80eb4cf68bfb97f301eeda2517908ed1"
+        },
+        {
+          "file": "science-brackets.webm",
+          "bytes": 9988,
+          "sha256": "6f787f176499afdfd384f56b99bd651eb28027eac7b0458e76676fc024e5a047"
+        },
+        {
+          "file": "science-brackets.png",
+          "bytes": 8187,
+          "sha256": "7de2c6e0c92d454bd64ddfad2dd0f6881af2dbc72cde292adfb1f5cbde8d7ff7"
+        }
+      ]
+    },
+    {
+      "id": "science-leader",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-leader.mp4",
+          "bytes": 15076,
+          "sha256": "7f8419d842e7333811d76cd4908967e3e0efe23186db2368ca81c938b68f0519"
+        },
+        {
+          "file": "science-leader.webm",
+          "bytes": 12363,
+          "sha256": "00edff2baea08539ce8dd6518a07fcc5a046be573fe888a06c81e3597fa1cdfc"
+        },
+        {
+          "file": "science-leader.png",
+          "bytes": 18471,
+          "sha256": "39346ef2d5d4e78de915637e76a9012dae9b33f525dfecbdee68756c976eabd7"
+        }
+      ]
+    },
+    {
+      "id": "science-waveform",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-waveform.mp4",
+          "bytes": 88260,
+          "sha256": "31bb2557fa3b299a573943f711cc519a4d9429f66a6eec3e0bce5498ad774348"
+        },
+        {
+          "file": "science-waveform.webm",
+          "bytes": 106257,
+          "sha256": "ffcd71951f3b4c4d58e654701531dc17dc8e1a50960600b7143e9cc4b63b223d"
+        },
+        {
+          "file": "science-waveform.png",
+          "bytes": 34678,
+          "sha256": "993dbd2c1ff7e399d799a085215fb16055096353a04077594856d8ece28cbbe7"
+        }
+      ]
+    },
+    {
+      "id": "science-comparison",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-comparison.mp4",
+          "bytes": 11125,
+          "sha256": "90fdee4e6e54a230ede29d76561573caef55c50c1106e5e4650fb820e94162e4"
+        },
+        {
+          "file": "science-comparison.webm",
+          "bytes": 10329,
+          "sha256": "4ab2ba2c9ec19ff067705e6eade3ab6a98a6f15acdbcaed9714b2b26ad994be3"
+        },
+        {
+          "file": "science-comparison.png",
+          "bytes": 10914,
+          "sha256": "72f94f7878bc9444117006608efd7a87d34aeb7fc37456997e2cf69fa0aceb99"
+        }
+      ]
+    },
+    {
+      "id": "science-steps",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-steps.mp4",
+          "bytes": 22241,
+          "sha256": "3bc05c9904ae6e9ea4f9c02c65056215ad0b5e4d818b48d91d76e1b484b791e3"
+        },
+        {
+          "file": "science-steps.webm",
+          "bytes": 23466,
+          "sha256": "8e11f01e8c430b011386b76a3302e90a299450d99e0c82dbe6c3a58be859bf7d"
+        },
+        {
+          "file": "science-steps.png",
+          "bytes": 30482,
+          "sha256": "ff3f496c8c879831345a353785244b615496bc7b8392ae8b15eddf4f3010eb6f"
+        }
+      ]
+    },
+    {
+      "id": "science-bars",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-bars.mp4",
+          "bytes": 13440,
+          "sha256": "cfb4244d1232477c3c7e39200a5ba908d36dc42205ef3aedc41dd214c58f54f0"
+        },
+        {
+          "file": "science-bars.webm",
+          "bytes": 18080,
+          "sha256": "e3aa95c3dd9caae3748d35f70a0b74001847348f1f549fa5e0b5ceb713f75e5b"
+        },
+        {
+          "file": "science-bars.png",
+          "bytes": 16728,
+          "sha256": "b3e9a8f348002cff4ce1731b8b111649a05b54d337166b7b686cc852f57db66f"
+        }
+      ]
+    },
+    {
+      "id": "science-axes",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-axes.mp4",
+          "bytes": 35436,
+          "sha256": "1ba2ff47b39f1f17ff10483bfb683f46cc1a3a2f0cc89fb019bd69c49c9e7ead"
+        },
+        {
+          "file": "science-axes.webm",
+          "bytes": 24207,
+          "sha256": "15f801d8837ec023b569c83fed402576f7e53f5b023b651560ff1f022aa86292"
+        },
+        {
+          "file": "science-axes.png",
+          "bytes": 25595,
+          "sha256": "645decdfad75d6df1ce272a7b94d4f6153ad11fd5cfb44aeb4b2ba8849f6ff89"
+        }
+      ]
+    },
+    {
+      "id": "science-dimension",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-dimension.mp4",
+          "bytes": 14410,
+          "sha256": "c5db29792b29a9a4b81cb588c104cd5758abebd696c6d8fa146c9e59e88e28ff"
+        },
+        {
+          "file": "science-dimension.webm",
+          "bytes": 10988,
+          "sha256": "9b43d7a81c0c402a8f924960bbf6a8dbeddc22e552ed6045491051ca0b7936fb"
+        },
+        {
+          "file": "science-dimension.png",
+          "bytes": 11522,
+          "sha256": "51497fe3821fc60ccd41736b6198b0e0afaf800a1bb055645def3c4d4cfd0542"
+        }
+      ]
+    },
+    {
+      "id": "science-scale",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-scale.mp4",
+          "bytes": 17361,
+          "sha256": "583bf6ce4633f10fc70ef694930006b00463dd5503593dd96cf8877c96588198"
+        },
+        {
+          "file": "science-scale.webm",
+          "bytes": 15186,
+          "sha256": "97e0dc101cf0706b51582bd36ad48a8b35b761e0a4794c0ee520161647839e19"
+        },
+        {
+          "file": "science-scale.png",
+          "bytes": 19766,
+          "sha256": "b2335814808660bfbefaa1d9b67083700ba40b2068d60918e71a6f959c614492"
+        }
+      ]
+    },
+    {
+      "id": "science-process",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-process.mp4",
+          "bytes": 18164,
+          "sha256": "f9d029002b5d54afe2e07c2d7a38a3b84359c38435ee3625e830cb39411901b4"
+        },
+        {
+          "file": "science-process.webm",
+          "bytes": 18238,
+          "sha256": "ac65422676b0770917a437a4d64847ba65a39b1c8db23a9480a96f48379abf7c"
+        },
+        {
+          "file": "science-process.png",
+          "bytes": 21003,
+          "sha256": "0aeda5caf2987b95f9b49750a35f40a98e6c108c7ef3318cfbc547028f517583"
+        }
+      ]
+    },
+    {
+      "id": "science-path",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-path.mp4",
+          "bytes": 26476,
+          "sha256": "2f8df2ff395f055b679920bd76a30b7db9a2b43d0f4e277f828e6955d792b916"
+        },
+        {
+          "file": "science-path.webm",
+          "bytes": 24494,
+          "sha256": "509138fa278f56c45593241f7dd2af012ab1e9bb174191a7b3b45a427f9d7f63"
+        },
+        {
+          "file": "science-path.png",
+          "bytes": 19744,
+          "sha256": "84a6c24a729a87afedb1d332a5fe897288f322955975ae82507b2dbd02e8694a"
+        }
+      ]
+    },
+    {
+      "id": "science-angle",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-angle.mp4",
+          "bytes": 26676,
+          "sha256": "4c6a33d566199725c3aaaf5a8fa8f2bbaab322d3f07c83fb8e91fc48bb105d53"
+        },
+        {
+          "file": "science-angle.webm",
+          "bytes": 22321,
+          "sha256": "c10bfed7e97ade3e11e389a32629a63142f0c8b08540424c55ca00745d156ba9"
+        },
+        {
+          "file": "science-angle.png",
+          "bytes": 17051,
+          "sha256": "846ca0f6500d032ee7fb610611bb95f4adc9e1b1f4192b55d2b3838fa5ec27fc"
+        }
+      ]
+    },
+    {
+      "id": "science-section",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-section.mp4",
+          "bytes": 40868,
+          "sha256": "4604b1131cf919f18a14216b70297326c11b96794c9dde4dfc99ed7e39e1e1b8"
+        },
+        {
+          "file": "science-section.webm",
+          "bytes": 44277,
+          "sha256": "1e4fa3c625b6ecc908707f958b8735a21ab320accdb53f6957553ae60316732e"
+        },
+        {
+          "file": "science-section.png",
+          "bytes": 56710,
+          "sha256": "0bef15eba1cd96c1ab7f3e6ea3a30b5a15d7fe92cb5476361fb499fde90b25f9"
+        }
+      ]
+    },
+    {
+      "id": "science-pin",
+      "kind": "video",
+      "duration": 4,
+      "width": 640,
+      "height": 360,
+      "fps": 24,
+      "frames": 96,
+      "files": [
+        {
+          "file": "science-pin.mp4",
+          "bytes": 12095,
+          "sha256": "a53a31c53d3112c6d07808d299f1e2cc2f4d78e860ac0986c737b071d574df69"
+        },
+        {
+          "file": "science-pin.webm",
+          "bytes": 11438,
+          "sha256": "a1c6a61fdd93282a908b7b80e198218367f4790fa7c9ea7621d325d1ade8ca61"
+        },
+        {
+          "file": "science-pin.png",
+          "bytes": 14458,
+          "sha256": "3571fbb84f16d36fe0aeaf390cca69617f42ac8eca1e361a82b9fa01a116e58c"
+        }
+      ]
+    },
+    {
+      "id": "science-question",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-question.png",
+          "bytes": 18581,
+          "sha256": "9c69b6861cd85573a0d74886ca0a0899f35017412ebc24c5bd456253ad4318ac"
+        }
+      ]
+    },
+    {
+      "id": "science-finding",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-finding.png",
+          "bytes": 22260,
+          "sha256": "f38c705311fd5c15b4e1570e55dbfa40f92afd84e7650e147533114fc7ee1ade"
+        }
+      ]
+    },
+    {
+      "id": "science-source",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-source.png",
+          "bytes": 16981,
+          "sha256": "03dc9e53f430b2b2601971b13fe39ac25eb82b111589793364292790da80385d"
+        }
+      ]
+    },
+    {
+      "id": "science-equation",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-equation.png",
+          "bytes": 17696,
+          "sha256": "b72c14ce95301f3a9c4c731101b923416504b15cb181532758341e04af2b0533"
+        }
+      ]
+    },
+    {
+      "id": "science-definition",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-definition.png",
+          "bytes": 25515,
+          "sha256": "0205c269b5cd02337aeda5a8f622a8f85e81b5f2c719c0accce8088df7606c96"
+        }
+      ]
+    },
+    {
+      "id": "science-hypothesis",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-hypothesis.png",
+          "bytes": 10905,
+          "sha256": "7b0a95b7c26130b62248e3ebe95f477873d77626f97ded2f35f683868824f3e6"
+        }
+      ]
+    },
+    {
+      "id": "science-unit",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-unit.png",
+          "bytes": 18890,
+          "sha256": "ff9ac28f17270a6d86aaedda0aa24a9cbcdf25bb2486ed3748d4835e2729f722"
+        }
+      ]
+    },
+    {
+      "id": "science-procedure",
+      "kind": "text",
+      "files": [
+        {
+          "file": "science-procedure.png",
+          "bytes": 22068,
+          "sha256": "4ab8d3d8e03f7d7abb2a798fbc7c63d35c6c38c68096f741951a4518fbfd23cf"
+        }
+      ]
+    }
+  ]
+}

@@ -11,6 +11,7 @@ export interface ClipSpeedRamp { points: { position: number; speed: number }[]; 
 export interface ClipFreezeFrame { sourceTime: number; original: { trimIn: number; trimOut: number; speed: number; volume: number; speedRamp?: ClipSpeedRamp } }
 export interface ClipOverlay {
   kind: 'arrow' | 'rectangle' | 'highlight' | 'mask' | 'spotlight' | 'blur'
+    | 'ellipse' | 'brackets' | 'double-arrow' | 'leader' | 'underline' | 'check'
   color: string
   strokeWidth: number
   blurRadius: number
@@ -21,6 +22,7 @@ export interface TimelineMarker { id: string; time: number; label: string; kind:
 
 export type TransitionEffect = 'fade' | 'wipe-up' | 'wipe-down' | 'wipe-left' | 'wipe-right' | 'close-vertical' | 'close-horizontal' | 'slide-left' | 'slide-right' | 'zoom'
   | 'zoom-fade' | 'zoom-fade-left' | 'zoom-fade-right' | 'zoom-fade-up' | 'zoom-fade-down'
+  | 'iris' | 'diamond' | 'blinds' | 'flash-white' | 'defocus' | 'zoom-through' | 'diagonal' | 'radial'
 
 /** A transition is anchored to the shared cut of two adjacent video clips. */
 export interface ClipTransition {

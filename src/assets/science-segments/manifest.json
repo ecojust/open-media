@@ -1,0 +1,139 @@
+{
+  "author": "Open Media",
+  "license": "MIT",
+  "generator": "scripts/generate-science-segments.py",
+  "items": [
+    {
+      "id": "science-orbital-atlas",
+      "filename": "science-orbital-atlas.webm",
+      "poster": "science-orbital-atlas.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 305359,
+      "sha256": "ce4716e7a802df46dd13b5ef1144580dc14ccf6553bfa64702a25dd938f2bdaf"
+    },
+    {
+      "id": "science-spectrum-lab",
+      "filename": "science-spectrum-lab.webm",
+      "poster": "science-spectrum-lab.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 62955,
+      "sha256": "0012e96f59d65fd2da12caee1ca664cd30f3e1fab678d8fd22bd197c4bcba633"
+    },
+    {
+      "id": "science-molecular-chain",
+      "filename": "science-molecular-chain.webm",
+      "poster": "science-molecular-chain.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 185216,
+      "sha256": "7cc09754074d67342deb438ded71d9a9ae82c99a9787059dfe4ed68f7e28e18f"
+    },
+    {
+      "id": "science-blueprint-launch",
+      "filename": "science-blueprint-launch.webm",
+      "poster": "science-blueprint-launch.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 59634,
+      "sha256": "7421ef92851a279b57ca51ab05644ab405be8291ceff37a53e9f91bc7d968c26"
+    },
+    {
+      "id": "science-data-field",
+      "filename": "science-data-field.webm",
+      "poster": "science-data-field.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 59197,
+      "sha256": "71df1eb3a781ab0847a2fcbc4bda58bffe62e9034fcd8f3acf0f70bf9bc9145e"
+    },
+    {
+      "id": "science-terrain-observer",
+      "filename": "science-terrain-observer.webm",
+      "poster": "science-terrain-observer.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 200973,
+      "sha256": "dff6d59c126b213b7e72a02bad42946ba6fa6d740ea7bfb4d275a3b16f31d2cb"
+    },
+    {
+      "id": "science-orbit-return",
+      "filename": "science-orbit-return.webm",
+      "poster": "science-orbit-return.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 41014,
+      "sha256": "10e10e533ae5c64d9f7f4b8842c8d1f926ad6cb5258347bd2ef68d3907947a95"
+    },
+    {
+      "id": "science-spectrum-resolve",
+      "filename": "science-spectrum-resolve.webm",
+      "poster": "science-spectrum-resolve.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 120678,
+      "sha256": "7b5848dfcd5e4e722da4d552fce95e278177817ed153cd1fe44c640ccb504dde"
+    },
+    {
+      "id": "science-molecular-summary",
+      "filename": "science-molecular-summary.webm",
+      "poster": "science-molecular-summary.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 36504,
+      "sha256": "309c659f2138f32adf02e90d18149401a9ddd6adcde53507e7b69adc7ee3c757"
+    },
+    {
+      "id": "science-blueprint-complete",
+      "filename": "science-blueprint-complete.webm",
+      "poster": "science-blueprint-complete.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 27936,
+      "sha256": "b03525d6cad51accb291d1cd9e3444e135deb596a70ce0756abac56533be95ba"
+    },
+    {
+      "id": "science-data-archive",
+      "filename": "science-data-archive.webm",
+      "poster": "science-data-archive.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 41738,
+      "sha256": "95b55ac3507d1f2d22adeefce38bc611d38d4b37d8e9ac392f4623a593be4706"
+    },
+    {
+      "id": "science-terrain-horizon",
+      "filename": "science-terrain-horizon.webm",
+      "poster": "science-terrain-horizon.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 111881,
+      "sha256": "981a699528e87c367d091a9ee7a920eb44fae1d995f8279b9754e5fc901adaeb"
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 import { cloneProject, createClip, createTextClip, createTrack, newId, validateProject } from './project.ts'
 import { clipDuration, findClip } from './timeline.ts'
 import { reconcileTransitions } from './transitions.ts'
-import { ANIMATION_EASINGS, validateKeyframes, validateNormalizedRect, validateSpeedRamp, validateTransitionParameters, visualChoice, visualColor, visualNumber, visualRecord } from './visual-animation.ts'
+import { OVERLAY_PRESETS, ANIMATION_EASINGS, validateKeyframes, validateNormalizedRect, validateSpeedRamp, validateTransitionParameters, visualChoice, visualColor, visualNumber, visualRecord } from './visual-animation.ts'
+import { applyVisualMotionPreset, VISUAL_MOTION_PRESETS } from './visual-motion-presets.ts'
 import type { Clip, ClipKeyframes, Project, Track } from './types.ts'
 
 export interface VisualToolResult { project: Project; data: Record<string, unknown>; label: string; selection?: string }
@@ -90,12 +91,13 @@ export function executeVisualTool(project: Project, name: string, value: unknown
     }
     data = { clipId: clip.id, duration: clipDuration(clip) }
   } else if (tool === 'overlay_add') {
-    const kind = visualChoice(args.kind, ['arrow', 'rectangle', 'highlight', 'mask', 'spotlight', 'blur'], '标注类型')
+    const kind = visualChoice(args.kind, OVERLAY_PRESETS.map(item => item.id), '标注类型')
     const x = visualNumber(args.x, '横坐标', -65536, 65536), y = visualNumber(args.y, '纵坐标', -65536, 65536)
     const width = visualNumber(args.width, '宽度', 1, 65536), height = visualNumber(args.height, '高度', 1, 65536)
     const track = textTrack(next, args.trackId, '视觉标注轨道')
-    const clip = createTextClip(next, { name: { arrow: '箭头标注', rectangle: '矩形标注', highlight: '区域高亮', mask: '遮罩', spotlight: '聚光灯', blur: '局部模糊' }[kind], text: '', textRole: 'watermark', start: visualNumber(args.start, '开始时间', 0, 86400), trimOut: visualNumber(args.duration, '时长', 0.001, 86400), x, y, width, height, rotation: visualNumber(args.rotation ?? 0, '旋转', -3600, 3600), opacity: visualNumber(args.opacity ?? (kind === 'highlight' ? 0.3 : kind === 'spotlight' ? 0.7 : 1), '不透明度', 0, 1), overlay: { kind, color: visualColor(args.color ?? (kind === 'mask' || kind === 'spotlight' ? '#000000' : '#f7c948')), strokeWidth: visualNumber(args.strokeWidth ?? 6, '线宽', 1, 100), blurRadius: visualNumber(args.blurRadius ?? 12, '模糊半径', 1, 50) } })
+    const clip = createTextClip(next, { name: kind === 'arrow' ? '箭头标注' : kind === 'rectangle' ? '矩形标注' : kind === 'highlight' ? '区域高亮' : OVERLAY_PRESETS.find(item => item.id === kind)!.label, text: '', textRole: 'watermark', start: visualNumber(args.start, '开始时间', 0, 86400), trimOut: visualNumber(args.duration, '时长', 0.001, 86400), x, y, width, height, rotation: visualNumber(args.rotation ?? 0, '旋转', -3600, 3600), opacity: visualNumber(args.opacity ?? (kind === 'highlight' ? 0.3 : kind === 'spotlight' ? 0.7 : 1), '不透明度', 0, 1), overlay: { kind, color: visualColor(args.color ?? (kind === 'mask' || kind === 'spotlight' ? '#000000' : '#f7c948')), strokeWidth: visualNumber(args.strokeWidth ?? 6, '线宽', 1, 100), blurRadius: visualNumber(args.blurRadius ?? 12, '模糊半径', 1, 50) } })
     if (kind === 'spotlight') { clip.overlay!.region = { x, y, width, height }; clip.x = 0; clip.y = 0; clip.width = next.width; clip.height = next.height }
+    if (args.animation !== undefined) Object.assign(clip, applyVisualMotionPreset(clip, visualChoice(args.animation, VISUAL_MOTION_PRESETS.map(item => item.id), '标注动画')))
     track.clips.push(clip); selection = clip.id; label = '添加视觉标注'; data = { clipId: clip.id, trackId: track.id }
   } else if (tool === 'title_add') {
     const preset = visualChoice(args.preset, ['chapter', 'lower-third', 'corner', 'subtitle'], '标题类型'), duration = visualNumber(args.duration, '标题时长', 0.01, 86400)

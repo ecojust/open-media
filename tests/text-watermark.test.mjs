@@ -88,10 +88,13 @@ test('损坏模板、非有限尺寸和跨日边界被明确拒绝，不能悄�
   assert.deepEqual(project, snapshot)
 })
 
-test('目录中的 100 种文字模板均可在横竖画幅生成可编辑文字，内容完整且尺寸不越界', async () => {
+test('目录中的全部文字模板均可在横竖画幅生成可编辑文字，内容完整且尺寸不越界', async () => {
   const { WATERMARK_MATERIALS } = await import('../src/core/watermark-library.ts')
+  const { SCIENCE_WATERMARK_MATERIALS } = await import('../src/core/science-watermark-catalog.ts')
+  const { GENERAL_WATERMARK_MATERIALS } = await import('../src/core/general-watermark-catalog.ts')
   const materials = WATERMARK_MATERIALS.filter(material => material.kind === 'text')
-  assert.equal(materials.length, 100)
+  assert.equal(materials.filter(material => !material.collection).length, 100)
+  assert.equal(materials.length, 100 + SCIENCE_WATERMARK_MATERIALS.filter(material => material.kind === 'text').length + GENERAL_WATERMARK_MATERIALS.length)
   for (const dimensions of [{ width: 640, height: 360 }, { width: 360, height: 640 }]) for (const material of materials) {
     const project = createProject('文字模板校验', dimensions)
     const result = addTextWatermark(project, material, 1.25), clip = findClip(result.project, result.clipId).clip

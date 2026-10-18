@@ -71,6 +71,68 @@ test('内置模板添加独立可编辑标题，空标题不生成空字幕，�
   assert.equal(noTitle.project.tracks.flatMap(track => track.clips).length, 1)
 })
 
+test('自定义片头片尾时长通过完整素材变速，标题与原有轨道同步且可撤销', () => {
+  for (const duration of [2, 8, 12]) {
+    const original = populated(), before = structuredClone(original)
+    const result = insertVideoSegment(original, asset(), 'prepend', { ...VIDEO_SEGMENT_PRESETS[0], duration })
+    const added = findClip(result.project, result.clipId).clip
+    assert.equal(result.duration, duration)
+    assert.equal(added.trimIn, 0); assert.equal(added.trimOut, 5)
+    assert.equal(added.speed, 5 / duration)
+    assert.equal(clipEnd(added), duration)
+    assert.equal(projectDuration(result.project), projectDuration(original) + duration)
+    for (const track of original.tracks) for (const clip of track.clips) assert.equal(findClip(result.project, clip.id).clip.start, clip.start + duration)
+    const titles = result.project.tracks.flatMap(track => track.clips).filter(clip => clip.name.startsWith('片头片尾'))
+    assert(titles.every(clip => clipEnd(clip) === duration))
+    assert.deepEqual(original, before)
+    assert.deepEqual(undoHistory(commitHistory(createHistory(original), result.project)).present, original)
+  }
+})
+
+test('模板时长拒绝无效值和超出源素材变速范围的值，省略仍保留原始时长', () => {
+  for (const duration of [null, '', '5', NaN, Infinity, -1, 0, .1, 31]) {
+    assert.throws(() => insertVideoSegment(createProject(), asset(), 'append', { ...VIDEO_SEGMENT_PRESETS[0], duration }), /时长/)
+  }
+  assert.throws(() => insertVideoSegment(createProject(), asset('long', { duration: 300 }), 'append', { ...VIDEO_SEGMENT_PRESETS[0], duration: 2 }), /变速范围/)
+  assert.throws(() => insertVideoSegment(createProject(), asset('short', { duration: .2 }), 'append', { ...VIDEO_SEGMENT_PRESETS[0], duration: 12 }), /变速范围/)
+  assert.equal(insertVideoSegment(createProject(), asset('custom', { duration: 17 }), 'append', VIDEO_SEGMENT_PRESETS[0]).duration, 17)
+})
+
+test('三种文字布局在横屏、竖屏与方形工程内保持安全边距和独立可编辑标题', () => {
+  for (const [width, height] of [[1280, 720], [1080, 1920], [1000, 1000]]) {
+    for (const layout of ['center', 'left', 'lower-third']) {
+      const result = insertVideoSegment(createProject('布局', { width, height }), asset(), 'append', {
+        heading: '这是可以继续编辑的主标题', subheading: '01 / 可以继续编辑的副标题', textColor: '#ffffff', layout,
+      })
+      const [heading, subheading] = result.project.tracks.flatMap(track => track.clips).filter(clip => clip.text)
+      assert.equal(heading.text, '这是可以继续编辑的主标题')
+      assert.equal(subheading.text, '01 / 可以继续编辑的副标题')
+      for (const clip of [heading, subheading]) {
+        assert(clip.x >= width * .1 - 1e-8)
+        assert(clip.x + clip.width <= width * .9 + 1e-8)
+        assert(clip.y >= height * .1)
+        assert(clip.y + clip.height <= height * .92)
+        assert(clip.fontSize >= 4 && clip.fontSize < clip.height)
+      }
+      if (layout === 'left') {
+        assert.equal(heading.textAlign, 'left'); assert.equal(subheading.textAlign, 'left')
+        assert(subheading.y + subheading.height < heading.y)
+      } else if (layout === 'lower-third') {
+        assert.equal(heading.textAlign, 'left'); assert.equal(subheading.textAlign, 'right')
+        assert(heading.y >= height * .6)
+        assert(heading.y + heading.height < subheading.y)
+      } else {
+        assert.equal(heading.textAlign, 'center'); assert.equal(subheading.textAlign, 'center')
+        assert.equal(heading.y, height * .36)
+      }
+    }
+  }
+  for (const layout of [null, '', 'floating', 1, {}]) assert.throws(() => insertVideoSegment(createProject(), asset(), 'append', { ...VIDEO_SEGMENT_PRESETS[0], layout }), /布局/)
+  const general = VIDEO_SEGMENT_PRESETS.filter(item => item.collection === 'general')
+  assert.equal(general.filter(item => item.placement === 'prepend' && item.layout === 'left').length, 2)
+  assert.equal(general.filter(item => item.placement === 'append' && item.layout === 'lower-third').length, 2)
+})
+
 test('连续添加复用素材和可编辑轨道，标题时段跟随整体平移；静音轨道另建', () => {
   const first = insertVideoSegment(createProject(), asset(), 'append', VIDEO_SEGMENT_PRESETS[0])
   const second = insertVideoSegment(first.project, asset('segment', { duration: 2 }), 'prepend', VIDEO_SEGMENT_PRESETS[1])

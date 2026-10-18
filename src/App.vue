@@ -17,6 +17,7 @@ import mcpToolCatalog from './mcp-tools.json'
 import { prepareEditorTool, type EditorToolRunner } from './core/editor-tool-service.ts'
 import { createMcpAutomation, type McpPlayback } from './core/mcp-automation.ts'
 import { serializeMcpError } from './core/mcp-response.ts'
+import { createNativeAppearanceSync } from './native-appearance.ts'
 import { claimMcpRequest, completeMcpRequest, getMcpServiceEpoch, getMcpStatus, getPendingMcpRequests, onMcpRequest, stopMcpService, type McpPanelJob, type McpRequest, type McpStatus } from './native-mcp.ts'
 import type { ImportedProject, MediaAsset, Project, ProjectHistory, ProjectSummary } from './core/types.ts'
 import { stampNewAssets } from './core/asset-times.ts'
@@ -24,6 +25,7 @@ import { cloneProject, createClip, createProject, createTrack, validateProject }
 import { adoptFirstVideoSize } from './core/project-size.ts'
 import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, redoHistory, undoHistory } from './core/timeline.ts'
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
+import { createDraftSaveQueue, draftSaveErrorMessage } from './core/draft-save-queue.ts'
 import { exportProjectFile, importProjectFile } from './core/project-file.ts'
 import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, type BrowserProjectFileHandle } from './core/browser-project-files.ts'
 import { loadProjectSaveTarget, storeProjectSaveTarget, type ProjectSaveTarget } from './core/project-save-targets.ts'
@@ -66,7 +68,7 @@ let continuousEdit: { group: string; history: ProjectHistory } | undefined
 const autoSave = ref(true), draftState = ref<'idle' | 'waiting' | 'pending' | 'saved' | 'error'>('idle'), draftError = ref(''), lastSaved = ref('')
 const draftSeconds = ref(0), lastSaveAt = ref(''), lastSaveKind = ref<'draft' | 'file'>('draft')
 const DRAFT_DELAY_MS = 3000
-let draftCountdown: ReturnType<typeof setInterval> | undefined, projectGeneration = 0, draftSaveRequest = 0
+let draftCountdown: ReturnType<typeof setInterval> | undefined, projectGeneration = 0
 let nativeProjectTarget: ProjectFileTarget | undefined, browserProjectTarget: BrowserProjectFileHandle | undefined
 let saveTargetRestoreError = ''
 const recent = ref<ProjectSummary[]>([]), status = ref('本地创作，自由表达'), busy = ref(''), error = ref(''), recording = ref(false), browserExporting = ref(false)
@@ -80,12 +82,16 @@ const screenshotShortcut = ref<string | null>(null), screenshotBusy = ref(false)
 const screenshotDisabled = computed(() => Boolean(busy.value || switching.value || booting.value || recording.value || pendingMedia.value || browserExporting.value || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value || mcpBusy.value))
 let screenshotAbort: AbortController | undefined, screenshotRequestId: string | undefined, unlistenScreenshot: (() => void) | undefined, destroyed = false
 let captureQueue = Promise.resolve()
-let draftTimer: ReturnType<typeof setTimeout> | undefined, draftGeneration = 0, saveQueue = Promise.resolve(), jobsTimer: ReturnType<typeof setTimeout> | undefined, mediaQuery: MediaQueryList | undefined, unlistenClose: (() => void) | undefined, allowClose = false
+let draftTimer: ReturnType<typeof setTimeout> | undefined, draftGeneration = 0, jobsTimer: ReturnType<typeof setTimeout> | undefined, mediaQuery: MediaQueryList | undefined, unlistenClose: (() => void) | undefined, allowClose = false
 const effectiveTheme = computed(() => theme.value === 'system' ? systemDark.value ? 'dark' : 'light' : theme.value)
+const nativeAppearance = createNativeAppearanceSync()
+watch(effectiveTheme, value => { if (native) void nativeAppearance.sync(value) })
 const duration = computed(() => projectDuration(project.value)), workspaceTitle = computed(() => workspaces.find(item => item.id === view.value)?.title || '开始')
 const visibleRecent = computed(() => recent.value.filter(item => item.title.toLowerCase().includes(search.value.toLowerCase())))
 const runningJobs = computed(() => jobs.value.filter(job => job.state === 'running').length)
-function contentKey(value: Project) { const copy = cloneProject(value); copy.updatedAt = ''; for (const asset of copy.assets) { asset.url = ''; delete asset.nativePath; delete asset.sourceUrl }; return JSON.stringify(copy) }
+function contentKey(value: Project) {
+  return JSON.stringify({ ...value, updatedAt: '', assets: value.assets.map(asset => ({ ...asset, url: '', nativePath: undefined, sourceUrl: undefined })) })
+}
 const cleanKey = ref(contentKey(initial)), dirty = computed(() => contentKey(project.value) !== cleanKey.value)
 const draftLabel = computed(() => draftState.value === 'error' ? '草稿保存失败' : draftState.value === 'waiting' ? `${draftSeconds.value} 秒后保存草稿` : draftState.value === 'pending' ? '正在保存草稿…' : !autoSave.value ? '自动保存已关闭' : draftState.value === 'saved' ? '本地草稿已保存' : '自动保存已开启')
 const autosaveProgress = computed(() => draftState.value === 'waiting' ? `${draftSeconds.value} 秒后保存` : draftState.value === 'pending' ? '保存中…' : '')
@@ -114,30 +120,31 @@ function scheduleDraft() {
 function persist(): Promise<boolean> {
   cancelDraftCountdown()
   const snapshot = cloneProject(project.value), snapshotBlobs = new Map(blobs), key = contentKey(snapshot)
-  const generation = projectGeneration, request = ++draftSaveRequest
+  const generation = projectGeneration, revision = projectRevision.value
   draftState.value = 'pending'; draftError.value = ''
-  const result = saveQueue.then(async () => {
+  return draftSaves.save(`${generation}:${snapshot.id}`, revision, { snapshot, snapshotBlobs, key, generation, revision }).then(saved => {
+    // Each caller settles its pending state, including callers sharing an active write.
+    if (saved && !destroyed && projectGeneration === generation && project.value.id === snapshot.id && revision === projectRevision.value && draftState.value !== 'waiting' && contentKey(project.value) === key) draftState.value = 'saved'
+    return saved
+  })
+}
+const draftSaves = createDraftSaveQueue(async ({ snapshot, snapshotBlobs, key, generation, revision }: { snapshot: Project; snapshotBlobs: Map<string, Blob>; key: string; generation: number; revision: number }): Promise<boolean> => {
     try {
       const savedAt = await storeProject(snapshot, snapshotBlobs)
       if (!destroyed && projectGeneration === generation && project.value.id === snapshot.id) {
         lastSaveAt.value = savedAt; lastSaveKind.value = 'draft'
-        // An earlier write must not hide the countdown or failure of a newer edit.
-        if (request === draftSaveRequest && draftState.value !== 'waiting' && contentKey(project.value) === key) draftState.value = 'saved'
         remember()
       }
       // A recent-project list read is independent of the successful draft write.
-      await refreshRecent().catch(() => {})
+      void refreshRecent().catch(() => {})
       return true
     } catch (cause) {
-      if (!destroyed && projectGeneration === generation && project.value.id === snapshot.id && request === draftSaveRequest && draftState.value !== 'waiting' && contentKey(project.value) === key) {
-        draftState.value = 'error'; draftError.value = cause instanceof Error ? cause.message : String(cause)
+      if (!destroyed && projectGeneration === generation && project.value.id === snapshot.id && revision === projectRevision.value && draftState.value !== 'waiting' && contentKey(project.value) === key) {
+        draftState.value = 'error'; draftError.value = draftSaveErrorMessage(cause)
       }
       return false
     }
-  })
-  saveQueue = result.then(() => undefined)
-  return result
-}
+})
 function commit(next: Project, label = '已修改项目', historyGroup?: string, remote = false): boolean {
   if (destroyed || mcpBusy.value && !remote) return false
   try {
@@ -339,7 +346,7 @@ const question = ref<Question>(), questionResolve = ref<((answer: string) => voi
 function ask(value: Question): Promise<string> { if (question.value) return Promise.resolve('cancel'); question.value = value; return new Promise(resolve => { questionResolve.value = resolve }) }
 function answer(value: string) { const resolve = questionResolve.value; question.value = undefined; questionResolve.value = undefined; resolve?.(value) }
 async function protectProject(): Promise<boolean> {
-  while (dirty.value) {
+  while (dirty.value || autoSave.value && ['waiting', 'pending', 'error'].includes(draftState.value)) {
     const id = project.value.id, key = contentKey(project.value)
     if (autoSave.value && await persist()) {
       if (project.value.id === id && contentKey(project.value) === key) return true
@@ -471,7 +478,7 @@ async function removeRecent(item: ProjectSummary) {
   if (mcpBusy.value) return
   const choice = await ask({ title: '移除本地草稿', text: `移除“${item.title}”的本地草稿？已经导出的项目文件仍可打开。`, choices: [{ id: 'cancel', label: '取消' }, { id: 'remove', label: '移除草稿', primary: true }] })
   if (choice !== 'remove') return
-  try { if (item.id === project.value.id) { draftGeneration++; cancelDraftCountdown() }; await saveQueue; await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) { draftState.value = 'idle'; if (lastSaveKind.value === 'draft') lastSaveAt.value = '' } } catch (cause) { fail(cause) }
+  try { if (item.id === project.value.id) { draftGeneration++; cancelDraftCountdown() }; await draftSaves.flush(); await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) { draftState.value = 'idle'; if (lastSaveKind.value === 'draft') lastSaveAt.value = '' } } catch (cause) { fail(cause) }
 }
 async function save(saveAs = false, closing = false): Promise<boolean> {
   if (busy.value || switching.value && !closing || booting.value || speechWorking.value || mcpBusy.value) return false
@@ -542,8 +549,10 @@ async function nativeClose() {
     finishRename()
     for (const { element } of suspendedDialogs) element.inert = true
     await nextTick()
+    // Undo can match the saved file while an older draft write is still in flight.
+    if (!dirty.value && autoSave.value && ['waiting', 'pending', 'error'].includes(draftState.value) && !await persist()) { fail(draftError.value); return }
     draftGeneration++; cancelDraftCountdown()
-    await saveQueue
+    await draftSaves.flush()
     jobs.value = await getMediaJobs()
     if (runningJobs.value) { openJobs(); fail('请等待导出完成，或先取消正在处理的任务。'); return }
     if (dirty.value) {
@@ -815,6 +824,7 @@ onMounted(async () => {
   mediaQuery = matchMedia('(prefers-color-scheme: dark)'); systemDark.value = mediaQuery.matches; mediaQuery.addEventListener('change', mediaChanged)
   window.addEventListener('keydown', keyboard); window.addEventListener('beforeunload', unload)
   try { autoSave.value = localStorage.getItem('open-media:autosave') !== 'false'; const value = localStorage.getItem('open-media:theme'); if (value === 'light' || value === 'dark' || value === 'system') theme.value = value } catch {}
+  if (native) void nativeAppearance.sync(effectiveTheme.value)
   try { await refreshRecent(); const last = localStorage.getItem('open-media:last-project'); if (last && recent.value.some(item => item.id === last)) { const imported = await loadProject(last); const restored = await hydrate(imported); await adoptProject(restored, true, imported.savedAt); view.value = 'home' } } catch (cause) { fail(cause) }
   booting.value = false
   void initializeScreenshot()
@@ -824,7 +834,7 @@ onMounted(async () => {
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { destroyed = true; clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; nativeAppearance.dispose(); clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>

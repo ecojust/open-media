@@ -1,10 +1,16 @@
 /** Original offline overlay materials bundled with the application. */
 import { EXPANDED_WATERMARK_MATERIALS } from './watermark-catalog-data.ts'
+import { SCIENCE_WATERMARK_MATERIALS } from './science-watermark-catalog.ts'
+import { GENERAL_WATERMARK_MATERIALS } from './general-watermark-catalog.ts'
+import type { VisualMotionPreset } from './visual-motion-presets.ts'
 
 export type WatermarkCategory = '互动贴纸' | '装饰动效' | '提示标注' | '字幕标签' | '可编辑文字'
 
 /** Text remains editable; measurements use the material's reference dimensions. */
 export interface WatermarkTextTemplate {
+  animation?: VisualMotionPreset
+  fadeIn?: number
+  fadeOut?: number
   text: string
   color: string
   background: string
@@ -17,6 +23,7 @@ export interface WatermarkTextTemplate {
 }
 
 export interface WatermarkMaterial {
+  collection?: 'science' | 'general'
   id: string
   name: string
   category: WatermarkCategory
@@ -72,4 +79,4 @@ export const WATERMARK_MATERIALS: WatermarkMaterial[] = [...definitions.map(([id
   height: 360,
   chromaKey: true,
   placement: placement ?? 'center',
-})), ...EXPANDED_WATERMARK_MATERIALS]
+})), ...EXPANDED_WATERMARK_MATERIALS, ...SCIENCE_WATERMARK_MATERIALS, ...GENERAL_WATERMARK_MATERIALS]

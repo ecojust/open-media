@@ -25,6 +25,7 @@ function playbackHarness(t, { pending = false, ready = true, video = false, fram
     frameCancels = []
     plays = 0
     pauses = 0
+    loads = 0
     get currentTime() { return this._time }
     set currentTime(time) { this._time = time; this.seeks.push(time); this.seeking = true }
     get playbackRate() { return this._rate }
@@ -40,8 +41,8 @@ function playbackHarness(t, { pending = false, ready = true, video = false, fram
       return Promise.resolve()
     }
     pause() { this.pauses++; this.paused = true }
-    removeAttribute() {}
-    load() {}
+    removeAttribute(name) { if (name === 'src') this.src = '' }
+    load() { this.loads++ }
     finishSeek() { this.seeking = false; this.dispatchEvent(new Event('seeked')) }
   }
   if (frameReady) {
@@ -80,13 +81,17 @@ test('视频分割边界沿用正在解码的画面与音频，不再次定位�
   const divided = splitClip(project, original.id, 2)
   const [left, right] = divided.tracks.find(track => track.kind === 'video').clips
   preview.setProject(divided)
+  const waiting = preview.entries.get(right.id).media
   preview.render(0, true)
   media._time = 2.97
   preview.render(1.98, true)
   media._time = 2.995
   preview.render(2.01, true)
   assert.equal(preview.entries.get(right.id).media, media)
-  assert.notEqual(preview.entries.get(left.id).media, media)
+  assert.equal(preview.entries.has(left.id), false, '越过切点后释放旧片段的位置')
+  assert.equal(waiting.src, '', '已交接的占位播放器应卸载媒体源')
+  assert.equal(waiting.loads, 1)
+  assert.equal(media.src, 'blob:tone', '连续播放的源不能被释放')
   assert.deepEqual(media.seeks, [], '切换片段时不应对已连续播放的源重新定位')
   assert.equal(media.plays, 1)
   assert.equal(media.pauses, 0, '视频自带音频也应继续播放')
@@ -120,9 +125,18 @@ test('同源重叠视频保留两个播放器，手动跨边界定位仍准确�
   preview.pause()
   preview.setProject(divided)
   preview.seek(2.1)
-  assert.equal(preview.entries.get(left.id).media, media)
+  assert.equal(preview.entries.has(left.id), false, '定位后离开范围的旧片段不再保留解码器')
+  assert.equal(media.src, '')
+  assert.equal(media.loads, 1)
+  assert.equal(media.paused, true)
   assert.equal(preview.entries.get(right.id).media, second)
   assert(Math.abs(second.seeks.at(-1) - 3.15) < 1e-8)
+  preview.seek(1.2)
+  const returnedLeft = preview.entries.get(left.id).media
+  assert.notEqual(returnedLeft, media, '反向定位重新加载已释放的片段')
+  assert.equal(returnedLeft.src, 'blob:tone')
+  assert(Math.abs(returnedLeft.seeks.at(-1) - 1.8) < 1e-8)
+  assert.equal(returnedLeft.paused, true, '暂停状态下反向定位不能自行播放')
 })
 
 test('暂停预览在首帧实际可绘制后重新绘制，移除素材和销毁会取消待处理回调', t => {

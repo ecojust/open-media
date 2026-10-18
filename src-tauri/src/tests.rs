@@ -1042,6 +1042,256 @@ fn timeline_exports_ten_centered_transition_effects_without_changing_duration() 
     }
 }
 
+fn verify_explainer_transition_exports(effects: &[&str]) {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let width = 240;
+    let height = 180;
+    let frame_size = width * height * 3;
+    for &effect in effects {
+        let mut spec = transition_spec(&asset, effect);
+        for field in ["project", "config"] {
+            spec[field]["width"] = json!(width);
+            spec[field]["height"] = json!(height);
+        }
+        for clip in spec["project"]["tracks"][1]["clips"].as_array_mut().unwrap() {
+            clip["x"] = json!(40);
+            clip["y"] = json!(30);
+        }
+        let filename = format!("explainer-{effect}.mp4");
+        let (_, probe) = run(temp.path(), &rt, spec, &filename);
+        let duration: f64 = probe["format"]["duration"].as_str().unwrap().parse().unwrap();
+        assert!((duration - 2.0).abs() < 0.01, "{effect}: altered timeline duration");
+        let decoded = decoded_video(&rt, &temp.path().join(filename));
+        assert_eq!(decoded.len(), 40 * frame_size, "{effect}: dropped decoded frames");
+        let pixel = |frame: usize, x: usize, y: usize| &decoded[frame * frame_size + (y * width + x) * 3..][..3];
+        for frame in 0..40 {
+            for (x, y) in [(20, 90), (220, 90), (120, 10), (120, 170)] {
+                let p = pixel(frame, x, y);
+                assert!(p[1] > 230 && p[0] < 15 && p[2] < 15,
+                    "{effect}: leaked outside positioned clip at frame {frame}: {p:?}");
+            }
+        }
+        for (frame, channel) in [(8, 0), (32, 2)] {
+            let p = pixel(frame, 120, 90);
+            assert!(p[channel] > 230 && p[1] < 15, "{effect}: changed a frame outside transition: {p:?}");
+        }
+        let cut = pixel(20, 120, 90);
+        if effect == "flash-white" {
+            assert!(cut[0] > 240 && cut[1] > 235 && (cut[2] as i32 - 232).abs() < 15,
+                "flash cut must use warm white: {cut:?}");
+        } else {
+            assert!(cut[1] > 230 && cut[0] < 15 && cut[2] < 15,
+                "{effect}: midpoint must reveal project background: {cut:?}");
+        }
+        for (frame, channel) in [(16, 0), (24, 2)] {
+            let center = pixel(frame, 120, 90);
+            if matches!(effect, "defocus" | "zoom-through") {
+                assert!((center[channel] as i32 - 127).abs() < 16 && (center[1] as i32 - 127).abs() < 16,
+                    "{effect}: opacity must be half at quarter-transition: {center:?}");
+            } else if effect == "flash-white" {
+                assert!(center[channel] > 235 && (center[1] as i32 - 124).abs() < 16,
+                    "flash must mix the source with ivory, not project green: {center:?}");
+            } else {
+                let checks: &[(usize, usize, bool)] = match effect {
+                    "iris" => &[(80, 60, true), (110, 90, true), (125, 105, false), (12, 60, false)],
+                    "diamond" => &[(80, 60, true), (100, 75, true), (120, 100, false), (10, 5, false)],
+                    "blinds" => &[(80, 4, true), (80, 12, false), (80, 108, true), (80, 114, false)],
+                    "diagonal" => &[(20, 20, true), (70, 30, true), (140, 100, false), (100, 100, false)],
+                    "radial" => &[(120, 30, true), (120, 90, true), (40, 90, false), (40, 30, false)],
+                    _ => &[],
+                };
+                for &(x, y, visible) in checks {
+                    let p = pixel(frame, 40 + x, 30 + y);
+                    assert!(if visible { p[channel] > 220 && p[1] < 25 } else { p[1] > 220 && p[channel] < 25 },
+                        "{effect}: incorrect mask at ({x},{y}) frame {frame}: {p:?}");
+                }
+            }
+        }
+        if matches!(effect, "diagonal" | "radial") {
+            let checks = if effect == "diagonal" { [(20, 20, true), (70, 30, false)] }
+                else { [(110, 30, true), (110, 90, false)] };
+            for (frame, channel) in [(18, 0), (22, 2)] {
+                for (x, y, visible) in checks {
+                    let p = pixel(frame, 40 + x, 30 + y);
+                    assert!(if visible { p[channel] > 220 && p[1] < 25 } else { p[1] > 220 && p[channel] < 25 },
+                        "{effect}: wrong quarter opening at ({x},{y}) frame {frame}: {p:?}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn explainer_transitions_export_distinct_masks_color_and_clip_local_motion() {
+    verify_explainer_transition_exports(&["iris", "diamond", "blinds", "flash-white", "defocus", "zoom-through"]);
+}
+
+fn verify_explainer_transition_ranges(effects: &[&str]) {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let store = MediaStore::new(temp.path()).unwrap();
+    let jobs = JobManager::default();
+    let frame_size = 160 * 120 * 3;
+    for &effect in effects {
+        let mut project = transition_spec(&asset, effect)["project"].clone();
+        project["fps"] = json!(20);
+        for track in project["tracks"].as_array_mut().unwrap() {
+            for clip in track["clips"].as_array_mut().unwrap() {
+                clip["start"] = json!(clip["start"].as_f64().unwrap() + 4.0);
+            }
+        }
+        let mut spec = json!({"project":project,"start":4.75,"end":5.25,"width":160,"fps":20});
+        let job = crate::preview_tools::begin(&store, &rt, &jobs, &spec).unwrap();
+        let finished = wait(&jobs, &job.id);
+        assert_eq!(finished.state, "completed", "{effect}: {:?}", finished.error);
+        let result = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+        assert!((result.duration - 0.5).abs() < 0.01);
+        let video = decoded_video(&rt, Path::new(&result.native_path));
+        assert_eq!(video.len(), 10 * frame_size, "{effect}: range has wrong number of frames");
+        crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+        spec["frameOnly"] = json!(true);
+        for (frame, time) in [(1, 4.8), (5, 5.0), (9, 5.2)] {
+            spec["start"] = json!(time);
+            let job = crate::preview_tools::begin(&store, &rt, &jobs, &spec).unwrap();
+            let finished = wait(&jobs, &job.id);
+            assert_eq!(finished.state, "completed", "{effect}: {:?}", finished.error);
+            let result = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+            let image = decoded_video(&rt, Path::new(&result.native_path));
+            assert_eq!(image.len(), frame_size);
+            let expected = &video[frame * frame_size..(frame + 1) * frame_size];
+            let average_error = image.iter().zip(expected).map(|(a,b)| (*a as f64-*b as f64).abs()).sum::<f64>() / frame_size as f64;
+            // The range uses 4:2:0 video. Eight narrow, saturated strips put far
+            // more pixels on chroma boundaries than the other masks, so compare
+            // their interiors separately from the encoded edge pixels.
+            let tolerance = if effect == "blinds" { 18.0 } else { 5.0 };
+            assert!(average_error < tolerance, "{effect}: exact frame/range disagree at {time}: mean error {average_error}");
+            if effect == "blinds" {
+                let visibility = ((time - 5.0_f64).abs() / 0.4).clamp(0.0, 1.0);
+                for y in 0..120 {
+                    let row = y / 15;
+                    let local = (y % 15) as f64;
+                    let opening = ((visibility - 0.22 * row as f64 / 7.0) / 0.78).clamp(0.0, 1.0) * 15.0;
+                    if local > 2.0 && local < 12.0 && (local - opening).abs() > 2.0 {
+                        let offset = (y * 160 + 80) * 3;
+                        let channel = if time < 5.0 { 0 } else { 2 };
+                        let visible = local < opening;
+                        assert_eq!(image[offset + channel] > image[offset + 1], visible,
+                            "blinds: incorrect still mask at {time}, row {y}");
+                        assert_eq!(expected[offset + channel] > expected[offset + 1], visible,
+                            "blinds: incorrect video mask at {time}, row {y}");
+                    }
+                }
+            }
+            crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+        }
+    }
+}
+
+#[test]
+fn explainer_transition_range_and_exact_frames_match_export_global_clock() {
+    verify_explainer_transition_ranges(&["iris", "diamond", "blinds", "flash-white", "defocus", "zoom-through"]);
+}
+
+#[test]
+fn explainer_diagonal_and_radial_masks_export_video_ranges_and_exact_frames() {
+    verify_explainer_transition_exports(&["diagonal", "radial"]);
+    verify_explainer_transition_ranges(&["diagonal", "radial"]);
+}
+
+#[test]
+fn explainer_defocus_scales_in_previews_and_zoom_through_moves_source_detail() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let source = temp.path().join("detail-source.mp4");
+    let created = process(&rt.encoder).args(["-v", "error", "-y", "-f", "lavfi", "-i",
+        "color=red:s=160x120:r=20:d=2,drawbox=x=80:y=0:w=80:h=120:color=blue:t=fill,drawbox=x=32:y=0:w=8:h=120:color=white:t=fill",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p"]).arg(&source).output().unwrap();
+    assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+    let store = MediaStore::new(temp.path()).unwrap();
+    let asset = store.import(&rt, &source, None).unwrap();
+    let jobs = JobManager::default();
+    let frame = |effect: &str, blur: Option<f64>, width: usize| {
+        let mut project = transition_spec(&asset, effect)["project"].clone();
+        project["fps"] = json!(20);
+        if let Some(blur) = blur { project["tracks"][0]["clips"][0]["transition"]["blur"] = json!(blur); }
+        let spec = json!({"project":project,"start":0.8,"frameOnly":true,"width":width});
+        let job = crate::preview_tools::begin(&store, &rt, &jobs, &spec).unwrap();
+        let finished = wait(&jobs, &job.id);
+        assert_eq!(finished.state, "completed", "{effect}: {:?}", finished.error);
+        let result = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+        let bytes = decoded_video(&rt, Path::new(&result.native_path));
+        assert_eq!(bytes.len(), width * (width * 3 / 4) * 3);
+        crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+        bytes
+    };
+    for width in [160, 80] {
+        let original = frame("defocus", Some(0.0), width);
+        let softened = frame("defocus", None, width);
+        let point = (60 * width / 160 * width + 72 * width / 160) * 3;
+        assert!(original[point + 2] < 8, "explicit zero should disable focus blur");
+        assert!(softened[point + 2] > 10 && softened[point + 2] < 35,
+            "focus default must mix boundary colors consistently at width {width}: {:?}", &softened[point..point + 3]);
+    }
+    let zoomed = frame("zoom-through", None, 160);
+    let occupied: Vec<_> = (0..70).filter(|x| zoomed[(60 * 160 + *x) * 3 + 1] > 220).collect();
+    assert!(!occupied.is_empty(), "camera push lost the source marker");
+    assert!((occupied[0] as i32 - 29).abs() <= 1,
+        "camera push must sample a 1.06x source at half visibility, not just fade: {occupied:?}");
+    assert!((occupied.last().copied().unwrap() as i32 - 37).abs() <= 1,
+        "camera push resized its source marker incorrectly: {occupied:?}");
+}
+
+#[test]
+fn explainer_transition_rotation_and_parameter_overrides_are_preserved() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let store = MediaStore::new(temp.path()).unwrap();
+    let jobs = JobManager::default();
+    let mut project = transition_spec(&asset, "diamond")["project"].clone();
+    project["width"] = json!(240);
+    project["height"] = json!(180);
+    for clip in project["tracks"][1]["clips"].as_array_mut().unwrap() {
+        clip["x"] = json!(40);
+        clip["y"] = json!(30);
+        clip["rotation"] = json!(90);
+    }
+    let frame = |project: &Value, time: f64| {
+        let job = crate::preview_tools::begin(&store, &rt, &jobs,
+            &json!({"project":project,"start":time,"frameOnly":true,"width":240})).unwrap();
+        let finished = wait(&jobs, &job.id);
+        assert_eq!(finished.state, "completed", "{:?}", finished.error);
+        let result = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+        let bytes = decoded_video(&rt, Path::new(&result.native_path));
+        assert_eq!(bytes.len(), 240 * 180 * 3);
+        crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+        bytes
+    };
+    let bytes = frame(&project, 0.8);
+    let inside = &bytes[(155 * 240 + 120) * 3..][..3];
+    let outside = &bytes[(90 * 240 + 185) * 3..][..3];
+    assert!(inside[0] > 220 && inside[1] < 25,
+        "diamond must rotate with its positioned clip, not in project coordinates: {inside:?}");
+    assert!(outside[1] > 220 && outside[0] < 25,
+        "rotated diamond must keep its narrow local axis: {outside:?}");
+    project["tracks"][0]["clips"][0]["transition"] = json!({
+        "effect":"flash-white","fromClipId":"left","toClipId":"right",
+        "color":"#8040ff","easing":"ease-in","scope":"outgoing"
+    });
+    let bytes = frame(&project, 0.8);
+    let center = &bytes[(90 * 240 + 120) * 3..][..3];
+    for (actual, expected) in center.iter().zip([160, 48, 191]) {
+        assert!((*actual as i32 - expected).abs() < 10, "flash must honor custom color/easing: {center:?}");
+    }
+    let bytes = frame(&project, 1.0);
+    let center = &bytes[(90 * 240 + 120) * 3..][..3];
+    assert!(center[2] > 220 && center[0] < 25 && center[1] < 25,
+        "outgoing-only flash must leave the incoming clip unchanged: {center:?}");
+}
+
 #[test]
 fn gentle_zoom_fades_export_eighty_percent_scale_fixed_anchors_and_independent_opacity() {
     let temp = tempfile::tempdir().unwrap();

@@ -1,0 +1,183 @@
+{
+  "author": "Open Media",
+  "license": "MIT",
+  "generator": "scripts/generate-general-segments.py",
+  "items": [
+    {
+      "id": "general-paper-rise",
+      "filename": "general-paper-rise.webm",
+      "poster": "general-paper-rise.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 71129,
+      "sha256": "6cda23802bba281ef84635bf732d3953d670708e6a229f4d0362c1127a712169"
+    },
+    {
+      "id": "general-gallery-reveal",
+      "filename": "general-gallery-reveal.webm",
+      "poster": "general-gallery-reveal.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 22553,
+      "sha256": "05fda704a559124930ced8b877c40aace38e4108821a4ad8905db02d10582c6b"
+    },
+    {
+      "id": "general-geometric-curtain",
+      "filename": "general-geometric-curtain.webm",
+      "poster": "general-geometric-curtain.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 14903,
+      "sha256": "6b01d31bba34bec5d03883194980cc09077beabafdddddefc4404d350a9a9d09"
+    },
+    {
+      "id": "general-soft-halo",
+      "filename": "general-soft-halo.webm",
+      "poster": "general-soft-halo.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 14975,
+      "sha256": "fb4996210f707c2d964cc17bf69a1299906930fdf7725d032f2cb45460c78152"
+    },
+    {
+      "id": "general-offset-blocks",
+      "filename": "general-offset-blocks.webm",
+      "poster": "general-offset-blocks.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 19352,
+      "sha256": "d0a67981327dd0876cb561a7c997c8be90d6a538a7854f5eba1ea1cc72f9a34b"
+    },
+    {
+      "id": "general-line-assembly",
+      "filename": "general-line-assembly.webm",
+      "poster": "general-line-assembly.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 14461,
+      "sha256": "28251223468a85de0c69a92ca9e2af62a8ee3fc351d36b41a4e53d4f44595fe0"
+    },
+    {
+      "id": "general-film-window",
+      "filename": "general-film-window.webm",
+      "poster": "general-film-window.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 26687,
+      "sha256": "ec97d8e62e82ba514a2be546b94184567f0185e82797e78b1fb19686751ee36f"
+    },
+    {
+      "id": "general-grain-gradient",
+      "filename": "general-grain-gradient.webm",
+      "poster": "general-grain-gradient.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 31976,
+      "sha256": "7ece3df5b808bcb3eaf446ea91b26e7e5f6f64fd1c63b86016733592dbc7a880"
+    },
+    {
+      "id": "general-paper-fold",
+      "filename": "general-paper-fold.webm",
+      "poster": "general-paper-fold.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 18798,
+      "sha256": "ae39be0543fe5e9cc078eeb48e46f1e847bea89f715fda612c1df2a0d0ea6bce"
+    },
+    {
+      "id": "general-gallery-close",
+      "filename": "general-gallery-close.webm",
+      "poster": "general-gallery-close.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 18876,
+      "sha256": "4cf79ab5bd127b516f055f232818ec5193be5ccef48a046724227acd80ab5850"
+    },
+    {
+      "id": "general-curtain-settle",
+      "filename": "general-curtain-settle.webm",
+      "poster": "general-curtain-settle.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 19545,
+      "sha256": "68f4dd84af137127c6146b7bf5d3c01cc9eb385101bbb57b618e6dbe38f9f7ca"
+    },
+    {
+      "id": "general-soft-afterglow",
+      "filename": "general-soft-afterglow.webm",
+      "poster": "general-soft-afterglow.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 17617,
+      "sha256": "c11a70059b68d89e13f4367553be164780ad6728d395430567ed545ca904d0fc"
+    },
+    {
+      "id": "general-blocks-balance",
+      "filename": "general-blocks-balance.webm",
+      "poster": "general-blocks-balance.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 12710,
+      "sha256": "18b6a002a7f3cfde24492caaac21cb6e0b74f0deacfe3bf396ed07a3ebb2db7c"
+    },
+    {
+      "id": "general-line-signature",
+      "filename": "general-line-signature.webm",
+      "poster": "general-line-signature.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 28169,
+      "sha256": "5447f6fd8cda2498d1f7ba891ced4c68fee64f7be0b9e64e33acfe4327e4dd0a"
+    },
+    {
+      "id": "general-film-resolve",
+      "filename": "general-film-resolve.webm",
+      "poster": "general-film-resolve.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 27504,
+      "sha256": "02b43b0f4b30a7ec87848b80d73dc1a523a65439919fa0883ec307b44978eece"
+    },
+    {
+      "id": "general-grain-dusk",
+      "filename": "general-grain-dusk.webm",
+      "poster": "general-grain-dusk.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 24533,
+      "sha256": "25cb39836781fd774f4d1a70277ceea569303bae6b96c01b96b26c18734a2968"
+    }
+  ]
+}

@@ -224,6 +224,24 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 
 缩放淡入淡出使用 `zoom-fade`，或 `zoom-fade-left`、`zoom-fade-right`、`zoom-fade-up`、`zoom-fade-down` 固定对应边缘。前半段从 100% 缩至 80% 并淡出，后半段从 80% 放至 100% 并淡入；每半段各占转场时长的一半。
 
+通用转场还提供 `iris`（圆形光圈）、`diamond`（菱形开幕）、`blinds`（阶梯百叶）、`flash-white`（柔光闪白）、`defocus`（失焦叠化）、`zoom-through`（推近穿越）、`diagonal`（斜向揭幕）和 `radial`（环弧开幕）。这些效果在画布预览、区间预览、取帧和视频导出中使用一致的时间与几何定义。
+
+素材目录搜索“科普”可找到 24 款标注/文字水印及 12 款片头片尾，返回的 `collection: "science"` 标识专题，`editableText` 与 `placement` 分别表示文字编辑能力和默认插入位置。动画中的刻度与图表是视觉示意；需要填写真实数值、来源或结论时，可选择原生文字模板。
+
+使用 `collection: "general"` 可筛出 24 款通用文字布局或 16 款通用片头片尾。文字水印的 `text`、`color`、`background`、`duration`、`watermarkPlacement`、`animation` 均可在添加时设定，之后仍保留为可编辑文字。`animation` 支持 `none`、`fade`、`slide-up`、`slide-down`、`slide-left`、`slide-right`、`push-in`、`pull-back`；入场与退场之间保持稳定阅读。参数不适用于已经编码的图片或视频水印。
+
+```json
+{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"open_media_material_list","arguments":{"kind":"watermark","collection":"general","limit":100}}}
+```
+
+```json
+{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"open_media_material_add","arguments":{"kind":"watermark","id":"general-hero-title","start":3,"text":"自定义标题","color":"#edbd72","background":"transparent","duration":5,"watermarkPlacement":"center","animation":"slide-up"}}}
+```
+
+片头片尾可指定 `duration`（0.5–30 秒，实际速度须在 0.1–16 倍内）和 `titleLayout`（`center`、`left`、`lower-third`）；目录也返回默认 `titleLayout`。调整时长使用完整背景动画变速，文字与项目后移时长同步。
+
+原生视觉标注现支持 `arrow`、`rectangle`、`highlight`、`mask`、`spotlight`、`blur`、`ellipse`、`brackets`、`double-arrow`、`leader`、`underline`、`check`。`overlay_add` 可选择上述入退场 `animation`；`clip_update.patch.overlay` 可更新完整标注定义，保持可编辑颜色、线宽和几何形状。
+
 先查询片头片尾模板，再使用返回的素材 ID 前插，并编辑标题：
 
 ```json

@@ -161,10 +161,10 @@ test('transitions use nearest cut and reconcile deletion, with locked affected t
   assertUnchangedAfterFailure(project, 'transition_remove', { clipId: 'first' }, /不是转场/)
 })
 
-test('MCP discovers, adds and updates every gentle zoom fade preset with matching schema choices', () => {
+test('MCP discovers, adds and updates every new transition preset with matching schema choices', () => {
   const { project } = fixture()
   const presets = exec(project, 'transition_list').data.presets
-  for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down']) {
+  for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down', 'iris', 'diamond', 'blinds', 'flash-white', 'defocus', 'zoom-through', 'diagonal', 'radial']) {
     assert.ok(presets.some(preset => preset.id === effect))
     validateMcpToolArguments('open_media_transition_add', { time: 5, effect, duration: 2 })
     const added = exec(project, 'transition_add', { time: 5, effect, duration: 2 })

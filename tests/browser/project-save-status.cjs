@@ -42,7 +42,7 @@ async function fixture(browser, url, title) {
   const page = await context.newPage(), errors = []
   page.setDefaultTimeout(15000); page.on('pageerror', error => errors.push(error.message))
   await page.addInitScript(() => {
-    const io = window.saveStatusIO = { mode: 'ready', writes: [], completions: [], openCalls: [], saveCalls: [], openName: 'input.omedia', saveName: 'output.omedia' }
+    const io = window.saveStatusIO = { mode: 'ready', writes: [], completions: [], holdRecent: false, recentReads: [], openCalls: [], saveCalls: [], openName: 'input.omedia', saveName: 'output.omedia' }
     const put = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function (...args) {
       if (this.name === 'projects') {
@@ -61,6 +61,21 @@ async function fixture(browser, url, title) {
         } : handler)
       },
     })
+    const getAll = IDBObjectStore.prototype.getAll
+    const success = Object.getOwnPropertyDescriptor(IDBRequest.prototype, 'onsuccess')
+    IDBObjectStore.prototype.getAll = function (...args) {
+      const request = getAll.apply(this, args)
+      if (this.name === 'projects' && io.holdRecent) Object.defineProperty(request, 'onsuccess', {
+        configurable: true,
+        set(handler) {
+          success.set.call(this, typeof handler === 'function' ? function (event) {
+            if (io.holdRecent) io.recentReads.push(() => handler.call(this, event))
+            else handler.call(this, event)
+          } : handler)
+        },
+      })
+      return request
+    }
     window.showOpenFilePicker = async options => {
       io.openCalls.push({ active: navigator.userActivation.isActive, options })
       return [await (await navigator.storage.getDirectory()).getFileHandle(io.openName)]
@@ -159,6 +174,58 @@ async function completionChecks(browser, url) {
     assert.deepEqual(errors, [])
     console.log('PASS 等待保存完成时不提前刷新时间；旧快照完成不吞掉后续编辑，原子写入失败保留草稿和时间，重试后恢复')
   } catch (error) { await page.screenshot({ path: path.join(artifacts, 'completion-failure.png') }); throw error }
+  finally { await context.close() }
+}
+
+async function recentRefreshChecks(browser, url) {
+  const { context, page, errors } = await fixture(browser, url, '最近项目读取基准项目')
+  try {
+    await page.evaluate(() => { window.saveStatusIO.holdRecent = true })
+    await rename(page, '已提交但最近项目仍在读取')
+    await expect.poll(() => page.evaluate(() => window.saveStatusIO.recentReads.length)).toBe(1)
+    const committed = await readDraft(page)
+    assert.equal(committed.project.title, '已提交但最近项目仍在读取')
+    await expect(savedTime(page)).toHaveAttribute('datetime', committed.savedAt)
+    // Re-enabling autosave requests the same project revision while the recent-list
+    // callback is delayed. Sharing a save must not leave the UI permanently pending.
+    await toggle(page).click()
+    await expect(toggle(page)).toHaveAttribute('aria-checked', 'false')
+    await toggle(page).click()
+    await expect(toggle(page)).toHaveAttribute('aria-checked', 'true')
+    await page.evaluate(() => { const io = window.saveStatusIO; io.holdRecent = false; io.recentReads.splice(0).forEach(resolve => resolve()) })
+    await expect(page.locator('.statusbar')).toContainText('本地草稿已保存')
+    await expect(countdown(page)).toHaveCount(0)
+    const restored = await readDraft(page)
+    assert.equal(restored.project.title, committed.project.title)
+    await expect(savedTime(page)).toHaveAttribute('datetime', restored.savedAt)
+    assert.deepEqual(errors, [])
+    console.log('PASS 最近项目读取延迟期间再次保存同一版本，完成后仍正确显示草稿已保存')
+  } catch (error) { await page.screenshot({ path: path.join(artifacts, 'recent-refresh-failure.png') }); throw error }
+  finally { await context.close() }
+}
+
+async function undoBeforeSwitchChecks(browser, url) {
+  const { context, page, errors } = await fixture(browser, url, '撤销后应保留的项目 A')
+  try {
+    const baseline = await readDraft(page)
+    await page.evaluate(() => { window.saveStatusIO.mode = 'hold' })
+    await rename(page, '尚未结束保存的项目 B')
+    await expect.poll(() => page.evaluate(() => window.saveStatusIO.completions.length)).toBe(1)
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect(page.locator('.project-title')).toHaveText(baseline.project.title)
+    await expect(page.locator('.project-title > i')).toHaveCount(0)
+    await expect(countdown(page)).toContainText('3')
+    await page.getByTestId('new-project').click()
+    // Returning to the file's clean state still needs a draft write after the older B.
+    await expect(page.locator('.project-title')).toHaveText(baseline.project.title)
+    await expect(page.locator('.workbench-body')).toHaveAttribute('inert', '')
+    await page.evaluate(() => { const io = window.saveStatusIO; io.mode = 'ready'; io.completions.splice(0).forEach(complete => complete()) })
+    await expect(page.locator('.project-title')).toHaveText('未命名项目')
+    const restored = await readDraft(page, baseline.project.id)
+    assert.deepEqual(restored.project, baseline.project, '切换前必须把撤销后的 A 写回草稿，不能遗留旧 B')
+    assert.deepEqual(errors, [])
+    console.log('PASS 旧快照仍在保存时撤销回已保存版本，立即新建也先保留撤销后的完整草稿')
+  } catch (error) { await page.screenshot({ path: path.join(artifacts, 'undo-switch-failure.png') }); throw error }
   finally { await context.close() }
 }
 
@@ -273,6 +340,8 @@ async function main() {
     const url = `http://127.0.0.1:${port}`
     await countdownChecks(browser, url)
     await completionChecks(browser, url)
+    await recentRefreshChecks(browser, url)
+    await undoBeforeSwitchChecks(browser, url)
     await openAndAssetChecks(browser, url)
   } finally { await browser?.close(); await server.close() }
 }

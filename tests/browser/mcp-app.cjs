@@ -6,11 +6,13 @@ const { chromium, expect } = require('@playwright/test')
 async function installNativeBridge(page) {
   await page.addInitScript(() => {
     localStorage.setItem('open-media:autosave', 'false')
+    localStorage.setItem('open-media:theme', 'dark')
     const fixture = window.mcpAppFixture = {
       calls: [], completions: [], requests: new Map(), callbacks: new Map(), listeners: new Map(), heldClaims: new Map(), heldCompletions: new Map(),
       counter: 1, running: true, connectedClients: 0, statusFailure: false, omitConnectionCount: false, holdNextStatus: false, holdClaimId: '', unexpected: [],
       mediaJobs: [{ id: 'existing-export', name: '已有视频导出', state: 'completed', progress: 1, outputPath: '/fixture/export.mp4' }],
       config: { host: '127.0.0.1', port: 39861, token: 'a'.repeat(64) },
+      backgroundColors: {},
     }
     const status = () => ({ running: fixture.running, host: fixture.config.host, port: fixture.config.port,
       url: fixture.running ? `http://${fixture.config.host}:${fixture.config.port}/mcp` : null,
@@ -44,6 +46,11 @@ async function installNativeBridge(page) {
           const id = fixture.counter++; fixture.listeners.set(id, { ...args, id }); return id
         }
         if (command === 'plugin:event|unlisten') { fixture.listeners.delete(args.eventId); return null }
+        if (command === 'plugin:window|set_background_color' || command === 'plugin:webview|set_webview_background_color') {
+          if (args.label !== 'main' || !['#151923', '#f7f9fc'].includes(args.value)) throw new Error('主窗口背景参数无效')
+          fixture.backgroundColors[command] = args.value
+          return null
+        }
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_media_jobs') return structuredClone(fixture.mediaJobs)
         if (command === 'cancel_media_job') { fixture.mediaJobs.find(job => job.id === args.id).state = 'cancelled'; return null }
@@ -149,6 +156,16 @@ async function main() {
     const replay = await completion(page, 'startup-replay')
     assert.equal(replay.isError, false, '渲染器监听建立后应领取遗漏事件的待处理请求')
     await expect(page.getByTestId('home-workspace')).toBeVisible()
+    const backgroundColors = () => page.evaluate(() => window.mcpAppFixture.backgroundColors)
+    const expectedColors = color => ({ 'plugin:window|set_background_color': color, 'plugin:webview|set_webview_background_color': color })
+    await expect.poll(backgroundColors).toEqual(expectedColors('#151923'))
+    await page.getByTestId('theme-light').click()
+    await expect.poll(backgroundColors).toEqual(expectedColors('#f7f9fc'))
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await page.getByTestId('theme-system').click()
+    await expect.poll(backgroundColors).toEqual(expectedColors('#151923'))
+    await page.emulateMedia({ colorScheme: 'light' })
+    await expect.poll(backgroundColors).toEqual(expectedColors('#f7f9fc'))
     await page.getByTestId('create-project').click()
     await expect(page.getByTestId('save-project')).toBeEnabled()
     await expect(page.locator('.statusbar > *')).toHaveCount(2)

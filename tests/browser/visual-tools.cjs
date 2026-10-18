@@ -33,15 +33,42 @@ async function main(){
   const split=structuredClone(movie);split.tracks[1].clips=[createClip(p.assets[1],movie,{id:'before',trimOut:1,opacity:.5,volume:0}),createClip(p.assets[1],movie,{id:'after',start:1,trimIn:1,trimOut:2,opacity:.5,volume:0})]
   let colored=addTransition(split,1,'fade',1);colored=run(colored,'transition_parameters_set',{clipId:colored.tracks[0].clips[0].id,color:'#00ff00'}).project
   const fadePixel=await render(colored,.75)
+  let overlays=createProject('通用标注导出',{width:480,height:240,fps:20,background:'#000000'})
+  const kinds=['ellipse','brackets','double-arrow','leader','underline','check']
+  for(const [index,kind] of kinds.entries()) overlays=run(overlays,'overlay_add',{kind,start:0,duration:2,x:10+(index%3)*160,y:10+Math.floor(index/3)*120,width:140,height:90,color:'#00ff00',strokeWidth:6}).project
+  const {exportProjectFile,importProjectFile}=await import('/src/core/project-file.ts')
+  const reopened=(await importProjectFile(await exportProjectFile(overlays))).project
+  canvas.width=480;canvas.height=240;await render(reopened,1)
+  const strokePoints=[[70,3],[3,10],[70,45],[100,20],[70,87],[51,72]],emptyPoints=[[70,45],[70,3],[70,10],[70,45],[70,45],[70,13]]
+  const overlayPixels=kinds.map((kind,index)=>({kind,stroke:pixel(10+(index%3)*160+strokePoints[index][0],10+Math.floor(index/3)*120+strokePoints[index][1]),empty:pixel(10+(index%3)*160+emptyPoints[index][0],10+Math.floor(index/3)*120+emptyPoints[index][1])}))
+  const nativeRasters=[],previousNative=window.__TAURI_INTERNALS__
+  window.__TAURI_INTERNALS__={invoke:async(command,args)=>{
+   if(command!=='import_blob_asset')throw Error(`Unexpected native overlay call: ${command}`)
+   const data=Uint8Array.from(args.bytes),blob=new Blob([data],{type:'image/png'}),image=await createImageBitmap(blob)
+   const raster=document.createElement('canvas');raster.width=image.width;raster.height=image.height;raster.getContext('2d').drawImage(image,0,0);image.close()
+   const index=nativeRasters.length,point=strokePoints[index],empty=emptyPoints[index]
+   nativeRasters.push({kind:kinds[index],bytes:args.bytes,stroke:[...raster.getContext('2d').getImageData(...point,1,1).data],empty:[...raster.getContext('2d').getImageData(...empty,1,1).data]})
+   return {id:`raster-${index}`,kind:'image',name:args.name,url:URL.createObjectURL(blob),duration:0,width:raster.width,height:raster.height,size:data.length,mime:'image/png'}
+  }}
+  try {const {prepareNativeProject}=await import('/src/core/native-project.ts');const prepared=await prepareNativeProject(reopened);if(Object.keys(prepared.textAssets).length!==6)throw Error('原生导出必须准备全部6种标注')}finally{if(previousNative)window.__TAURI_INTERNALS__=previousNative;else delete window.__TAURI_INTERNALS__}
   preview.dispose()
+  const overlayOutput=await exportTimelineWebM(reopened,{fps:20,videoBitsPerSecond:2000000})
   const output=await exportTimelineWebM(crop,{fps:20,videoBitsPerSecond:1000000})
-  return {cropPixel,movePixels,focusPixel,maskPixel,blurPixel,spotlightPixels,frozenPixels,fadePixel,output:[...new Uint8Array(await output.arrayBuffer())]}
+  return {overlayPixels,nativeRasters,overlayOutput:[...new Uint8Array(await overlayOutput.arrayBuffer())],cropPixel,movePixels,focusPixel,maskPixel,blurPixel,spotlightPixels,frozenPixels,fadePixel,output:[...new Uint8Array(await output.arrayBuffer())]}
  })
  const blue=p=>p[2]>220&&p[0]<20,black=p=>p[0]+p[1]+p[2]<10
  assert(blue(result.cropPixel));assert(black(result.movePixels[0]));assert(result.movePixels[1][0]>110&&result.movePixels[1][0]<140);assert(blue(result.focusPixel));assert(result.maskPixel[1]>240&&result.maskPixel[0]<10);assert(result.blurPixel[0]>50&&result.blurPixel[2]>50);assert(black(result.spotlightPixels[0])&&blue(result.spotlightPixels[1]));assert(result.frozenPixels.every(blue));assert(result.fadePixel[0]>55&&result.fadePixel[0]<75&&result.fadePixel[1]>55&&result.fadePixel[1]<75&&result.fadePixel[2]<10,`colored fade opacity ${result.fadePixel}`)
  console.log('PASS 源裁剪/移动透明关键帧/区域聚焦/遮罩/聚光/局部模糊/停帧的实际 Canvas 像素')
  const out=path.join(folder,'crop-export.webm');await fs.writeFile(out,Buffer.from(result.output));const pixels=execFileSync('ffmpeg',['-v','error','-i',out,'-vf','crop=2:2:79:44,scale=1:1','-f','rawvideo','-pix_fmt','rgb24','-']);assert(pixels.length>90);for(let i=0;i<pixels.length;i+=3)assert(pixels[i+2]>180&&pixels[i]<50)
  console.log(`PASS 浏览器真实裁剪导出并逐帧解码验证 ${out}`)
+ const green=p=>p[1]>220&&p[0]<20&&p[2]<20
+ for(const item of result.overlayPixels){assert(green(item.stroke),`${item.kind} 实际预览线条 ${item.stroke}`);assert(black(item.empty),`${item.kind} 必须保留空心/无笔画区域 ${item.empty}`)}
+ for(const item of result.nativeRasters){assert(green(item.stroke)&&item.stroke[3]>220,`${item.kind} 原生PNG线条`);assert(item.empty[3]<10,`${item.kind} 原生PNG保留透明`);await fs.writeFile(path.join(folder,`${item.kind}.png`),Buffer.from(item.bytes))}
+ const overlayOut=path.join(folder,'editable-overlays.webm');await fs.writeFile(overlayOut,Buffer.from(result.overlayOutput))
+ const raw=execFileSync('ffmpeg',['-v','error','-ss','1','-i',overlayOut,'-frames:v','1','-f','rawvideo','-pix_fmt','rgb24','-'],{maxBuffer:1e6})
+ const strokePoints=[[70,3],[3,10],[70,45],[100,20],[70,87],[51,72]],emptyPoints=[[70,45],[70,3],[70,10],[70,45],[70,45],[70,13]]
+ for(let i=0;i<6;i++)for(const[point,filled]of[[strokePoints[i],true],[emptyPoints[i],false]]){const x=10+(i%3)*160+point[0],y=10+Math.floor(i/3)*120+point[1],at=(y*480+x)*3,p=[...raw.subarray(at,at+3)];assert(filled?p[1]>180&&p[0]<40&&p[2]<40:p.every(c=>c<25),`导出标注 ${i} ${filled?'线条':'空心'} ${p}`)}
+ console.log(`PASS 6种通用标注真实Canvas、便携保存重开、原生透明PNG栅格、真实WebM解码 ${overlayOut}`)
  await page.screenshot({path:'/tmp/open-media-visual-tools.png'})
 }
 main().catch(e=>{console.error(e);process.exitCode=1}).finally(async()=>{await browser?.close();server?.kill()})

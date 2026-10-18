@@ -3,21 +3,41 @@ import { cloneProject, createClip, createTextClip, createTrack, MAX_ASSETS, MAX_
 import { clipEnd } from './timeline.ts'
 import type { MediaAsset, Project } from './types.ts'
 import type { WatermarkMaterial } from './watermark-library.ts'
+import { applyVisualMotionPreset, type VisualMotionPreset } from './visual-motion-presets.ts'
 
 export type WatermarkPlacement = 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'bottom-center'
 export interface WatermarkOptions { placement?: WatermarkPlacement; chromaKey?: boolean; spillSuppression?: boolean }
+export interface TextWatermarkOptions {
+  text?: string
+  color?: string
+  background?: string
+  duration?: number
+  placement?: WatermarkPlacement
+  animation?: VisualMotionPreset
+}
 
 /** Text templates remain editable text clips, without importing their card thumbnails. */
-export function addTextWatermark(project: Project, material: WatermarkMaterial, start: number): { project: Project; clipId: string; trackId: string } {
+export function addTextWatermark(project: Project, material: WatermarkMaterial, start: number, options: TextWatermarkOptions = {}): { project: Project; clipId: string; trackId: string } {
   const template = material.textTemplate
   if (material.kind !== 'text' || !template) throw new Error('需要可编辑的文字水印模板。')
   if (![material.width, material.height, template.width, template.height, template.fontSize].every(value => Number.isFinite(value) && value > 0)) {
     throw new Error('文字水印模板尺寸无效。')
   }
-  const duration = material.duration
+  if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !['text', 'color', 'background', 'duration', 'placement', 'animation'].includes(key))) throw new Error('文字水印配置无效。')
+  if (options.text !== undefined && (typeof options.text !== 'string' || !options.text.trim() || options.text.length > 20000)) throw new Error('水印文字不能为空，且不能超过 20000 字。')
+  if (options.color !== undefined && (typeof options.color !== 'string' || !/^#[\da-f]{6}$/i.test(options.color))) throw new Error('水印文字颜色必须为六位十六进制颜色。')
+  if (options.background !== undefined && (typeof options.background !== 'string' || (options.background !== 'transparent' && !/^#[\da-f]{6}$/i.test(options.background)))) throw new Error('水印背景须为透明或六位十六进制颜色。')
+  if (options.duration !== undefined && (typeof options.duration !== 'number' || !Number.isFinite(options.duration))) throw new Error('水印素材时长无效。')
+  if (options.placement !== undefined && typeof options.placement !== 'string') throw new Error('水印位置无效。')
+  if (options.animation !== undefined && typeof options.animation !== 'string') throw new Error('入退场动画无效。')
+  const duration = options.duration ?? material.duration
   if (!Number.isFinite(duration) || duration < 0.001) throw new Error('水印素材时长无效。')
+  const animation = options.animation ?? template.animation
+  for (const value of animation === undefined ? [template.fadeIn, template.fadeOut] : []) {
+    if (value !== undefined && (!Number.isFinite(value) || value < 0 || value > duration)) throw new Error('文字水印淡入淡出时间无效。')
+  }
   if (!Number.isFinite(start) || start < 0 || start + duration > MAX_PROJECT_DURATION) throw new Error('水印起点无效或时间线超过 24 小时。')
-  const placement = material.placement ?? 'center'
+  const placement = options.placement ?? material.placement ?? 'center'
   if (!['center', 'top-left', 'top-right', 'bottom-left', 'bottom-right', 'bottom-center'].includes(placement)) throw new Error('水印位置无效。')
   if (project.tracks.reduce((count, track) => count + track.clips.length, 0) >= MAX_CLIPS) {
     throw new Error(`项目最多容纳 ${MAX_CLIPS} 个片段，请移除不用的片段后再添加水印。`)
@@ -32,12 +52,14 @@ export function addTextWatermark(project: Project, material: WatermarkMaterial, 
   const width = Math.max(1, template.width * scale), height = Math.max(1, template.height * scale)
   const x = placement.endsWith('left') ? marginX : placement.endsWith('right') ? project.width - marginX - width : (project.width - width) / 2
   const y = placement.startsWith('top') ? marginY : placement.startsWith('bottom') ? project.height - marginY - height : (project.height - height) / 2
-  const clip = createTextClip(project, {
+  let clip = createTextClip(project, {
     name: material.name, textRole: 'watermark', start, trimOut: duration, width, height, x, y,
-    text: template.text, color: template.color, background: template.background,
+    text: options.text ?? template.text, color: options.color ?? template.color, background: options.background ?? template.background,
     fontFamily: template.fontFamily, fontWeight: template.fontWeight, textAlign: template.textAlign,
     fontSize: Math.max(4, Math.min(2048, template.fontSize * scale)),
+    fadeIn: template.fadeIn ?? 0, fadeOut: template.fadeOut ?? 0,
   })
+  if (animation !== undefined) clip = applyVisualMotionPreset(clip, animation)
   const next = cloneProject(project)
   const track = existing ? next.tracks.find(item => item.id === existing.id)! : createTrack('text', '文字水印轨道')
   track.clips.push(clip)

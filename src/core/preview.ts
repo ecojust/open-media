@@ -4,7 +4,7 @@ import { isChromaKeyEnabled } from './chroma-key.ts'
 import { ClipFilterRenderer } from './filter-renderer.ts'
 import { audioSourceDistance, audioSourceTime } from './audio-loop.ts'
 import { animatedClipAt, drawClipOverlay, playbackSpeedAt } from './visual-animation.ts'
-import { transitionVisualAt } from './transitions.ts'
+import { transitionBlindRects, transitionVisualAt } from './transitions.ts'
 
 export { clipOpacityAt } from './timeline.ts'
 import { clipDuration as previewClipDuration, projectDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
@@ -142,6 +142,9 @@ function waitForMedia(media: HTMLMediaElement | HTMLImageElement, signal?: Abort
 export class TimelinePreview {
   private project: Project
   private entries = new Map<string, MediaEntry>()
+  private assets = new Map<string, MediaAsset>()
+  private liveMedia = new WeakSet<HTMLMediaElement | HTMLImageElement>()
+  private preloadAll = false
   private filterRenderer?: ClipFilterRenderer
   private blurCanvas?: HTMLCanvasElement
   private transitionCanvas?: HTMLCanvasElement
@@ -172,53 +175,76 @@ export class TimelinePreview {
   setProject(project: Project): void {
     this.playbackGeneration++
     this.project = project
-    const valid = new Set<string>()
+    this.assets = new Map(project.assets.map(asset => [asset.id, asset]))
+    const valid = new Map<string, string>()
     for (const track of project.tracks) {
       for (const clip of track.clips) {
-        const asset = project.assets.find(item => item.id === clip.assetId)
+        const asset = clip.assetId ? this.assets.get(clip.assetId) : undefined
         if (!asset) continue
-        valid.add(clip.id)
-        const key = `${asset.id}:${asset.url}`
-        const previous = this.entries.get(clip.id)
-        if (previous?.key === key) continue
-        if (previous) this.removeEntry(previous)
-        const media = this.createMedia(asset)
-        const entry: MediaEntry = { key, assetId: asset.id, media }
-        this.entries.set(clip.id, entry)
-        if (this.audioContext) this.connectAudio(entry)
+        valid.set(clip.id, `${asset.id}:${asset.url}`)
       }
     }
     for (const [id, entry] of this.entries) {
-      if (!valid.has(id)) { this.removeEntry(entry); this.entries.delete(id) }
+      if (valid.get(id) !== entry.key) { this.removeEntry(entry); this.entries.delete(id) }
     }
     this.render(this.lastTime, this.playing)
+  }
+
+  private ensureEntries(time: number): Set<string> {
+    const wanted: Clip[] = [], upcoming: Clip[] = []
+    for (const track of this.project.tracks) for (const clip of track.clips) {
+      if (!clip.assetId || !this.assets.has(clip.assetId)) continue
+      if (this.preloadAll || time >= clip.start && time < clip.start + previewClipDuration(clip)) wanted.push(clip)
+      else if (clip.start > time && clip.start <= time + 2) upcoming.push(clip)
+    }
+    // 预览只保留当前片段和最多四个即将开始的片段，避免长时间线累积解码器。
+    upcoming.sort((left, right) => left.start - right.start)
+    wanted.push(...upcoming.slice(0, 4))
+    const ids = new Set<string>()
+    for (const clip of wanted) {
+      ids.add(clip.id)
+      if (this.entries.has(clip.id)) continue
+      const asset = this.assets.get(clip.assetId!)!
+      const entry: MediaEntry = { key: `${asset.id}:${asset.url}`, assetId: asset.id, media: this.createMedia(asset) }
+      this.entries.set(clip.id, entry)
+      if (this.audioContext) this.connectAudio(entry)
+    }
+    return ids
+  }
+
+  private activeEntries(time: number): MediaEntry[] {
+    return this.project.tracks.flatMap(track => track.clips
+      .filter(clip => time >= clip.start && time < clip.start + previewClipDuration(clip))
+      .map(clip => this.entries.get(clip.id))).filter((entry): entry is MediaEntry => Boolean(entry))
   }
 
   private createMedia(asset: MediaAsset): HTMLMediaElement | HTMLImageElement {
     if (asset.kind === 'image') {
       const image = new Image()
+      this.liveMedia.add(image)
       image.crossOrigin = 'anonymous'
-      image.onload = () => { if (!this.disposed) this.render(this.lastTime, this.playing) }
-      image.onerror = () => this.report(asset.id, `无法预览“${asset.name}”，请重新导入素材`)
+      image.onload = () => { if (!this.disposed && this.liveMedia.has(image)) this.render(this.lastTime, this.playing) }
+      image.onerror = () => { if (this.liveMedia.has(image)) this.report(asset.id, `无法预览“${asset.name}”，请重新导入素材`) }
       image.src = asset.url
       return image
     }
     const media = document.createElement(asset.kind === 'video' ? 'video' : 'audio')
+    this.liveMedia.add(media)
     media.crossOrigin = 'anonymous'
     media.preload = 'auto'
     if (media instanceof HTMLVideoElement) media.playsInline = true
     media.addEventListener('loadeddata', () => {
-      if (this.disposed) return
+      if (this.disposed || !this.liveMedia.has(media)) return
       this.render(this.lastTime, this.playing)
     })
-    media.addEventListener('seeked', () => { if (!this.disposed && !this.playing) this.draw() })
-    media.addEventListener('error', () => this.report(asset.id, `无法预览“${asset.name}”，请重新导入素材`))
+    media.addEventListener('seeked', () => { if (!this.disposed && this.liveMedia.has(media) && !this.playing) this.draw() })
+    media.addEventListener('error', () => { if (this.liveMedia.has(media)) this.report(asset.id, `无法预览“${asset.name}”，请重新导入素材`) })
     // Loaded data can precede presentation of the first decoded video frame.
     // A one-shot frame callback also refreshes the resting, paused preview.
     if (media instanceof HTMLVideoElement && typeof media.requestVideoFrameCallback === 'function') {
       const request = media.requestVideoFrameCallback(() => {
         this.readyVideoFrames.delete(media)
-        if (!this.disposed) this.render(this.lastTime, this.playing)
+        if (!this.disposed && this.liveMedia.has(media)) this.render(this.lastTime, this.playing)
       })
       this.readyVideoFrames.set(media, request)
     }
@@ -233,6 +259,10 @@ export class TimelinePreview {
   }
 
   async prepare(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted || this.disposed) throw new DOMException('已取消导出', 'AbortError')
+    // 完整导出会提前检查所有素材，交互预览则按播放位置加载。
+    this.preloadAll = true
+    this.render(this.lastTime, this.playing)
     await Promise.all([...this.entries.values()].map(entry => waitForMedia(entry.media, signal)))
   }
 
@@ -330,6 +360,7 @@ export class TimelinePreview {
     if (this.disposed) return
     const wasPlaying = this.playing
     const now = performance.now()
+    const resident = this.ensureEntries(time)
     if (!forceSeek && time >= this.lastTime) this.continueSplitVideo(time, now)
     this.lastTime = Math.max(0, time)
     this.playing = playing
@@ -349,7 +380,7 @@ export class TimelinePreview {
         }
         entry.active = true
         entry.timing = timing
-        const asset = this.project.assets.find(item => item.id === clip.assetId)
+        const asset = clip.assetId ? this.assets.get(clip.assetId) : undefined
         const sourceDuration = Number.isFinite(media.duration) && media.duration > 0 ? media.duration : asset?.duration || 0
         const loops = track.kind === 'audio' && clip.trimOut > sourceDuration + 1e-6
         if (media.loop !== loops) media.loop = loops
@@ -387,6 +418,8 @@ export class TimelinePreview {
       }
     }
     for (const [id, entry] of this.entries) {
+      // 相邻分割片段先交接连续的解码器，再释放离开预加载范围的旧位置。
+      if (!resident.has(id)) { this.removeEntry(entry); this.entries.delete(id); continue }
       if (entry.media instanceof HTMLMediaElement && !active.has(id)) {
         entry.active = false
         if (entry.wantsPlayback || !entry.media.paused) this.stopEntry(entry)
@@ -398,15 +431,11 @@ export class TimelinePreview {
 
   async playReady(time: number, signal?: AbortSignal): Promise<void> {
     const generation = ++this.playbackGeneration
-    const entries = this.project.tracks.flatMap(track => track.clips
-      .filter(clip => time >= clip.start && time < clip.start + previewClipDuration(clip))
-      .map(clip => this.entries.get(clip.id))).filter((entry): entry is MediaEntry => Boolean(entry))
-    await Promise.all(entries.map(entry => waitForMedia(entry.media, signal)))
-    if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
     await this.waitForSeek(time, signal)
     if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
     if (signal?.aborted) throw new DOMException('已取消播放', 'AbortError')
     this.render(time, true)
+    const entries = this.activeEntries(time)
     try {
       await waitForPlayback(Promise.all(entries.map(entry => entry.playRequest)), signal, '素材播放启动超时，请再次点击播放')
     } catch (cause) {
@@ -423,6 +452,10 @@ export class TimelinePreview {
 
   private async waitForSeek(time: number, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) throw new DOMException('已取消导出', 'AbortError')
+    const generation = this.playbackGeneration
+    this.render(time, false, true)
+    await Promise.all(this.activeEntries(time).map(entry => waitForMedia(entry.media, signal)))
+    if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
     this.render(time, false, true)
     await Promise.all([...this.entries.values()].filter(entry => entry.media instanceof HTMLMediaElement && entry.media.seeking).map(entry => new Promise<void>((resolve, reject) => {
       const media = entry.media as HTMLMediaElement
@@ -467,9 +500,23 @@ export class TimelinePreview {
     ctx.clip()
     const transition = track.kind === 'video' ? transitionVisualAt(this.project, clip.id, this.lastTime) : undefined
     if (transition) {
-      if (!(transition.color && transition.effect === 'fade')) ctx.globalAlpha *= transition.opacity
+      if (!(transition.color && ['fade', 'flash-white'].includes(transition.effect))) ctx.globalAlpha *= transition.opacity
       ctx.beginPath()
-      ctx.rect(transition.mask.x * clip.width, transition.mask.y * clip.height, transition.mask.width * clip.width, transition.mask.height * clip.height)
+      if (transition.aperture && transition.visibility <= 0) {
+        ctx.rect(0, 0, 0, 0)
+      } else if (transition.aperture && transition.visibility < 1) {
+        if (transition.aperture === 'circle') ctx.arc(clip.width / 2, clip.height / 2, Math.hypot(clip.width, clip.height) / 2 * transition.visibility, 0, Math.PI * 2)
+        else if (transition.aperture === 'radial') {
+          ctx.moveTo(clip.width / 2, clip.height / 2)
+          ctx.arc(clip.width / 2, clip.height / 2, Math.hypot(clip.width, clip.height) / 2, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * transition.visibility)
+          ctx.closePath()
+        } else if (transition.aperture === 'diagonal') {
+          ctx.moveTo(0, 0); ctx.lineTo(clip.width * 2 * transition.visibility, 0); ctx.lineTo(0, clip.height * 2 * transition.visibility); ctx.closePath()
+        } else if (transition.aperture === 'diamond') {
+          const x = clip.width / 2, y = clip.height / 2, dx = clip.width * transition.visibility, dy = clip.height * transition.visibility
+          ctx.moveTo(x, y - dy); ctx.lineTo(x + dx, y); ctx.lineTo(x, y + dy); ctx.lineTo(x - dx, y); ctx.closePath()
+        } else for (const strip of transitionBlindRects(transition.visibility)) ctx.rect(0, strip.y * clip.height, clip.width, strip.height * clip.height)
+      } else ctx.rect(transition.mask.x * clip.width, transition.mask.y * clip.height, transition.mask.width * clip.width, transition.mask.height * clip.height)
       ctx.clip()
       ctx.translate(transition.translateX * clip.width, transition.translateY * clip.height)
       ctx.translate(clip.width / 2, clip.height / 2)
@@ -517,13 +564,14 @@ export class TimelinePreview {
         const crop = clip.crop ?? { x: 0, y: 0, width: 1, height: 1 }
         const rect = fitRect(width * crop.width, height * crop.height, clip.width, clip.height, clip.fit)
         rect[0] += width * crop.x; rect[1] += height * crop.y
-        if (transition && ((transition.blur && transition.blurStrength) || (transition.color && transition.effect === 'fade'))) {
+        if (transition && ((transition.blur && transition.blurStrength) || (transition.color && ['fade', 'flash-white'].includes(transition.effect)))) {
           const layer = this.transitionCanvas ??= document.createElement('canvas'), blurred = this.transitionBlurCanvas ??= document.createElement('canvas')
-          const factor = Math.min(1, 2048 / Math.max(clip.width, clip.height)), w = Math.max(1, Math.ceil(clip.width * factor)), h = Math.max(1, Math.ceil(clip.height * factor))
+          const canvasScale = Math.max(this.canvas.width / this.project.width, this.canvas.height / this.project.height) * Math.max(animated.width / clip.width, animated.height / clip.height)
+          const factor = Math.min(1, canvasScale, 2048 / Math.max(clip.width, clip.height)), w = Math.max(1, Math.ceil(clip.width * factor)), h = Math.max(1, Math.ceil(clip.height * factor))
           if (layer.width !== w || layer.height !== h) { layer.width = blurred.width = w; layer.height = blurred.height = h }
           const original = layer.getContext('2d')!, softened = blurred.getContext('2d')!
           original.setTransform(1, 0, 0, 1, 0, 0); original.clearRect(0, 0, w, h); original.save(); original.scale(factor, factor)
-          if (transition.color && transition.effect === 'fade') { original.fillStyle = transition.color; original.fillRect(0, 0, clip.width, clip.height); original.globalAlpha = transition.opacity }
+          if (transition.color && ['fade', 'flash-white'].includes(transition.effect)) { original.fillStyle = transition.color; original.fillRect(0, 0, clip.width, clip.height); original.globalAlpha = transition.opacity }
           original.drawImage(source, ...rect); original.restore()
           if (transition.blur && transition.blurStrength) {
             softened.clearRect(0, 0, w, h); softened.save(); softened.filter = `blur(${transition.blur * factor}px)`; softened.drawImage(layer, 0, 0); softened.restore()
@@ -540,6 +588,7 @@ export class TimelinePreview {
   pause(): void { this.playbackGeneration++; this.render(this.lastTime, false) }
 
   private removeEntry(entry: MediaEntry): void {
+    this.liveMedia.delete(entry.media)
     if (entry.media instanceof HTMLVideoElement) {
       const request = this.readyVideoFrames.get(entry.media)
       if (request !== undefined) entry.media.cancelVideoFrameCallback(request)

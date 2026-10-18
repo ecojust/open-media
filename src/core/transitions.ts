@@ -1,6 +1,14 @@
-import { easeProgress, visualClipDuration } from './visual-animation.ts'
+import { easeProgress, validateTransitionParameters, visualClipDuration } from './visual-animation.ts'
 import { cloneProject, createTrack, newId, validateProject } from './project.ts'
-import type { Clip, Project, TransitionEffect } from './types.ts'
+import type { Clip, ClipTransition, Project, TransitionEffect } from './types.ts'
+
+export type TransitionParameters = Pick<ClipTransition, 'direction' | 'easing' | 'color' | 'blur' | 'scope'>
+export const TRANSITION_COLLECTIONS = [
+  { id: 'dissolve', name: '淡化与柔焦', effects: ['fade', 'flash-white', 'defocus'] },
+  { id: 'direction', name: '方向移动', effects: ['wipe-up', 'wipe-down', 'wipe-left', 'wipe-right', 'slide-left', 'slide-right'] },
+  { id: 'geometry', name: '几何开幕', effects: ['close-vertical', 'close-horizontal', 'diagonal', 'radial', 'iris', 'diamond', 'blinds'] },
+  { id: 'zoom', name: '缩放衔接', effects: ['zoom', 'zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down', 'zoom-through'] },
+] as const
 
 export const TRANSITION_PRESETS: readonly { id: TransitionEffect; name: string; description: string }[] = [
   { id: 'fade', name: '淡出淡入', description: '前段淡出至项目背景，后段逐渐显现' },
@@ -18,6 +26,14 @@ export const TRANSITION_PRESETS: readonly { id: TransitionEffect; name: string; 
   { id: 'zoom-fade-right', name: '靠右缩放淡化', description: '固定右侧：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
   { id: 'zoom-fade-up', name: '靠上缩放淡化', description: '固定顶部：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
   { id: 'zoom-fade-down', name: '靠下缩放淡化', description: '固定底部：前段从 100% 缩至 80% 并淡出，后段从 80% 放至 100% 并淡入' },
+  { id: 'diagonal', name: '斜向揭幕', description: '画面沿对角线收起与展开，以干净的斜切连接两个场景' },
+  { id: 'radial', name: '环弧开幕', description: '从顶部顺时针展开扇形视野，适合圆形结构与周期主题' },
+  { id: 'iris', name: '圆形光圈', description: '圆形视野向中心收拢，再展开至完整画面，适合聚焦观察对象' },
+  { id: 'diamond', name: '菱形开幕', description: '几何菱形收拢与展开，以简洁的切面衔接章节' },
+  { id: 'blinds', name: '阶梯百叶', description: '八道横向切片依次收起与展开，呈现有层次的节奏' },
+  { id: 'flash-white', name: '柔光闪白', description: '画面渐变至暖白柔光，再显现下一镜头，适合重要发现' },
+  { id: 'defocus', name: '失焦叠化', description: '画面柔化并淡出，下一镜头从朦胧中逐渐清晰' },
+  { id: 'zoom-through', name: '推近穿越', description: '前段轻推至 112% 并淡出，后段从 112% 回到原比例，衔接宏观与细节' },
 ]
 
 const EPSILON = 1e-6
@@ -75,21 +91,29 @@ function finish(project: Project): Project {
   return validateProject(project, { trusted: true })
 }
 
-export function addTransition(project: Project, time: number, effect: TransitionEffect, duration = 1, preferredTrackId?: string): Project {
+export function addTransition(project: Project, time: number, effect: TransitionEffect, duration = 1, preferredTrackId?: string, parameters?: TransitionParameters): Project {
   effectName(effect)
+  const options = parameters ? validateTransitionParameters(parameters) : {}
   const cut = findTransitionCut(project, time, preferredTrackId)
   if (!cut) throw new Error('需要两个首尾相接的视频片段。请先分割视频或将两个视频片段接拢，并解锁视频轨道。')
   const length = boundedDuration(project, cut, duration)
   const next = cloneProject(project)
   const existing = next.tracks.flatMap(track => track.clips.map(clip => ({ track, clip })))
     .find(({ clip }) => clip.transition?.fromClipId === cut.fromClipId && clip.transition.toClipId === cut.toClipId)
-  if (existing) return updateTransition(project, existing.clip.id, effect, length)
+  if (existing) {
+    const updated = updateTransition(project, existing.clip.id, effect, length)
+    if (parameters) {
+      const clip = updated.tracks.flatMap(track => track.clips).find(clip => clip.id === existing.clip.id)!
+      clip.transition = { effect, fromClipId: cut.fromClipId, toClipId: cut.toClipId, ...options }
+    }
+    return finish(updated)
+  }
   let track = next.tracks.find(track => track.kind === 'transition')
   if (track?.locked) throw new Error('请先解锁转场轨道。')
   if (!track) { track = createTrack('transition'); next.tracks.unshift(track) }
   track.clips.push({ id: newId('clip'), generatedAt: new Date().toISOString(), name: effectName(effect), start: cut.time - length / 2,
     trimIn: 0, trimOut: length, speed: 1, volume: 0, opacity: 1, x: 0, y: 0, width: project.width, height: project.height,
-    rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, transition: { effect, fromClipId: cut.fromClipId, toClipId: cut.toClipId } })
+    rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, transition: { effect, fromClipId: cut.fromClipId, toClipId: cut.toClipId, ...options } })
   return finish(next)
 }
 
@@ -159,6 +183,7 @@ export interface TransitionVisual {
   opacity: number
   /** Normalized clip-local visible rectangle. */
   mask: { x: number; y: number; width: number; height: number }
+  aperture?: 'circle' | 'diamond' | 'blinds' | 'diagonal' | 'radial'
   translateX: number
   translateY: number
   color?: string
@@ -181,6 +206,14 @@ export function transitionVisual(effect: TransitionEffect, visibility: number): 
     case 'slide-left': result.translateX = -(1 - v); break
     case 'slide-right': result.translateX = 1 - v; break
     case 'zoom': result.scale = v; result.opacity = v; break
+    case 'diagonal': result.aperture = 'diagonal'; break
+    case 'radial': result.aperture = 'radial'; break
+    case 'iris': result.aperture = 'circle'; break
+    case 'diamond': result.aperture = 'diamond'; break
+    case 'blinds': result.aperture = 'blinds'; break
+    case 'flash-white': result.opacity = v; result.color = '#fff9e8'; break
+    case 'defocus': result.opacity = v; result.blur = 16; result.blurStrength = 1 - v; break
+    case 'zoom-through': result.scale = 1 + 0.12 * (1 - v); result.opacity = v; break
     case 'zoom-fade':
     case 'zoom-fade-left':
     case 'zoom-fade-right':
@@ -197,6 +230,24 @@ export function transitionVisual(effect: TransitionEffect, visibility: number): 
   return result
 }
 
+/** Eight staggered strips, normalized to the original clip rectangle. */
+export function transitionBlindRects(visibility: number): { x: number; y: number; width: number; height: number }[] {
+  const v = Math.max(0, Math.min(1, visibility))
+  return Array.from({ length: 8 }, (_, row) => ({ x: 0, y: row / 8, width: 1, height: Math.max(0, Math.min(1, (v - 0.22 * row / 7) / 0.78)) / 8 }))
+}
+
+/** Shared by the material gallery and the timeline so customization previews match output. */
+export function transitionVisualForParameters(sourceEffect: TransitionEffect, visibility: number, parameters: TransitionParameters = {}): TransitionVisual {
+  let effect = sourceEffect
+  if (parameters.direction && effect.startsWith('wipe-')) effect = `wipe-${parameters.direction}` as TransitionEffect
+  if (parameters.direction && effect.startsWith('slide-')) effect = parameters.direction === 'left' || parameters.direction === 'up' ? 'slide-left' : 'slide-right'
+  const visual = transitionVisual(effect, easeProgress(visibility, parameters.easing))
+  if (parameters.direction && sourceEffect.startsWith('slide-') && ['up', 'down'].includes(parameters.direction)) { visual.translateY = visual.translateX; visual.translateX = 0 }
+  if (parameters.color) visual.color = parameters.color
+  if (parameters.blur !== undefined) { visual.blur = parameters.blur; visual.blurStrength = 1 - visual.visibility }
+  return visual
+}
+
 /** Matching native export semantics: each side fades/masks toward the cut. */
 export function transitionVisualAt(project: Project, clipId: string, time: number): TransitionVisual | undefined {
   for (const track of project.tracks) {
@@ -209,14 +260,7 @@ export function transitionVisualAt(project: Project, clipId: string, time: numbe
       if ((outgoing && time >= middle) || (!outgoing && time < middle)) continue
       const v = Math.min(1, Math.max(0, (outgoing ? middle - time : time - middle) / (durationOf(clip) / 2)))
       if ((binding.scope === 'outgoing' && !outgoing) || (binding.scope === 'incoming' && outgoing)) continue
-      let effect = binding.effect
-      if (binding.direction && effect.startsWith('wipe-')) effect = `wipe-${binding.direction}` as TransitionEffect
-      if (binding.direction && effect.startsWith('slide-')) effect = binding.direction === 'left' || binding.direction === 'up' ? 'slide-left' : 'slide-right'
-      const visual = transitionVisual(effect, easeProgress(v, binding.easing))
-      if (binding.direction && binding.effect.startsWith('slide-') && ['up', 'down'].includes(binding.direction)) { visual.translateY = visual.translateX; visual.translateX = 0 }
-      if (binding.color) visual.color = binding.color
-      if (binding.blur) { visual.blur = binding.blur; visual.blurStrength = 1 - visual.visibility }
-      return visual
+      return transitionVisualForParameters(binding.effect, v, binding)
     }
   }
   return undefined

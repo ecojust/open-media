@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createClip, createProject, createTrack, validateProject } from '../src/core/project.ts'
 import { addAsset, addClip, addTrack, clipDuration, commitHistory, createHistory, deleteClip, duplicateClip, findClip, moveClip, projectDuration, redoHistory, removeTrack, setTrack, splitClip, trimClip, undoHistory, updateClip } from '../src/core/timeline.ts'
 import { closeTimelineGaps, trimClipAtPlayhead } from '../src/core/timeline-editing.ts'
-import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, transitionVisualAt, updateTransition } from '../src/core/transitions.ts'
+import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, TRANSITION_COLLECTIONS, transitionBlindRects, transitionVisual, transitionVisualAt, transitionVisualForParameters, updateTransition } from '../src/core/transitions.ts'
 import { visibleVisualClips } from '../src/core/preview-position.ts'
 
 function fixture(offset = 0) {
@@ -17,6 +17,22 @@ function fixture(offset = 0) {
   return { project, trackId, video }
 }
 const effectClips = project => project.tracks.filter(track => track.kind === 'transition').flatMap(track => track.clips)
+
+test('通用转场分类完整，添加参数与实际时间线一致，重选时清除旧参数', () => {
+  assert.deepEqual(TRANSITION_COLLECTIONS.flatMap(group => group.effects).sort(), TRANSITION_PRESETS.map(item => item.id).sort())
+  const { project, trackId } = fixture(), original = structuredClone(project)
+  const parameters = { direction: 'up', easing: 'ease-out', scope: 'incoming' }
+  const next = addTransition(project, 4, 'slide-left', 2, trackId, parameters)
+  assert.equal(transitionVisualAt(next, 'first', 3.5), undefined)
+  assert.deepEqual(transitionVisualAt(next, 'second', 4.5), transitionVisualForParameters('slide-left', .5, parameters))
+  assert(transitionVisualAt(next, 'second', 4.5).translateY < 0)
+  const replaced = addTransition(next, 4, 'defocus', 1, trackId, { easing: 'linear', blur: 0, scope: 'both' })
+  assert.equal(effectClips(replaced).length, 1)
+  assert.equal(effectClips(replaced)[0].transition.direction, undefined)
+  assert.equal(transitionVisualAt(replaced, 'second', 4.25).blur, 0)
+  assert.deepEqual(project, original)
+  assert.throws(() => addTransition(project, 4, 'fade', 1, trackId, { blur: -1 }), /模糊/)
+})
 
 test('降低项目帧率会将最短转场扩至新帧率的两帧，锁定转场则拒绝隐式改动', () => {
   const { project } = fixture()
@@ -36,8 +52,8 @@ test('降低项目帧率会将最短转场扩至新帧率的两帧，锁定转�
 
 test('转场预设绑定最近切点，居中且不改变时间线总长度', () => {
   const { project, trackId } = fixture()
-  assert.equal(TRANSITION_PRESETS.length, 15)
-  assert.equal(new Set(TRANSITION_PRESETS.map(item => item.id)).size, 15)
+  assert.equal(TRANSITION_PRESETS.length, 23)
+  assert.equal(new Set(TRANSITION_PRESETS.map(item => item.id)).size, 23)
   assert.deepEqual(findTransitionCut(project, 3.7), { trackId, fromClipId: 'first', toClipId: 'second', time: 4, maxDuration: 4 })
   for (const preset of TRANSITION_PRESETS) {
     const edited = addTransition(project, 5, preset.id, 2)
@@ -214,4 +230,37 @@ test('一次添加/调整可撤销和重做，历史保留完整转场引用', (
   assert.equal(effectClips(undoHistory(history).present)[0].transition.effect, 'fade')
   assert.equal(effectClips(undoHistory(undoHistory(history)).present).length, 0)
   assert.equal(effectClips(redoHistory(undoHistory(history)).present)[0].transition.effect, 'zoom')
+})
+
+
+test('科普转场保持明确端点，保存重开支持形状、柔光与自定义参数', () => {
+  const { project } = fixture()
+  for (const id of ['iris', 'diamond', 'blinds', 'flash-white', 'defocus', 'zoom-through', 'diagonal', 'radial']) {
+    const edited = validateProject(JSON.parse(JSON.stringify(addTransition(project, 4, id, 2))))
+    const start = transitionVisualAt(edited, 'first', 3)
+    const cut = transitionVisualAt(edited, 'second', 4)
+    assert.equal(start.visibility, 1)
+    assert.equal(start.opacity, 1)
+    assert.equal(start.scale, 1)
+    assert.equal(cut.visibility, 0)
+    if (['flash-white', 'defocus', 'zoom-through'].includes(id)) assert.equal(cut.opacity, 0)
+    assert.deepEqual(transitionVisualAt(edited, 'first', 3.3), transitionVisualAt(edited, 'second', 4.7))
+    assert.equal(projectDuration(edited), projectDuration(project))
+  }
+  assert.equal(transitionVisual('iris', .5).aperture, 'circle')
+  assert.equal(transitionVisual('diamond', .5).aperture, 'diamond')
+  assert.equal(transitionVisual('zoom-through', 0).scale, 1.12)
+  assert.equal(transitionVisual('zoom-through', .5).scale, 1.06)
+  assert(transitionBlindRects(0).every(strip => strip.height === 0))
+  assert(transitionBlindRects(1).every(strip => strip.height === 1 / 8))
+  const halfway = transitionBlindRects(.5)
+  assert(halfway[0].height > halfway[7].height, '各切片依次展开')
+  const soft = addTransition(project, 4, 'defocus', 2)
+  assert.equal(transitionVisualAt(soft, 'first', 3.5).blur, 16)
+  effectClips(soft)[0].transition.blur = 0
+  assert.equal(transitionVisualAt(soft, 'first', 3.5).blur, 0, '显式关闭柔化应保留')
+  const flash = addTransition(project, 4, 'flash-white', 2)
+  assert.equal(transitionVisualAt(flash, 'first', 3.5).color, '#fff9e8')
+  effectClips(flash)[0].transition.color = '#ccbbaa'
+  assert.equal(transitionVisualAt(flash, 'first', 3.5).color, '#ccbbaa')
 })

@@ -63,9 +63,17 @@ export function validateSpeedRamp(value: unknown): ClipSpeedRamp {
   if (r.sourceRange !== undefined) { const range = visualRecord(r.sourceRange, '曲线源范围'); sourceRange = { start: visualNumber(range.start, '曲线源起点', 0, 86400), end: visualNumber(range.end, '曲线源终点', 0.001, 86400) }; if (sourceRange.end <= sourceRange.start) throw new Error('曲线源范围无效。') }
   return { points, easing: visualChoice(r.easing ?? 'linear', ANIMATION_EASINGS, '缓动'), preservePitch: r.preservePitch !== false, ...(sourceRange ? { sourceRange } : {}) }
 }
+export const OVERLAY_PRESETS: readonly { id: ClipOverlay['kind']; label: string }[] = [
+  { id: 'arrow', label: '箭头' }, { id: 'rectangle', label: '矩形框' },
+  { id: 'ellipse', label: '椭圆框' }, { id: 'brackets', label: '四角括号' },
+  { id: 'double-arrow', label: '双向箭头' }, { id: 'leader', label: '折线引注' },
+  { id: 'underline', label: '下划线' }, { id: 'check', label: '勾号' },
+  { id: 'highlight', label: '高亮区域' }, { id: 'mask', label: '遮罩' },
+  { id: 'spotlight', label: '聚光灯' }, { id: 'blur', label: '局部模糊' },
+]
 export function validateOverlay(value: unknown, width: number, height: number): ClipOverlay {
   const r = visualRecord(value, '视觉标注')
-  const result: ClipOverlay = { kind: visualChoice(r.kind, ['arrow', 'rectangle', 'highlight', 'mask', 'spotlight', 'blur'], '标注类型'), color: visualColor(r.color), strokeWidth: visualNumber(r.strokeWidth, '线宽', 1, 100), blurRadius: visualNumber(r.blurRadius, '模糊半径', 1, 50) }
+  const result: ClipOverlay = { kind: visualChoice(r.kind, OVERLAY_PRESETS.map(item => item.id), '标注类型'), color: visualColor(r.color), strokeWidth: visualNumber(r.strokeWidth, '线宽', 1, 100), blurRadius: visualNumber(r.blurRadius, '模糊半径', 1, 50) }
   if (result.kind === 'spotlight') {
     const region = visualRecord(r.region, '聚光区域')
     result.region = { x: visualNumber(region.x, '聚光横坐标', 0, width), y: visualNumber(region.y, '聚光纵坐标', 0, height), width: visualNumber(region.width, '聚光宽度', 1, width), height: visualNumber(region.height, '聚光高度', 1, height) }
@@ -130,6 +138,29 @@ export function drawClipOverlay(ctx: CanvasRenderingContext2D, clip: Clip): void
     const head = Math.min(w * 0.4, h * 0.5), cy = h / 2
     ctx.beginPath(); ctx.moveTo(line / 2, cy); ctx.lineTo(w - head, cy); ctx.stroke()
     ctx.beginPath(); ctx.moveTo(w - line / 2, cy); ctx.lineTo(w - head, cy - head); ctx.lineTo(w - head, cy + head); ctx.closePath(); ctx.fill()
+  } else if (overlay.kind === 'ellipse') {
+    ctx.beginPath(); ctx.ellipse(w / 2, h / 2, (w - line) / 2, (h - line) / 2, 0, 0, Math.PI * 2); ctx.stroke()
+  } else if (overlay.kind === 'brackets') {
+    const inset = line / 2, arm = Math.min(w, h) * .24
+    ctx.beginPath()
+    for (const [x, y, dx, dy] of [[inset, inset, 1, 1], [w - inset, inset, -1, 1], [inset, h - inset, 1, -1], [w - inset, h - inset, -1, -1]]) {
+      ctx.moveTo(x! + dx! * arm, y!); ctx.lineTo(x!, y!); ctx.lineTo(x!, y! + dy! * arm)
+    }
+    ctx.stroke()
+  } else if (overlay.kind === 'double-arrow') {
+    const head = Math.min(w * .24, h * .42), cy = h / 2
+    ctx.beginPath(); ctx.moveTo(head, cy); ctx.lineTo(w - head, cy); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(line / 2, cy); ctx.lineTo(head, cy - head); ctx.lineTo(head, cy + head); ctx.closePath(); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(w - line / 2, cy); ctx.lineTo(w - head, cy - head); ctx.lineTo(w - head, cy + head); ctx.closePath(); ctx.fill()
+  } else if (overlay.kind === 'leader') {
+    const dot = Math.min(line * .85, w * .08, h * .08), x = Math.max(line / 2, dot), y = h - Math.max(line / 2, dot)
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(w * .38, h * .22); ctx.lineTo(w - line / 2, h * .22); ctx.stroke()
+    ctx.beginPath(); ctx.arc(x, y, dot, 0, Math.PI * 2); ctx.fill()
+  } else if (overlay.kind === 'underline') {
+    ctx.beginPath(); ctx.moveTo(line / 2, h - line / 2); ctx.lineTo(w - line / 2, h - line / 2); ctx.stroke()
+  } else if (overlay.kind === 'check') {
+    const pad = line / 2, x = (value: number) => pad + (w - line) * value, y = (value: number) => pad + (h - line) * value
+    ctx.beginPath(); ctx.moveTo(x(.1), y(.48)); ctx.lineTo(x(.36), y(.82)); ctx.lineTo(x(.9), y(.12)); ctx.stroke()
   } else if (overlay.kind === 'rectangle') ctx.strokeRect(line / 2, line / 2, w - line, h - line)
   else if (overlay.kind === 'spotlight' && overlay.region) { const r = overlay.region; ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.rect(r.x, r.y, r.width, r.height); ctx.fill('evenodd') }
   else ctx.fillRect(0, 0, w, h)

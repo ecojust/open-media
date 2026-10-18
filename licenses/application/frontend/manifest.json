@@ -5,12 +5,12 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "4902f2d40daa6f6d40ee711cca29b56d7748ecd43b9287b363e65669502226fa",
+      "sha256": "25b1aaf6ddf8c8a3eb09a6c7a7de7e3964a04c9670a745c3cce01f0ac39a1ac8",
       "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives."
     },
     {
       "path": "package-lock.json",
-      "sha256": "39b8e75f8dc0a2e64ff27f97fea6f75d702f8cc76e1991c155f1442c26d14097",
+      "sha256": "7f732dfe65723fca5e79d90c0cc27b5e95e000006882072db8ea87c187ca0675",
       "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives."
     },
     {
@@ -29,8 +29,13 @@
       "role": "Included in the production browser bundle.",
       "bundledModules": [
         "node_modules/@tauri-apps/api/core.js",
+        "node_modules/@tauri-apps/api/dpi.js",
         "node_modules/@tauri-apps/api/event.js",
-        "node_modules/@tauri-apps/api/external/tslib/tslib.es6.js"
+        "node_modules/@tauri-apps/api/external/tslib/tslib.es6.js",
+        "node_modules/@tauri-apps/api/image.js",
+        "node_modules/@tauri-apps/api/webview.js",
+        "node_modules/@tauri-apps/api/webviewWindow.js",
+        "node_modules/@tauri-apps/api/window.js"
       ],
       "licenses": [
         {

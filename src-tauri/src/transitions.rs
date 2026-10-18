@@ -24,6 +24,14 @@ enum Effect {
     ZoomFadeRight,
     ZoomFadeUp,
     ZoomFadeDown,
+    Iris,
+    Diamond,
+    Blinds,
+    FlashWhite,
+    Defocus,
+    ZoomThrough,
+    Diagonal,
+    Radial,
 }
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -52,8 +60,7 @@ struct Binding {
     #[serde(default)]
     easing: Easing,
     color: Option<String>,
-    #[serde(default)]
-    blur: f64,
+    blur: Option<f64>,
     #[serde(default)]
     scope: Scope,
 }
@@ -123,8 +130,7 @@ impl Transitions {
                 }
                 let binding: Binding = serde_json::from_value(clip["transition"].clone())
                     .map_err(|_| "转场类型或关联片段无效，请重新添加转场。")?;
-                if !binding.blur.is_finite()
-                    || !(0.0..=50.0).contains(&binding.blur)
+                if binding.blur.is_some_and(|blur| !blur.is_finite() || !(0.0..=50.0).contains(&blur))
                     || binding.color.as_ref().is_some_and(|color| {
                         color.len() != 7
                             || !color.starts_with('#')
@@ -133,6 +139,9 @@ impl Transitions {
                 {
                     return Err("转场颜色或模糊参数无效。".into());
                 }
+                // The focus preset has a useful default; an explicit zero still
+                // disables blur, including in older saved projects.
+                let blur = binding.blur.unwrap_or(if matches!(binding.effect, Effect::Defocus) { 16.0 } else { 0.0 });
                 let from = sources
                     .get(binding.from_clip_id.as_str())
                     .ok_or("转场的前一个视频片段已丢失。")?;
@@ -197,7 +206,7 @@ impl Transitions {
                             direction: binding.direction,
                             easing: binding.easing,
                             color: binding.color.clone(),
-                            blur: binding.blur,
+                            blur,
                         });
                 }
                 if !matches!(binding.scope, Scope::Outgoing) {
@@ -209,7 +218,7 @@ impl Transitions {
                         direction: binding.direction,
                         easing: binding.easing,
                         color: binding.color.clone(),
-                        blur: binding.blur,
+                        blur,
                     });
                 }
             }
@@ -227,6 +236,7 @@ impl Transitions {
         filters: &mut Vec<String>,
         index: usize,
         frame_time: Option<f64>,
+        render_scale: f64,
     ) -> String {
         let Some(halves) = clip["id"].as_str().and_then(|id| self.0.get(id)) else {
             return chain;
@@ -250,9 +260,10 @@ impl Transitions {
             };
             let v = format!("({})", half.easing.expression(&progress));
             if half.blur > 0.0 {
+                let sigma = (half.blur * render_scale).clamp(0.000001, 1024.0);
                 chain+=&format!(",format=gbrap,split[transition_plain{index}_{part}][transition_blur{index}_{part}]");
                 filters.push(chain);
-                filters.push(format!("[transition_blur{index}_{part}]gblur=sigma={}:steps=2[transition_blurred{index}_{part}]",half.blur));
+                filters.push(format!("[transition_blur{index}_{part}]gblur=sigma={sigma}:steps=2:enable='gte({enabled_clock},{start})*lt({enabled_clock},{end})'[transition_blurred{index}_{part}]"));
                 filters.push(format!("[transition_plain{index}_{part}][transition_blurred{index}_{part}]blend=all_expr='A*{v}+B*(1-{v})':enable='gte({enabled_clock},{start})*lt({enabled_clock},{end})'[transition_mix{index}_{part}]"));
                 chain = format!("[transition_mix{index}_{part}]null");
             }
@@ -273,7 +284,16 @@ impl Transitions {
                 half.effect
             };
             let mask = match effect {
-                Effect::Fade => v.clone(),
+                Effect::Fade | Effect::FlashWhite | Effect::Defocus => v.clone(),
+                Effect::Iris => format!("gt({v},0)*lte(hypot(X-W/2,Y-H/2),hypot(W,H)*{v}/2)"),
+                Effect::Diamond => format!("gt({v},0)*lte(abs(2*X/W-1)+abs(2*Y/H-1),2*{v})"),
+                Effect::Diagonal => format!("gt({v},0)*lte(X/W+Y/H,2*{v})"),
+                Effect::Radial => format!("gt({v},0)*lte(mod(atan2(Y-H/2,X-W/2)+PI/2+2*PI,2*PI),2*PI*{v})"),
+                Effect::Blinds => {
+                    let row = "min(floor(Y*8/H),7)";
+                    let opening = format!("clip(({v}-0.22*({row})/7)/0.78,0,1)");
+                    format!("lt(mod(Y,H/8),H/8*{opening})")
+                }
                 Effect::WipeUp => format!("gte(Y,H*(1-{v}))"),
                 Effect::WipeDown => format!("lt(Y,H*{v})"),
                 Effect::WipeLeft => format!("gte(X,W*(1-{v}))"),
@@ -313,6 +333,12 @@ impl Transitions {
                         "gte({sample_x},0)*lt({sample_x},W)*gte({sample_y},0)*lt({sample_y},H)*{v}"
                     )
                 }
+                Effect::ZoomThrough => {
+                    let scale = format!("(1.12-0.12*{v})");
+                    sample_x = format!("(X-W/2)/{scale}+W/2");
+                    sample_y = format!("(Y-H/2)/{scale}+H/2");
+                    v.clone()
+                }
                 Effect::ZoomFade
                 | Effect::ZoomFadeLeft
                 | Effect::ZoomFadeRight
@@ -339,10 +365,9 @@ impl Transitions {
                     )
                 }
             };
-            if let Some(color) = half
-                .color
-                .as_ref()
-                .filter(|_| matches!(effect, Effect::Fade))
+            if let Some(color) = half.color.as_deref()
+                .filter(|_| matches!(effect, Effect::Fade | Effect::FlashWhite))
+                .or_else(|| matches!(effect, Effect::FlashWhite).then_some("#fff9e8"))
             {
                 let red = u8::from_str_radix(&color[1..3], 16).unwrap();
                 let green = u8::from_str_radix(&color[3..5], 16).unwrap();

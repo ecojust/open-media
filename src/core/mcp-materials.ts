@@ -3,14 +3,14 @@ import type { WatermarkMaterial } from './watermark-library.ts'
 import type { BackgroundMusicItem } from './background-music-catalog.ts'
 import type { VideoSegmentItem } from './video-segment-catalog.ts'
 import type { VideoSegmentPlacement } from './video-segment-presets.ts'
-import { addTextWatermark, addWatermark } from './watermark-track.ts'
+import { addTextWatermark, addWatermark, type TextWatermarkOptions } from './watermark-track.ts'
 import { chooseWatermarkSource } from './watermark-source.ts'
 import { addBackgroundMusic } from './background-music-track.ts'
 import { insertVideoSegment } from './video-segment-track.ts'
 import { MAX_PROJECT_DURATION } from './project.ts'
 
 export type McpMaterialKind = 'watermark' | 'music' | 'video_segment'
-export interface McpMaterialQuery { kind: McpMaterialKind; search?: string; offset?: number; limit?: number }
+export interface McpMaterialQuery { kind: McpMaterialKind; search?: string; collection?: 'general' | 'science'; offset?: number; limit?: number }
 export interface McpMaterialArguments {
   kind: McpMaterialKind
   id: string
@@ -18,6 +18,13 @@ export interface McpMaterialArguments {
   placement?: VideoSegmentPlacement
   heading?: string
   subheading?: string
+  titleLayout?: 'center' | 'left' | 'lower-third'
+  duration?: number
+  text?: string
+  color?: string
+  background?: string
+  animation?: TextWatermarkOptions['animation']
+  watermarkPlacement?: TextWatermarkOptions['placement']
 }
 export interface McpMaterialMetadata {
   id: string
@@ -29,11 +36,13 @@ export interface McpMaterialMetadata {
   width?: number
   height?: number
   tags?: string[]
+  collection?: 'science' | 'general'
   editableText?: boolean
   text?: string
   placement?: string
   heading?: string
   subheading?: string
+  titleLayout?: 'center' | 'left' | 'lower-third'
 }
 export interface McpMaterialDependencies {
   loadWatermarks?(): Promise<readonly WatermarkMaterial[]>
@@ -74,16 +83,18 @@ export async function listMcpMaterials(query: McpMaterialQuery, dependencies: Mc
   const offset = query.offset ?? 0, limit = query.limit ?? 50
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > 10000 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('素材分页参数无效。')
   if (query.search !== undefined && (typeof query.search !== 'string' || query.search.length > 200)) throw new Error('素材搜索文字过长或格式无效。')
+  if (query.collection !== undefined && !['general', 'science'].includes(query.collection)) throw new Error('素材专题无效。')
   let items: McpMaterialMetadata[]
   if (query.kind === 'watermark') {
-    items = (await watermarks(dependencies)).map(item => ({ id: item.id, name: item.name, category: item.category, description: item.tags.join(' · '), tags: [...item.tags], duration: item.duration, mediaKind: item.kind, width: item.width, height: item.height, editableText: item.kind === 'text', ...(item.kind === 'text' ? { text: item.textTemplate?.text } : {}), placement: item.placement }))
+    items = (await watermarks(dependencies)).map(item => ({ id: item.id, name: item.name, category: item.category, description: item.tags.join(' · '), tags: [...item.tags], ...(item.collection ? { collection: item.collection } : {}), duration: item.duration, mediaKind: item.kind, width: item.width, height: item.height, editableText: item.kind === 'text', ...(item.kind === 'text' ? { text: item.textTemplate?.text } : {}), placement: item.placement }))
   } else if (query.kind === 'music') {
     items = (await music(dependencies)).map(item => ({ id: item.id, name: item.title, category: item.style, description: item.description, duration: item.duration, mediaKind: 'audio' }))
   } else {
-    items = (await videoSegments(dependencies)).map(item => ({ id: item.id, name: item.title, category: item.style, description: item.description, duration: item.duration, mediaKind: 'video', width: item.width, height: item.height, editableText: true, placement: item.placement, heading: item.heading, subheading: item.subheading }))
+    items = (await videoSegments(dependencies)).map(item => ({ id: item.id, name: item.title, category: item.style, description: item.description, ...(item.collection ? { collection: item.collection, tags: [...(item.collection === 'general' ? ['通用', '可编辑'] : ['科普', '科学']), item.placement === 'prepend' ? '片头' : '片尾'] } : {}), duration: item.duration, mediaKind: 'video', width: item.width, height: item.height, editableText: true, placement: item.placement, heading: item.heading, subheading: item.subheading, titleLayout: item.layout ?? 'center' }))
   }
+  if (query.collection) items = items.filter(item => item.collection === query.collection)
   const search = query.search?.trim().toLowerCase()
-  if (search) items = items.filter(item => [item.id, item.name, item.category, item.description, item.text, item.heading, item.subheading].some(value => value?.toLowerCase().includes(search)))
+  if (search) items = items.filter(item => [item.id, item.name, item.category, item.description, item.text, item.heading, item.subheading, ...(item.tags ?? [])].some(value => value?.toLowerCase().includes(search)))
   return { kind: query.kind, total: items.length, offset, limit, items: items.slice(offset, offset + limit) }
 }
 
@@ -108,10 +119,13 @@ export async function prepareMcpMaterial(project: Project, args: McpMaterialArgu
   if (typeof args.id !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(args.id)) throw new Error('内置素材标识无效。')
   const start = args.start ?? 0
   if (!Number.isFinite(start) || start < 0 || start > MAX_PROJECT_DURATION) throw new Error('素材起点无效。')
-  if (args.kind !== 'video_segment' && (args.placement !== undefined || args.heading !== undefined || args.subheading !== undefined)) throw new Error('片头片尾位置和标题仅适用于视频片段。')
+  if (args.kind !== 'video_segment' && (args.placement !== undefined || args.heading !== undefined || args.subheading !== undefined || args.titleLayout !== undefined)) throw new Error('片头片尾位置和标题仅适用于视频片段。')
   if (args.placement !== undefined && !['prepend', 'append'].includes(args.placement)) throw new Error('请选择向前或向后添加视频片段。')
   if (args.heading !== undefined && (typeof args.heading !== 'string' || args.heading.length > 120 || args.heading.includes('\0'))) throw new Error('片头片尾标题最多支持 120 个字符。')
   if (args.subheading !== undefined && (typeof args.subheading !== 'string' || args.subheading.length > 240 || args.subheading.includes('\0'))) throw new Error('片头片尾副标题最多支持 240 个字符。')
+  const hasTextOptions = [args.text, args.color, args.background, args.animation, args.watermarkPlacement].some(value => value !== undefined)
+  if (hasTextOptions && args.kind !== 'watermark') throw new Error('文字样式参数仅适用于可编辑文字水印。')
+  if (args.duration !== undefined && args.kind === 'music') throw new Error('内置音乐的时长请通过音频片段属性调整。')
   options.signal?.throwIfAborted()
   const native = options.native ?? await import('../native.ts')
   if (!native.isDesktop()) throw new Error('MCP 内置素材操作需要桌面端。')
@@ -125,10 +139,11 @@ export async function prepareMcpMaterial(project: Project, args: McpMaterialArgu
       options.signal?.throwIfAborted()
       if (!material) throw new Error('找不到这个内置水印，请重新浏览素材库。')
       if (material.kind === 'text') {
-        const edit = addTextWatermark(project, material, start)
+        const edit = addTextWatermark(project, material, start, { text: args.text, color: args.color, background: args.background, duration: args.duration, animation: args.animation, placement: args.watermarkPlacement })
         options.signal?.throwIfAborted()
         return { project: edit.project, label: 'MCP 添加可编辑文字水印', selection: { clipId: edit.clipId, trackId: edit.trackId } }
       }
+      if (hasTextOptions || args.duration !== undefined) throw new Error('此水印是媒体素材；自定义文字、配色、动画和时长仅适用于可编辑文字水印。')
       url = bundledUrl((options.chooseWatermarkSource ?? chooseWatermarkSource)(material))
       expectedKind = material.kind
       const extension = new URL(url, 'https://bundled.invalid/').pathname.split('.').pop() || (material.kind === 'image' ? 'png' : 'mp4')
@@ -149,7 +164,7 @@ export async function prepareMcpMaterial(project: Project, args: McpMaterialArgu
       options.signal?.throwIfAborted()
       if (!material) throw new Error('找不到这个内置视频片段，请重新浏览素材库。')
       const placement = args.placement ?? material.placement
-      const caption = { heading: args.heading ?? material.heading, subheading: args.subheading ?? material.subheading, textColor: material.textColor }
+      const caption = { heading: args.heading ?? material.heading, subheading: args.subheading ?? material.subheading, textColor: material.textColor, layout: args.titleLayout ?? material.layout, ...(args.duration !== undefined ? { duration: args.duration } : {}) }
       url = bundledUrl(material.url)
       name = `${material.title}.${material.filename.split('.').pop() || 'webm'}`
       expectedKind = 'video'

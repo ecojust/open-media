@@ -51,7 +51,7 @@ async function main() {
   const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
   await server.listen()
   const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || process.env.CHROMIUM_PATH || chromium.executablePath(), headless: true, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } }), errors = []
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: 'reduce' }), errors = []
   page.on('pageerror', error => errors.push(error.message))
   page.setDefaultTimeout(20000)
   try {
@@ -68,18 +68,26 @@ async function main() {
     await expect(page.getByLabel('项目宽度', { exact: true })).toBeVisible()
     await page.getByTestId('transition-open').click()
     const gallery = page.getByRole('dialog', { name: '转场', exact: true })
-    await expect(gallery.getByRole('radio')).toHaveCount(15)
-    for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down']) {
+    await expect(gallery.getByRole('radio')).toHaveCount(23)
+    await gallery.getByRole('button', { name: '几何开幕 7' }).click()
+    await expect(gallery.getByRole('radio')).toHaveCount(7)
+    await page.screenshot({ path: '/tmp/open-media-science-transition-library.png' })
+    await gallery.getByRole('button', { name: '全部 23' }).click()
+    await expect(gallery.getByRole('radio')).toHaveCount(23)
+    for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down', 'iris', 'diamond', 'blinds', 'flash-white', 'defocus', 'zoom-through', 'diagonal', 'radial']) {
       await expect(gallery.locator(`input[value="${effect}"]`)).toHaveCount(1)
     }
     await page.screenshot({ path: '/tmp/open-media-transition-library.png' })
     await expect(gallery).toContainText('切点 2.50 秒')
     await gallery.locator('.transition-card').filter({ hasText: '纵向开合' }).click()
     await gallery.getByLabel('转场时长', { exact: true }).fill('1.2')
+    await gallery.getByLabel('转场动画节奏').selectOption('ease-out')
+    await gallery.getByLabel('转场作用范围').selectOption('both')
     await gallery.getByTestId('transition-apply').click()
     await expect(gallery).toHaveCount(0)
     let next = await read(page), effect = effects(next)[0]
     assert.deepEqual([effect.transition.effect, effect.start, effect.trimOut], ['close-vertical', 1.9, 1.2])
+    assert.equal(effect.transition.easing, 'ease-out'); assert.equal(effect.transition.scope, 'both')
     await expect(clipButton(page, effect.id)).toHaveClass(/transition/)
     await expect(clipButton(page, effect.id).locator('.trim-handle')).toHaveCount(0)
     await expect(page.getByRole('button', { name: '复制片段', exact: true })).toBeDisabled()
@@ -124,10 +132,15 @@ async function main() {
     assert.equal(effects(await read(page))[0].transition.effect, 'zoom-fade-down')
     assert.equal(effects(await read(page))[0].start, 1.9)
     assert.equal(effects(await read(page))[0].trimOut, 1.2)
-    console.log('PASS 转场库15效果、5种缩放淡化应用及修改、切点居中、禁止自由拖动/复制、撤销重做')
+    for (const effectId of ['iris', 'diamond', 'blinds', 'flash-white', 'defocus', 'zoom-through', 'diagonal', 'radial']) {
+      await page.getByLabel('片段转场效果').selectOption(effectId)
+      assert.equal(effects(await read(page))[0].transition.effect, effectId)
+    }
+    console.log('PASS 转场库23效果、5种缩放淡化及8种科普转场应用及修改、切点居中、禁止自由拖动/复制、撤销重做')
 
     await page.getByTestId('video-segment-intro-open').click()
     const segments = page.getByRole('dialog', { name: '片头', exact: true })
+    await segments.getByTestId('video-segment-collection-all').click()
     await expect(segments.getByTestId('video-segment-item')).toHaveCount(templateIds.prepend.length)
     assert.deepEqual(await segments.getByTestId('video-segment-item').evaluateAll(items => items.map(item => item.dataset.segmentId)), templateIds.prepend)
     await expect(segments.getByRole('radio')).toHaveCount(0)
@@ -157,6 +170,7 @@ async function main() {
 
     await page.getByTestId('video-segment-outro-open').click()
     const endings = page.getByRole('dialog', { name: '片尾', exact: true })
+    await endings.getByTestId('video-segment-collection-all').click()
     await expect(endings.getByTestId('video-segment-item')).toHaveCount(templateIds.append.length)
     assert.deepEqual(await endings.getByTestId('video-segment-item').evaluateAll(items => items.map(item => item.dataset.segmentId)), templateIds.append)
     await expect(endings.getByRole('radio')).toHaveCount(0)

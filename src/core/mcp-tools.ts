@@ -103,7 +103,7 @@ export function validateMcpToolArguments(name: string, args: unknown): Record<st
   if (['open_media_playback_set', 'open_media_speech_settings_set'].includes(name) && !Object.keys(result).some(key => key !== 'expectedRevision')) throw new Error('至少提供一个设置字段。')
   if (name === 'open_media_material_add') {
     if (result.kind === 'video_segment' && result.start !== undefined) throw new Error('视频片段通过 placement 指定前插或后插，不使用 start。')
-    if (result.kind !== 'video_segment' && ['placement', 'heading', 'subheading'].some(key => result[key] !== undefined)) throw new Error('placement、heading 和 subheading 仅适用于视频片段模板。')
+    if (result.kind !== 'video_segment' && ['placement', 'heading', 'subheading', 'titleLayout'].some(key => result[key] !== undefined)) throw new Error('placement、heading、subheading 和 titleLayout 仅适用于视频片段模板。')
   }
   return result
 }

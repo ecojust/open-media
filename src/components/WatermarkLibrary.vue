@@ -3,18 +3,26 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Compon
 import { applyChromaKey, createChromaKey } from '../core/chroma-key'
 import { WATERMARK_CATEGORIES, WATERMARK_MATERIALS, type WatermarkMaterial } from '../core/watermark-library'
 import { chooseWatermarkSource } from '../core/watermark-source'
+import type { TextWatermarkOptions } from '../core/watermark-track'
+import TextWatermarkCustomizer from './TextWatermarkCustomizer.vue'
 import Icon from './Icon.vue'
 
-const props = withDefaults(defineProps<{ busy?: boolean; error?: string }>(), { busy: false, error: '' })
-const emit = defineEmits<{ select: [material: WatermarkMaterial]; 'import-local': [] }>()
+const props = withDefaults(defineProps<{ busy?: boolean; error?: string; projectWidth?: number; projectHeight?: number }>(), { busy: false, error: '' })
+const emit = defineEmits<{ select: [material: WatermarkMaterial, options?: TextWatermarkOptions]; 'import-local': [] }>()
 const search = ref(''), category = ref('全部'), activePreviewId = ref(''), previewReady = ref(false), failedPreviewId = ref('')
+const collection = ref<'all' | 'science' | 'general'>('general')
+const customizing = ref<WatermarkMaterial>()
+const generalCount = WATERMARK_MATERIALS.filter(material => material.collection === 'general').length
+const scienceCount = WATERMARK_MATERIALS.filter(material => material.collection === 'science').length
+const collectionMaterials = computed(() => WATERMARK_MATERIALS.filter(material => collection.value === 'all' || material.collection === collection.value))
 const scroller = ref<HTMLElement | null>(null)
 const categories = ['全部', ...WATERMARK_CATEGORIES]
 const page = ref(1), pageSize = 24
-const categoryCounts = Object.fromEntries(categories.map(item => [item, item === '全部' ? WATERMARK_MATERIALS.length : WATERMARK_MATERIALS.filter(material => material.category === item).length]))
+const categoryCounts = computed(() => Object.fromEntries(categories.map(item => [item, item === '全部' ? collectionMaterials.value.length : collectionMaterials.value.filter(material => material.category === item).length])))
+const visibleCategories = computed(() => categories.filter(item => collection.value === 'all' || categoryCounts.value[item]))
 const filteredMaterials = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
-  return WATERMARK_MATERIALS.filter(material => (category.value === '全部' || material.category === category.value)
+  return collectionMaterials.value.filter(material => (category.value === '全部' || material.category === category.value)
     && (!query || [material.name, material.category, material.textTemplate?.text ?? '', ...material.tags].join(' ').toLocaleLowerCase().includes(query)))
 })
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredMaterials.value.length / pageSize)))
@@ -106,12 +114,15 @@ function leavePreview(id: string): void { if (activePreviewId.value === id) stop
 function add(material: WatermarkMaterial): void {
   if (props.busy) return
   stopPreview()
+  if (material.kind === 'text' && material.collection === 'general') { customizing.value = material; return }
   emit('select', material)
 }
+function addCustomized(options: TextWatermarkOptions): void { if (customizing.value && !props.busy) emit('select', customizing.value, options) }
 function importLocal(): void { if (!props.busy) { stopPreview(); emit('import-local') } }
 function visibilityChanged(): void { if (document.hidden) stopPreview() }
 function resetPagePreview(): void { stopPreview(); failedPreviewId.value = ''; if (scroller.value) scroller.value.scrollTop = 0 }
 watch([search, category], () => { page.value = 1; resetPagePreview() })
+watch(collection, () => { category.value = '全部'; page.value = 1; resetPagePreview() })
 watch(page, resetPagePreview)
 watch(() => props.busy, busy => { if (busy) stopPreview() })
 onMounted(() => document.addEventListener('visibilitychange', visibilityChanged))
@@ -119,13 +130,20 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
 </script>
 
 <template>
-  <section class="watermark-library" data-testid="watermark-library" aria-label="水印素材库" :aria-busy="busy">
+  <TextWatermarkCustomizer v-if="customizing" :material="customizing" :busy="busy" :project-width="projectWidth" :project-height="projectHeight" :error="error" @back="customizing = undefined" @add="addCustomized" />
+  <section v-else class="watermark-library" :class="{ 'science-collection': collection !== 'all' }" data-testid="watermark-library" aria-label="水印素材库" :aria-busy="busy">
     <div class="library-toolbar">
       <label class="material-search"><Icon name="search" :size="16" /><input v-model="search" type="search" aria-label="搜索水印素材" placeholder="搜索题材、动画、文字…" autocomplete="off" :disabled="busy" data-testid="watermark-search" /></label>
       <button type="button" class="import-local" :disabled="busy" data-testid="watermark-import-local" @click="importLocal"><Icon name="import" :size="15" /><span>导入素材</span></button>
     </div>
+    <div class="material-collections" role="group" aria-label="水印素材专题">
+      <button type="button" :aria-pressed="collection === 'general'" :disabled="busy" data-testid="watermark-collection-general" @click="collection = 'general'">通用样式<span>{{ generalCount }}</span></button>
+      <button type="button" :aria-pressed="collection === 'all'" :disabled="busy" data-testid="watermark-collection-all" @click="collection = 'all'">全部素材</button>
+      <button type="button" :aria-pressed="collection === 'science'" :disabled="busy" data-testid="watermark-collection-science" @click="collection = 'science'">科普精选<span>{{ scienceCount }}</span></button>
+      <span class="collection-hint">{{ collection === 'general' ? '自由改字 · 配色 · 入退场动画' : '标题 · 标注 · 装饰' }}</span>
+    </div>
     <div class="material-categories" role="group" aria-label="水印素材分类">
-      <button v-for="item in categories" :key="item" type="button" :aria-pressed="category === item" :disabled="busy" :data-watermark-category="item" @click="category = item">{{ item }}<span class="category-count">{{ categoryCounts[item] }}</span></button>
+      <button v-for="item in visibleCategories" :key="item" type="button" :aria-pressed="category === item" :disabled="busy" :data-watermark-category="item" @click="category = item">{{ item }}<span class="category-count">{{ categoryCounts[item] }}</span></button>
     </div>
     <div class="library-summary"><span>{{ filteredMaterials.length }} 个{{ search.trim() ? '匹配' : '内置' }}素材</span><span><Icon name="volume-off" :size="12" />悬停预览 · 从当前刻度添加</span></div>
     <p v-if="error" class="library-error" role="alert" data-testid="watermark-error">{{ error }}</p>
@@ -142,7 +160,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
           <div class="material-detail"><div><strong :title="material.name">{{ material.name }}</strong><span>{{ material.category }}<i />{{ material.duration }} 秒</span></div><button type="button" class="material-add" :aria-label="`添加 ${material.name}`" :title="`从当前刻度添加 ${material.name}`" :disabled="busy" :data-watermark-add="material.id" @click="add(material)"><Icon name="plus" :size="17" /></button></div>
         </article>
       </div>
-      <div v-else class="material-empty" role="status"><Icon name="search" :size="28" /><strong>没有找到匹配的素材</strong><span>试试其他关键词，或导入自己的图片、视频。</span><button type="button" :disabled="busy" @click="search = ''; category = '全部'">查看全部素材</button></div>
+      <div v-else class="material-empty" role="status"><Icon name="search" :size="28" /><strong>没有找到匹配的素材</strong><span>试试其他关键词，或导入自己的图片、视频。</span><button type="button" :disabled="busy" @click="search = ''; category = '全部'; collection = 'all'">查看全部素材</button></div>
     </div>
     <nav v-if="pageCount > 1" class="material-pagination" aria-label="水印素材分页" data-testid="watermark-pagination">
       <button type="button" :disabled="busy || page === 1" data-testid="watermark-previous-page" @click="page--">上一页</button>
@@ -162,6 +180,11 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
 .watermark-library button{box-sizing:border-box;font:inherit;cursor:pointer}
 .watermark-library .import-local{display:flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;min-height:36px;padding:6px 11px;border:1px solid var(--ed-border);border-radius:8px;background:var(--ed-panel);color:var(--ed-text);font-size:11px;white-space:nowrap}
 .watermark-library .import-local:hover:not(:disabled){border-color:var(--ed-accent);color:var(--ed-accent);background:var(--ed-bg)}
+.material-collections{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:12px;padding-bottom:11px;border-bottom:1px solid var(--ed-border)}
+.material-collections>button{display:flex;align-items:center;gap:6px;min-height:30px;padding:4px 10px;border:1px solid var(--ed-border);border-radius:7px;background:var(--ed-panel);color:var(--ed-muted);font-size:11px}
+.material-collections>button[aria-pressed=true]{border-color:var(--ed-accent);background:color-mix(in srgb,var(--ed-accent) 12%,var(--ed-panel));color:var(--ed-accent)}
+.material-collections>button>span{font-size:9px;font-variant-numeric:tabular-nums;opacity:.8}
+.collection-hint{margin-left:auto;color:var(--ed-muted);font-size:10px;line-height:1.6}
 .material-categories{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-bottom:10px}
 .watermark-library .material-categories button{display:block;flex-shrink:0;min-height:29px;padding:4px 10px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ed-muted);font-size:11px;line-height:19px;white-space:nowrap}
 .watermark-library .material-categories button:hover:not(:disabled){color:var(--ed-text);background:var(--ed-bg)}
@@ -174,6 +197,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', visibil
 .material-card{min-width:0;border:1px solid var(--ed-border);border-radius:9px;background:var(--ed-panel);overflow:hidden}
 .watermark-library .material-preview{display:block;position:relative;width:100%;min-height:0;padding:0;aspect-ratio:16/9;overflow:hidden;border:0;border-bottom:1px solid var(--ed-border);border-radius:0;background-color:color-mix(in srgb,var(--ed-bg) 65%,var(--ed-panel));background-image:conic-gradient(var(--ed-border) 25%,transparent 0 50%,var(--ed-border) 0 75%,transparent 0);background-size:16px 16px;color:var(--ed-text)}
 .material-preview img,.material-preview canvas{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain;pointer-events:none;user-select:none}
+.science-collection .material-preview{background-color:#15212d;background-image:conic-gradient(#1b2936 25%,transparent 0 50%,#1b2936 0 75%,transparent 0);background-size:24px 24px}
 .material-preview canvas{opacity:0}
 .material-preview canvas.ready{opacity:1}
 .material-preview.preview-ready img{opacity:0}

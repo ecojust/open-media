@@ -4,7 +4,9 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { VIDEO_SEGMENT_PRESETS } from '../src/core/video-segment-presets.ts'
+import { VIDEO_SEGMENT_PRESETS as ALL_VIDEO_SEGMENT_PRESETS } from '../src/core/video-segment-presets.ts'
+
+const VIDEO_SEGMENT_PRESETS = ALL_VIDEO_SEGMENT_PRESETS.filter(item => !item.collection)
 
 const directory = new URL('../src/assets/video-segments/', import.meta.url)
 const manifest = JSON.parse(readFileSync(new URL('manifest.json', directory), 'utf8'))

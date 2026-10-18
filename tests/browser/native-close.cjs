@@ -11,7 +11,17 @@ async function fixture(browser, url, autoSave = false) {
   await page.addInitScript(autoSave => {
     localStorage.setItem('open-media:autosave', String(autoSave))
     const callbacks = new Map(), listeners = new Map()
-    const state = window.closeHarness = { calls: [], jobs: [], saveMode: 'ready', closeMode: 'ready', jobsMode: 'ready', saved: [] }
+    const state = window.closeHarness = { calls: [], jobs: [], saveMode: 'ready', closeMode: 'ready', jobsMode: 'ready', saved: [], draftMode: 'ready', draftCompletions: [] }
+    const complete = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete')
+    Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {
+      ...complete,
+      set(handler) {
+        complete.set.call(this, typeof handler === 'function' ? function (event) {
+          if (state.draftMode === 'hold' && this.mode === 'readwrite' && this.objectStoreNames.contains('projects')) state.draftCompletions.push(() => handler.call(this, event))
+          else handler.call(this, event)
+        } : handler)
+      },
+    })
     let callbackId = 0
     window.__TAURI_INTERNALS__ = {
       transformCallback(callback) { const id = ++callbackId; callbacks.set(id, callback); return id },
@@ -65,6 +75,13 @@ const calls = (page, command) => page.evaluate(command => window.closeHarness.ca
 const dialog = page => page.getByRole('dialog', { name: '关闭应用', exact: true })
 async function setMode(page, key, value) { await page.evaluate(({ key, value }) => { window.closeHarness[key] = value }, { key, value }) }
 async function checkNoExit(page) { assert.equal(await calls(page, 'close_native_window'), 0) }
+async function readDraft(page, id) {
+  return page.evaluate(async id => {
+    const { loadProject } = await import('/src/core/storage.ts')
+    const restored = await loadProject(id || localStorage.getItem('open-media:last-project'))
+    try { return restored.project } finally { restored.revoke() }
+  }, id)
+}
 
 async function main() {
   const { createServer } = await import('vite')
@@ -184,6 +201,29 @@ async function main() {
       assert.deepEqual(await page.evaluate(async () => (await (await import('/src/core/storage.ts')).listProjects()).map(project => project.title)), ['已有本地草稿'])
       await finish()
       console.log('PASS 自动保存草稿后仍提示未写入文件的修改；全部关闭保留已有草稿，不另写项目文件或覆盖草稿')
+    }
+    {
+      const { page, finish } = await fixture(browser, url, true)
+      await rename(page, '已保存且撤销后应保留的 A')
+      await page.getByTestId('save-project').click()
+      await expect(page.locator('.status-main')).toContainText('项目已保存')
+      const baseline = await readDraft(page)
+      await expect(page.locator('.project-title > i')).toHaveCount(0)
+      await setMode(page, 'draftMode', 'hold')
+      await rename(page, '仍在保存的 B')
+      await expect.poll(() => page.evaluate(() => window.closeHarness.draftCompletions.length)).toBe(1)
+      await page.getByRole('button', { name: '撤销', exact: true }).click()
+      await expect(page.locator('.project-title')).toHaveText(baseline.title)
+      await expect(page.locator('.project-title > i')).toHaveCount(0)
+      await close(page)
+      await checkNoExit(page)
+      await expect(dialog(page)).toHaveCount(0)
+      await page.evaluate(() => { const state = window.closeHarness; state.draftMode = 'ready'; state.draftCompletions.splice(0).forEach(complete => complete()) })
+      await expect.poll(() => calls(page, 'close_native_window')).toBe(1)
+      assert.deepEqual(await readDraft(page, baseline.id), baseline, '关闭前须保留撤销后的 A，不能让旧 B 成为最后草稿')
+      assert.equal(await calls(page, 'save_project_file'), 1, '撤销回已保存版本后关闭只补写草稿，不重写项目文件')
+      await finish()
+      console.log('PASS 旧草稿写入期间撤销回已保存版本，关闭前先提交撤销后的草稿，不遗留旧版本')
     }
     {
       const { page, finish } = await fixture(browser, url)

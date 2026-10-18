@@ -1,10 +1,19 @@
-import { validateProject } from './project.ts'
+import { newId, validateProject } from './project.ts'
 import { projectDuration } from './timeline.ts'
 import type { ImportedProject, MediaAsset, Project, ProjectSummary } from './types.ts'
 
 const DATABASE_NAME = 'open-media-projects'
 const DATABASE_VERSION = 1
 const pendingSaves = new Map<string, Promise<string>>()
+const committedBlobRevisions = new WeakMap<Blob, Map<string, string>>()
+type StoredProject = Project & { localDraftRevision?: string }
+
+function rememberStoredBlob(blob: Blob, key: string, revision: string | undefined): void {
+  if (typeof revision !== 'string' || !revision) return
+  let revisions = committedBlobRevisions.get(blob)
+  if (!revisions) { revisions = new Map(); committedBlobRevisions.set(blob, revisions) }
+  revisions.set(key, revision)
+}
 
 function storedSaveTime(value: unknown): string | undefined {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return undefined
@@ -79,34 +88,47 @@ export function saveProject(project: Project, blobs: Map<string, Blob> = new Map
 }
 
 async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promise<string> {
-  const clean = validateProject(project, { trusted: true })
+  const clean = project
   const db = await openDatabase()
   try {
-    const reading = db.transaction(['projects', 'blobs'], 'readonly')
-    const readDone = completed(reading)
-    const oldProjectRequest = request(reading.objectStore('projects').get(clean.id))
-    const existingRequests = clean.assets.map((asset) => request(reading.objectStore('blobs').get(blobKey(clean.id, asset.id))))
-    const [oldProject, existing] = await Promise.all([oldProjectRequest, Promise.all(existingRequests), readDone]).then(([previous, available]) => [previous as Project | undefined, available as (Blob | undefined)[]] as const)
+    const durable = new Set(clean.assets.filter((asset) => asset.nativePath && asset.url && !asset.url.startsWith('blob:') && !asset.sourceUrl?.startsWith('blob:')).map((asset) => asset.id))
+    const unsupplied = clean.assets.filter((asset) => !blobs.has(asset.id) && !durable.has(asset.id))
+    const existing = new Set<string>()
+    if (unsupplied.length) {
+      const reading = db.transaction('blobs', 'readonly')
+      const readDone = completed(reading)
+      // Existence checks must not deserialize every original media file on each edit.
+      const keys = unsupplied.map((asset) => request(reading.objectStore('blobs').getKey(blobKey(clean.id, asset.id))))
+      const [values] = await Promise.all([Promise.all(keys), readDone])
+      values.forEach((key, index) => { if (key !== undefined) existing.add(unsupplied[index]!.id) })
+    }
     const pending = new Map<string, Blob>()
-    for (const [index, asset] of clean.assets.entries()) {
-      const durableNativeAsset = asset.nativePath && asset.url && !asset.url.startsWith('blob:') && !asset.sourceUrl?.startsWith('blob:')
+    for (const asset of clean.assets) {
       const provided = blobs.get(asset.id)
       if (provided) {
         if (!provided.size) throw new Error(`素材“${asset.name}”为空，项目未保存。`)
         pending.set(asset.id, provided)
-      } else if (!durableNativeAsset && !existing[index]) pending.set(asset.id, await fetchAssetBlob(asset))
-      if (!durableNativeAsset) { asset.url = ''; delete asset.sourceUrl; delete asset.nativePath }
+      } else if (!durable.has(asset.id) && !existing.has(asset.id)) pending.set(asset.id, await fetchAssetBlob(asset))
+      if (!durable.has(asset.id)) { asset.url = ''; delete asset.sourceUrl; delete asset.nativePath }
     }
-    const savedAt = new Date().toISOString()
     const writing = db.transaction(['projects', 'blobs'], 'readwrite')
     const writeDone = completed(writing)
     const blobStore = writing.objectStore('blobs')
     try {
-      for (const [assetId, blob] of pending) blobStore.put(blob, blobKey(clean.id, assetId))
+      const projectStore = writing.objectStore('projects')
+      const oldProject = await request(projectStore.get(clean.id)) as StoredProject | undefined
+      // Blobs are immutable. Reuse only an identical instance from the current committed
+      // revision, checked inside this write transaction so another window cannot race it.
+      const reusable = [...pending].filter(([assetId, blob]) => oldProject?.localDraftRevision && committedBlobRevisions.get(blob)?.get(blobKey(clean.id, assetId)) === oldProject.localDraftRevision)
+      const reusableKeys = await Promise.all(reusable.map(([assetId]) => request(blobStore.getKey(blobKey(clean.id, assetId)))))
+      const retainedBlobs = new Set(reusable.filter((_, index) => reusableKeys[index] !== undefined).map(([assetId]) => assetId))
+      for (const [assetId, blob] of pending) if (!retainedBlobs.has(assetId)) blobStore.put(blob, blobKey(clean.id, assetId))
       const retained = new Set(clean.assets.map((asset) => asset.id))
       for (const asset of oldProject?.assets ?? []) if (!retained.has(asset.id)) blobStore.delete(blobKey(clean.id, asset.id))
-      writing.objectStore('projects').put({ ...clean, localDraftSavedAt: savedAt })
+      const savedAt = new Date().toISOString(), revision = newId()
+      projectStore.put({ ...clean, localDraftSavedAt: savedAt, localDraftRevision: revision })
       await writeDone
+      for (const [assetId, blob] of pending) rememberStoredBlob(blob, blobKey(clean.id, assetId), revision)
       return savedAt
     } catch (error) {
       try { writing.abort() } catch { /* A failed write may have already aborted the transaction. */ }
@@ -115,8 +137,8 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    if ((error as DOMException)?.name === 'QuotaExceededError') throw new Error('本地存储空间不足，项目未覆盖。请清理旧项目，或保存便携项目文件。')
-    throw new Error(`保存失败：${reason}`)
+    if ((error as DOMException)?.name === 'QuotaExceededError') throw new Error('本地存储空间不足，项目未覆盖。请清理旧项目，或保存便携项目文件。', { cause: error })
+    throw new Error(`保存失败：${reason}`, { cause: error })
   } finally { db.close() }
 }
 
@@ -143,6 +165,7 @@ export async function loadProject(id: string): Promise<ImportedProject & { saved
         }
       } else if (!asset.nativePath || !asset.url) throw new Error(`素材“${asset.name}”在本地存储中缺失，无法完整打开项目。`)
     })
+    for (const [assetId, blob] of blobs) rememberStoredBlob(blob, blobKey(id, assetId), raw.localDraftRevision)
     const savedAt = storedSaveTime(raw.localDraftSavedAt)
     return { project, blobs, ...(savedAt ? { savedAt } : {}), revoke: () => { urls.splice(0).forEach((url) => URL.revokeObjectURL(url)) } }
   } catch (error) { urls.forEach((url) => URL.revokeObjectURL(url)); throw error } finally { db.close() }

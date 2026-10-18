@@ -449,7 +449,7 @@
   },
   {
     "name": "open_media_overlay_add",
-    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。\n执行方式：同步返回最终结果。",
+    "description": "新增可编辑视觉标注。支持箭头、矩形框、椭圆框、四角括号、双向箭头、折线引注、下划线、勾号、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。可选animation生成入场、停留、退场关键帧；省略时不添加动画。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -458,6 +458,12 @@
           "enum": [
             "arrow",
             "rectangle",
+            "ellipse",
+            "brackets",
+            "double-arrow",
+            "leader",
+            "underline",
+            "check",
             "highlight",
             "mask",
             "spotlight",
@@ -527,6 +533,19 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "animation": {
+          "type": "string",
+          "enum": [
+            "none",
+            "fade",
+            "slide-up",
+            "slide-down",
+            "slide-left",
+            "slide-right",
+            "push-in",
+            "pull-back"
+          ]
         }
       },
       "required": [

@@ -904,6 +904,82 @@
                   "type": "null"
                 }
               ]
+            },
+            "overlay": {
+              "type": "object",
+              "description": "完整替换视觉标注样式；仅用于文字水印轨道，位置、尺寸和旋转使用片段对应属性。",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "arrow",
+                    "rectangle",
+                    "ellipse",
+                    "brackets",
+                    "double-arrow",
+                    "leader",
+                    "underline",
+                    "check",
+                    "highlight",
+                    "mask",
+                    "spotlight",
+                    "blur"
+                  ]
+                },
+                "color": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{6}$"
+                },
+                "strokeWidth": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "blurRadius": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "region": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 65536
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 65536
+                    },
+                    "width": {
+                      "type": "number",
+                      "minimum": 1,
+                      "maximum": 65536
+                    },
+                    "height": {
+                      "type": "number",
+                      "minimum": 1,
+                      "maximum": 65536
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "width",
+                    "height"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "kind",
+                "color",
+                "strokeWidth",
+                "blurRadius"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [],
@@ -1426,7 +1502,15 @@
             "zoom-fade-left",
             "zoom-fade-right",
             "zoom-fade-up",
-            "zoom-fade-down"
+            "zoom-fade-down",
+            "iris",
+            "diamond",
+            "blinds",
+            "flash-white",
+            "defocus",
+            "zoom-through",
+            "diagonal",
+            "radial"
           ]
         },
         "duration": {
@@ -1495,7 +1579,15 @@
             "zoom-fade-left",
             "zoom-fade-right",
             "zoom-fade-up",
-            "zoom-fade-down"
+            "zoom-fade-down",
+            "iris",
+            "diamond",
+            "blinds",
+            "flash-white",
+            "defocus",
+            "zoom-through",
+            "diagonal",
+            "radial"
           ]
         },
         "duration": {
@@ -2347,6 +2439,14 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        },
+        "collection": {
+          "type": "string",
+          "enum": [
+            "general",
+            "science"
+          ],
+          "description": "general 为通用可编辑样式，science 为科普专题；不传则列出全部。"
         }
       },
       "required": [
@@ -2369,7 +2469,7 @@
   },
   {
     "name": "open_media_material_add",
-    "description": "添加指定内置素材，返回异步jobId。视频片段placement为prepend或append，支持heading/subheading编辑标题；其他素材start为项目时间。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "添加指定内置素材，返回异步jobId。视频片段placement为prepend或append，支持heading/subheading编辑标题；其他素材start为项目时间。可编辑文字水印支持text/color/background/animation/watermarkPlacement；duration可设置文字水印或片头片尾时长（片头片尾0.5–30秒）。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2414,6 +2514,58 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 120,
+          "description": "文字水印0.5–120秒；视频片头片尾0.5–30秒并按完整原视频调整速度。"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^(#[0-9a-fA-F]{6}|transparent)$"
+        },
+        "animation": {
+          "type": "string",
+          "enum": [
+            "none",
+            "fade",
+            "slide-up",
+            "slide-down",
+            "slide-left",
+            "slide-right",
+            "push-in",
+            "pull-back"
+          ]
+        },
+        "watermarkPlacement": {
+          "type": "string",
+          "enum": [
+            "center",
+            "top-left",
+            "top-right",
+            "bottom-left",
+            "bottom-right",
+            "bottom-center"
+          ]
+        },
+        "titleLayout": {
+          "type": "string",
+          "enum": [
+            "center",
+            "left",
+            "lower-third"
+          ],
+          "description": "片头片尾文字布局：居中、左对齐、底部信息区；不传使用模板默认布局。"
         }
       },
       "required": [
@@ -4777,7 +4929,7 @@
   },
   {
     "name": "open_media_overlay_add",
-    "description": "新增可编辑视觉标注。支持箭头、矩形、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。\n执行方式：同步返回最终结果。",
+    "description": "新增可编辑视觉标注。支持箭头、矩形框、椭圆框、四角括号、双向箭头、折线引注、下划线、勾号、高亮、遮罩、聚光灯和局部模糊。位置单位为项目像素；聚光灯的矩形指定保留亮度的区域。可选animation生成入场、停留、退场关键帧；省略时不添加动画。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -4786,6 +4938,12 @@
           "enum": [
             "arrow",
             "rectangle",
+            "ellipse",
+            "brackets",
+            "double-arrow",
+            "leader",
+            "underline",
+            "check",
             "highlight",
             "mask",
             "spotlight",
@@ -4855,6 +5013,19 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "animation": {
+          "type": "string",
+          "enum": [
+            "none",
+            "fade",
+            "slide-up",
+            "slide-down",
+            "slide-left",
+            "slide-right",
+            "push-in",
+            "pull-back"
+          ]
         }
       },
       "required": [

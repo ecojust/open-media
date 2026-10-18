@@ -30,7 +30,7 @@ async function installProject(page, url) {
     window.showOpenFilePicker = async () => [(await (await navigator.storage.getDirectory()).getFileHandle('text-watermarks.omedia'))]
   })
   await page.goto(url)
-  await expect(page.getByTestId('home-workspace')).toBeVisible()
+  await expect(page.getByTestId('home-workspace')).toBeVisible({ timeout: 20000 })
   await page.evaluate(async () => {
     const { createProject, createTextClip } = await import('/src/core/project.ts')
     const { saveProject } = await import('/src/core/storage.ts')
@@ -70,23 +70,27 @@ async function allPageIds(page, expectedCount) {
 
 async function catalogChecks(page) {
   const catalog = await page.evaluate(async () => (await import('/src/core/watermark-library.ts')).WATERMARK_MATERIALS)
-  assert.equal(catalog.length, 500)
-  assert.equal(new Set(catalog.map(item => item.id)).size, 500)
+  const science = catalog.filter(item => item.collection === 'science')
+  assert.equal(catalog.filter(item => !item.collection).length, 500)
+  assert.equal(science.length, 24)
+  assert.equal(new Set(catalog.map(item => item.id)).size, catalog.length)
   const legacy = ['thumb-pulse', 'star-save', 'follow-pop', 'share-plane', 'heart-wave', 'celebrate', 'sparkle-trail', 'ripple-rings', 'corner-frame', 'loading-dots', 'rec-label', 'notice-bubble', 'cursor-click', 'point-arrow', 'focus-circle', 'chapter-card', 'note-strip', 'thanks-card']
   for (const id of legacy) assert(catalog.some(item => item.id === id && item.kind === 'video'), `旧素材 ${id} 必须保留`)
   await page.getByTestId('watermark-open').click()
-  await expect(page.locator('[data-watermark-category="全部"]')).toContainText('500')
-  const allIds = await allPageIds(page, 500)
+  await page.getByTestId('watermark-collection-all').click()
+  await expect(page.locator('[data-watermark-category="全部"]')).toContainText(String(catalog.length))
+  const allIds = await allPageIds(page, catalog.length)
   assert.deepEqual(allIds, catalog.map(item => item.id))
   for (const category of categories) {
     const expected = catalog.filter(item => item.category === category)
-    assert.equal(expected.length, 100)
+    assert.equal(expected.filter(item => !item.collection).length, 100)
+    assert.equal(expected.length, 100 + catalog.filter(item => item.collection && item.category === category).length)
     const button = page.locator(`[data-watermark-category="${category}"]`)
-    await expect(button).toContainText('100')
+    await expect(button).toContainText(String(expected.length))
     await button.click()
     await expect(button).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByTestId('watermark-previous-page')).toBeDisabled()
-    const ids = await allPageIds(page, 100)
+    const ids = await allPageIds(page, expected.length)
     assert.deepEqual(ids, expected.map(item => item.id))
     await expect(page.locator(`[data-watermark-add="${expected.at(-1).id}"]`)).toBeVisible()
     await page.getByTestId('watermark-previous-page').click()
@@ -112,15 +116,16 @@ async function catalogChecks(page) {
   await cards(page).locator('img').evaluateAll(async images => Promise.all(images.map(async image => { image.loading = 'eager'; await image.decode() })))
   await page.screenshot({ path: path.join(artifacts, 'editable-text-library.png') })
   await expandedAnimationPreview(page, catalog)
-  console.log('PASS 全部 500 项与 5 类各 100 项逐页可达且不重复；旧 18 项保留，中文文字与题材搜索数量及分页完整')
+  console.log('PASS 原 500 项与新增科普素材逐页可达且不重复；五类旧 100 项分别保留，中文文字与题材搜索数量及分页完整')
   return { text, catalog }
 }
 
-async function expandedAnimationPreview(page, catalog) {
+async function expandedAnimationPreview(page, catalog, materialId = 'motion-farewell') {
   if (!(await dialog(page).count())) await page.getByTestId('watermark-open').click()
-  const animation = catalog.findLast(item => item.kind === 'video' && item.id === 'motion-farewell')
+  const animation = catalog.findLast(item => item.kind === 'video' && item.id === materialId)
   assert(animation, '扩展目录应包含新的真实动画')
   assert.equal(animation.spillSuppression, true, '新增绿幕动效应默认启用去溢色')
+  await page.getByTestId('watermark-collection-all').click()
   await page.locator('[data-watermark-category="全部"]').click()
   await page.getByTestId('watermark-search').fill(animation.name)
   const card = page.locator(`[data-watermark-id="${animation.id}"]`)
@@ -133,13 +138,44 @@ async function expandedAnimationPreview(page, catalog) {
     return { hash, transparent, opaque, unexpectedGreen }
   })
   await expect.poll(async () => (await frame()).opaque).toBeGreaterThan(100)
+  const seekPreview = async seconds => {
+    await page.evaluate(async ({ seconds, materialId }) => {
+      const video = window.lastWatermarkVideo
+      if (!video || !video.currentSrc.includes(materialId)) throw new Error(`未找到 ${materialId} 的实际预览视频`)
+      video.pause()
+      await new Promise((resolve, reject) => {
+        const fail = () => reject(new Error('预览视频定位失败'))
+        video.addEventListener('error', fail, { once: true })
+        video.addEventListener('seeked', () => { video.removeEventListener('error', fail); resolve() }, { once: true })
+        video.currentTime = seconds
+      })
+    }, { seconds, materialId })
+    await expect.poll(() => card.locator('canvas').evaluate(canvas => canvas.lastPreviewDraw?.time), { timeout: 5000, intervals: [50] }).toBeCloseTo(seconds, 3)
+  }
+  if (materialId.startsWith('science-')) {
+    const playback = await page.evaluate(async () => {
+      const video = window.lastWatermarkVideo
+      const before = video.currentTime
+      await new Promise(resolve => setTimeout(resolve, 200))
+      return { before, after: video.currentTime, paused: video.paused, ended: video.ended, ready: video.readyState, loop: video.loop }
+    })
+    assert.equal(playback.paused, false, `${materialId} 悬停后必须真实播放：${JSON.stringify(playback)}`)
+    assert.notEqual(playback.after, playback.before, `${materialId} 预览视频时钟必须前进：${JSON.stringify(playback)}`)
+    await seekPreview(.125)
+  }
   const firstFrame = await frame()
   assert(firstFrame.transparent > 500 && firstFrame.opaque > 100, '新动效预览应有真实图案且去除绿幕')
-  await expect.poll(async () => (await frame()).hash).not.toBe(firstFrame.hash)
-  await page.screenshot({ path: path.join(artifacts, 'expanded-animation-preview.png') })
+  if (materialId.startsWith('science-')) {
+    await seekPreview(.8)
+    const secondFrame = await frame()
+    assert.notEqual(secondFrame.hash, firstFrame.hash, `${materialId} 实际入场帧应不同：${JSON.stringify({ firstFrame, secondFrame })}`)
+    await seekPreview(2)
+    assert((await frame()).opaque > 100, `${materialId} 停留帧必须保留可见内容`)
+  } else await expect.poll(async () => (await frame()).hash, { intervals: [50], timeout: 6000 }).not.toBe(firstFrame.hash)
+  await page.screenshot({ path: path.join(artifacts, materialId === 'motion-farewell' ? 'expanded-animation-preview.png' : `${materialId}-preview.png`) })
   assert(firstFrame.unexpectedGreen <= 16, `暖白橙色动效预览不能出现绿色染边：${firstFrame.unexpectedGreen} 个绿偏像素`)
   await dialog(page).getByRole('button', { name: '关闭添加水印' }).click()
-  console.log('PASS 新动效真实预览帧持续变化，透明底和柔光边缘没有绿色染边')
+  console.log(`PASS ${animation.id} 真实预览包含动态帧，透明底和柔光边缘没有绿色染边`)
 }
 
 async function canvasSnapshot(page) {
@@ -163,6 +199,7 @@ async function editableChecks(page, material) {
   await seek(page, 3.25)
   await page.getByTestId('watermark-open').click()
   await page.locator('[data-watermark-category="可编辑文字"]').click()
+  await page.getByTestId('watermark-collection-all').click()
   await page.getByTestId('watermark-search').fill(material.name)
   await page.locator(`[data-watermark-add="${material.id}"]`).click()
   await expect(dialog(page)).not.toBeVisible()
@@ -177,6 +214,7 @@ async function editableChecks(page, material) {
   assert.equal(added.assetId, undefined)
   assert.deepEqual(project.assets, original.assets, '文字水印不能导入缩略图或烘焙图片素材')
   for (const before of original.tracks) assert.deepEqual(project.tracks.find(item => item.id === before.id), before)
+  if (material.textTemplate.fadeIn) await seek(page, 3.25 + material.textTemplate.fadeIn + 0.1)
   await expect(page.getByTestId('preview-selected-clip')).toHaveAttribute('data-preview-clip-id', id)
   await page.getByRole('button', { name: '撤销', exact: true }).click()
   await expect(page.locator(`.timeline-clip[data-clip-id="${id}"]`)).toHaveCount(0)
@@ -184,7 +222,7 @@ async function editableChecks(page, material) {
   await page.getByRole('button', { name: '重做', exact: true }).click()
   await expect(page.locator(`.timeline-clip[data-clip-id="${id}"]`)).toBeVisible()
   await page.locator(`.timeline-clip[data-clip-id="${id}"]`).click()
-  await seek(page, 3.5)
+  await seek(page, 3.25 + Math.max(0.25, (material.textTemplate.fadeIn || 0) + 0.1))
   const beforeText = await canvasSnapshot(page)
   await setField(page, page.getByTestId('clip-text-content'), '我们的旅行记录\n下一站见')
   await expect.poll(async () => (await textClip(page, id))?.text).toBe('我们的旅行记录\n下一站见')
@@ -225,7 +263,7 @@ async function editableChecks(page, material) {
   await expect(page.locator('.status-main')).toContainText('已打开')
   await expect.poll(async () => (await textClip(page, id))?.text).toBe(expectedText.text)
   assert.deepEqual(await textClip(page, id), expectedText)
-  await page.locator(`.timeline-clip[data-clip-id="${id}"]`).click(); await seek(page, 3.5)
+  await page.locator(`.timeline-clip[data-clip-id="${id}"]`).click(); await seek(page, 3.25 + Math.max(0.25, (material.textTemplate.fadeIn || 0) + 0.1))
   await expect(page.getByTestId('clip-text-content')).toHaveValue(expectedText.text)
   await expect.poll(async () => (await canvasSnapshot(page)).magenta).toBeGreaterThan(30)
   console.log('PASS 文字水印从当前 3.25 秒插入原生文字轨道；撤销/重做、文案/颜色/字号编辑真实更新预览，拖动位置和保存重开完整保留且无烘焙媒体')
@@ -243,7 +281,8 @@ async function textAppearanceChecks(page, catalog) {
     await seek(page, 0.5)
     await page.getByTestId('watermark-open').click()
     await page.locator('[data-watermark-category="可编辑文字"]').click()
-    await page.getByTestId('watermark-search').fill(material.name)
+    await page.getByTestId('watermark-collection-all').click()
+  await page.getByTestId('watermark-search').fill(material.name)
     await page.locator(`[data-watermark-add="${material.id}"]`).click()
     await expect(dialog(page)).not.toBeVisible()
     await expect(page.getByTestId('clip-text-content')).toHaveValue(material.textTemplate.text)
@@ -291,10 +330,11 @@ async function textAppearanceChecks(page, catalog) {
   console.log('PASS 衬线、等宽、多行、深色底与右对齐文字从真实UI插入，原生属性、文字颜色、背景和排布与缩略图一致')
 }
 
-async function expandedAnimationExport(page, catalog) {
-  const material = catalog.findLast(item => item.kind === 'video' && item.id.startsWith('motion-'))
+async function expandedAnimationExport(page, catalog, materialId) {
+  const material = catalog.findLast(item => item.kind === 'video' && (materialId ? item.id === materialId : item.id.startsWith('motion-')))
   await seek(page, 0)
   await page.getByTestId('watermark-open').click()
+  await page.getByTestId('watermark-collection-all').click()
   await page.getByTestId('watermark-search').fill(material.name)
   await page.locator(`[data-watermark-add="${material.id}"]`).click()
   await expect(dialog(page)).not.toBeVisible()
@@ -342,6 +382,47 @@ async function expandedAnimationExport(page, catalog) {
   console.log('PASS 新动效导入真实素材后导出 1 秒 WebM，再解码两帧验证动态变化及去绿底颜色')
 }
 
+async function scienceTextPosterChecks(page, catalog) {
+  for (const material of catalog.filter(item => item.collection === 'science' && item.kind === 'text')) {
+    const result = await page.evaluate(async material => {
+      const { createProject } = await import('/src/core/project.ts')
+      const { addTextWatermark } = await import('/src/core/watermark-track.ts')
+      const { drawTextClip } = await import('/src/core/preview.ts')
+      const inserted = addTextWatermark(createProject('文字缩略图', { width: 640, height: 360 }), material, 0)
+      const clip = inserted.project.tracks.flatMap(track => track.clips).find(clip => clip.id === inserted.clipId)
+      const image = new Image(); image.src = material.poster; await image.decode()
+      const x = (640 - clip.width) / 2, y = (360 - clip.height) / 2
+      const render = poster => {
+        const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 360
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        if (poster) ctx.drawImage(image, 0, 0)
+        else { ctx.translate(x, y); drawTextClip(ctx, clip) }
+        const data = ctx.getImageData(0, 0, 640, 360).data
+        const color = [1, 3, 5].map(index => parseInt(clip.color.slice(index, index + 2), 16))
+        let count = 0, minX = 640, maxX = -1, minY = 360, maxY = -1
+        for (let py = 0; py < 360; py++) for (let px = 0; px < 640; px++) {
+          const index = (py * 640 + px) * 4
+          if (data[index + 3] > 240 && color.every((value, channel) => Math.abs(data[index + channel] - value) < 30)) {
+            count++; minX = Math.min(minX, px); maxX = Math.max(maxX, px); minY = Math.min(minY, py); maxY = Math.max(maxY, py)
+          }
+        }
+        return { count, minX, maxX, minY, maxY, corner: [...ctx.getImageData(x + 4, y + 4, 1, 1).data] }
+      }
+      return { actual: render(false), poster: render(true), background: clip.background }
+    }, material)
+    const { actual, poster } = result
+    assert(actual.count > 30 && poster.count > 30, `${material.id} 实际文字与缩略图均有前景`)
+    assert(actual.count / poster.count > .3 && actual.count / poster.count < 3, `${material.id} 文字面积应同量级`)
+    assert(Math.abs(actual.minY + actual.maxY - poster.minY - poster.maxY) / 2 < material.textTemplate.fontSize, `${material.id} 多行纵向位置应对应`)
+    assert(Math.abs(actual.minX + actual.maxX - poster.minX - poster.maxX) / 2 < material.textTemplate.fontSize * 1.4, `${material.id} 水平对齐应对应`)
+    if (result.background !== 'transparent') {
+      const color = [1, 3, 5].map(index => parseInt(result.background.slice(index, index + 2), 16))
+      for (const frame of [actual, poster]) assert.deepEqual(frame.corner, [...color, 255], `${material.id} 底色必须与实际原生矩形对应`)
+    }
+  }
+  console.log('PASS 8 个科普文字缩略图与实际原生文字渲染的颜色、对齐、行距与背景一致')
+}
+
 async function main() {
   mkdirSync(artifacts, { recursive: true })
   const { createServer } = await import('vite')
@@ -352,10 +433,34 @@ async function main() {
   await server.listen()
   const browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox', '--no-proxy-server', '--autoplay-policy=no-user-gesture-required', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
   const context = await browser.newContext({ viewport: { width: 1440, height: 1050 } }), page = await context.newPage(), errors = []
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play
+    HTMLMediaElement.prototype.play = function (...args) {
+      if (this instanceof HTMLVideoElement) window.lastWatermarkVideo = this
+      return play.apply(this, args)
+    }
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage
+    CanvasRenderingContext2D.prototype.drawImage = function (...args) {
+      if (args[0] instanceof HTMLVideoElement) this.canvas.lastPreviewDraw = { source: args[0].currentSrc, time: args[0].currentTime }
+      return drawImage.apply(this, args)
+    }
+  })
   page.setDefaultTimeout(20000); page.on('pageerror', error => errors.push(error.message))
   try {
     await installProject(page, `http://127.0.0.1:${port}`)
-    if (process.env.WATERMARK_CHECK === 'animation') {
+    if (process.env.WATERMARK_CHECK === 'science') {
+      const catalog = await page.evaluate(async () => (await import('/src/core/watermark-library.ts')).WATERMARK_MATERIALS)
+      if (!process.env.SCIENCE_MATERIAL) {
+        await editableChecks(page, catalog.find(item => item.id === 'science-question'))
+      }
+      await scienceTextPosterChecks(page, catalog)
+      const selected = process.env.SCIENCE_MATERIAL?.split(',')
+      const motions = catalog.filter(item => item.collection === 'science' && item.kind === 'video' && (!selected || selected.includes(item.id)))
+      assert(motions.length > 0, '必须选择真实存在的科普动效')
+      for (const material of motions) await expandedAnimationPreview(page, catalog, material.id)
+      await expandedAnimationExport(page, catalog, 'science-waveform')
+      console.log(`PASS ${motions.length} 种科普动效实际预览，真实导出后解码及 8 个原生文字模板渲染`)
+    } else if (process.env.WATERMARK_CHECK === 'animation') {
       const catalog = await page.evaluate(async () => (await import('/src/core/watermark-library.ts')).WATERMARK_MATERIALS)
       await expandedAnimationPreview(page, catalog)
       await expandedAnimationExport(page, catalog)
@@ -366,7 +471,7 @@ async function main() {
       await expandedAnimationExport(page, catalog)
     }
     assert.deepEqual(errors, [])
-  } catch (error) { await page.screenshot({ path: path.join(artifacts, 'failure.png') }).catch(() => {}); throw error }
+  } catch (error) { if (errors.length) console.error('Page errors:', errors); console.error('Playback:', await page.evaluate(() => { const video = window.lastWatermarkVideo; return video && { source: video.currentSrc, time: video.currentTime, duration: video.duration, paused: video.paused, ended: video.ended, ready: video.readyState, error: video.error?.message } }).catch(() => null)); await page.screenshot({ path: path.join(artifacts, 'failure.png') }).catch(() => {}); throw error }
   finally { await context.close(); await browser.close(); await server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
