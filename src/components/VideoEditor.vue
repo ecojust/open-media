@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Clip, MediaAsset, Project, Track, TrackKind } from '../core/types'
 import { cloneProject, createClip, createSubtitleClip, createTrack, MAX_PROJECT_DURATION, newId, validateProject } from '../core/project'
-import { MIN_PROJECT_SIZE, MAX_PROJECT_SIZE, projectSizeError, resizeProject, videoClipSourceSize } from '../core/project-size'
+import { projectSizeError, videoClipSourceSize } from '../core/project-size'
 import { isSubtitleClip } from '../core/subtitle-style'
 import { DEFAULT_SUBTITLE_TEXT, trackSubtitleIssues } from '../core/subtitle-validation'
 import { addClip, addTrack, applySubtitleStyleToTrack, clipDuration, clipEnd, deleteClip, duplicateClip, findClip, moveClip, projectDuration, removeTrack, reorderTrack, setTrack, splitClip, updateClip } from '../core/timeline'
@@ -20,6 +20,9 @@ import AudioClipPlayer from './AudioClipPlayer.vue'
 import EditorVoiceRecorder from './EditorVoiceRecorder.vue'
 import WatermarkLibrary from './WatermarkLibrary.vue'
 import BackgroundMusicLibrary from './BackgroundMusicLibrary.vue'
+import VideoSegmentLibrary from './VideoSegmentLibrary.vue'
+import TransitionLibrary from './TransitionLibrary.vue'
+import ProjectSizeControls from './ProjectSizeControls.vue'
 import ChromaKeyPanel from './ChromaKeyPanel.vue'
 import PreviewSelection from './PreviewSelection.vue'
 import type { PreviewPosition } from '../core/preview-position'
@@ -29,12 +32,16 @@ import { chooseWatermarkSource } from '../core/watermark-source'
 import { addRecordedAudio } from '../core/recording-track'
 import { addBackgroundMusic } from '../core/background-music-track'
 import type { BackgroundMusicItem } from '../core/background-music-catalog'
+import { insertVideoSegment } from '../core/video-segment-track'
+import type { VideoSegmentItem, VideoSegmentPlacement, VideoSegmentCaption } from '../core/video-segment-catalog'
+import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, updateTransition } from '../core/transitions'
+import type { TransitionEffect } from '../core/types'
 import { importMediaFile, mediaKind, revokeMediaAsset } from '../core/media-import'
 import { importBlobAsset, isDesktop } from '../native'
 import type { RecordedMicrophoneAudio } from '../core/microphone-recording'
 
-const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean }>()
-const emit = defineEmits<{ change: [project: Project, label?: string, historyGroup?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
+const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean; automationBusy?: boolean }>()
+const emit = defineEmits<{ change: [project: Project, label?: string, historyGroup?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; openMcp: []; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const previewSelection = ref<InstanceType<typeof PreviewSelection> | null>(null)
 const editorRoot = ref<HTMLElement | null>(null)
@@ -51,13 +58,14 @@ const recordingPlayback = ref(false)
 const zoom = ref(44)
 const assetFilter = ref('all')
 const search = ref('')
-const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | null>(null)
+const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | null>(null)
 const modalOpen = computed(() => editorDialog.value !== null)
 const dialogReturnFocus = ref<HTMLElement | null>(null)
 const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
 const audioClipPlayer = ref<InstanceType<typeof AudioClipPlayer> | null>(null)
-const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false)
-const editingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value)
+const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false), segmentBusy = ref(false)
+const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value)
+const editingBusy = computed(() => localEditingBusy.value || !!props.automationBusy)
 const watermarkError = ref(''), watermarkStart = ref(0)
 const watermarkFile = ref<HTMLInputElement>()
 let watermarkLocalGreen = false
@@ -65,6 +73,13 @@ let watermarkAbort: AbortController | undefined
 const musicError = ref(''), musicStart = ref(0), musicFile = ref<HTMLInputElement>()
 const musicAssets = new Map<string, string>()
 let musicAbort: AbortController | undefined
+const segmentError = ref(''), segmentFile = ref<HTMLInputElement>()
+const segmentAssets = new Map<string, string>()
+let segmentPlacement: VideoSegmentPlacement = 'prepend'
+let segmentAbort: AbortController | undefined
+const transitionError = ref(''), transitionTime = ref(0), transitionTrackId = ref<string>()
+const transitionCut = computed(() => findTransitionCut(props.project, transitionTime.value, transitionTrackId.value))
+const projectSizeControls = ref<InstanceType<typeof ProjectSizeControls> | null>(null)
 const clipSpeechTargetId = ref(''), clipSpeechError = ref(''), clipSpeechNotice = ref('')
 const selectedSpeechBusy = computed(() => speechBusy.value && clipSpeechTargetId.value === selectedId.value && editorDialog.value !== 'speech')
 const clipMenu = ref<{ x: number; y: number; clipId: string } | null>(null)
@@ -109,13 +124,6 @@ const assetTimes = computed(() => new Map(activeProject.value.assets.filter(asse
   return [asset.id, { short: assetDateFormat.format(date).replace('/', '-'), full: `加入时间：${generatedDateFormat.format(date)}` }]
 })))
 const ratio = computed(() => `${activeProject.value.width} / ${activeProject.value.height}`)
-const customSizeMode = ref(false)
-const customWidth = ref(String(props.project.width)), customHeight = ref(String(props.project.height)), customSizeError = ref('')
-const projectSizePreset = computed(() => {
-  if (customSizeMode.value) return 'custom'
-  const presets: Record<string, [number, number]> = { landscape: [1920, 1080], portrait: [1080, 1920], square: [1080, 1080], cinema: [2560, 1080] }
-  return Object.entries(presets).find(([, size]) => size[0] === props.project.width && size[1] === props.project.height)?.[0] ?? 'custom'
-})
 const selectedLocked = computed(() => selected.value?.track.locked || false)
 const selectedSubtitleTargets = computed(() => {
   const current = selected.value
@@ -183,7 +191,7 @@ function commit(action: () => Project, label: string): boolean {
 function setSpeechBusy(value: boolean): void {
   speechBusy.value = value
   if (value) { pause(); cancelGesture(); closeMenus(); finishTrackRename(false); cancelTrackDelete() }
-  emit('busy', editingBusy.value)
+  emit('busy', localEditingBusy.value)
 }
 function setRecordingBusy(value: boolean): void {
   const wasBusy = recordingBusy.value
@@ -195,7 +203,7 @@ function setRecordingBusy(value: boolean): void {
     // The next explicit play starts with fresh decoders and an output context.
     resetPreview()
   }
-  emit('busy', editingBusy.value)
+  emit('busy', localEditingBusy.value)
 }
 function startRecordingPlayback(start: number, projectId: string, elapsed: () => number): void {
   if (editorDestroyed || !recordingBusy.value || props.project.id !== projectId || !preview) return
@@ -262,9 +270,8 @@ async function saveRecording(audio: RecordedMicrophoneAudio, start: number, proj
     throw cause
   }
 }
-function openEditorDialog(kind: 'speech' | 'project' | 'watermark' | 'music'): void {
+function openEditorDialog(kind: NonNullable<typeof editorDialog.value>): void {
   if (editingBusy.value) return
-  if (kind === 'project') { customSizeMode.value = false; resetCustomSize() }
   const focused = document.activeElement
   dialogReturnFocus.value = focused instanceof HTMLElement && !focused.closest('.clip-context-menu') ? focused : menuReturnFocus
   pause(); cancelGesture(); closeMenus(); finishTrackRename(); editorDialog.value = kind
@@ -283,6 +290,122 @@ function openBackgroundMusic(): void {
   musicError.value = ''
   openEditorDialog('music')
 }
+function openVideoSegments(): void {
+  if (editingBusy.value || props.exportDisabled) return
+  segmentError.value = ''
+  openEditorDialog('segment')
+}
+function importLocalSegment(placement: VideoSegmentPlacement): void {
+  if (editingBusy.value || editorDialog.value !== 'segment') return
+  segmentPlacement = placement
+  segmentFile.value?.click()
+}
+function localSegmentChosen(event: Event): void {
+  const input = event.target as HTMLInputElement, file = input.files?.[0]
+  input.value = ''
+  if (file) void insertSegment(file, segmentPlacement)
+}
+async function insertSegment(source: VideoSegmentItem | File, placement: VideoSegmentPlacement, caption?: VideoSegmentCaption): Promise<void> {
+  if (editingBusy.value || props.exportDisabled || editorDialog.value !== 'segment') return
+  const original = props.project, projectId = original.id
+  const abort = new AbortController()
+  segmentAbort = abort
+  segmentBusy.value = true; segmentError.value = ''; emit('busy', localEditingBusy.value)
+  const timeout = window.setTimeout(() => abort.abort(new Error('读取视频片段超时，请重试。')), 60000)
+  let asset: MediaAsset | undefined, created = false, committed = false
+  const checkCurrent = () => {
+    abort.signal.throwIfAborted()
+    if (editorDestroyed || props.project.id !== projectId || (!committed && props.project !== original)) throw new Error('项目已变化，本次视频片段未添加。')
+  }
+  try {
+    const material = source instanceof File ? undefined : source
+    const key = material ? `${projectId}/${material.id}` : ''
+    if (key) asset = props.project.assets.find(item => item.id === segmentAssets.get(key))
+    let blob: Blob | undefined
+    if (!asset) {
+      if (source instanceof File) {
+        if (mediaKind(source.name, source.type) !== 'video') throw new Error('请选择可用的视频文件。')
+        if (source.size > 512 * 1024 * 1024) throw new Error('单个片头或片尾视频不能超过 512 MB，请先裁剪或压缩。')
+        blob = source
+      } else {
+        const response = await fetch(source.url, { signal: abort.signal })
+        if (!response.ok) throw new Error('内置视频片段读取失败，请重试。')
+        blob = await response.blob()
+      }
+      checkCurrent()
+      if (!blob.size) throw new Error('视频片段文件为空。')
+      const name = material ? `${material.title}.${material.filename.split('.').pop() || 'mp4'}` : (source as File).name
+      asset = isDesktop()
+        ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
+        : await importMediaFile(new File([blob], name, { type: blob.type || 'video/mp4' }))
+      created = true
+      checkCurrent()
+    }
+    if (asset.kind !== 'video') throw new Error('这个文件不包含可用的视频画面。')
+    const result = insertVideoSegment(props.project, asset, placement, material ? caption ?? material : undefined)
+    if (blob) emit('prepared-asset', asset, blob)
+    emit('change', result.project, placement === 'prepend' ? '已添加片头，现有轨道同步后移' : '已添加片尾')
+    committed = true
+    await nextTick()
+    checkCurrent()
+    if (!findClip(props.project, result.clipId)) throw new Error('视频片段未能加入项目，请重试。')
+    if (key) segmentAssets.set(key, asset.id)
+    selectedId.value = result.clipId; inspectorTab.value = 'properties'; playhead.value = result.start
+    editorDialog.value = null
+    await nextTick()
+    checkCurrent()
+    preview?.seek(result.start, false)
+    timelineScroll.value?.querySelector<HTMLElement>(`[data-clip-id="${result.clipId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  } catch (cause) {
+    if (!editorDestroyed && props.project.id === projectId) segmentError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    window.clearTimeout(timeout)
+    if (created && asset && !props.project.assets.some(item => item.id === asset!.id)) revokeMediaAsset(asset)
+    if (segmentAbort === abort) { segmentAbort = undefined; segmentBusy.value = false; emit('busy', localEditingBusy.value) }
+  }
+}
+function openTransitions(): void {
+  if (editingBusy.value || props.exportDisabled) return
+  transitionTime.value = playhead.value
+  transitionTrackId.value = selected.value?.track.kind === 'video' ? selected.value.track.id : undefined
+  transitionError.value = ''
+  openEditorDialog('transition')
+}
+async function insertTransition(effect: TransitionEffect, length: number): Promise<void> {
+  if (editingBusy.value || props.exportDisabled || !transitionCut.value) return
+  const cut = transitionCut.value
+  try {
+    const project = addTransition(props.project, cut.time, effect, length, cut.trackId)
+    const clip = project.tracks.flatMap(track => track.clips).find(item => item.transition?.fromClipId === cut.fromClipId && item.transition.toClipId === cut.toClipId)
+    emit('change', project, '已应用转场')
+    editorDialog.value = null
+    if (clip) {
+      selectedId.value = clip.id; playhead.value = clip.start; inspectorTab.value = 'properties'
+      await nextTick()
+      timelineScroll.value?.querySelector<HTMLElement>(`[data-clip-id="${clip.id}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+      preview?.seek(clip.start, false)
+    }
+  } catch (cause) { transitionError.value = cause instanceof Error ? cause.message : String(cause) }
+}
+function changeTransition(effect: TransitionEffect, length: number): void {
+  if (!selected.value?.clip.transition || selectedLocked.value || editingBusy.value) return
+  pause()
+  commit(() => updateTransition(props.project, selectedId.value, effect, length), '调整转场')
+}
+function changeTransitionLength(event: Event): void {
+  const current = selected.value?.clip, input = event.target as HTMLInputElement
+  if (!current?.transition) return
+  let length = clipDuration(current)
+  if (!selectedLocked.value && !editingBusy.value) {
+    pause()
+    try {
+      const project = updateTransition(props.project, current.id, current.transition.effect, Number(input.value))
+      length = clipDuration(findClip(project, current.id)!.clip)
+      emit('change', project, '调整转场时长')
+    } catch (cause) { message(cause) }
+  }
+  input.value = String(Number(length.toFixed(3)))
+}
 function importLocalMusic(): void {
   if (!editingBusy.value && editorDialog.value === 'music') musicFile.value?.click()
 }
@@ -296,7 +419,7 @@ async function insertBackgroundMusic(source: BackgroundMusicItem | File): Promis
   const original = props.project, projectId = original.id, start = musicStart.value
   const abort = new AbortController()
   musicAbort = abort
-  musicBusy.value = true; musicError.value = ''; emit('busy', true)
+  musicBusy.value = true; musicError.value = ''; emit('busy', localEditingBusy.value)
   const timeout = window.setTimeout(() => abort.abort(new Error('读取背景音乐超时，请重试。')), 30000)
   let asset: MediaAsset | undefined, created = false, committed = false
   const checkCurrent = () => {
@@ -345,7 +468,7 @@ async function insertBackgroundMusic(source: BackgroundMusicItem | File): Promis
   } finally {
     window.clearTimeout(timeout)
     if (created && asset && !props.project.assets.some(item => item.id === asset!.id)) revokeMediaAsset(asset)
-    if (musicAbort === abort) { musicAbort = undefined; musicBusy.value = false; emit('busy', editingBusy.value) }
+    if (musicAbort === abort) { musicAbort = undefined; musicBusy.value = false; emit('busy', localEditingBusy.value) }
   }
 }
 async function finishMusicInsertion(result: ReturnType<typeof addBackgroundMusic>, start: number, checkCurrent: () => void): Promise<void> {
@@ -374,7 +497,7 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
   const projectId = props.project.id, start = watermarkStart.value
   const abort = new AbortController()
   watermarkAbort = abort
-  watermarkBusy.value = true; watermarkError.value = ''; emit('busy', true)
+  watermarkBusy.value = true; watermarkError.value = ''; emit('busy', localEditingBusy.value)
   const timeout = window.setTimeout(() => abort.abort(new Error('读取水印素材超时，请重试。')), 20000)
   let asset: MediaAsset | undefined
   let focusTextId = ''
@@ -425,7 +548,7 @@ async function insertWatermark(source: WatermarkMaterial | File, removeGreen = f
   } finally {
     window.clearTimeout(timeout)
     if (asset && !props.project.assets.some(item => item.id === asset!.id)) revokeMediaAsset(asset)
-    if (watermarkAbort === abort) { watermarkAbort = undefined; watermarkBusy.value = false; emit('busy', editingBusy.value) }
+    if (watermarkAbort === abort) { watermarkAbort = undefined; watermarkBusy.value = false; emit('busy', localEditingBusy.value) }
     if (focusTextId) {
       await nextTick()
       if (!editorDestroyed && props.project.id === projectId && selectedId.value === focusTextId && !modalOpen.value) {
@@ -495,9 +618,9 @@ function closeMenus(restoreFocus = false): void {
 function outsideMenus(event: PointerEvent): void {
   if (!(event.target as HTMLElement).closest('.clip-context-menu')) closeMenus()
 }
-function menuAction(action: () => void): void {
+function menuAction(action: () => void, restoreFocus = true): void {
   action(); closeMenus()
-  if (!renamingTrackId.value && !pendingTrackDelete.value && !editingBusy.value && !modalOpen.value) restoreMenuFocus()
+  if (restoreFocus && !renamingTrackId.value && !pendingTrackDelete.value && !editingBusy.value && !modalOpen.value) restoreMenuFocus()
 }
 function menuKeyboard(event: KeyboardEvent): void {
   event.stopPropagation()
@@ -736,6 +859,9 @@ function pauseTimeline(): void {
   preview?.pause()
 }
 async function togglePlay(): Promise<void> {
+  await changePlayback()
+}
+async function changePlayback(propagateError = false): Promise<void> {
   if (editingBusy.value) return
   cancelPreviewPosition()
   audioClipPlayer.value?.stop()
@@ -769,9 +895,38 @@ async function togglePlay(): Promise<void> {
     playing.value = false
     renderer.pause()
     if (!(cause instanceof DOMException && cause.name === 'AbortError')) { resetPreview(); message(cause) }
+    if (propagateError) throw cause
   } finally {
     if (request === playbackRequest) { preparingPlayback.value = false; playbackAbort = undefined }
   }
+}
+interface EditorPlayback { time: number; playing: boolean; selectedClipId: string }
+function getPlayback(): EditorPlayback {
+  return { time: playhead.value, playing: playing.value, selectedClipId: selected.value?.clip.id || '' }
+}
+function getInteractionBusy(): boolean {
+  const focused = document.activeElement
+  const editingField = focused instanceof HTMLElement && editorRoot.value?.contains(focused) && focused.matches('input:not([readonly]):not(:disabled),textarea:not([readonly]):not(:disabled),select:not(:disabled),[contenteditable="true"]')
+  return !!(editorDestroyed || localEditingBusy.value || preparingPlayback.value || gesture || previewPositionGesture || trackDrag || renamingTrackId.value || pendingTrackDelete.value || modalOpen.value || clipMenu.value || trackMenu.value || editingField || editorRoot.value?.querySelector('.timeline-divider.dragging'))
+}
+async function setPlayback(patch: Partial<EditorPlayback>): Promise<EditorPlayback> {
+  if (editorDestroyed) throw new Error('剪辑界面已关闭。')
+  if (patch.time !== undefined && (!Number.isFinite(patch.time) || patch.time < 0 || patch.time > MAX_PROJECT_DURATION)) throw new Error('播放时间不在有效范围内。')
+  if (patch.playing !== undefined && typeof patch.playing !== 'boolean') throw new Error('播放状态需要是布尔值。')
+  if (patch.selectedClipId !== undefined && (typeof patch.selectedClipId !== 'string' || patch.selectedClipId !== '' && !findClip(props.project, patch.selectedClipId))) throw new Error('选中的片段不存在。')
+  const onlyPause = patch.playing === false && patch.time === undefined && patch.selectedClipId === undefined
+  // The automation controller also selects newly committed material before releasing its job lock.
+  const onlySelection = patch.selectedClipId !== undefined && patch.time === undefined && patch.playing === undefined
+  if (recordingBusy.value || !onlyPause && (getInteractionBusy() || !onlySelection && (props.automationBusy || props.exportDisabled))) throw new Error('剪辑界面正在处理操作，请稍后重试。')
+  if (patch.playing === true && (!duration.value || !preview)) throw new Error('当前工程没有可播放的片段。')
+  if (patch.playing === false) pause()
+  if (patch.time !== undefined) seek(patch.time)
+  if (patch.selectedClipId !== undefined) { selectedId.value = patch.selectedClipId; inspectorTab.value = 'properties' }
+  if (patch.playing === true && !playing.value) {
+    await changePlayback(true)
+    if (editorDestroyed || !playing.value) throw new Error('播放准备已取消，请重试。')
+  }
+  return getPlayback()
 }
 function addAssetToTimeline(asset: MediaAsset, targetTrackId?: string, time = playhead.value): void {
   commit(() => {
@@ -795,7 +950,7 @@ function addText(): void {
 }
 function addTimelineTrack(kind: TrackKind): void {
   commit(() => {
-    const track = createTrack(kind, `${{ video: '视频', audio: '音频', text: '字幕' }[kind]} ${props.project.tracks.filter(item => item.kind === kind).length + 1}`)
+    const track = createTrack(kind, `${{ video: '视频', audio: '音频', text: '字幕', transition: '转场' }[kind]} ${props.project.tracks.filter(item => item.kind === kind).length + 1}`)
     const project = addTrack(props.project, track)
     return kind === 'text' || kind === 'video' ? reorderTrack(project, track.id, 0) : project
   }, '添加轨道')
@@ -885,7 +1040,7 @@ function stringValue(event: Event): string { return (event.target as HTMLInputEl
 function frameTime(value: number): number { return Math.round(value * props.project.fps) / props.project.fps }
 function canTrim(side: 'start' | 'end'): boolean {
   const current = selected.value
-  if (!current || current.track.locked || editingBusy.value) return false
+  if (!current || current.track.kind === 'transition' || current.track.locked || editingBusy.value) return false
   const time = frameTime(playhead.value), start = current.clip.start, end = clipEnd(current.clip)
   return side === 'start' ? time > start + 1e-7 && end - time >= 1 / props.project.fps - 1e-7 : time < end - 1e-7 && time - start >= 1 / props.project.fps - 1e-7
 }
@@ -894,7 +1049,7 @@ function trimSelected(side: 'start' | 'end'): void {
   pause(); commit(() => trimClipAtPlayhead(props.project, selectedId.value, frameTime(playhead.value), side), side === 'start' ? '裁掉播放头左侧' : '裁掉播放头右侧')
 }
 function splitSelected(): void { if (canSplit.value) { pause(); commit(() => splitClip(props.project, selectedId.value, frameTime(playhead.value)), '分割片段') } }
-function duplicateSelected(): void { if (selected.value) commit(() => duplicateClip(props.project, selectedId.value), '复制片段') }
+function duplicateSelected(): void { if (selected.value && selected.value.track.kind !== 'transition') commit(() => duplicateClip(props.project, selectedId.value), '复制片段') }
 function deleteSelected(closeGap = false): void {
   if (!selected.value || selectedLocked.value || editingBusy.value) return
   pause()
@@ -919,39 +1074,21 @@ function closeGaps(): void {
 }
 function setProjectSetting(patch: Partial<Project>): void {
   const sizeMode = patch.width !== undefined || patch.height !== undefined ? { autoSizeFromVideo: false } : {}
-  commit(() => validateProject({ ...props.project, ...patch, ...sizeMode, updatedAt: new Date().toISOString() }, { trusted: true }), '调整项目设置')
+  commit(() => {
+    const project = Object.assign(cloneProject(props.project), patch, sizeMode, { updatedAt: new Date().toISOString() })
+    reconcileTransitions(project, props.project)
+    return validateProject(project, { trusted: true })
+  }, '调整项目设置')
 }
-function setRatio(value: string): void {
-  if (value === 'custom') { customSizeMode.value = true; resetCustomSize(); return }
-  const dimensions: Record<string, [number, number]> = { landscape: [1920, 1080], portrait: [1080, 1920], square: [1080, 1080], cinema: [2560, 1080] }
-  const next = dimensions[value]
-  if (!next) return
+function resizeProjectLive(project: Project, label: string, historyGroup?: string): void {
+  if (editingBusy.value || props.exportDisabled || project.id !== props.project.id) return
   pause(); cancelGesture()
-  if (commit(() => resizeProject(props.project, next[0], next[1]), '调整画面比例')) { customSizeMode.value = false; customSizeError.value = '' }
-}
-function resetCustomSize(): void {
-  customWidth.value = String(props.project.width); customHeight.value = String(props.project.height); customSizeError.value = ''
-}
-function applyCustomProjectSize(): boolean {
-  if (editingBusy.value) return false
-  const width = Number(customWidth.value), height = Number(customHeight.value)
-  customSizeError.value = projectSizeError(width, height) || ''
-  if (customSizeError.value) return false
-  if (width === props.project.width && height === props.project.height && props.project.autoSizeFromVideo === false) return true
-  pause(); cancelGesture()
-  return commit(() => resizeProject(props.project, width, height), `项目尺寸已设为 ${width} × ${height}`)
-}
-function completeProjectSettings(): void {
-  if (projectSizePreset.value === 'custom' && !applyCustomProjectSize()) return
-  closeEditorDialog()
+  emit('change', project, label, historyGroup)
 }
 function useSelectedVideoSize(): void {
   if (editingBusy.value || selectedLocked.value || selectedVideoSizeError.value) return
   const source = selectedVideoSize.value
-  if (!source) return
-  openEditorDialog('project')
-  customSizeMode.value = true
-  customWidth.value = String(source.width); customHeight.value = String(source.height); customSizeError.value = ''
+  if (source) projectSizeControls.value?.setSourceSize(source.width, source.height)
 }
 function onAssetDrag(event: DragEvent, asset: MediaAsset): void {
   event.dataTransfer?.setData('application/x-open-media-asset', asset.id)
@@ -959,7 +1096,7 @@ function onAssetDrag(event: DragEvent, asset: MediaAsset): void {
 }
 function onDrop(event: DragEvent, track: Track): void {
   event.preventDefault()
-  if (editingBusy.value || track.locked || pendingTrackDelete.value) return
+  if (editingBusy.value || track.locked || track.kind === 'transition' || pendingTrackDelete.value) return
   const assetId = event.dataTransfer?.getData('application/x-open-media-asset')
   const asset = props.project.assets.find(item => item.id === assetId)
   if (asset) {
@@ -978,7 +1115,7 @@ function startGesture(event: PointerEvent, clip: Clip, track: Track, kind: 'move
   event.preventDefault(); event.stopPropagation()
   ;(event.currentTarget as HTMLElement).closest<HTMLButtonElement>('.timeline-clip')?.focus({ preventScroll: true })
   selectedId.value = clip.id
-  if (track.locked) return
+  if (track.locked || track.kind === 'transition') return
   pause(); closeMenus()
   gesture = { kind, clipId: clip.id, trackId: track.id, startX: event.clientX, startScroll: timelineScroll.value?.scrollLeft || 0, original: { ...clip }, base: props.project }
   window.addEventListener('pointermove', moveGesture)
@@ -1081,9 +1218,9 @@ watch(() => props.project, project => {
   if (clipMenu.value && !findClip(project, clipMenu.value.clipId)) closeMenus()
   if (trackMenu.value && !project.tracks.some(track => track.id === trackMenu.value?.trackId)) closeMenus()
 })
-watch([() => props.project.id, () => props.project.width, () => props.project.height], resetCustomSize)
-watch(() => props.project.id, () => { cancelWatermarkImport(); cancelMusicImport(); musicAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
+watch(() => props.project.id, () => { cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); musicAssets.clear(); segmentAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
 watch([editingBusy, modalOpen, () => props.exportDisabled], values => { if (values.some(Boolean)) { cancelTrackDrag(); cancelPreviewPosition() } }, { flush: 'sync' })
+watch(() => props.automationBusy, busy => { if (busy) { pause(); cancelGesture(); closeMenus() } }, { flush: 'sync' })
 watch(selectedId, () => { cancelPreviewPosition(); clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
 onMounted(() => {
   if (canvas.value) {
@@ -1100,27 +1237,33 @@ function closeMenusOnResize(): void { closeMenus() }
 function cancelWatermarkImport(): void {
   watermarkAbort?.abort(new DOMException('已取消水印导入', 'AbortError'))
   watermarkAbort = undefined
-  if (watermarkBusy.value) { watermarkBusy.value = false; emit('busy', editingBusy.value) }
+  if (watermarkBusy.value) { watermarkBusy.value = false; emit('busy', localEditingBusy.value) }
 }
 function cancelMusicImport(): void {
   musicAbort?.abort(new DOMException('已取消背景音乐导入', 'AbortError'))
   musicAbort = undefined
-  if (musicBusy.value) { musicBusy.value = false; emit('busy', editingBusy.value) }
+  if (musicBusy.value) { musicBusy.value = false; emit('busy', localEditingBusy.value) }
 }
-onBeforeUnmount(() => { editorDestroyed = true; cancelWatermarkImport(); cancelMusicImport(); pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
-defineExpose({ getCanvas: () => canvas.value, pause, seek })
+function cancelSegmentImport(): void {
+  segmentAbort?.abort(new DOMException('已取消视频片段导入', 'AbortError'))
+  segmentAbort = undefined
+  if (segmentBusy.value) { segmentBusy.value = false; emit('busy', localEditingBusy.value) }
+}
+onBeforeUnmount(() => { editorDestroyed = true; cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
+defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayback, getInteractionBusy })
 </script>
 
 <template>
   <section ref="editorRoot" class="video-editor" data-testid="video-editor" :inert="pendingTrackDelete ? true : undefined">
-    <div class="editor-tools" :inert="editingBusy || undefined">
-      <div class="tool-group">
+    <div class="editor-tools">
+      <div class="tool-group" :inert="editingBusy || undefined">
         <button class="editor-primary" title="导入素材" aria-label="导入素材" @click="emit('import')"><Icon name="import" :size="16" /><span>导入素材</span></button>
         <button title="文字转语音" aria-label="文字转语音" :class="{ 'editor-primary': editorDialog === 'speech' }" @click="openSpeech"><Icon name="audio" :size="16" /><span>配音</span></button>
       </div>
       <div class="editor-output-actions">
         <button class="project-settings-button" title="项目设置" aria-label="项目设置" aria-haspopup="dialog" :disabled="editingBusy" @click="openEditorDialog('project')"><Icon name="settings" :size="18" /></button>
         <button class="editor-export" data-testid="export-project" :disabled="!duration || exportDisabled || editingBusy" @click="pause(); emit('export')"><Icon name="export" :size="16" />导出视频</button>
+        <button class="mcp-service-button mcp-compact-entry" title="MCP 服务" aria-label="MCP 服务" aria-haspopup="dialog" data-testid="editor-mcp-open-compact" @click="emit('openMcp')"><Icon name="mcp" :size="18" /></button>
       </div>
     </div>
     <div class="editor-main">
@@ -1140,6 +1283,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
       </aside>
       <main class="preview-panel" :inert="speechBusy || undefined">
         <div class="preview-heading"><span class="preview-title">预览</span><span>{{ project.width }} × {{ project.height }} · {{ project.fps }} fps</span></div>
+        <ProjectSizeControls ref="projectSizeControls" :project="project" :disabled="editingBusy || !!exportDisabled || modalOpen" @change="resizeProjectLive" />
         <div class="preview-stage">
           <div class="preview-frame" :style="{ aspectRatio: ratio }">
             <canvas ref="canvas" aria-label="视频合成预览" data-testid="video-preview" />
@@ -1158,16 +1302,23 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
           <span class="preview-scale">适应窗口</span>
         </div>
       </main>
-      <aside class="property-panel" :inert="editingBusy && !selectedSpeechBusy || undefined">
+      <aside class="property-panel">
         <header class="property-heading">
-          <div v-if="selectedSupportsFilters" class="property-tabs" role="tablist" aria-label="片段设置" @keydown="inspectorTabKeyboard">
+          <div v-if="selectedSupportsFilters" class="property-tabs" role="tablist" aria-label="片段设置" :inert="editingBusy || undefined" @keydown="inspectorTabKeyboard">
             <button id="clip-properties-tab" type="button" role="tab" :aria-selected="inspectorTab === 'properties'" aria-controls="clip-properties-panel" :tabindex="inspectorTab === 'properties' ? 0 : -1" @click="inspectorTab = 'properties'"><Icon name="sliders" :size="14" />属性</button>
             <button id="clip-filters-tab" type="button" role="tab" :aria-selected="inspectorTab === 'filters'" aria-controls="clip-filters-panel" :tabindex="inspectorTab === 'filters' ? 0 : -1" @click="inspectorTab = 'filters'"><Icon name="sun" :size="14" />滤镜</button>
           </div>
           <span v-else>片段属性</span>
+          <button class="mcp-service-button mcp-inspector-entry" title="MCP 服务" aria-label="MCP 服务" aria-haspopup="dialog" data-testid="editor-mcp-open" @click="emit('openMcp')"><Icon name="mcp" :size="18" /></button>
         </header>
-        <div v-if="selected" class="property-content">
-          <div class="selected-heading"><Icon :name="selected.track.kind === 'text' ? 'text' : selected.track.kind === 'audio' ? 'audio' : 'video'" :size="16" /><strong>{{ selected.clip.name }}</strong><span v-if="selectedLocked">已锁定</span></div>
+        <div v-if="selected" class="property-content" :inert="editingBusy && !selectedSpeechBusy || undefined">
+          <div class="selected-heading"><Icon :name="selected.track.kind === 'text' ? 'text' : selected.track.kind === 'audio' ? 'audio' : selected.track.kind === 'transition' ? 'transition' : 'video'" :size="16" /><strong>{{ selected.clip.name }}</strong><span v-if="selectedLocked">已锁定</span></div>
+          <fieldset v-if="selected.clip.transition" class="transition-properties" :disabled="selectedLocked || editingBusy">
+            <label>转场效果<select aria-label="片段转场效果" :value="selected.clip.transition.effect" @change="changeTransition(stringValue($event) as TransitionEffect, clipDuration(selected.clip))"><option v-for="effect in TRANSITION_PRESETS" :key="effect.id" :value="effect.id">{{ effect.name }}</option></select></label>
+            <label>转场时长 / 秒<input type="number" :min="2 / project.fps" step="0.1" :value="Number(clipDuration(selected.clip).toFixed(3))" aria-label="片段转场时长" @change="changeTransitionLength" /></label>
+            <p class="setting-note">切点 {{ (selected.clip.start + clipDuration(selected.clip) / 2).toFixed(2) }} 秒 · 前后各 {{ (clipDuration(selected.clip) / 2).toFixed(2) }} 秒。转场始终跟随关联视频的剪切点。</p>
+          </fieldset>
+          <template v-else>
           <section v-show="inspectorTab === 'properties'" id="clip-properties-panel" :role="selectedSupportsFilters ? 'tabpanel' : undefined" :aria-labelledby="selectedSupportsFilters ? 'clip-properties-tab' : undefined" :tabindex="selectedSupportsFilters ? 0 : undefined">
           <AudioClipPlayer v-if="selectedSupportsAudioPlayback" :key="`${project.id}:${selected.clip.id}`" ref="audioClipPlayer" :project="activeProject" :clip="selected.clip" :disabled="editingBusy || modalOpen || !!exportDisabled" @play-request="pauseTimeline" @status="message" />
           <div v-if="selected.track.kind === 'text'" class="clip-speech-actions">
@@ -1194,6 +1345,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
           <section v-if="selectedSupportsFilters" v-show="inspectorTab === 'filters'" id="clip-filters-panel" role="tabpanel" aria-labelledby="clip-filters-tab" tabindex="0">
             <ClipFilterPanel :key="selected.clip.id" :filters="selected.clip.filters" :disabled="selectedLocked" @change="(filters, label) => updateSelected({ filters }, label)" />
           </section>
+          </template>
         </div>
         <div v-else class="property-empty"><Icon name="settings" :size="28" /><strong>选择一个片段</strong><span>调整画面、速度、声音<br />或添加淡入淡出</span></div>
       </aside>
@@ -1206,10 +1358,12 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
           <button title="添加字幕" @click="addText"><Icon name="text" :size="15" /><span>字幕</span></button>
           <button title="从当前刻度添加水印" aria-label="添加水印" aria-haspopup="dialog" data-testid="watermark-open" :disabled="editingBusy || !!exportDisabled" @click="openWatermarks"><Icon name="sticker" :size="15" /><span>水印</span></button>
           <button title="从当前刻度加入背景音乐" aria-label="背景音乐" aria-haspopup="dialog" data-testid="background-music-open" :disabled="editingBusy || !!exportDisabled" @click="openBackgroundMusic"><Icon name="audio" :size="15" /><span>背景音乐</span></button>
+          <button title="添加片头或片尾" aria-label="视频片段" aria-haspopup="dialog" data-testid="video-segment-open" :disabled="editingBusy || !!exportDisabled" @click="openVideoSegments"><Icon name="video" :size="15" /><span>视频片段</span></button>
+          <button title="在相邻视频切点应用转场" aria-label="转场" aria-haspopup="dialog" data-testid="transition-open" :disabled="editingBusy || !!exportDisabled" @click="openTransitions"><Icon name="transition" :size="15" /><span>转场</span></button>
           <button :disabled="!canSplit" title="在播放头处分割（S）" @click="splitSelected"><Icon name="scissors" :size="15" /><span>分割</span></button>
           <button :disabled="!canTrimStart" title="裁掉播放头左侧（Q）" aria-label="裁掉播放头左侧（Q）" @click="trimSelected('start')"><Icon name="mark-in" :size="15" /></button>
           <button :disabled="!canTrimEnd" title="裁掉播放头右侧（W）" aria-label="裁掉播放头右侧（W）" @click="trimSelected('end')"><Icon name="mark-out" :size="15" /></button>
-          <button :disabled="!selected || selectedLocked" title="复制片段" aria-label="复制片段" @click="duplicateSelected"><Icon name="copy" :size="15" /></button>
+          <button :disabled="!selected || selectedLocked || selected.track.kind === 'transition'" title="复制片段" aria-label="复制片段" @click="duplicateSelected"><Icon name="copy" :size="15" /></button>
           <button :disabled="!selected || selectedLocked" title="删除片段" aria-label="删除片段" @click="deleteSelected()"><Icon name="trash" :size="15" /></button>
         </div>
         <div class="timeline-edits"><button data-testid="timeline-snap" :aria-pressed="snapEnabled" :class="{ active: snapEnabled }" :title="snapEnabled ? '吸附已开启，按住 Shift 临时关闭' : '吸附已关闭，仍按帧对齐'" aria-label="时间线吸附" @click="snapEnabled = !snapEnabled; snapGuide = null"><Icon name="magnet" :size="16" /></button><button data-testid="timeline-close-gaps" :disabled="!duration" title="清除全轨公共空隙，保持各轨道同步" aria-label="清除全轨公共空隙" @click="closeGaps"><Icon name="close-gap" :size="16" /></button></div>
@@ -1220,16 +1374,16 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
           <div class="ruler-row"><div class="track-label ruler-label">{{ formatTime(playhead, true) }}</div><div class="timeline-ruler" :style="{ width: `${timelineWidth}px` }" @pointerdown="setPlayheadFromPointer"><span v-for="tick in ticks" :key="tick" :style="{ left: `${tick * zoom}px` }">{{ formatTime(tick) }}</span><div class="ruler-playhead" :style="{ left: `${playhead * zoom}px` }" /></div></div>
           <div v-for="(track, trackIndex) in activeProject.tracks" :key="track.id" class="track-row" :data-track-row-id="track.id" :class="{ locked: track.locked, 'track-dragging': draggingTrackId === track.id }">
             <div class="track-label" :data-track-label-id="track.id" tabindex="-1" @contextmenu="openTrackMenu($event, track)">
-              <div class="track-name" @dblclick.stop="startTrackRename(track)"><button class="track-drag-handle" :data-track-drag="track.id" :disabled="track.locked || editingBusy || !!exportDisabled || !!renamingTrackId || activeProject.tracks.length < 2" :aria-label="`拖动排序：${track.name}`" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="拖动调整轨道层级（Alt + ↑ / ↓）" @pointerdown="startTrackDrag($event, track)" @keydown="trackHandleKeyboard($event, track)" @click.stop @dblclick.stop @contextmenu.prevent.stop><Icon name="grip" :size="13" /></button><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : 'video'" :size="13" /><input v-if="renamingTrackId === track.id" v-model="trackName" class="track-rename-input" aria-label="轨道名称" maxlength="200" @keydown.enter.prevent.stop="finishTrackRename()" @keydown.esc.prevent.stop="finishTrackRename(false)" @blur="finishTrackRename()" @pointerdown.stop @dblclick.stop @contextmenu.stop /><span v-else :title="`${track.name} · 双击重命名`">{{ track.name }}</span><button v-if="subtitleIssues.get(track.id)?.length" class="track-subtitle-warning" data-testid="track-subtitle-warning" :data-warning-track-id="track.id" :disabled="editingBusy" :title="subtitleWarningLabel(track)" :aria-label="subtitleWarningLabel(track)" @pointerdown.stop @dblclick.stop @click.stop="focusSubtitleIssue(track)"><Icon name="alert" :size="13" /><span>{{ subtitleIssues.get(track.id)?.length }}</span></button><span class="track-clip-count" data-testid="track-clip-count" :data-count-track-id="track.id" :title="`${track.name}：${track.clips.length} 个片段`" :aria-label="`${track.name}：${track.clips.length} 个片段`" @dblclick.stop>{{ track.clips.length }}</span></div>
-              <div class="track-actions"><button :title="track.muted ? '开启轨道声音' : '静音轨道'" :class="{ enabled: track.muted }" :disabled="track.kind === 'text' || track.locked" @click="commit(() => setTrack(project, track.id, { muted: !track.muted }), '调整轨道静音')"><Icon :name="track.muted ? 'volume-off' : 'volume'" :size="13" /></button><button :title="track.locked ? '解锁轨道' : '锁定轨道'" :class="{ enabled: track.locked }" @click="commit(() => setTrack(project, track.id, { locked: !track.locked }), '调整轨道锁定')"><Icon :name="track.locked ? 'lock' : 'unlock'" :size="12" /></button><button :disabled="!trackIndex || track.locked" title="轨道上移一层" @click="changeTrackOrder(track, -1)"><Icon name="chevron-up" :size="13" /></button><button title="轨道操作" aria-label="轨道操作" aria-haspopup="menu" @click="openTrackMenu($event, track)"><Icon name="more" :size="13" /></button></div>
+              <div class="track-name" @dblclick.stop="startTrackRename(track)"><button class="track-drag-handle" :data-track-drag="track.id" :disabled="track.locked || editingBusy || !!exportDisabled || !!renamingTrackId || activeProject.tracks.length < 2" :aria-label="`拖动排序：${track.name}`" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="拖动调整轨道层级（Alt + ↑ / ↓）" @pointerdown="startTrackDrag($event, track)" @keydown="trackHandleKeyboard($event, track)" @click.stop @dblclick.stop @contextmenu.prevent.stop><Icon name="grip" :size="13" /></button><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : track.kind === 'transition' ? 'transition' : 'video'" :size="13" /><input v-if="renamingTrackId === track.id" v-model="trackName" class="track-rename-input" aria-label="轨道名称" maxlength="200" @keydown.enter.prevent.stop="finishTrackRename()" @keydown.esc.prevent.stop="finishTrackRename(false)" @blur="finishTrackRename()" @pointerdown.stop @dblclick.stop @contextmenu.stop /><span v-else :title="`${track.name} · 双击重命名`">{{ track.name }}</span><button v-if="subtitleIssues.get(track.id)?.length" class="track-subtitle-warning" data-testid="track-subtitle-warning" :data-warning-track-id="track.id" :disabled="editingBusy" :title="subtitleWarningLabel(track)" :aria-label="subtitleWarningLabel(track)" @pointerdown.stop @dblclick.stop @click.stop="focusSubtitleIssue(track)"><Icon name="alert" :size="13" /><span>{{ subtitleIssues.get(track.id)?.length }}</span></button><span class="track-clip-count" data-testid="track-clip-count" :data-count-track-id="track.id" :title="`${track.name}：${track.clips.length} 个片段`" :aria-label="`${track.name}：${track.clips.length} 个片段`" @dblclick.stop>{{ track.clips.length }}</span></div>
+              <div class="track-actions"><button :title="track.kind === 'transition' ? track.muted ? '启用转场' : '停用转场' : track.muted ? '开启轨道声音' : '静音轨道'" :class="{ enabled: track.muted }" :disabled="track.kind === 'text' || track.locked" @click="commit(() => setTrack(project, track.id, { muted: !track.muted }), track.kind === 'transition' ? '调整转场启用状态' : '调整轨道静音')"><Icon :name="track.kind === 'transition' ? track.muted ? 'eye-off' : 'eye' : track.muted ? 'volume-off' : 'volume'" :size="13" /></button><button :title="track.locked ? '解锁轨道' : '锁定轨道'" :class="{ enabled: track.locked }" @click="commit(() => setTrack(project, track.id, { locked: !track.locked }), '调整轨道锁定')"><Icon :name="track.locked ? 'lock' : 'unlock'" :size="12" /></button><button :disabled="!trackIndex || track.locked" title="轨道上移一层" @click="changeTrackOrder(track, -1)"><Icon name="chevron-up" :size="13" /></button><button title="轨道操作" aria-label="轨道操作" aria-haspopup="menu" @click="openTrackMenu($event, track)"><Icon name="more" :size="13" /></button></div>
             </div>
             <div class="track-lane" :data-track-id="track.id" :style="{ width: `${timelineWidth}px`, backgroundSize: `${zoom * tickStep}px 100%` }" @dragover.prevent @drop="onDrop($event, track)" @pointerdown="setPlayheadFromPointer">
-              <span v-if="!track.clips.length" class="track-hint">{{ track.kind === 'text' ? '点击时间线工具栏「字幕」添加文字' : track.kind === 'audio' ? '拖入音乐或视频的声音' : '拖入视频或图片' }}</span>
+              <span v-if="!track.clips.length" class="track-hint">{{ track.kind === 'text' ? '点击时间线工具栏「字幕」添加文字' : track.kind === 'audio' ? '拖入音乐或视频的声音' : track.kind === 'transition' ? '在转场库中选择效果，自动对齐视频切点' : '拖入视频或图片' }}</span>
               <button v-for="clip in track.clips" :key="clip.id" class="timeline-clip" :class="[track.kind, { selected: selectedId === clip.id, 'subtitle-invalid': subtitleIssuesByClip.has(clip.id) }]" :style="{ left: `${clip.start * zoom}px`, width: `${Math.max(10, clipDuration(clip) * zoom)}px` }" :title="timelineClipTitle(clip)" :data-clip-id="clip.id" @pointerdown="startGesture($event, clip, track, 'move')" @click.stop="selectedId = clip.id" @contextmenu="openClipMenu($event, clip, track)">
-                <span class="trim-handle start" title="拖动裁剪开头" @pointerdown.stop="startGesture($event, clip, track, 'trim-start')" />
-                <span class="clip-title"><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : 'video'" :size="12" />{{ clip.text ?? clip.name }}</span>
+                <span v-if="track.kind !== 'transition'" class="trim-handle start" title="拖动裁剪开头" @pointerdown.stop="startGesture($event, clip, track, 'trim-start')" />
+                <span class="clip-title"><Icon :name="track.kind === 'text' ? 'text' : track.kind === 'audio' ? 'audio' : track.kind === 'transition' ? 'transition' : 'video'" :size="12" />{{ clip.text ?? clip.name }}</span>
                 <span class="clip-detail-row"><span class="clip-detail">{{ clip.speed !== 1 ? `${clip.speed}× · ` : '' }}{{ clipDuration(clip).toFixed(1) }}s</span><span v-if="clip.generatedAt || (track.kind === 'audio' && clip.speech)" class="clip-metadata"><span v-if="track.kind === 'audio' && clip.speech" class="clip-speech-model" data-testid="clip-speech-model" :title="`配音模型：${clipSpeechModel(clip)} · ${clip.speech.voiceId}`">{{ clipSpeechModel(clip) }}</span><time v-if="clip.generatedAt" class="clip-generated-time" data-testid="clip-generated-time" :datetime="clip.generatedAt" :title="generatedTimes.get(clip.generatedAt)?.full">{{ generatedTimes.get(clip.generatedAt)?.short }}</time></span></span>
-                <span class="trim-handle end" title="拖动裁剪结尾" @pointerdown.stop="startGesture($event, clip, track, 'trim-end')" />
+                <span v-if="track.kind !== 'transition'" class="trim-handle end" title="拖动裁剪结尾" @pointerdown.stop="startGesture($event, clip, track, 'trim-end')" />
               </button>
               <div class="lane-playhead" :style="{ left: `${playhead * zoom}px` }" />
             </div>
@@ -1243,6 +1397,13 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
     </section>
     <input ref="watermarkFile" type="file" accept="image/*,video/*,.mp4,.mov,.webm,.png,.webp,.svg" hidden data-testid="watermark-file" @change="localWatermarkChosen" />
     <input ref="musicFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus,.aiff,.aif,.wma" hidden data-testid="background-music-file" @change="localMusicChosen" />
+    <input ref="segmentFile" type="file" accept="video/*,.mp4,.mov,.webm,.mkv,.avi,.m4v" hidden data-testid="video-segment-file" @change="localSegmentChosen" />
+    <EditorDialog :open="editorDialog === 'segment'" title="视频片段" icon="video" wide :busy="segmentBusy" busy-message="正在准备视频片段…" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+      <VideoSegmentLibrary v-if="editorDialog === 'segment'" :busy="segmentBusy" :error="segmentError" @select="insertSegment" @import-local="importLocalSegment" />
+    </EditorDialog>
+    <EditorDialog :open="editorDialog === 'transition'" title="转场" icon="transition" wide :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+      <TransitionLibrary v-if="editorDialog === 'transition'" :cut="transitionCut" :fps="project.fps" :from-name="transitionCut && findClip(project, transitionCut.fromClipId)?.clip.name" :to-name="transitionCut && findClip(project, transitionCut.toClipId)?.clip.name" :error="transitionError" @select="insertTransition" />
+    </EditorDialog>
     <EditorDialog :open="editorDialog === 'music'" title="背景音乐" icon="audio" wide :busy="musicBusy" busy-message="正在准备背景音乐…" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <BackgroundMusicLibrary v-if="editorDialog === 'music'" :busy="musicBusy" :error="musicError" @select="insertBackgroundMusic" @import-local="importLocalMusic" />
     </EditorDialog>
@@ -1254,16 +1415,11 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'project'" title="项目设置" icon="settings" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
         <div class="property-content project-settings-content">
-          <h3>画面</h3><label>画面比例<select aria-label="画面比例" :value="projectSizePreset" @change="setRatio(stringValue($event))"><option value="landscape">横屏 16:9</option><option value="portrait">竖屏 9:16</option><option value="square">方形 1:1</option><option value="cinema">宽银幕 21:9</option><option value="custom">自定义尺寸</option></select></label>
-          <form v-if="projectSizePreset === 'custom'" class="project-custom-size" novalidate @submit.prevent="applyCustomProjectSize">
-            <div class="property-grid"><label>宽度（px）<input v-model="customWidth" type="number" :min="MIN_PROJECT_SIZE" :max="MAX_PROJECT_SIZE" step="1" aria-label="项目宽度" aria-describedby="project-custom-size-help" :aria-invalid="!!customSizeError" @input="customSizeError = ''" /></label><label>高度（px）<input v-model="customHeight" type="number" :min="MIN_PROJECT_SIZE" :max="MAX_PROJECT_SIZE" step="1" aria-label="项目高度" aria-describedby="project-custom-size-help" :aria-invalid="!!customSizeError" @input="customSizeError = ''" /></label></div>
-            <div class="project-size-actions"><span id="project-custom-size-help">{{ MIN_PROJECT_SIZE }}–{{ MAX_PROJECT_SIZE }} px，整数尺寸</span><button type="submit" :disabled="editingBusy" class="editor-primary">应用尺寸</button></div>
-            <p v-if="customSizeError" class="project-size-error" role="alert">{{ customSizeError }}</p>
-          </form>
-          <label>帧率<select :value="project.fps" aria-label="项目帧率" @change="setProjectSetting({ fps: numberValue($event) })"><option :value="24">24 fps</option><option :value="25">25 fps</option><option :value="30">30 fps</option><option :value="60">60 fps</option></select></label><label>背景颜色<input type="color" :value="project.background" aria-label="项目背景颜色" @change="setProjectSetting({ background: stringValue($event) })" /></label><div class="setting-note"><template v-if="project.autoSizeFromVideo">首次导入视频后自动采用源视频尺寸。</template>当前尺寸 {{ project.width }} × {{ project.height }}。调整尺寸会同步缩放画面片段和字幕位置。轨道从上到下对应画面从前景到背景。</div>
+          <h3>画面</h3>
+          <label>帧率<select :value="project.fps" aria-label="项目帧率" @change="setProjectSetting({ fps: numberValue($event) })"><option :value="24">24 fps</option><option :value="25">25 fps</option><option :value="30">30 fps</option><option :value="60">60 fps</option></select></label><label>背景颜色<input type="color" :value="project.background" aria-label="项目背景颜色" @change="setProjectSetting({ background: stringValue($event) })" /></label><div class="setting-note"><template v-if="project.autoSizeFromVideo">首次导入视频后自动采用源视频尺寸。</template>当前尺寸 {{ project.width }} × {{ project.height }}，可在预览上方直接调整并实时查看。轨道从上到下对应画面从前景到背景。</div>
           <h3>项目概况</h3><dl><dt>总时长</dt><dd>{{ formatTime(duration, true) }}</dd><dt>素材</dt><dd>{{ project.assets.length }} 个</dd><dt>轨道</dt><dd>{{ project.tracks.length }} 条</dd></dl>
         </div>
-      <template #footer><button class="editor-primary" @click="completeProjectSettings">完成</button></template>
+      <template #footer><button class="editor-primary" @click="closeEditorDialog">完成</button></template>
     </EditorDialog>
     <Teleport to="body">
       <div v-if="clipMenu && selected" ref="menuElement" class="clip-context-menu" role="menu" tabindex="-1" :aria-label="selected.track.kind === 'text' ? '文字片段操作' : '片段操作'" :style="{ left: `${clipMenu.x}px`, top: `${clipMenu.y}px` }" @keydown="menuKeyboard">
@@ -1274,11 +1430,11 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
         <button role="menuitem" :disabled="!canTrimEnd" @click="menuAction(() => trimSelected('end'))"><Icon name="mark-out" :size="14" /><span>裁掉播放头右侧</span><kbd>W</kbd></button>
         <button v-if="selectedSupportsAudioPlayback" role="menuitem" data-testid="restore-audio-length" :disabled="selectedLocked || editingBusy" @click="menuAction(restoreSelectedAudioLength)"><Icon name="undo" :size="14" />恢复原长度</button>
         <button v-if="selectedVideo" role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(separateAudio)"><Icon name="audio" :size="14" />分离到音轨</button>
-        <button v-if="selectedVideo" role="menuitem" data-testid="project-size-from-clip" :disabled="selectedLocked || editingBusy || !!selectedVideoSizeError" :title="selectedVideoSizeError || `源视频尺寸 ${selectedVideoSize?.width} × ${selectedVideoSize?.height}`" @click="menuAction(useSelectedVideoSize)"><Icon name="video" :size="14" />在项目设置中使用源尺寸</button>
+        <button v-if="selectedVideo" role="menuitem" data-testid="project-size-from-clip" :disabled="selectedLocked || editingBusy || !!selectedVideoSizeError" :title="selectedVideoSizeError || `源视频尺寸 ${selectedVideoSize?.width} × ${selectedVideoSize?.height}`" @click="menuAction(useSelectedVideoSize, false)"><Icon name="video" :size="14" />以此片段设置画面尺寸</button>
         <button v-if="selected.track.kind === 'video'" role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(pictureInPicture)"><Icon name="video" :size="14" />设为画中画</button>
-        <hr /><button role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(duplicateSelected)"><Icon name="copy" :size="14" />复制片段</button>
+        <hr /><button role="menuitem" :disabled="selectedLocked || editingBusy || selected.track.kind === 'transition'" @click="menuAction(duplicateSelected)"><Icon name="copy" :size="14" />复制片段</button>
         <button role="menuitem" :disabled="selectedLocked || editingBusy" @click="menuAction(() => deleteSelected())"><Icon name="trash" :size="14" /><span>删除片段</span><kbd>Delete</kbd></button>
-        <button role="menuitem" :disabled="selectedLocked || editingBusy" title="仅接拢此片段原范围内的全轨公共空隙" @click="menuAction(() => deleteSelected(true))"><Icon name="close-gap" :size="14" /><span>删除并接拢空隙</span><kbd>Shift Del</kbd></button>
+        <button role="menuitem" :disabled="selectedLocked || editingBusy || selected.track.kind === 'transition'" title="仅接拢此片段原范围内的全轨公共空隙" @click="menuAction(() => deleteSelected(true))"><Icon name="close-gap" :size="14" /><span>删除并接拢空隙</span><kbd>Shift Del</kbd></button>
       </div>
       <div v-if="trackMenu && menuTrack" ref="menuElement" class="clip-context-menu" role="menu" tabindex="-1" aria-label="轨道操作" :style="{ left: `${trackMenu.x}px`, top: `${trackMenu.y}px` }" @keydown="menuKeyboard">
         <button role="menuitem" :disabled="menuTrack.locked || editingBusy" @click="menuAction(() => startTrackRename(menuTrack!))"><Icon name="text" :size="14" />重命名轨道</button>
@@ -1292,7 +1448,9 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
 </template>
 
 <style scoped>
-.project-custom-size{margin-bottom:14px}.project-size-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;color:var(--ed-muted)}.project-size-actions button{flex-shrink:0}.project-size-error{margin:8px 0 0;color:var(--ui-danger,#b73838);font-size:11px;line-height:1.5}.project-custom-size input[aria-invalid="true"]{border-color:var(--ui-danger,#b73838)}
+.mcp-service-button{width:29px;flex:none;padding:4px;color:var(--ed-muted)}.mcp-inspector-entry{margin-left:auto}.mcp-compact-entry{display:none}@media(max-width:860px){.mcp-inspector-entry{display:none}.mcp-compact-entry{display:inline-flex}}
+.transition-properties{margin-top:12px}.timeline-clip.transition{background:color-mix(in srgb,var(--ed-accent) 18%,var(--ed-panel));border-color:color-mix(in srgb,var(--ed-accent) 45%,var(--ed-border));cursor:pointer}.timeline-clip.transition::after{content:"";position:absolute;top:0;bottom:0;left:50%;border-left:1px dashed currentColor;opacity:.35;pointer-events:none}
+
 .clip-speech-progress{grid-column:1/-1;display:grid;gap:3px;color:var(--ed-muted);font-size:10px;line-height:1.6;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .clip-speech-progress-meta{display:flex;justify-content:space-between;gap:8px}.clip-speech-progress progress{display:block;appearance:none;-webkit-appearance:none;width:100%;height:6px;margin:3px 0;border:0;border-radius:99px;overflow:hidden;background:var(--ed-border);accent-color:var(--ed-accent)}.clip-speech-progress progress::-webkit-progress-bar{background:var(--ed-border);border-radius:99px}.clip-speech-progress progress::-webkit-progress-value{background:var(--ed-accent);border-radius:99px}.clip-speech-progress progress::-moz-progress-bar{background:var(--ed-accent);border-radius:99px}.clip-speech-progress progress:indeterminate{background:linear-gradient(90deg,var(--ed-border) 0 30%,var(--ed-accent) 50%,var(--ed-border) 70% 100%);background-size:200% 100%;animation:clip-speech-progress-pulse 1.5s ease-in-out infinite}.clip-speech-progress progress:indeterminate::-webkit-progress-bar{background:transparent}@keyframes clip-speech-progress-pulse{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){.clip-speech-progress progress:indeterminate{animation:none}}
 .clip-detail-row{display:flex;align-items:center;gap:min(6px,5%);min-width:0;width:100%;margin-top:auto}

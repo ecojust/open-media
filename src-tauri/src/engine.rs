@@ -17,6 +17,9 @@ use std::{
 #[path = "export_acceleration.rs"]
 mod export_acceleration;
 
+#[path = "transitions.rs"]
+mod transitions;
+
 pub type Result<T> = std::result::Result<T, String>;
 
 pub fn new_id() -> String {
@@ -473,6 +476,18 @@ impl JobManager {
         }
     }
     pub fn begin(&self, runtime: &Runtime, plan: RenderPlan, output: PathBuf) -> Result<MediaJob> {
+        self.begin_with_overwrite(runtime, plan, output, true)
+    }
+    pub fn begin_with_overwrite(
+        &self,
+        runtime: &Runtime,
+        plan: RenderPlan,
+        output: PathBuf,
+        overwrite: bool,
+    ) -> Result<MediaJob> {
+        if !overwrite && output.try_exists().map_err(|e| e.to_string())? {
+            return Err("输出文件已存在，请指定新路径或明确允许覆盖。".into());
+        }
         let parent = output.parent().ok_or("请选择有效的保存目录。")?;
         let staging = tempfile::NamedTempFile::new_in(parent)
             .map_err(|e| format!("无法创建输出文件：{e}"))?;
@@ -606,8 +621,14 @@ impl JobManager {
                     if cancelled.load(Ordering::SeqCst) {
                         return Err("cancelled".into());
                     }
-                    staging
-                        .persist(&output)
+                    // A file may have appeared while encoding; the default MCP export must
+                    // still preserve it instead of relying on the initial existence check.
+                    let saved = if overwrite {
+                        staging.persist(&output)
+                    } else {
+                        staging.persist_noclobber(&output)
+                    };
+                    saved
                         .map(|_| ())
                         .map_err(|e| format!("无法保存导出文件：{}", e.error))
                 })();
@@ -1125,9 +1146,13 @@ fn timeline_plan(
         .filter(|t| t.len() <= 100)
         .ok_or("时间线轨道无效。")?;
     let assets = project["assets"].as_array().ok_or("素材列表无效。")?;
+    let transitions = transitions::Transitions::from_project(project)?;
     let mut clips = Vec::new();
     let mut total = 0.0_f64;
     for track in tracks.iter().rev() {
+        if track["kind"] == "transition" {
+            continue;
+        }
         let items = track["clips"].as_array().ok_or("轨道片段无效。")?;
         for clip in items {
             let speed = number(clip, "speed", 1.0, 0.1, 16.0)?;
@@ -1259,6 +1284,7 @@ fn timeline_plan(
                     duration - fade_out
                 );
             }
+            chain += &transitions.filter_chain(clip, fps);
             if rotation != 0.0 {
                 chain +=
                     &format!(",rotate={rotation}:ow=rotw({rotation}):oh=roth({rotation}):c=none");

@@ -1,0 +1,193 @@
+import { cloneProject, createTrack, newId, validateProject } from './project.ts'
+import type { Clip, Project, TransitionEffect } from './types.ts'
+
+export const TRANSITION_PRESETS: readonly { id: TransitionEffect; name: string; description: string }[] = [
+  { id: 'fade', name: '淡出淡入', description: '前段淡出至项目背景，后段逐渐显现' },
+  { id: 'wipe-up', name: '向上擦除', description: '画面从顶部收起，再从底部向上展开' },
+  { id: 'wipe-down', name: '向下展开', description: '画面从底部收起，再从顶部向下展开' },
+  { id: 'wipe-left', name: '向左擦除', description: '画面向右侧收起，再向左侧展开' },
+  { id: 'wipe-right', name: '向右展开', description: '画面向左侧收起，再向右侧展开' },
+  { id: 'close-vertical', name: '纵向开合', description: '上下边缘向中心收拢，再纵向展开' },
+  { id: 'close-horizontal', name: '横向开合', description: '左右边缘向中心收拢，再横向展开' },
+  { id: 'slide-left', name: '向左滑动', description: '前段滑向左侧，后段从左侧滑入' },
+  { id: 'slide-right', name: '向右滑动', description: '前段滑向右侧，后段从右侧滑入' },
+  { id: 'zoom', name: '缩放显现', description: '前段缩小淡出，后段从中心放大显现' },
+]
+
+const EPSILON = 1e-6
+const durationOf = (clip: Clip) => (clip.trimOut - clip.trimIn) / clip.speed
+const endOf = (clip: Clip) => clip.start + durationOf(clip)
+
+export interface TransitionCut {
+  trackId: string
+  fromClipId: string
+  toClipId: string
+  time: number
+  maxDuration: number
+}
+
+function cuts(project: Project): TransitionCut[] {
+  const assets = new Map(project.assets.map(asset => [asset.id, asset]))
+  return project.tracks.filter(track => track.kind === 'video').flatMap(track => {
+    const sorted = [...track.clips].sort((a, b) => a.start - b.start || endOf(a) - endOf(b))
+    let maximumEarlierEnd = -Infinity
+    return sorted.slice(1).flatMap((to, index) => {
+      const from = sorted[index]!
+      const covered = maximumEarlierEnd > to.start + EPSILON
+      maximumEarlierEnd = Math.max(maximumEarlierEnd, endOf(from))
+      if (assets.get(from.assetId!)?.kind !== 'video' || assets.get(to.assetId!)?.kind !== 'video') return []
+      if (Math.abs(endOf(from) - to.start) > EPSILON) return []
+      // Reject a cut covered by another clip on the same track.
+      if (covered) return []
+      return [{ trackId: track.id, fromClipId: from.id, toClipId: to.id, time: to.start, maxDuration: Math.min(durationOf(from), durationOf(to)) }]
+    })
+  })
+}
+
+/** Prefer the selected video track, then the nearest unambiguous cut elsewhere. */
+export function findTransitionCut(project: Project, time: number, preferredTrackId?: string): TransitionCut | undefined {
+  if (!Number.isFinite(time)) return undefined
+  const candidates = cuts(project).filter(cut => !project.tracks.find(track => track.id === cut.trackId)!.locked && cut.maxDuration >= 2 / project.fps - EPSILON)
+  const preferred = candidates.filter(cut => cut.trackId === preferredTrackId)
+  return (preferred.length ? preferred : candidates).sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time) || a.time - b.time)[0]
+}
+
+function effectName(effect: TransitionEffect): string {
+  const preset = TRANSITION_PRESETS.find(preset => preset.id === effect)
+  if (!preset) throw new Error('转场效果无效。')
+  return preset.name
+}
+
+function boundedDuration(project: Project, cut: TransitionCut, requested: number): number {
+  if (!Number.isFinite(requested) || requested <= 0) throw new Error('转场时长必须大于零。')
+  if (cut.maxDuration < 2 / project.fps - EPSILON) throw new Error('相邻视频片段太短，无法应用转场。')
+  return Math.max(2 / project.fps, Math.min(requested, cut.maxDuration))
+}
+
+function finish(project: Project): Project {
+  project.updatedAt = new Date().toISOString()
+  return validateProject(project, { trusted: true })
+}
+
+export function addTransition(project: Project, time: number, effect: TransitionEffect, duration = 1, preferredTrackId?: string): Project {
+  effectName(effect)
+  const cut = findTransitionCut(project, time, preferredTrackId)
+  if (!cut) throw new Error('需要两个首尾相接的视频片段。请先分割视频或将两个视频片段接拢，并解锁视频轨道。')
+  const length = boundedDuration(project, cut, duration)
+  const next = cloneProject(project)
+  const existing = next.tracks.flatMap(track => track.clips.map(clip => ({ track, clip })))
+    .find(({ clip }) => clip.transition?.fromClipId === cut.fromClipId && clip.transition.toClipId === cut.toClipId)
+  if (existing) return updateTransition(project, existing.clip.id, effect, length)
+  let track = next.tracks.find(track => track.kind === 'transition')
+  if (track?.locked) throw new Error('请先解锁转场轨道。')
+  if (!track) { track = createTrack('transition'); next.tracks.unshift(track) }
+  track.clips.push({ id: newId('clip'), generatedAt: new Date().toISOString(), name: effectName(effect), start: cut.time - length / 2,
+    trimIn: 0, trimOut: length, speed: 1, volume: 0, opacity: 1, x: 0, y: 0, width: project.width, height: project.height,
+    rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, transition: { effect, fromClipId: cut.fromClipId, toClipId: cut.toClipId } })
+  return finish(next)
+}
+
+export function updateTransition(project: Project, clipId: string, effect: TransitionEffect, duration: number): Project {
+  effectName(effect)
+  const next = cloneProject(project)
+  const track = next.tracks.find(track => track.kind === 'transition' && track.clips.some(clip => clip.id === clipId))
+  const clip = track?.clips.find(clip => clip.id === clipId)
+  if (!track || !clip?.transition) throw new Error('转场不存在。')
+  if (track.locked) throw new Error('请先解锁转场轨道。')
+  const cut = cuts(next).find(cut => cut.fromClipId === clip.transition!.fromClipId && cut.toClipId === clip.transition!.toClipId)
+  if (!cut) throw new Error('转场关联的视频片段已经不再相邻。')
+  if (next.tracks.find(track => track.id === cut.trackId)!.locked) throw new Error('请先解锁关联的视频轨道。')
+  const length = boundedDuration(next, cut, duration)
+  clip.name = effectName(effect)
+  clip.transition.effect = effect
+  clip.start = cut.time - length / 2
+  clip.trimOut = length
+  return finish(next)
+}
+
+/** Re-anchor after a timeline edit; invalidated cuts are removed, never moved freely. */
+export function reconcileTransitions(project: Project, previous?: Project): void {
+  const transitionTracks = project.tracks.filter(track => track.kind === 'transition' && track.clips.length)
+  if (!transitionTracks.length) return
+  const available = new Map(cuts(project).map(cut => [`${cut.fromClipId}:${cut.toClipId}`, cut]))
+  for (const track of transitionTracks) {
+    const previousTrack = previous?.tracks.find(item => item.id === track.id)
+    track.clips = track.clips.filter(clip => {
+      const cut = clip.transition && available.get(`${clip.transition.fromClipId}:${clip.transition.toClipId}`)
+      const prior = previousTrack?.clips.find(item => item.id === clip.id)
+      if (!cut || cut.maxDuration < 2 / project.fps - EPSILON) {
+        if (track.locked) throw new Error('此次编辑会移除关联转场，请先解锁转场轨道。')
+        return false
+      }
+      const length = boundedDuration(project, cut, durationOf(clip))
+      const start = cut.time - length / 2
+      if (track.locked && prior && (Math.abs(prior.start - start) > EPSILON || Math.abs(durationOf(prior) - length) > EPSILON || JSON.stringify(prior.transition) !== JSON.stringify(clip.transition))) throw new Error('此次编辑会调整关联转场，请先解锁转场轨道。')
+      clip.start = start; clip.trimIn = 0; clip.trimOut = length; clip.speed = 1
+      return true
+    })
+  }
+}
+
+/** Validate references after every track and media clip has been decoded. */
+export function validateTransitionBindings(project: Pick<Project, 'tracks' | 'assets' | 'fps'>): void {
+  const transitionTracks = project.tracks.filter(track => track.kind === 'transition' && track.clips.length)
+  if (!transitionTracks.length) return
+  const available = new Map(cuts(project as Project).map(cut => [`${cut.fromClipId}:${cut.toClipId}`, cut]))
+  const used = new Set<string>()
+  for (const track of transitionTracks) for (const clip of track.clips) {
+    if (!clip.transition) throw new Error('转场缺少关联的视频片段。')
+    const binding = clip.transition
+    const key = `${binding.fromClipId}:${binding.toClipId}`
+    if (used.has(key)) throw new Error('同一视频切点只能使用一个转场。')
+    used.add(key)
+    const cut = available.get(key)
+    if (!cut) throw new Error('转场必须关联同一轨道上首尾相接的两个视频片段。')
+    const length = durationOf(clip)
+    if (clip.trimIn !== 0 || clip.speed !== 1 || length < 2 / project.fps - EPSILON || length > cut.maxDuration + EPSILON || Math.abs(clip.start + length / 2 - cut.time) > EPSILON) throw new Error('转场时长或位置无效，必须以视频切点为中心。')
+  }
+}
+
+export interface TransitionVisual {
+  effect: TransitionEffect
+  visibility: number
+  opacity: number
+  /** Normalized clip-local visible rectangle. */
+  mask: { x: number; y: number; width: number; height: number }
+  translateX: number
+  scale: number
+}
+
+export function transitionVisual(effect: TransitionEffect, visibility: number): TransitionVisual {
+  const v = Math.min(1, Math.max(0, visibility))
+  const result: TransitionVisual = { effect, visibility: v, opacity: 1, mask: { x: 0, y: 0, width: 1, height: 1 }, translateX: 0, scale: 1 }
+  switch (effect) {
+    case 'fade': result.opacity = v; break
+    case 'wipe-up': result.mask = { x: 0, y: 1 - v, width: 1, height: v }; break
+    case 'wipe-down': result.mask.height = v; break
+    case 'wipe-left': result.mask = { x: 1 - v, y: 0, width: v, height: 1 }; break
+    case 'wipe-right': result.mask.width = v; break
+    case 'close-vertical': result.mask = { x: 0, y: (1 - v) / 2, width: 1, height: v }; break
+    case 'close-horizontal': result.mask = { x: (1 - v) / 2, y: 0, width: v, height: 1 }; break
+    case 'slide-left': result.translateX = -(1 - v); break
+    case 'slide-right': result.translateX = 1 - v; break
+    case 'zoom': result.scale = v; result.opacity = v; break
+  }
+  return result
+}
+
+/** Matching native export semantics: each side fades/masks toward the cut. */
+export function transitionVisualAt(project: Project, clipId: string, time: number): TransitionVisual | undefined {
+  for (const track of project.tracks) {
+    if (track.kind !== 'transition' || track.muted) continue
+    for (const clip of track.clips) {
+      const binding = clip.transition
+      if (!binding || (binding.fromClipId !== clipId && binding.toClipId !== clipId) || time < clip.start || time >= endOf(clip)) continue
+      const middle = clip.start + durationOf(clip) / 2
+      const outgoing = binding.fromClipId === clipId
+      if ((outgoing && time >= middle) || (!outgoing && time < middle)) continue
+      const v = Math.min(1, Math.max(0, (outgoing ? middle - time : time - middle) / (durationOf(clip) / 2)))
+      return transitionVisual(binding.effect, v)
+    }
+  }
+  return undefined
+}

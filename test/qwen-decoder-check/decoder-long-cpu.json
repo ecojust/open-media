@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "device": "cpu",
+  "hardwareGpuVerified": false,
+  "torchVersion": "2.9.1+cpu",
+  "sampleRate": 24000,
+  "codeShape": [
+    394,
+    16
+  ],
+  "audioSeconds": 31.52,
+  "cpuProbeAudioSeconds": 1.92,
+  "cpuProbeElapsedSeconds": 1.1930468560021836,
+  "cpuPrefixRelativeRmsError": 0.004061490478763144,
+  "bf16VersusFp32RelativeRmsError": 0.01327238926559565,
+  "gpuRelativeRmsError": null,
+  "numericalErrorLimit": 0.1,
+  "invalidOutputsRejected": {
+    "finiteNoise": true,
+    "wrongLength": true,
+    "wrongRate": true,
+    "nonFinite": true
+  },
+  "limitations": "Decoder math only; no M5 reproduction, no subtitle recognition or intelligibility score."
+}

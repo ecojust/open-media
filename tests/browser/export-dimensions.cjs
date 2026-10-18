@@ -126,7 +126,7 @@ async function main() {
       await mount(page, baseURL, true, 16384, 8192)
       await checkSize(page, 16384, 8192)
       await expect(page.getByTestId('start-export')).toBeDisabled()
-      await expect(page.getByTestId('export-dimension-error')).toContainText('请在项目设置中调整画面尺寸')
+      await expect(page.getByTestId('export-dimension-error')).toContainText('请在预览上方调整画面尺寸')
       assert.deepEqual(errors, [])
       await page.close()
       console.log('PASS 超出编码上限明确提示项目设置调整，不留下无说明禁用按钮')

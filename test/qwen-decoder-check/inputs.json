@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "testedAtUtc": "2026-10-18",
+  "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+  "sourceFiles": {
+    "scripts/speech-device-runtime.py": "bed53b39045217a20298ad455eb71653f072a947b6aecbe342a575c6eb730ab1",
+    "scripts/test-speech-qwen-decoder.py": "8704e4cdf9e1055894841a083aa10d9eb3fcdc6a5784b19aa6532c54d3a67c0c",
+    "scripts/test-speech-qwen-attention.py": "f31bf97b152574485441d6801a9ce1a5020bfae0d7695c8bfa10ac25778c104e",
+    "test/chinese-tts-benchmark/wav/qwen3-tts-1.7b-serena/01.wav": "d9399d420961632834515af46b176f6f748cae5cfe744da3d33de33f8347ea7f",
+    "test/chinese-tts-benchmark/wav/qwen3-tts-1.7b-serena/10.wav": "9bf1fd2494d0e7eadb37df8e1aed1081504da8421f70063052f6fdce5a202065"
+  }
+}

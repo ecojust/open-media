@@ -5,6 +5,7 @@ import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCa
 import { compactVoiceCatalog } from '../core/voice-catalog'
 import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade } from '../core/voice-downloads'
 import { bundledVoicePreviewUrl, VOICE_PREVIEW_TEXT } from '../core/voice-previews'
+import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../core/speech-settings'
 import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getSpeechJob, getSpeechStatus, repairSpeechModel, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
@@ -14,7 +15,17 @@ const emit = defineEmits<{ change: [project: Project, label: string]; status: [m
 const desktop = isDesktop()
 const status = ref<SpeechStatus>({ ready: false, voices: [] })
 const loading = ref(false), busy = ref(false), cancelling = ref(false), finalizing = ref(false), error = ref(''), notice = ref('')
-const voiceId = ref(''), speed = ref(1), alignText = ref(true)
+const preferences = getSpeechSettings()
+const voiceId = ref(preferences.voiceId), speed = ref(preferences.rate), alignText = ref(preferences.alignText)
+let syncingPreferences = false
+const stopPreferenceSync = subscribeSpeechSettings(value => {
+  syncingPreferences = true
+  voiceId.value = value.voiceId; speed.value = value.rate; alignText.value = value.alignText
+  syncingPreferences = false
+})
+watch([voiceId, speed, alignText], ([voice, rate, align]) => {
+  if (!syncingPreferences) updateSpeechSettings({ voiceId: voice, rate, alignText: align })
+}, { flush: 'sync' })
 const pendingModels = ref<string[]>([]), downloadError = ref('')
 const selectedVoiceReady = computed(() => voiceReady(status.value.voices.find(voice => voice.id === voiceId.value)))
 const previewUrl = ref(''), player = ref<HTMLAudioElement | null>(null)
@@ -302,7 +313,7 @@ watch(speed, value => {
   if (previewIsBundled && player.value) player.value.playbackRate = value
   else clearPreview()
 })
-onBeforeUnmount(() => { disposed = true; stopStatusPoll(); stopGenerationTimer(); clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
+onBeforeUnmount(() => { disposed = true; stopPreferenceSync(); stopStatusPoll(); stopGenerationTimer(); clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
 defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel, generationProgress, progressPercent, progressDescription, elapsedLabel, error, notice })
 </script>
 

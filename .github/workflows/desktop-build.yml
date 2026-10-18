@@ -76,6 +76,13 @@ jobs:
         run: |
           set -o pipefail
           cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib speech::tests::real_offline_speech_round_trip -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee .speech-runtime/logs/native.log
+      - name: Verify the native MCP transport with a standard client
+        run: |
+          npm install --prefix "$RUNNER_TEMP/open-media-mcp-client" --no-package-lock --ignore-scripts @modelcontextprotocol/sdk@1.32.1
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib --no-run --message-format=json > "$RUNNER_TEMP/open-media-native-tests.jsonl"
+          test_binary=$(node --input-type=module -e 'import fs from "node:fs"; const messages = fs.readFileSync(process.argv[1], "utf8").trim().split("\n").map(line => JSON.parse(line)); const artifact = messages.find(item => item.reason === "compiler-artifact" && item.target?.name === "open_media_lib" && item.profile?.test && item.executable); if (!artifact) throw new Error("Native test executable missing"); console.log(artifact.executable);' "$RUNNER_TEMP/open-media-native-tests.jsonl")
+          set -o pipefail
+          node scripts/verify-mcp-protocol.mjs --server-test-binary "$test_binary" --sdk-directory "$RUNNER_TEMP/open-media-mcp-client" 2>&1 | tee .media-runtime/logs/mcp-protocol.log
       - run: npx playwright install --with-deps chromium
       - name: Select the locked browser runtime
         run: |
@@ -120,6 +127,7 @@ jobs:
           path: |
             test-results/browser/
             .media-runtime/logs/native-checks.log
+            .media-runtime/logs/mcp-protocol.log
             .speech-runtime/logs/
             .speech-runtime/verification/**/*.log
             .speech-runtime/verification/**/proof.json

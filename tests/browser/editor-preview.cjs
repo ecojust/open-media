@@ -109,7 +109,11 @@ async function main() {
       const preview = new TimelinePreview(previewCanvas, project)
       await preview.prepare(); await preview.seekReady(0.4)
       const backgroundPixel = [...previewCanvas.getContext('2d').getImageData(5, 5, 1, 1).data]
-      const subtitlePixel = [...previewCanvas.getContext('2d').getImageData(52, 102, 1, 1).data]
+      const subtitlePixels = previewCanvas.getContext('2d').getImageData(50, 100, 220, 70).data
+      let subtitleBackgroundCount = 0, subtitlePixel = []
+      for (let index = 0; index < subtitlePixels.length; index += 4) if (subtitlePixels[index + 2] > 150 && subtitlePixels[index] < 100) {
+        subtitleBackgroundCount++; subtitlePixel = [...subtitlePixels.slice(index, index + 4)]
+      }
       preview.dispose()
       const progress = []
       const exported = await exportTimelineWebM(project, { width: 320, height: 180, fps: 20, onProgress: value => progress.push(value) })
@@ -131,10 +135,11 @@ async function main() {
       const state = ref(project)
       window.editorState = state
       createApp({ render: () => h(VideoEditor, { project: state.value, onChange: next => { state.value = next }, onStatus: message => { window.editorStatus = message } }) }).mount('#app')
-      return { backgroundPixel, subtitlePixel, audioMax, audioDuration: decodedAudio.duration, bytes, progress: [progress[0], progress.at(-1)], cancelName }
+      return { backgroundPixel, subtitlePixel, subtitleBackgroundCount, audioMax, audioDuration: decodedAudio.duration, bytes, progress: [progress[0], progress.at(-1)], cancelName }
     })
     assert(data.backgroundPixel[0] > 140 && data.backgroundPixel[1] < 80, `视频画面未进入预览：${data.backgroundPixel}`)
     assert(data.subtitlePixel[2] > 150 && data.subtitlePixel[0] < 100, `字幕图层未叠加：${data.subtitlePixel}`)
+    assert(data.subtitleBackgroundCount > 500 && data.subtitleBackgroundCount < 220 * 70 / 2, '字幕背景应真实叠加在文字范围内，不填满定位矩形')
     assert(data.audioMax > 0.01, `真实音轨未混入导出：${data.audioMax}`)
     assert(data.audioDuration > 0.2 && data.audioDuration < 1.7, `音轨时长无效：${data.audioDuration}`)
     assert.deepEqual(data.bytes.slice(0, 4), [0x1a, 0x45, 0xdf, 0xa3])
@@ -273,13 +278,19 @@ async function main() {
 
     await installTimeline(page, [{ name: '工具栏字幕轨道', clips: [] }])
     const clipTools = page.locator('.timeline-clip-tools')
-    await expect(clipTools.getByRole('button')).toHaveCount(8)
+    await expect(clipTools.getByRole('button')).toHaveCount(10)
     const watermarkButton = clipTools.getByRole('button', { name: '添加水印', exact: true })
     await expect(watermarkButton).toBeVisible()
     assert.equal(await watermarkButton.evaluate(button => button.previousElementSibling?.textContent.trim()), '字幕')
     const musicButton = clipTools.getByRole('button', { name: '背景音乐', exact: true })
     await expect(musicButton).toBeVisible()
     assert.equal(await musicButton.evaluate(button => button.previousElementSibling?.textContent.trim()), '水印')
+    const segmentButton = clipTools.getByRole('button', { name: '视频片段', exact: true })
+    await expect(segmentButton).toBeVisible()
+    assert.equal(await segmentButton.evaluate(button => button.previousElementSibling?.textContent.trim()), '背景音乐')
+    const transitionButton = clipTools.getByRole('button', { name: '转场', exact: true })
+    await expect(transitionButton).toBeVisible()
+    await expect(transitionButton.locator('svg')).toHaveCount(1)
     await expect(page.locator('.editor-tools').getByRole('button')).toHaveCount(4)
     await expect(page.locator('.editor-tools').getByRole('button', { name: '字幕', exact: true })).toHaveCount(0)
     await clipTools.getByRole('button', { name: '字幕', exact: true }).click()
@@ -364,7 +375,7 @@ async function main() {
       const toolbarBounds = await page.locator('.video-editor').evaluate(element => ({ editor: element.getBoundingClientRect().right, button: element.querySelector('.editor-export').getBoundingClientRect().right }))
       assert(toolbarBounds.button <= toolbarBounds.editor + 1, `${width}px 导出按钮被裁切`)
       const timelineToolbar = page.locator('.timeline-toolbar')
-      await expect(timelineToolbar.getByRole('button')).toHaveCount(16)
+      await expect(timelineToolbar.getByRole('button')).toHaveCount(18)
       if (width === 320) {
         assert(await timelineToolbar.evaluate(element => element.scrollWidth > element.clientWidth), '窄屏应允许横向滚动时间线工具栏')
         const controls = timelineToolbar.locator('button,input')
@@ -407,7 +418,7 @@ async function main() {
       const { createProject, createTextClip } = await import('/src/core/project.ts')
       const { addClip } = await import('/src/core/timeline.ts')
       let project = createProject('切换预览验证', { width: 320, height: 180 })
-      project = addClip(project, project.tracks[0].id, createTextClip(project, { start: 0, trimOut: 1, x: 0, y: 0, width: 320, height: 180, text: '', background: '#2244dd' }))
+      project = addClip(project, project.tracks[0].id, createTextClip(project, { start: 0, trimOut: 1, x: 0, y: 0, width: 320, height: 180, textRole: 'watermark', text: '', background: '#2244dd' }))
       project = addClip(project, project.tracks[0].id, createTextClip(project, { start: 5, trimOut: 1, text: '尾部' }))
       window.editorState.value = project
     })

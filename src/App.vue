@@ -12,6 +12,9 @@ import RecorderWorkspace from './components/RecorderWorkspace.vue'
 import GifWorkspace from './components/GifWorkspace.vue'
 import ConvertWorkspace from './components/ConvertWorkspace.vue'
 import ExportPanel from './components/ExportPanel.vue'
+import McpPanel from './components/McpPanel.vue'
+import { createMcpAutomation, type McpPlayback } from './core/mcp-automation.ts'
+import { claimMcpRequest, completeMcpRequest, getMcpServiceEpoch, getPendingMcpRequests, onMcpRequest, stopMcpService, type McpPanelJob, type McpRequest, type McpStatus } from './native-mcp.ts'
 import type { ImportedProject, MediaAsset, Project, ProjectHistory, ProjectSummary } from './core/types.ts'
 import { stampNewAssets } from './core/asset-times.ts'
 import { cloneProject, createClip, createProject, createTrack, validateProject } from './core/project.ts'
@@ -34,6 +37,16 @@ const workspaces: { id: Workspace; title: string; icon: string; description: str
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
+const projectRevision = ref(0)
+watch(project, () => { projectRevision.value++ }, { flush: 'sync' })
+const videoEditor = ref<InstanceType<typeof VideoEditor>>()
+const mcpOpen = ref(false), mcpBusy = ref(false), mcpJobs = shallowRef<McpPanelJob[]>([]), mcpServiceRunning = ref(false)
+let mcpBridgeError = ''
+let unlistenMcp: (() => void) | undefined, mcpRequestQueue = Promise.resolve()
+let mcpRequestDeadline: number | undefined, mcpPlaybackVersion = 0
+let pendingMcpPlayback: { version: number; pause: () => void } | undefined
+const receivedMcpRequests = new Set<string>()
+const pendingHydration = new WeakMap<Project, ImportedProject>()
 let continuousEdit: { group: string; history: ProjectHistory } | undefined
 const autoSave = ref(true), draftState = ref<'idle' | 'waiting' | 'pending' | 'saved' | 'error'>('idle'), draftError = ref(''), lastSaved = ref('')
 const draftSeconds = ref(0), lastSaveAt = ref(''), lastSaveKind = ref<'draft' | 'file'>('draft')
@@ -49,7 +62,7 @@ const recoveryRecordings = ref<{ id: string; name: string; blob: Blob }[]>([])
 const switching = ref(false), pendingMedia = ref(0), imageConverting = ref(false), videoConverting = ref(false), gifConverting = ref(false), speechWorking = ref(false)
 const screenshotPicker = ref<InstanceType<typeof ScreenshotPicker>>()
 const screenshotShortcut = ref<string | null>(null), screenshotBusy = ref(false), screenshotConfiguring = ref(false), screenshotError = ref(''), screenshotAssetId = ref('')
-const screenshotDisabled = computed(() => Boolean(busy.value || switching.value || booting.value || recording.value || pendingMedia.value || browserExporting.value || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value))
+const screenshotDisabled = computed(() => Boolean(busy.value || switching.value || booting.value || recording.value || pendingMedia.value || browserExporting.value || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value || mcpBusy.value))
 let screenshotAbort: AbortController | undefined, screenshotRequestId: string | undefined, unlistenScreenshot: (() => void) | undefined, destroyed = false
 let captureQueue = Promise.resolve()
 let draftTimer: ReturnType<typeof setTimeout> | undefined, draftGeneration = 0, saveQueue = Promise.resolve(), jobsTimer: ReturnType<typeof setTimeout> | undefined, mediaQuery: MediaQueryList | undefined, unlistenClose: (() => void) | undefined, allowClose = false
@@ -63,7 +76,7 @@ const draftLabel = computed(() => draftState.value === 'error' ? '草稿保存�
 const autosaveProgress = computed(() => draftState.value === 'waiting' ? `${draftSeconds.value} 秒后保存` : draftState.value === 'pending' ? '保存中…' : '')
 function savedTime(value: string) { return new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) }
 const lastSaveTitle = computed(() => lastSaveAt.value ? `${lastSaveKind.value === 'file' ? '项目文件' : '本地草稿'}上次保存：${savedTime(lastSaveAt.value)}` : '')
-function openVideoExport() { if (view.value === 'edit' && duration.value && !busy.value && !switching.value && !booting.value && !speechWorking.value) exportOpen.value = true }
+function openVideoExport() { if (view.value === 'edit' && duration.value && !busy.value && !switching.value && !booting.value && !speechWorking.value && !mcpBusy.value) exportOpen.value = true }
 function announce(message: string) { status.value = message }
 function fail(cause: unknown) { error.value = cause instanceof Error ? cause.message : String(cause); status.value = error.value }
 function notifyError(cause: unknown) { fail(cause); busy.value = '' }
@@ -110,10 +123,11 @@ function persist(): Promise<boolean> {
   saveQueue = result.then(() => undefined)
   return result
 }
-function commit(next: Project, label = '已修改项目', historyGroup?: string) {
+function commit(next: Project, label = '已修改项目', historyGroup?: string, remote = false): boolean {
+  if (destroyed || mcpBusy.value && !remote) return false
   try {
     const checked = validateProject(stampNewAssets(next, project.value), { trusted: true })
-    if (contentKey(checked) === contentKey(project.value)) return
+    if (contentKey(checked) === contentKey(project.value)) return true
     checked.updatedAt = new Date().toISOString()
     // Consecutive live text edits share one undo step; other edits and history navigation end the group.
     history.value = historyGroup && continuousEdit?.group === historyGroup && continuousEdit.history === history.value
@@ -122,10 +136,11 @@ function commit(next: Project, label = '已修改项目', historyGroup?: string)
     continuousEdit = historyGroup ? { group: historyGroup, history: history.value } : undefined
     project.value = checked
     announce(label); scheduleDraft()
-  } catch (cause) { fail(cause) }
+    return true
+  } catch (cause) { fail(cause); return false }
 }
 function moveHistory(direction: 'undo' | 'redo') {
-  if (switching.value || booting.value || speechWorking.value) return
+  if (switching.value || booting.value || speechWorking.value || mcpBusy.value) return
   continuousEdit = undefined
   history.value = direction === 'undo' ? undoHistory(history.value) : redoHistory(history.value)
   project.value = cloneProject(history.value.present); announce(direction === 'undo' ? '已撤销' : '已重做'); scheduleDraft()
@@ -141,7 +156,7 @@ async function acceptAssets(assets: MediaAsset[], assetBlobs?: Map<string, Blob>
 }
 async function acceptAsset(asset: MediaAsset) { try { await acceptAssets([asset]); announce('录制已加入素材库，可前往视频剪辑继续编辑。') } catch (cause) { fail(cause) } }
 async function importFiles(files?: File[]) {
-  if (busy.value || switching.value || booting.value || speechWorking.value) return false
+  if (busy.value || switching.value || booting.value || speechWorking.value || mcpBusy.value) return false
   if (!files?.length) {
     if (!native) { mediaInput.value?.click(); return }
     busy.value = '正在导入素材…'
@@ -162,8 +177,8 @@ async function importFiles(files?: File[]) {
   try { await acceptAssets(assets, imported); if (failures.length) fail(failures.join('\n')); return failures.length === 0 && assets.length > 0 } finally { busy.value = '' }
 }
 function waitForIdle(): Promise<void> {
-  if (!busy.value && !switching.value) return Promise.resolve()
-  return new Promise(resolve => { const stop = watch([busy, switching], ([working, changing]) => { if (!working && !changing) { stop(); resolve() } }) })
+  if (!busy.value && !switching.value && !mcpBusy.value) return Promise.resolve()
+  return new Promise(resolve => { const stop = watch([busy, switching, mcpBusy], ([working, changing, automated]) => { if (!working && !changing && !automated) { stop(); resolve() } }) })
 }
 function captured(blob: Blob, name: string): Promise<void> {
   const targetId = project.value.id
@@ -291,6 +306,7 @@ async function acceptConverted(asset: MediaAsset) {
   } catch (cause) { fail(cause) } finally { pendingMedia.value-- }
 }
 function addToTimeline(assetId: string) {
+  if (mcpBusy.value) return
   const asset = project.value.assets.find(item => item.id === assetId)
   if (!asset) return
   try {
@@ -351,6 +367,7 @@ async function rememberProjectSaveTarget(projectId: string, target?: ProjectSave
   }
 }
 async function adoptProject(next: Project, restored = false, savedAt?: string) {
+  continuousEdit = undefined
   projectGeneration++; draftGeneration++; cancelDraftCountdown()
   lastSaveAt.value = savedAt || ''; lastSaveKind.value = 'draft'
   applyProjectSaveTarget()
@@ -368,15 +385,20 @@ async function adoptProject(next: Project, restored = false, savedAt?: string) {
     }
   }
 }
-function mediaIsWorking(): boolean { return screenshotBusy.value || recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value }
+function localMediaIsWorking(): boolean { return screenshotBusy.value || recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value }
+function mediaIsWorking(): boolean { return localMediaIsWorking() || mcpBusy.value }
 async function changeProject(action: () => Promise<void>): Promise<void> {
   if (busy.value || switching.value || booting.value) return
-  if (mediaIsWorking()) { fail('请先完成或取消录制、配音、转换及导出，再切换项目。'); return }
+  if (mediaIsWorking()) { fail('请先完成或取消录制、配音、转换、导出及 MCP 任务，再切换项目。'); return }
   switching.value = true
   try { if (await protectProject()) await action() } catch (cause) { fail(cause) } finally { switching.value = false }
 }
 async function newProject() { await changeProject(async () => { await adoptProject(createProject()); announce('已新建项目。') }) }
-async function hydrate(imported: ImportedProject) {
+function retainImportedMedia(imported: ImportedProject, next: Project) {
+  for (const [id, blob] of imported.blobs) blobs.set(id, blob)
+  hydratedReleases.push({ release: imported.revoke, urls: new Set(imported.project.assets.map(asset => asset.url)) }); next.assets.forEach(rememberAsset)
+}
+async function hydrate(imported: ImportedProject, deferred = false) {
   const next = cloneProject(imported.project)
   if (native) {
     for (const asset of next.assets) {
@@ -387,9 +409,10 @@ async function hydrate(imported: ImportedProject) {
       }
     }
   }
-  for (const [id, blob] of imported.blobs) blobs.set(id, blob)
-  hydratedReleases.push({ release: imported.revoke, urls: new Set(imported.project.assets.map(asset => asset.url)) }); next.assets.forEach(rememberAsset)
-  return validateProject(next, { trusted: true })
+  const checked = validateProject(next, { trusted: true })
+  if (deferred) pendingHydration.set(checked, imported)
+  else retainImportedMedia(imported, checked)
+  return checked
 }
 async function openProject(file?: File) {
   if (busy.value || switching.value || booting.value) return
@@ -430,12 +453,13 @@ async function openRecent(id: string) {
   })
 }
 async function removeRecent(item: ProjectSummary) {
+  if (mcpBusy.value) return
   const choice = await ask({ title: '移除本地草稿', text: `移除“${item.title}”的本地草稿？已经导出的项目文件仍可打开。`, choices: [{ id: 'cancel', label: '取消' }, { id: 'remove', label: '移除草稿', primary: true }] })
   if (choice !== 'remove') return
   try { if (item.id === project.value.id) { draftGeneration++; cancelDraftCountdown() }; await saveQueue; await deleteProject(item.id); await refreshRecent(); if (item.id === project.value.id) { draftState.value = 'idle'; if (lastSaveKind.value === 'draft') lastSaveAt.value = '' } } catch (cause) { fail(cause) }
 }
 async function save(saveAs = false, closing = false): Promise<boolean> {
-  if (busy.value || switching.value && !closing || booting.value || speechWorking.value) return false
+  if (busy.value || switching.value && !closing || booting.value || speechWorking.value || mcpBusy.value) return false
   if (!saveAs && saveTargetRestoreError) { fail(saveTargetRestoreError); return false }
   busy.value = '正在打包项目与素材…'; error.value = ''
   const snapshot = cloneProject(project.value), key = contentKey(snapshot)
@@ -465,13 +489,14 @@ async function save(saveAs = false, closing = false): Promise<boolean> {
     return false
   } finally { busy.value = '' }
 }
-async function rename() { renameValue.value = project.value.title; renaming.value = true; await nextTick(); renameInput.value?.focus(); renameInput.value?.select() }
+async function rename() { if (mcpBusy.value) return; renameValue.value = project.value.title; renaming.value = true; await nextTick(); renameInput.value?.focus(); renameInput.value?.select() }
 function finishRename() { if (!renaming.value) return; renaming.value = false; const title = renameValue.value.trim().slice(0, 300); if (title) commit({ ...project.value, title }, '项目已重命名') }
 async function pollJobs() { if (!native) return; try { jobs.value = await getMediaJobs() } catch {} ; jobsTimer = setTimeout(() => void pollJobs(), 1000) }
 async function cancelJob(id: string) { try { await cancelMediaJob(id); jobs.value = await getMediaJobs() } catch (cause) { fail(cause) } }
 async function nativeClose() {
   if (allowClose || switching.value || question.value) return
   if (busy.value || booting.value) { fail('请等待当前操作完成，再关闭应用。'); return }
+  if (mcpBusy.value) { mcpOpen.value = true; fail('请先完成或取消 MCP 任务，再关闭应用。'); return }
   if (screenshotBusy.value) { fail('请先完成或取消截屏，再关闭应用。'); return }
   if (speechWorking.value) { view.value = 'edit'; fail('请先结束录音或完成、取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
@@ -499,7 +524,11 @@ async function nativeClose() {
       if (choice === 'save' && (!await save(false, true) || dirty.value)) return
     }
     allowClose = true
-    try { await closeNativeWindow() } catch (cause) { allowClose = false; throw cause }
+    try {
+      cancelMcpPlayback()
+      if (mcpServiceRunning.value) { await mcpAutomation.cancelAll(); await stopMcpService(); mcpServiceRunning.value = false }
+      await closeNativeWindow()
+    } catch (cause) { allowClose = false; throw cause }
   } catch (cause) { fail(cause) }
   finally {
     if (!allowClose) {
@@ -509,13 +538,13 @@ async function nativeClose() {
     }
   }
 }
-const hasDialog = computed(() => Boolean(question.value || exportOpen.value || jobsOpen.value))
+const hasDialog = computed(() => Boolean(question.value || exportOpen.value || jobsOpen.value || mcpOpen.value))
 let previousFocus: HTMLElement | null = null
 watch(hasDialog, async open => { if (open) { previousFocus = document.activeElement as HTMLElement; await nextTick(); ((question.value ? document.querySelector('.app-confirm button') : document.querySelector('[role="dialog"][aria-modal="true"] button, [role="dialog"][aria-modal="true"] input')) as HTMLElement | null)?.focus() } else previousFocus?.focus() })
 function keyboard(event: KeyboardEvent) {
   if (event.defaultPrevented || !hasDialog.value && document.querySelector('[role="dialog"][aria-modal="true"]')) return
   if (hasDialog.value) {
-    if (event.key === 'Escape') { event.preventDefault(); if (question.value) answer('cancel'); else if (jobsOpen.value) jobsOpen.value = false; else if (!browserExporting.value) exportOpen.value = false }
+    if (event.key === 'Escape') { event.preventDefault(); if (question.value) answer('cancel'); else if (mcpOpen.value) mcpOpen.value = false; else if (jobsOpen.value) jobsOpen.value = false; else if (!browserExporting.value) exportOpen.value = false }
     if (event.key === 'Tab') {
       const dialog = question.value ? document.querySelector('.app-confirm') : document.querySelector('[role="dialog"][aria-modal="true"]'), items = dialog ? [...dialog.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href],[tabindex="0"]')].filter(item => item.offsetParent !== null) : []
       const first = items[0], last = items.at(-1)
@@ -524,7 +553,7 @@ function keyboard(event: KeyboardEvent) {
     }
     return
   }
-  if (switching.value || booting.value || speechWorking.value) { if (event.ctrlKey || event.metaKey) event.preventDefault(); return }
+  if (switching.value || booting.value || speechWorking.value || mcpBusy.value) { if (event.ctrlKey || event.metaKey) event.preventDefault(); return }
   if (!native && matchesScreenshotShortcut(event, screenshotShortcut.value)) { event.preventDefault(); void takeScreenshot(); return }
   if (!(event.ctrlKey || event.metaKey) || event.altKey) return
   const key = event.key.toLowerCase()
@@ -537,6 +566,142 @@ function keyboard(event: KeyboardEvent) {
 function unload(event: BeforeUnloadEvent) { if (!allowClose && (mediaIsWorking() || recoveryRecordings.value.length || busy.value || switching.value || dirty.value && (draftState.value !== 'saved' || !autoSave.value))) { event.preventDefault(); event.returnValue = '' } }
 function mediaChanged(event: MediaQueryListEvent) { systemDark.value = event.matches }
 function dropped(event: DragEvent) { event.preventDefault(); const files = [...(event.dataTransfer?.files || [])]; if (files.length === 1 && files[0]!.name.toLowerCase().endsWith('.omedia')) void openProject(files[0]); else if (files.length) void importFiles(files) }
+function mcpLocalInteractionBusy(): boolean {
+  // The automation task owns mcpBusy; feeding it back here would block its own commit.
+  if (destroyed || allowClose || booting.value || switching.value || busy.value || localMediaIsWorking() || renaming.value || question.value || exportOpen.value || jobsOpen.value) return true
+  if (videoEditor.value?.getInteractionBusy()) return true
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active.matches('input,textarea,[contenteditable="true"]') && !active.closest('.mcp-panel')) return true
+  return [...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(dialog => !dialog.querySelector('.mcp-panel'))
+}
+function cancelMcpPlayback(): void {
+  mcpPlaybackVersion++
+  const pending = pendingMcpPlayback
+  pendingMcpPlayback = undefined
+  pending?.pause()
+}
+const mcpAutomation = createMcpAutomation({
+  getProject: () => project.value,
+  getRevision: () => projectRevision.value,
+  isBusy: mcpLocalInteractionBusy,
+  isDirty: () => dirty.value,
+  getBlobs: () => new Map(blobs),
+  getSaveTarget: () => {
+    if (saveTargetRestoreError) throw new Error(saveTargetRestoreError)
+    return nativeProjectTarget ? { ...nativeProjectTarget } : undefined
+  },
+  commit: (next, label, expected) => {
+    if (destroyed || allowClose || project.value.id !== expected.projectId || projectRevision.value !== expected.revision) return false
+    videoEditor.value?.pause()
+    return commit(next, label, undefined, true)
+  },
+  hydrate: imported => hydrate(imported, true),
+  adopt: async next => {
+    const imported = pendingHydration.get(next)
+    if (imported) { retainImportedMedia(imported, next); pendingHydration.delete(next) }
+    await adoptProject(next)
+  },
+  didSave: async (snapshot, target) => {
+    if (destroyed || project.value.id !== snapshot.id) {
+      await storeProjectSaveTarget(snapshot.id, { kind: 'native', target })
+      return
+    }
+    const savedAt = new Date().toISOString()
+    const warning = await rememberProjectSaveTarget(snapshot.id, { kind: 'native', target })
+    cleanKey.value = contentKey(snapshot)
+    await persist()
+    if (!destroyed && project.value.id === snapshot.id) { lastSaveAt.value = savedAt; lastSaveKind.value = 'file'; if (warning) error.value = warning }
+  },
+  didOpen: async target => {
+    const warning = await rememberProjectSaveTarget(project.value.id, { kind: 'native', target: { name: target.name, path: target.path, token: target.token } })
+    cleanKey.value = contentKey(project.value)
+    if (warning) error.value = warning
+  },
+  history: direction => { videoEditor.value?.pause(); moveHistory(direction) },
+  getPlayback: () => videoEditor.value?.getPlayback() ?? { time: 0, playing: false, selectedClipId: '' },
+  setPlayback: async (patch: Partial<McpPlayback>) => {
+    if (destroyed || allowClose) throw new Error('应用正在关闭。')
+    const epoch = getMcpServiceEpoch(), projectId = project.value.id, version = ++mcpPlaybackVersion
+    const deadline = mcpRequestDeadline ?? Date.now() + 30_000
+    const current = () => !destroyed && !allowClose && version === mcpPlaybackVersion && epoch === getMcpServiceEpoch() && project.value.id === projectId && Date.now() < deadline
+    pendingMcpPlayback = { version, pause: () => videoEditor.value?.pause() }
+    const timeout = setTimeout(() => { if (pendingMcpPlayback?.version === version) cancelMcpPlayback() }, Math.max(0, deadline - Date.now()))
+    try {
+      if (view.value !== 'edit') view.value = 'edit'
+      // Newly created clips must reach the editor props before selection is validated.
+      await nextTick()
+      if (!current()) throw new Error('MCP 播放请求已停止或过期。')
+      const editor = videoEditor.value
+      if (!editor) throw new Error('视频剪辑界面尚未就绪。')
+      pendingMcpPlayback = { version, pause: () => editor.pause() }
+      const result = await editor.setPlayback(patch)
+      if (!current()) {
+        if (pendingMcpPlayback?.version === version) cancelMcpPlayback()
+        throw new Error('MCP 播放请求已停止或过期。')
+      }
+      return result
+    } finally {
+      clearTimeout(timeout)
+      if (pendingMcpPlayback?.version === version) pendingMcpPlayback = undefined
+    }
+  },
+  ownAsset: (asset, blob) => { rememberAsset(asset); if (blob) blobs.set(asset.id, blob) },
+  onBusy: value => {
+    if (value) { videoEditor.value?.pause(); view.value = 'edit' }
+    mcpBusy.value = value
+  },
+  onJobsChanged: () => { if (!destroyed) mcpJobs.value = mcpAutomation.list() },
+  announce: message => { if (!destroyed) announce(message) },
+})
+function openMcp(): void { mcpOpen.value = true; if (mcpBridgeError) fail(mcpBridgeError) }
+async function cancelMcpJob(id: string): Promise<void> {
+  try { await mcpAutomation.cancel(id); mcpJobs.value = mcpAutomation.list() } catch (cause) { fail(cause) }
+}
+function mcpServiceChanged(next: McpStatus): void {
+  mcpServiceRunning.value = next.running
+  if (!next.running) { cancelMcpPlayback(); void mcpAutomation.cancelAll() }
+  else void recoverPendingMcpRequests()
+}
+function enqueueMcpRequest(request: McpRequest): void {
+  if (destroyed || !request || typeof request.id !== 'string' || typeof request.deadlineAt !== 'number' || receivedMcpRequests.has(request.id)) return
+  receivedMcpRequests.add(request.id)
+  // Native request IDs are unique for the application lifetime; bound the replay cache.
+  if (receivedMcpRequests.size > 2048) receivedMcpRequests.delete(receivedMcpRequests.values().next().value!)
+  const epoch = getMcpServiceEpoch()
+  const current = () => !destroyed && !allowClose && epoch === getMcpServiceEpoch() && Date.now() < request.deadlineAt
+  const run = async () => {
+    if (!current()) return
+    const claimed = await claimMcpRequest(request.id)
+    // Claim crosses native IPC. Stop, navigation and expiry must be checked again after it.
+    if (!claimed || !current()) return
+    mcpRequestDeadline = request.deadlineAt
+    try {
+      const result = await mcpAutomation.execute(request.tool, request.arguments)
+      if (current()) await completeMcpRequest(request.id, result)
+    } catch (cause) {
+      if (current()) await completeMcpRequest(request.id, { error: cause instanceof Error ? cause.message : String(cause) }, true)
+    } finally { mcpRequestDeadline = undefined }
+  }
+  mcpRequestQueue = mcpRequestQueue.then(run, run).catch(cause => {
+    if (!destroyed) { mcpBridgeError = `MCP 请求处理失败：${cause instanceof Error ? cause.message : String(cause)}`; announce(mcpBridgeError) }
+  })
+}
+async function recoverPendingMcpRequests(): Promise<void> {
+  if (!native || destroyed) return
+  try {
+    const requests = await getPendingMcpRequests()
+    if (!Array.isArray(requests)) throw new Error('无法读取待处理请求。')
+    if (!destroyed) { mcpBridgeError = ''; requests.forEach(enqueueMcpRequest) }
+  } catch (cause) { if (!destroyed) mcpBridgeError = `MCP 连接尚未就绪：${cause instanceof Error ? cause.message : String(cause)}` }
+}
+async function initializeMcp(): Promise<void> {
+  try {
+    const unlisten = await onMcpRequest(enqueueMcpRequest)
+    if (destroyed) { unlisten(); return }
+    unlistenMcp = unlisten
+    await recoverPendingMcpRequests()
+  } catch (cause) { if (!destroyed) mcpBridgeError = `无法监听 MCP 请求：${cause instanceof Error ? cause.message : String(cause)}` }
+}
 onMounted(async () => {
   mediaQuery = matchMedia('(prefers-color-scheme: dark)'); systemDark.value = mediaQuery.matches; mediaQuery.addEventListener('change', mediaChanged)
   window.addEventListener('keydown', keyboard); window.addEventListener('beforeunload', unload)
@@ -545,55 +710,57 @@ onMounted(async () => {
   booting.value = false
   void initializeScreenshot()
   if (native) {
+    void initializeMcp()
     void pollJobs()
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { destroyed = true; screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>
   <div class="app-shell" :data-theme="effectiveTheme" @dragover.prevent @drop="dropped">
     <header class="topbar">
-      <button class="brand" :disabled="speechWorking" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
+      <button class="brand" :disabled="speechWorking || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
     </header>
     <div class="workbench-body" :inert="switching || booting">
       <aside class="sidebar" :class="{collapsed}">
         <div class="sidebar-heading"><span v-if="!collapsed">工作台</span><button class="icon-button" :title="collapsed?'展开侧栏':'折叠侧栏'" :aria-label="collapsed?'展开侧栏':'折叠侧栏'" @click="collapsed=!collapsed"><Icon name="panel" :size="17"/></button></div>
-        <nav aria-label="工作区"><button :disabled="speechWorking" :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :disabled="speechWorking" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
+        <nav aria-label="工作区"><button :disabled="speechWorking || mcpBusy" :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :disabled="speechWorking || mcpBusy" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
         <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · {{ buildInfo.version }}</small></div>
       </aside>
       <main class="main-area">
-        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
+        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking || mcpBusy" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
         <button title="新建工程" aria-label="新建工程" :disabled="!!busy || switching || booting || mediaIsWorking()" data-testid="new-project" @click="newProject()"><Icon name="plus"/><span>新建工程</span></button>
         <button title="打开项目 (Ctrl/⌘+O)" aria-label="打开项目" :disabled="!!busy || switching || booting || mediaIsWorking()" data-testid="open-project" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
-        <button :title="lastSaved && (native || browserProjectTarget) ? `保存到 ${lastSaved} (Ctrl/⌘+S)` : '保存项目 (Ctrl/⌘+S)'" aria-label="保存项目" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-project" @click="save()"><Icon name="save"/><span>保存</span></button>
+        <button :title="lastSaved && (native || browserProjectTarget) ? `保存到 ${lastSaved} (Ctrl/⌘+S)` : '保存项目 (Ctrl/⌘+S)'" aria-label="保存项目" :disabled="!!busy || switching || booting || speechWorking || mcpBusy" data-testid="save-project" @click="save()"><Icon name="save"/><span>保存</span></button>
         <button class="autosave-switch" role="switch" :aria-checked="autoSave" aria-label="自动保存本地草稿" title="仅自动保存本地草稿" :disabled="booting || switching" data-testid="autosave-toggle" :aria-describedby="autosaveProgress ? 'autosave-progress' : undefined" @click="toggleAutosave"><span>自动保存</span><svg width="28" height="16" viewBox="0 0 28 16"><rect width="28" height="16" rx="8"/><circle :cx="autoSave?20:8" cy="8" r="5.5"/></svg></button>
         <span v-if="autosaveProgress" id="autosave-progress" class="autosave-countdown" data-testid="autosave-countdown">{{ autosaveProgress }}</span>
-        <button title="另存为项目 (Ctrl/⌘+Shift+S)" aria-label="另存为项目" :disabled="!!busy || switching || booting || speechWorking" data-testid="save-as-project" @click="save(true)"><Icon name="save-as"/><span>另存为</span></button>
-        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting || speechWorking" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting || speechWorking" @click="moveHistory('redo')"><Icon name="redo"/></button>
+        <button title="另存为项目 (Ctrl/⌘+Shift+S)" aria-label="另存为项目" :disabled="!!busy || switching || booting || speechWorking || mcpBusy" data-testid="save-as-project" @click="save(true)"><Icon name="save-as"/><span>另存为</span></button>
+        <span class="divider"/><button class="icon-button" title="撤销 (Ctrl+Z)" aria-label="撤销" :disabled="!history.past.length || switching || booting || speechWorking || mcpBusy" @click="moveHistory('undo')"><Icon name="undo"/></button><button class="icon-button" title="重做" aria-label="重做" :disabled="!history.future.length || switching || booting || speechWorking || mcpBusy" @click="moveHistory('redo')"><Icon name="redo"/></button>
       </div></div>
         <div v-if="error" class="app-error" role="alert"><Icon name="alert" :size="16"/><span>{{ error }}</span><button class="icon-button" aria-label="关闭提示" @click="error=''"><Icon name="close" :size="15"/></button></div>
         <div v-for="item in recoveryRecordings" :key="item.id" class="app-error recording-recovery" role="alert"><Icon name="video" :size="16"/><span>录制尚未加入项目：{{ item.name }}</span><button @click="saveRecoveredRecording(item.id)">保存录制文件</button></div>
         <div v-if="booting" class="boot-loading"><span class="spinner"/>正在恢复工作台…</div>
         <section v-else-if="view==='home'" class="home-workspace" data-testid="home-workspace">
-          <div class="home-intro"><div class="eyebrow"><span/>YOUR LOCAL CREATIVE STUDIO</div><h1>把灵感，剪成作品。</h1><p>录下屏幕，整理片段，转换媒体。<br/>让每一次创作，都从这里开始。</p><div class="home-actions"><button class="primary" data-testid="create-project" :disabled="switching || booting || speechWorking || screenshotBusy" @click="newProject"><Icon name="plus"/>新建剪辑项目</button><button :disabled="switching || booting || speechWorking || screenshotBusy" @click="openProject()"><Icon name="folder"/>打开项目</button></div><div class="hero-art" aria-hidden="true"><div class="art-window"><div class="art-dots"><i/><i/><i/></div><svg viewBox="0 0 260 120"><path d="M0 85 40 65 75 80 130 32 180 60 220 25 260 45v75H0Z" fill="#dce8ff"/><path d="M0 105 60 80 105 95 155 65 210 88 260 64v56H0Z" fill="#b9d0ff"/><circle cx="130" cy="60" r="25" fill="white"/><path d="m124 48 19 12-19 12z" fill="#4b7deb"/></svg></div><div class="art-timeline"><i/><i/><i/><i/><b/></div><div class="art-note"><Icon name="audio" :size="20"/><span><i/><i/><i/><i/><i/><i/><i/></span></div></div></div>
-          <div class="workspace-cards"><button v-for="item in workspaces" :key="item.id" :data-testid="`create-${item.id}`" @click="view=item.id"><span class="card-icon" :style="{'--card-color':item.color}"><Icon :name="item.icon" :size="23"/></span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><Icon name="chevron-right" :size="15"/></button></div>
-          <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
+          <div class="home-intro"><div class="eyebrow"><span/>YOUR LOCAL CREATIVE STUDIO</div><h1>把灵感，剪成作品。</h1><p>录下屏幕，整理片段，转换媒体。<br/>让每一次创作，都从这里开始。</p><div class="home-actions"><button class="primary" data-testid="create-project" :disabled="switching || booting || speechWorking || screenshotBusy || mcpBusy" @click="newProject"><Icon name="plus"/>新建剪辑项目</button><button :disabled="switching || booting || speechWorking || screenshotBusy || mcpBusy" @click="openProject()"><Icon name="folder"/>打开项目</button></div><div class="hero-art" aria-hidden="true"><div class="art-window"><div class="art-dots"><i/><i/><i/></div><svg viewBox="0 0 260 120"><path d="M0 85 40 65 75 80 130 32 180 60 220 25 260 45v75H0Z" fill="#dce8ff"/><path d="M0 105 60 80 105 95 155 65 210 88 260 64v56H0Z" fill="#b9d0ff"/><circle cx="130" cy="60" r="25" fill="white"/><path d="m124 48 19 12-19 12z" fill="#4b7deb"/></svg></div><div class="art-timeline"><i/><i/><i/><i/><b/></div><div class="art-note"><Icon name="audio" :size="20"/><span><i/><i/><i/><i/><i/><i/><i/></span></div></div></div>
+          <div class="workspace-cards"><button v-for="item in workspaces" :key="item.id" :data-testid="`create-${item.id}`" :disabled="mcpBusy" @click="view=item.id"><span class="card-icon" :style="{'--card-color':item.color}"><Icon :name="item.icon" :size="23"/></span><strong>{{ item.title }}</strong><p>{{ item.description }}</p><Icon name="chevron-right" :size="15"/></button></div>
+          <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button :disabled="mcpBusy" @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" :disabled="mcpBusy" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
-        <VideoEditor v-if="!booting && view==='edit'" :project="project" :export-disabled="!!busy || switching || booting" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
+        <VideoEditor ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
         <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
       </main>
     </div>
-    <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/><span class="status-message">{{ busy || status }}</span><time v-if="lastSaveAt" class="last-save-time" data-testid="last-save-time" :datetime="lastSaveAt" :title="lastSaveTitle">上次保存 {{ savedTime(lastSaveAt) }}</time></span><span v-if="native" class="status-tasks"><button class="job-status" aria-label="处理任务" title="查看视频导出与媒体转换任务" @click="jobsOpen=true"><Icon name="layers" :size="13"/><span>处理任务</span><b v-if="runningJobs">{{ runningJobs }}</b></button></span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>
+    <footer class="statusbar"><span class="status-main"><span v-if="busy" class="spinner small"/><Icon v-else :name="recording?'record':'check'" :size="13"/><span class="status-message">{{ busy || status }}</span><time v-if="lastSaveAt" class="last-save-time" data-testid="last-save-time" :datetime="lastSaveAt" :title="lastSaveTitle">上次保存 {{ savedTime(lastSaveAt) }}</time></span><span v-if="native" class="status-tasks"><button v-if="mcpBusy || mcpServiceRunning" class="job-status" aria-label="MCP 任务" @click="openMcp"><Icon name="mcp" :size="13"/><span>{{ mcpBusy ? 'MCP 正在处理' : 'MCP 服务' }}</span></button><button class="job-status" aria-label="处理任务" title="查看视频导出与媒体转换任务" @click="jobsOpen=true"><Icon name="layers" :size="13"/><span>处理任务</span><b v-if="runningJobs">{{ runningJobs }}</b></button></span><button :class="{danger:draftState==='error'}" :title="draftError || lastSaved || draftLabel" @click="draftState==='error' && persist()"><span v-if="draftState==='pending'" class="spinner small"/><Icon v-else :name="draftState==='error'?'alert':autoSave?'check':'save'" :size="13"/>{{ draftLabel }}</button></footer>
     <input ref="mediaInput" class="sr-only" type="file" accept="video/*,audio/*,image/*,.mkv,.mov,.avi,.flac,.ogg" multiple data-testid="media-input" @change="importFiles([...(($event.target as HTMLInputElement).files || [])]); ($event.target as HTMLInputElement).value=''"/>
     <input ref="projectInput" class="sr-only" type="file" accept=".omedia" data-testid="project-input" @change="openProject(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value=''"/>
     <ScreenshotPicker ref="screenshotPicker"/>
     <ExportPanel :open="exportOpen" :project="project" :native="native" @close="exportOpen=false" @status="announce" @busy="browserExporting=$event"/>
+    <McpPanel :open="mcpOpen" :native="native" :jobs="mcpJobs" @close="mcpOpen=false" @status="announce" @cancel-job="cancelMcpJob" @service-change="mcpServiceChanged"/>
     <EditorDialog :open="!!question" :title="question?.title || '确认操作'" icon="alert" class="app-confirm" @close="answer('cancel')"><div class="dialog-content"><p>{{ question?.text }}</p></div><template #footer><div class="confirmation-actions"><button v-for="choice in question?.choices" :key="choice.id" :class="{primary:choice.primary}" @click="answer(choice.id)">{{ choice.label }}</button></div></template></EditorDialog>
     <div v-if="jobsOpen" class="modal-shade" @click.self="jobsOpen=false"><section class="dialog jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="jobs-title"><header><span><Icon name="layers"/><strong id="jobs-title">处理任务</strong></span><button class="icon-button" aria-label="关闭任务" @click="jobsOpen=false"><Icon name="close"/></button></header><div class="dialog-content"><p v-if="!jobs.length" class="muted">还没有处理任务。</p><article v-for="job in [...jobs].reverse()" :key="job.id" class="job-item"><div><strong>{{ job.name }}</strong><span>{{ ({running:'正在处理',completed:'已完成',failed:'失败',cancelled:'已取消'})[job.state] }}</span></div><div v-if="job.state==='running'" class="progress-track"><i :style="{width:`${job.progress*100}%`}"/></div><p v-if="job.outputPath">{{ job.outputPath }}</p><p v-if="job.error" class="error-message">{{ job.error }}</p><button v-if="job.state==='running'" @click="cancelJob(job.id)">取消任务</button></article></div><footer><button @click="jobsOpen=false">关闭</button></footer></section></div>
   </div>

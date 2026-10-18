@@ -965,3 +965,148 @@ fn timeline_split_preserves_every_decoded_frame_across_fractional_boundaries() {
         }
     }
 }
+
+fn transition_spec(asset: &Asset, effect: &str) -> Value {
+    let visual = |id: &str, start: f64, trim_in: f64, trim_out: f64| json!({
+        "id":id,"assetId":asset.id,"start":start,"trimIn":trim_in,"trimOut":trim_out,
+        "speed":1,"width":160,"height":120,"volume":0,"fadeIn":0,"fadeOut":0
+    });
+    json!({"kind":"timeline","project":{
+        "width":160,"height":120,"background":"#00ff00","assets":[asset],
+        "tracks":[
+            {"kind":"transition","clips":[{"id":"transition","start":0.6,"trimIn":0,"trimOut":0.8,"speed":1,"transition":{"effect":effect,"fromClipId":"left","toClipId":"right"}}]},
+            {"kind":"video","muted":true,"clips":[visual("left",0.0,0.0,1.0),visual("right",1.0,1.0,2.0)]}
+        ]
+    },"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"high"}})
+}
+
+fn decoded_video(runtime: &Runtime, path: &Path) -> Vec<u8> {
+    let decoded = process(&runtime.encoder).args(["-v", "error", "-i"]).arg(path)
+        .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]).output().unwrap();
+    assert!(decoded.status.success(), "{}", String::from_utf8_lossy(&decoded.stderr));
+    decoded.stdout
+}
+
+#[test]
+fn timeline_exports_ten_centered_transition_effects_without_changing_duration() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let frame_size = 160 * 120 * 3;
+    for effect in ["fade", "wipe-up", "wipe-down", "wipe-left", "wipe-right", "close-vertical", "close-horizontal", "slide-left", "slide-right", "zoom"] {
+        let filename = format!("transition-{effect}.mp4");
+        let (_, probe) = run(temp.path(), &rt, transition_spec(&asset, effect), &filename);
+        let duration: f64 = probe["format"]["duration"].as_str().unwrap().parse().unwrap();
+        assert!((duration - 2.0).abs() < 0.01, "{effect}: transition changed duration to {duration}");
+        let decoded = decoded_video(&rt, &temp.path().join(&filename));
+        assert_eq!(decoded.len(), 40 * frame_size, "{effect}: dropped output frames");
+        for (index, frame) in decoded.chunks_exact(frame_size).enumerate() {
+            let center = &frame[(60 * 160 + 80) * 3..][..3];
+            if index < 12 {
+                assert!(center[0] > 220 && center[1] < 25, "{effect}: unexpected background before transition at {index}: {center:?}");
+            }
+            if index >= 28 {
+                assert!(center[2] > 220 && center[1] < 25, "{effect}: unexpected background after transition at {index}: {center:?}");
+            }
+            // The intentional midpoint reveals the configured green background,
+            // not an extra black frame caused by the source clip ending.
+            if index == 20 {
+                assert!(center[1] > 220 && center[0] < 25 && center[2] < 25, "{effect}: incorrect cut frame {center:?}");
+            }
+            assert!(frame.chunks_exact(3).all(|pixel| pixel.iter().any(|value| *value > 45)), "{effect}: introduced black pixels at {index}");
+        }
+        for (index, source_channel) in [(16, 0), (24, 2)] {
+            let frame = &decoded[index * frame_size..(index + 1) * frame_size];
+            let average = |channel: usize| frame.chunks_exact(3).map(|pixel| pixel[channel] as f64).sum::<f64>() / (160.0 * 120.0);
+            if effect == "fade" {
+                assert!((average(source_channel) - 127.0).abs() < 20.0 && (average(1) - 127.0).abs() < 20.0, "{effect}: incorrect half opacity at frame {index}");
+            } else if effect == "zoom" {
+                assert!((average(source_channel) - 32.0).abs() < 15.0 && average(1) > 205.0, "{effect}: incorrect centered scale at frame {index}");
+            } else {
+                assert!((average(source_channel) - 127.0).abs() < 25.0 && (average(1) - 127.0).abs() < 25.0, "{effect}: incorrect half coverage at frame {index}: {} {}", average(source_channel), average(1));
+            }
+            let checks: &[(usize, usize, bool)] = match effect {
+                "wipe-up" => &[(40, 20, false), (40, 100, true)],
+                "wipe-down" => &[(40, 20, true), (40, 100, false)],
+                "wipe-left" | "slide-right" => &[(20, 40, false), (140, 40, true)],
+                "wipe-right" | "slide-left" => &[(20, 40, true), (140, 40, false)],
+                "close-vertical" => &[(20, 60, true), (80, 20, false), (80, 100, false)],
+                "close-horizontal" => &[(80, 20, true), (20, 60, false), (140, 60, false)],
+                _ => &[],
+            };
+            for &(x, y, visible) in checks {
+                let pixel = &frame[(y * 160 + x) * 3..][..3];
+                assert!(if visible { pixel[source_channel] > 220 && pixel[1] < 25 } else { pixel[1] > 220 && pixel[source_channel] < 25 }, "{effect}: wrong direction at ({x}, {y}), frame {index}: {pixel:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn muted_transition_does_not_affect_export_and_invalid_anchors_are_rejected() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let store = MediaStore::new(temp.path()).unwrap();
+    let mut spec = transition_spec(&asset, "fade");
+    spec["project"]["tracks"][0]["muted"] = json!(true);
+    run(temp.path(), &rt, spec.clone(), "muted-transition.mp4");
+    let bytes = decoded_video(&rt, &temp.path().join("muted-transition.mp4"));
+    let cut = &bytes[20 * 160 * 120 * 3..];
+    assert!(cut[2] > 220 && cut[1] < 25, "muted transition must preserve the hard cut");
+    for (field, value) in [("start", json!(0.5)), ("trimOut", json!(1.2)), ("speed", json!(2))] {
+        let mut invalid = spec.clone();
+        invalid["project"]["tracks"][0]["clips"][0][field] = value;
+        assert!(build_plan(&store, &rt, &invalid).is_err(), "accepted invalid transition {field}");
+    }
+    for (field, value) in [("effect", json!("unknown")), ("toClipId", json!("missing")), ("fromClipId", json!("right"))] {
+        let mut invalid = spec.clone();
+        invalid["project"]["tracks"][0]["clips"][0]["transition"][field] = value;
+        assert!(build_plan(&store, &rt, &invalid).is_err(), "accepted invalid binding {field}");
+    }
+    let mut gap = spec.clone();
+    gap["project"]["tracks"][1]["clips"][1]["start"] = json!(1.1);
+    assert!(build_plan(&store, &rt, &gap).is_err(), "accepted a transition across a gap");
+    let mut duplicate = spec.clone();
+    let existing = duplicate["project"]["tracks"][0]["clips"][0].clone();
+    duplicate["project"]["tracks"][0]["clips"].as_array_mut().unwrap().push(existing);
+    assert!(build_plan(&store, &rt, &duplicate).is_err(), "accepted two transitions at one cut");
+    let mut overlapped = spec.clone();
+    let covering = json!({"id":"covering","assetId":asset.id,"start":0,"trimIn":0,"trimOut":1.8,"speed":1});
+    overlapped["project"]["tracks"][1]["clips"].as_array_mut().unwrap().push(covering);
+    assert!(build_plan(&store, &rt, &overlapped).is_err(), "accepted a cut covered by another video clip");
+}
+
+#[test]
+fn transitions_keep_fractional_speed_adjusted_cuts_and_multiple_boundaries_in_sync() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let visual = |id: &str, start: f64, trim_in: f64, trim_out: f64| json!({
+        "id":id,"assetId":asset.id,"start":start,"trimIn":trim_in,"trimOut":trim_out,
+        "speed":1.25,"width":160,"height":120,"volume":0,"fadeIn":0,"fadeOut":0
+    });
+    let transition = |id: &str, cut: f64, from: &str, to: &str| json!({"id":id,"start":cut-0.15,"trimIn":0,"trimOut":0.3,"speed":1,"transition":{"effect":"fade","fromClipId":from,"toClipId":to}});
+    let spec = json!({"kind":"timeline","project":{
+        "width":160,"height":120,"fps":30,"background":"#00ff00","assets":[asset.clone()],
+        "tracks":[
+            {"kind":"transition","clips":[transition("first",0.537,"left","middle"),transition("second",1.073,"middle","right")]},
+            {"kind":"video","muted":true,"clips":[visual("left",0.0,0.0,0.67125),visual("middle",0.537,0.67125,1.34125),visual("right",1.073,1.34125,2.0)]}
+        ]
+    },"config":{"format":"mp4","width":160,"height":120,"fps":30,"quality":"high"}});
+    let (_, probe) = run(temp.path(), &rt, spec, "fractional-transitions.mp4");
+    assert_eq!(probe["streams"][0]["nb_frames"], "48");
+    let bytes = decoded_video(&rt, &temp.path().join("fractional-transitions.mp4"));
+    for (frame_number, frame) in bytes.chunks_exact(160 * 120 * 3).enumerate() {
+        let time = frame_number as f64 / 30.0;
+        let pixel = &frame[(60 * 160 + 80) * 3..][..3];
+        assert!(pixel.iter().any(|value| *value > 75), "black frame at {frame_number}: {pixel:?}");
+        let nearest = (time - 0.537).abs().min((time - 1.073).abs());
+        if nearest > 0.15 + 1.0 / 30.0 {
+            assert!(pixel[1] < 25, "transition extends beyond its window at {frame_number}: {pixel:?}");
+        }
+        if nearest < 0.04 {
+            assert!(pixel[1] > 180, "fractional transition does not align with its cut at {frame_number}: {pixel:?}");
+        }
+    }
+}

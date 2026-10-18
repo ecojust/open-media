@@ -1370,6 +1370,13 @@ fn parse_generation_status(log: &str) -> Option<(String, Option<f64>)> {
         } else if line == "stage=generating" || line.starts_with("stage=generating,") {
             phase = Some("正在合成语音");
             progress = None;
+        } else if line.starts_with("stage=decoder-check,") {
+            phase = Some(if log_field(line, "status=") == Some("recovered") {
+                "正在重新解码音频"
+            } else {
+                "正在校验音频解码"
+            });
+            progress = None;
         } else if line == "stage=writing" || line.starts_with("stage=writing,") {
             phase = Some("正在写入音频");
             progress = None;
@@ -1595,6 +1602,21 @@ mod tests {
                 .0
                 .contains("音频处理"));
         }
+    }
+
+    #[test]
+    fn decoder_verification_does_not_misreport_the_main_model_device() {
+        let checking = "stage=device,device=mps,engine=qwen3\nstage=generating,chunks=2\nstage=decoder-check,engine=qwen3,device=mps,reference=cpu\n";
+        assert_eq!(
+            parse_generation_status(checking).unwrap(),
+            ("正在校验音频解码 · GPU（MPS）".into(), None)
+        );
+        let recovered = format!("{checking}stage=device,device=mps,engine=qwen3,partial=audio-cpu\nstage=decoder-check,engine=qwen3,device=cpu,status=recovered\n");
+        assert_eq!(
+            parse_generation_status(&recovered).unwrap(),
+            ("正在重新解码音频 · GPU（MPS） + CPU 音频处理".into(), None)
+        );
+        assert_eq!(last_generation_device(&recovered), Some("mps"));
     }
 
     #[test]

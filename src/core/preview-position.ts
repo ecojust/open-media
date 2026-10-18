@@ -18,10 +18,10 @@ export function clipBounds(clip: ClipGeometry): ClipBounds {
 /** Locked visuals remain alignment references, while only editable ones can be moved. */
 export function visibleVisualClips(project: Project, time: number): { track: Track; clip: Clip }[] {
   const assets = new Map(project.assets.map(asset => [asset.id, asset]))
-  return project.tracks.filter(track => track.kind !== 'audio').flatMap(track => track.clips.filter(clip => {
+  return project.tracks.filter(track => track.kind !== 'audio' && track.kind !== 'transition').flatMap(track => track.clips.filter(clip => {
     if (clipOpacityAt(clip, time) <= 0) return false
     if (track.kind === 'text' || clip.text !== undefined) {
-      if (!clip.text?.trim() && (!clip.background || clip.background === 'transparent')) return false
+      if (!clip.text?.trim() && (clip.textRole !== 'watermark' || !clip.background || clip.background === 'transparent')) return false
     } else {
       const asset = clip.assetId && assets.get(clip.assetId)
       if (!asset || asset.kind === 'audio') return false

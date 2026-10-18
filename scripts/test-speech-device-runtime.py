@@ -260,5 +260,97 @@ class DispatchTests(unittest.TestCase):
             self.assertNotIn("PYTORCH_ENABLE_MPS_FALLBACK", os.environ)
 
 
+class DecoderGuardTests(unittest.TestCase):
+    def setUp(self):
+        class Codes:
+            ndim = 2
+
+            def __init__(self, frames=80):
+                self.shape = (frames, 16)
+
+            def __getitem__(self, item):
+                return Codes(min(self.shape[0], item.stop))
+
+        self.codes = Codes()
+        self.parameter = SimpleNamespace(device=SimpleNamespace(type="mps"), dtype="bf16", is_floating_point=lambda: True)
+        self.model = SimpleNamespace(device=self.parameter.device, hf_device_map={"": "mps"},
+                                     parameters=lambda: iter([self.parameter]))
+
+        def move(*, device):
+            self.parameter.device = SimpleNamespace(type=device)
+            self.model.device = self.parameter.device
+            return self.model
+
+        self.model.to = Mock(side_effect=move)
+        self.tokenizer = SimpleNamespace(model=self.model, device=SimpleNamespace(type="mps"))
+        self.calls = []
+
+        def decode(encoded):
+            frames = encoded[0]["audio_codes"].shape[0]
+            self.calls.append((self.tokenizer.device.type, frames))
+            return ([[0.1] * frames], 24000)
+
+        self.decode = Mock(side_effect=decode)
+        self.tokenizer.decode = self.decode
+        self.events = []
+        self.runtime = SimpleNamespace(SAMPLE_RATE=24000, stage=lambda name, **fields: self.events.append((name, fields)))
+        self.config = {"engine": "qwen3", "dtype": "bfloat16"}
+        self.torch = SimpleNamespace(device=lambda name: SimpleNamespace(type=name), mps=SimpleNamespace(synchronize=Mock()))
+        self.compare = patch.object(device_runtime, "decoder_relative_error", return_value=0.01)
+        self.compare_mock = self.compare.start()
+        self.addCleanup(self.compare.stop)
+        device_runtime.guard_qwen_decoder(self.runtime, self.config, self.tokenizer, self.torch, object(), "mps")
+
+    def test_correct_decoder_returns_full_gpu_audio_and_bounds_cpu_check(self):
+        result = self.tokenizer.decode([{"audio_codes": self.codes}])
+        self.assertEqual(self.calls, [("mps", 80), ("cpu", 24)])
+        self.assertEqual(len(result[0][0]), 80)
+        self.assertEqual(len(self.compare_mock.call_args.args[0][0][0]), 24)
+        self.assertEqual(self.tokenizer.device.type, "mps")
+        self.assertEqual(self.model.hf_device_map, {"": "mps"})
+        self.assertFalse(any(fields.get("partial") == "audio-cpu" for _, fields in self.events))
+        self.assertTrue(any(fields.get("status") == "passed" for _, fields in self.events))
+
+    def test_finite_but_corrupt_decode_retries_same_codes_only_on_cpu(self):
+        self.compare_mock.return_value = 0.8
+        result = self.tokenizer.decode([{"audio_codes": self.codes}])
+        self.assertEqual(self.calls, [("mps", 80), ("cpu", 24), ("cpu", 80)])
+        self.assertEqual(len(result[0][0]), 80)
+        self.assertEqual(self.tokenizer.device.type, "cpu")
+        self.assertEqual(self.parameter.dtype, "bf16")
+        self.assertTrue(any(fields.get("partial") == "audio-cpu" for _, fields in self.events))
+        self.tokenizer.decode([{"audio_codes": self.codes}])
+        self.assertEqual(self.calls[-1], ("cpu", 80))
+        self.compare_mock.assert_called_once()
+
+    def test_gpu_decode_exception_keeps_generated_codes_for_cpu_recovery(self):
+        original = self.decode.side_effect
+        self.decode.side_effect = lambda codes: (_ for _ in ()).throw(RuntimeError("Decoder allocation failed")) \
+            if self.tokenizer.device.type == "mps" else original(codes)
+        result = self.tokenizer.decode([{"audio_codes": self.codes}])
+        self.assertEqual(self.calls, [("cpu", 24), ("cpu", 80)])
+        self.assertEqual(len(result[0][0]), 80)
+        self.assertTrue(any(fields.get("status") == "recovered" for _, fields in self.events))
+
+    def test_invalid_reference_does_not_publish_gpu_noise(self):
+        self.compare_mock.side_effect = RuntimeError("Reference returned invalid samples")
+        with self.assertRaisesRegex(RuntimeError, "invalid samples"):
+            self.tokenizer.decode([{"audio_codes": self.codes}])
+        self.assertFalse(any(fields.get("status") == "passed" for _, fields in self.events))
+
+    def test_cancelled_decode_never_retries_or_moves_model(self):
+        self.decode.side_effect = KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            self.tokenizer.decode([{"audio_codes": self.codes}])
+        self.model.to.assert_not_called()
+
+    def test_invalid_code_shape_is_rejected_before_decoding(self):
+        self.codes.shape = (1, 24, 16)
+        self.codes.ndim = 3
+        with self.assertRaisesRegex(RuntimeError, "code dimensions"):
+            self.tokenizer.decode([{"audio_codes": self.codes}])
+        self.decode.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

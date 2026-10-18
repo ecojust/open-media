@@ -2,6 +2,7 @@ import type { Clip, MediaAsset, Project, SubtitleStyle, Track, TrackKind } from 
 import { validateClipFilters } from './clip-filters.ts'
 import { validateChromaKey } from './chroma-key.ts'
 import { normalizeAssetAddedAt } from './asset-times.ts'
+import { TRANSITION_PRESETS, validateTransitionBindings } from './transitions.ts'
 
 export const MAX_PROJECT_DURATION = 24 * 60 * 60
 export const MAX_ASSETS = 1000
@@ -28,7 +29,7 @@ export function cloneProject(project: Project): Project {
 }
 
 export function createTrack(kind: TrackKind = 'video', name?: string): Track {
-  return { id: newId('track'), name: name ?? ({ video: '视频轨道', audio: '音频轨道', text: '字幕轨道' }[kind]), kind, muted: false, locked: false, clips: [] }
+  return { id: newId('track'), name: name ?? ({ video: '视频轨道', audio: '音频轨道', text: '字幕轨道', transition: '转场轨道' }[kind]), kind, muted: false, locked: false, clips: [] }
 }
 
 export function createProject(title = '未命名项目', options: Partial<Pick<Project, 'width' | 'height' | 'fps' | 'background'>> = {}): Project {
@@ -147,7 +148,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     if (!Array.isArray(t.clips)) throw new Error('轨道片段列表无效。')
     clipCount += t.clips.length
     if (clipCount > MAX_CLIPS) throw new Error('项目片段数量过多。')
-    const kind = choice(t.kind, ['video', 'audio', 'text'] as const, '轨道类型')
+    const kind = choice(t.kind, ['video', 'audio', 'text', 'transition'] as const, '轨道类型')
     const trackId = id(t.id)
     const clips = t.clips.map((item): Clip => {
       const c = record(item, '片段')
@@ -156,7 +157,13 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       const duration = (clip.trimOut - clip.trimIn) / clip.speed
       if (duration < 1 / 1000 || clip.start + duration > MAX_PROJECT_DURATION + 1e-6) throw new Error('片段时长无效或时间线超过 24 小时。')
       if (clip.fadeIn > duration + 1e-6 || clip.fadeOut > duration + 1e-6) throw new Error('淡入淡出时间不能超过片段时长。')
-      if (kind === 'text') {
+      if (c.transition !== undefined && kind !== 'transition') throw new Error('转场信息只能用于转场轨道。')
+      if (kind === 'transition') {
+        if (c.assetId !== undefined || c.text !== undefined || c.textRole !== undefined) throw new Error('转场轨道不能直接放置媒体或文字片段。')
+        const binding = record(c.transition, '转场信息')
+        clip.transition = { effect: choice(binding.effect, TRANSITION_PRESETS.map(preset => preset.id), '转场效果'), fromClipId: text(binding.fromClipId, '转场前片段', 160), toClipId: text(binding.toClipId, '转场后片段', 160) }
+        if (clip.fadeIn !== 0 || clip.fadeOut !== 0 || clip.volume !== 0 || clip.opacity !== 1) throw new Error('转场片段不支持独立的淡入淡出或音量。')
+      } else if (kind === 'text') {
         if (c.assetId !== undefined) throw new Error('字幕轨道不能引用媒体素材。')
         if (c.textRole !== undefined) clip.textRole = choice(c.textRole, ['subtitle', 'watermark'] as const, '文字用途')
         else clip.textRole = t.name === '文字水印轨道' ? 'watermark' : 'subtitle'
@@ -196,6 +203,8 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     return { id: trackId, name: text(t.name, '轨道名称', 300), kind, muted: boolean(t.muted), locked: boolean(t.locked), clips }
   })
   const textIds = new Set(tracks.filter((track) => track.kind === 'text').flatMap((track) => track.clips.map((clip) => clip.id)))
+  const fps = number(root.fps, '帧率', 1, 240)
+  validateTransitionBindings({ tracks, assets, fps })
   const speechTextIds = new Set<string>()
   for (const clip of tracks.flatMap((track) => track.clips)) {
     const textClipId = clip.speech?.textClipId

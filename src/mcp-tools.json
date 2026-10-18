@@ -1,0 +1,2134 @@
+[
+  {
+    "name": "open_media_project_get",
+    "description": "读取当前工程、画面设置、全部轨道和片段ID、素材元数据、字幕问题及总时长。时间单位为秒，坐标为项目像素，轨道顺序从前景到背景。不返回文件路径或内部URL。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_validate",
+    "description": "校验当前项目引用、时间、转场及字幕空值或默认文字；返回具体问题。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_update",
+    "description": "修改当前工程设置。宽高修改同时按比例调整视觉片段及字幕默认样式；帧率修改重新校验转场。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "patch": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "width": {
+              "type": "integer",
+              "minimum": 16,
+              "maximum": 16384
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 16,
+              "maximum": 16384
+            },
+            "fps": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 240
+            },
+            "background": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^(?:#[0-9a-fA-F]{3,8}|transparent|black|white|rgba?\\([\\d.,%\\s]+\\))$"
+            }
+          },
+          "required": [],
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "patch"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_list",
+    "description": "列出当前工程已有素材的ID、类型、尺寸、时长、大小与导入时间，不返回内部URL或文件路径。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "video",
+            "audio",
+            "image"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_remove",
+    "description": "移除当前工程中未被片段使用的素材引用；不删除磁盘文件。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "assetId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_track_add",
+    "description": "新增视频、音频、字幕或转场轨道。返回新轨道ID。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "video",
+            "audio",
+            "text",
+            "transition"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_track_update",
+    "description": "修改轨道名称、静音/隐藏或锁定状态。解除锁定后才能编辑该轨道。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "patch": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 300
+            },
+            "muted": {
+              "type": "boolean"
+            },
+            "locked": {
+              "type": "boolean"
+            }
+          },
+          "required": [],
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "trackId",
+        "patch"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_track_remove",
+    "description": "删除轨道及其中所有片段；被锁定轨道不可删除，关联配音与转场会校验。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "trackId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_track_reorder",
+    "description": "移动轨道到指定的从0开始位置；顺序由前景到背景。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "trackId",
+        "index"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_add",
+    "description": "将已导入素材添加到指定视频或音频轨道。start为项目时间，trimIn/trimOut为源媒体时间。音频允许延长以循环播放。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": -65536,
+              "maximum": 65536
+            },
+            "y": {
+              "type": "number",
+              "minimum": -65536,
+              "maximum": 65536
+            },
+            "width": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "height": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "rotation": {
+              "type": "number",
+              "minimum": -3600,
+              "maximum": 3600
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "fadeIn": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "fadeOut": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "start": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "trimIn": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "trimOut": {
+              "type": "number",
+              "minimum": 0.001,
+              "maximum": 86400
+            },
+            "speed": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 16
+            },
+            "volume": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "fit": {
+              "type": "string",
+              "enum": [
+                "contain",
+                "cover",
+                "fill"
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "assetId",
+        "trackId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_text_add",
+    "description": "添加可编辑字幕或文字水印。字幕默认沿用最近使用样式，duration为时间线时长。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 20000
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 86400
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "subtitle",
+            "watermark"
+          ]
+        },
+        "style": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": -65536,
+              "maximum": 65536
+            },
+            "y": {
+              "type": "number",
+              "minimum": -65536,
+              "maximum": 65536
+            },
+            "width": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "height": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "rotation": {
+              "type": "number",
+              "minimum": -3600,
+              "maximum": 3600
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "fadeIn": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "fadeOut": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "fontSize": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 2048
+            },
+            "fontFamily": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "fontWeight": {
+              "type": "number",
+              "minimum": 100,
+              "maximum": 900
+            },
+            "color": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^(?:#[0-9a-fA-F]{3,8}|transparent|black|white|rgba?\\([\\d.,%\\s]+\\))$"
+            },
+            "background": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^(?:#[0-9a-fA-F]{3,8}|transparent|black|white|rgba?\\([\\d.,%\\s]+\\))$"
+            },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "textVerticalAlign": {
+              "type": "string",
+              "enum": [
+                "top",
+                "middle",
+                "bottom"
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "trackId",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_update",
+    "description": "修改片段时间、画面位置尺寸、音量速度、字幕文字/样式、滤镜或抠像。filters/chromaKey部分字段合并，null清除；语音来源不可伪造，转场使用专用工具。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "patch": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": -65536,
+              "maximum": 65536
+            },
+            "y": {
+              "type": "number",
+              "minimum": -65536,
+              "maximum": 65536
+            },
+            "width": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "height": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "rotation": {
+              "type": "number",
+              "minimum": -3600,
+              "maximum": 3600
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "fadeIn": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "fadeOut": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            },
+            "start": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "trimIn": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "trimOut": {
+              "type": "number",
+              "minimum": 0.001,
+              "maximum": 86400
+            },
+            "speed": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 16
+            },
+            "volume": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "fit": {
+              "type": "string",
+              "enum": [
+                "contain",
+                "cover",
+                "fill"
+              ]
+            },
+            "fontSize": {
+              "type": "number",
+              "minimum": 4,
+              "maximum": 2048
+            },
+            "fontFamily": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "fontWeight": {
+              "type": "number",
+              "minimum": 100,
+              "maximum": 900
+            },
+            "color": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^(?:#[0-9a-fA-F]{3,8}|transparent|black|white|rgba?\\([\\d.,%\\s]+\\))$"
+            },
+            "background": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80,
+              "pattern": "^(?:#[0-9a-fA-F]{3,8}|transparent|black|white|rgba?\\([\\d.,%\\s]+\\))$"
+            },
+            "textAlign": {
+              "type": "string",
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            },
+            "textVerticalAlign": {
+              "type": "string",
+              "enum": [
+                "top",
+                "middle",
+                "bottom"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 20000
+            },
+            "textRole": {
+              "type": "string",
+              "enum": [
+                "subtitle",
+                "watermark"
+              ]
+            },
+            "filters": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "intensity": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "brightness": {
+                      "type": "number",
+                      "minimum": -1,
+                      "maximum": 1
+                    },
+                    "contrast": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 2
+                    },
+                    "saturation": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 2
+                    },
+                    "temperature": {
+                      "type": "number",
+                      "minimum": -1,
+                      "maximum": 1
+                    },
+                    "tint": {
+                      "type": "number",
+                      "minimum": -1,
+                      "maximum": 1
+                    },
+                    "sepia": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false,
+                  "minProperties": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "chromaKey": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "color": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 7,
+                      "pattern": "^#[0-9a-fA-F]{6}$"
+                    },
+                    "similarity": {
+                      "type": "number",
+                      "minimum": 0.01,
+                      "maximum": 1
+                    },
+                    "blend": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "spillSuppression": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [],
+                  "additionalProperties": false,
+                  "minProperties": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "filterPreset": {
+          "type": "string",
+          "enum": [
+            "original",
+            "vivid",
+            "soft",
+            "warm",
+            "cool",
+            "cinematic",
+            "faded",
+            "monochrome",
+            "high-contrast",
+            "retro",
+            "night",
+            "sunset"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_move",
+    "description": "将片段移动到兼容轨道及指定项目时间；会校验轨道锁和关联转场。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId",
+        "trackId",
+        "start"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_split",
+    "description": "在指定项目时间分割片段。返回新增片段ID，不改变媒体源。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId",
+        "time"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_trim",
+    "description": "设置片段源起止时间。更改trimIn不会自动移动项目开始时间；若需按播放头裁剪使用side和time。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "trimIn": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "trimOut": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 86400
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "start",
+            "end"
+          ]
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_duplicate",
+    "description": "复制片段到同轨道，默认紧接原片段，也可指定start。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_remove",
+    "description": "删除片段。ripple=true时只接拢被删除区间内所有轨道共同空白，锁定轨道导致原子拒绝。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "ripple": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_restore_audio_length",
+    "description": "恢复音频片段至完整源长度，保留位置和播放速度，解除字幕关联。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_clip_extract_audio",
+    "description": "将视频片段的声音分离到音频轨道，保留剪辑位置、源起止、音量和速度，并将原视频静音。优先使用未锁定的音频轨道，否则创建新轨道；作为一次可撤销修改。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_subtitle_apply_style",
+    "description": "把当前字幕的全部视觉属性应用到同一轨道的其他字幕，保留各自文字和时间。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_timeline_close_gaps",
+    "description": "接拢时间线上所有轨道均为空白的区间；保留各轨道同步关系。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_filter_list",
+    "description": "列出可用于clip_update的预设滤镜及完整色彩参数。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_transition_list",
+    "description": "列出十种转场预设、当前转场；可传time查找最近可用视频切点。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_transition_add",
+    "description": "在靠近time的两个首尾相接视频片段切点添加转场，时长前后各半，自动创建转场轨道。同一切点再次添加会替换效果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "fade",
+            "wipe-up",
+            "wipe-down",
+            "wipe-left",
+            "wipe-right",
+            "close-vertical",
+            "close-horizontal",
+            "slide-left",
+            "slide-right",
+            "zoom"
+          ]
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 86400
+        },
+        "trackId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "time",
+        "effect"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_transition_update",
+    "description": "修改转场效果与总时长，保留所绑定视频切点；时长受相邻片段限制。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "fade",
+            "wipe-up",
+            "wipe-down",
+            "wipe-left",
+            "wipe-right",
+            "close-vertical",
+            "close-horizontal",
+            "slide-left",
+            "slide-right",
+            "zoom"
+          ]
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 86400
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId",
+        "effect",
+        "duration"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_transition_remove",
+    "description": "删除指定转场。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "clipId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_plan",
+    "description": "检查指定字幕是否可生成配音；不传clipIds时检查全部文字片段，返回待生成及跳过原因，不启动模型。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "minItems": 1,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_align",
+    "description": "让指定字幕时长与已关联配音对齐；不传clipIds时处理所有已配音字幕。字幕文字必须与配音文本一致。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "minItems": 1,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_new",
+    "description": "创建新工程并设为当前工程。有未保存修改时需要显式discardUnsaved=true。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 16384
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 16384
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 240
+        },
+        "background": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^(?:#[0-9a-fA-F]{3,8}|transparent|black|white|rgba?\\([\\d.,%\\s]+\\))$"
+        },
+        "discardUnsaved": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_open",
+    "description": "打开本机项目文件并切换到该工程。有未保存修改时需要显式discardUnsaved=true。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "discardUnsaved": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_save",
+    "description": "保存当前工程，已有保存位置时直接覆盖；新位置使用path，覆盖其他现有文件需overwrite=true。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_project_history",
+    "description": "对当前项目撤销或重做一步修改。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": [
+            "undo",
+            "redo"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "direction"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_asset_import",
+    "description": "将本机媒体文件导入当前工程，返回异步jobId，使用job_get查看结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_playback_get",
+    "description": "读取预览播放头、播放状态与当前选中片段。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_playback_set",
+    "description": "控制预览时间、播放状态或选中片段。选中片段需传已有clipId。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "playing": {
+          "type": "boolean"
+        },
+        "selectedClipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_voices",
+    "description": "列出实际可用及可按需下载的声音、模型状态、硬件要求。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_settings_get",
+    "description": "读取当前配音音色、语速与字幕对齐设置。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_settings_set",
+    "description": "更新公共配音设置，不生成音频。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "voiceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        },
+        "alignText": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_generate",
+    "description": "为指定字幕生成配音，不传clipIds则批量处理全部字幕；使用已下载模型，返回异步jobId，可查询进度及取消。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "clipIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "minItems": 1,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "voiceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "rate": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2
+        },
+        "alignText": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_speech_model",
+    "description": "查询模型安装状态，或按需下载、取消、修复模型。下载与修复返回任务状态。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "status",
+            "download",
+            "cancel",
+            "repair"
+          ]
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_job_list",
+    "description": "列出当前会话的任务、进度与结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_job_get",
+    "description": "读取异步任务状态、进度、错误或最终结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_job_cancel",
+    "description": "请求取消异步任务并清理临时资源。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_material_list",
+    "description": "分页浏览内置水印、背景音乐或片头片尾模板。返回material_add所需的id。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "watermark",
+            "music",
+            "video_segment"
+          ]
+        },
+        "search": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_material_add",
+    "description": "添加指定内置素材，返回异步jobId。视频片段placement为prepend或append，支持heading/subheading编辑标题；其他素材start为项目时间。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "watermark",
+            "music",
+            "video_segment"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "placement": {
+          "type": "string",
+          "enum": [
+            "prepend",
+            "append"
+          ]
+        },
+        "heading": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120
+        },
+        "subheading": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 240
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  {
+    "name": "open_media_export_start",
+    "description": "导出当前项目到本机路径，返回异步jobId，查询进度、耗时和完成路径。尺寸固定使用项目设置，已有文件需overwrite=true。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "outputPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "mp4",
+            "webm",
+            "mov",
+            "gif"
+          ]
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 60
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "balanced",
+            "high"
+          ]
+        },
+        "overwrite": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "outputPath",
+        "format"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  }
+]

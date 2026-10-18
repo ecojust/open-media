@@ -17,7 +17,7 @@ test('预览淡入淡出与时间线规则一致，片段外不渲染', () => {
   assert.equal(clipOpacityAt(clip, 6), 0)
 })
 
-test('字幕共享绘制函数保留空行、自动换行、背景和对齐设置', () => {
+test('字幕背景只包裹各行文字，空行不绘制背景，保留自动换行和对齐', () => {
   const calls = []
   const context = {
     measureText: text => ({ width: text.length * 10 }),
@@ -26,10 +26,50 @@ test('字幕共享绘制函数保留空行、自动换行、背景和对齐设�
   }
   const clip = createTextClip({ width: 100, height: 100 }, { width: 54, height: 100, text: 'abcdef\n\nz', background: '#ffffff', textAlign: 'left', fontSize: 10 })
   drawTextClip(context, clip)
-  assert.deepEqual(calls[0], ['background', 0, 0, 54, 100])
-  assert.deepEqual(calls.filter(call => call[0] === 'text').map(call => call[1]), ['abc', 'def', '', 'z'])
+  const backgrounds = calls.filter(call => call[0] === 'background')
+  const text = calls.filter(call => call[0] === 'text')
+  assert.equal(backgrounds.length, 3)
+  assert.equal(backgrounds[0][1], 10)
+  assert.equal(backgrounds[0][3], 34)
+  assert.equal(backgrounds[2][3], 14, '短行背景宽度随文字缩小')
+  assert(backgrounds.every(([, , , , height]) => height < 13))
+  assert.deepEqual(text.map(call => call[1]), ['abc', 'def', '', 'z'])
   assert.equal(context.textAlign, 'left')
-  assert.equal(calls[1][2], 12)
+  assert.equal(text[0][2], 12)
+  assert.equal(calls.findIndex(call => call[0] === 'text'), 3, '所有背景先绘制，避免遮盖相邻行文字')
+})
+
+test('少量文字在大字幕框中按真实字形范围着色，支持左中右对齐和空白字幕', () => {
+  for (const alignment of ['left', 'center', 'right']) {
+    const backgrounds = []
+    const context = {
+      measureText() {
+        const left = this.textAlign === 'left' ? -1 : this.textAlign === 'right' ? 29 : 14
+        return { width: 30, actualBoundingBoxLeft: left, actualBoundingBoxRight: 28 - left, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 6 }
+      },
+      fillRect: (...args) => backgrounds.push(args),
+      fillText() {},
+    }
+    const clip = createTextClip({ width: 640, height: 360 }, { width: 600, height: 300, text: '文字', fontSize: 20, background: '#112233', textAlign: alignment })
+    drawTextClip(context, clip)
+    assert.equal(backgrounds.length, 1)
+    assert.equal(backgrounds[0][2], 36)
+    assert(Math.abs(backgrounds[0][3] - 18.8) < 1e-9)
+    const x = alignment === 'left' ? 12 : alignment === 'right' ? 588 : 300
+    const left = alignment === 'left' ? -1 : alignment === 'right' ? 29 : 14
+    assert.equal(backgrounds[0][0], x - left - 4)
+    assert.equal(backgrounds[0][1], 150 - 8 - 2.4)
+    backgrounds.length = 0
+    drawTextClip(context, { ...clip, text: '  \n\t' })
+    assert.equal(backgrounds.length, 0, '空白文本应完全透明')
+  }
+})
+
+test('文字水印模板保留作为设计元素的整块底板', () => {
+  const backgrounds = []
+  const context = { measureText: text => ({ width: text.length * 10 }), fillRect: (...args) => backgrounds.push(args), fillText() {} }
+  drawTextClip(context, createTextClip({ width: 640, height: 360 }, { textRole: 'watermark', width: 400, height: 120, text: '章节标题', background: '#242a44' }))
+  assert.deepEqual(backgrounds, [[0, 0, 400, 120]])
 })
 
 test('没有浏览器编码能力时明确拒绝导出，不返回伪造文件', async () => {

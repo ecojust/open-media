@@ -3,6 +3,7 @@ import { isClipFilterIdentity } from './clip-filters.ts'
 import { isChromaKeyEnabled } from './chroma-key.ts'
 import { ClipFilterRenderer } from './filter-renderer.ts'
 import { audioSourceDistance, audioSourceTime } from './audio-loop.ts'
+import { transitionVisualAt } from './transitions.ts'
 
 export { clipOpacityAt } from './timeline.ts'
 import { clipDuration as previewClipDuration, projectDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
@@ -21,17 +22,20 @@ export function fitRect(sourceWidth: number, sourceHeight: number, width: number
 
 /** Draw subtitle content in local clip coordinates; used by preview and native export rasterization. */
 export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
-  if (clip.background && clip.background !== 'transparent') { ctx.fillStyle = clip.background; ctx.fillRect(0, 0, clip.width, clip.height) }
+  if (clip.textRole === 'watermark' && clip.background && clip.background !== 'transparent') {
+    ctx.fillStyle = clip.background
+    ctx.fillRect(0, 0, clip.width, clip.height)
+  }
   const fontSize = clip.fontSize || 56
   ctx.font = `${clip.fontWeight || 400} ${fontSize}px ${clip.fontFamily || 'sans-serif'}`
-  ctx.fillStyle = clip.color || '#ffffff'
   ctx.textAlign = clip.textAlign || 'center'
   ctx.textBaseline = 'middle'
+  const maxWidth = Math.max(1, clip.width - 24)
   const lines: string[] = []
   for (const paragraph of (clip.text || '').split('\n')) {
     let line = ''
     for (const char of paragraph) {
-      if (line && ctx.measureText(line + char).width > clip.width - 24) { lines.push(line); line = char } else line += char
+      if (line && ctx.measureText(line + char).width > maxWidth) { lines.push(line); line = char } else line += char
     }
     lines.push(line)
   }
@@ -41,8 +45,32 @@ export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
   const firstLineY = clip.textVerticalAlign === 'top' ? padding + fontSize / 2
     : clip.textVerticalAlign === 'bottom' ? clip.height - padding - fontSize / 2 - (lines.length - 1) * lineHeight
       : clip.height / 2 - (lines.length - 1) * lineHeight / 2
-  lines.forEach((line, index) => ctx.fillText(line, x, firstLineY + index * lineHeight, Math.max(1, clip.width - 24)))
-
+  if (clip.textRole !== 'watermark' && clip.background && clip.background !== 'transparent') {
+    ctx.fillStyle = clip.background
+    const horizontalPadding = Math.min(12, fontSize * 0.2)
+    const verticalPadding = Math.min(6, fontSize * 0.12)
+    // Measure each painted line, rather than the positioning box. All backgrounds
+    // are drawn first so the next line cannot cover a preceding line's descenders.
+    lines.forEach((line, index) => {
+      if (!line.trim()) return
+      const metrics = ctx.measureText(line)
+      const scale = metrics.width > maxWidth ? maxWidth / metrics.width : 1
+      const advance = metrics.width * scale
+      const fallbackLeft = ctx.textAlign === 'left' ? 0 : ctx.textAlign === 'right' ? advance : advance / 2
+      const leftBearing = Number.isFinite(metrics.actualBoundingBoxLeft) ? metrics.actualBoundingBoxLeft * scale : fallbackLeft
+      const rightBearing = Number.isFinite(metrics.actualBoundingBoxRight) ? metrics.actualBoundingBoxRight * scale : advance - fallbackLeft
+      const ascent = Number.isFinite(metrics.actualBoundingBoxAscent) ? metrics.actualBoundingBoxAscent : fontSize / 2
+      const descent = Number.isFinite(metrics.actualBoundingBoxDescent) ? metrics.actualBoundingBoxDescent : fontSize / 2
+      const y = firstLineY + index * lineHeight
+      const left = Math.max(0, x - leftBearing - horizontalPadding)
+      const top = Math.max(0, y - ascent - verticalPadding)
+      const right = Math.min(clip.width, x + rightBearing + horizontalPadding)
+      const bottom = Math.min(clip.height, y + descent + verticalPadding)
+      if (right > left && bottom > top) ctx.fillRect(left, top, right - left, bottom - top)
+    })
+  }
+  ctx.fillStyle = clip.color || '#ffffff'
+  lines.forEach((line, index) => ctx.fillText(line, x, firstLineY + index * lineHeight, maxWidth))
 }
 
 type MediaEntry = {
@@ -409,6 +437,7 @@ export class TimelinePreview {
     ctx.fillStyle = project.background
     ctx.fillRect(0, 0, project.width, project.height)
     for (const track of [...project.tracks].reverse()) {
+      if (track.kind === 'transition') continue
       for (const clip of track.clips) {
         if (this.lastTime < clip.start || this.lastTime >= clip.start + previewClipDuration(clip)) continue
         this.drawClip(clip, track)
@@ -427,6 +456,17 @@ export class TimelinePreview {
     ctx.beginPath()
     ctx.rect(0, 0, clip.width, clip.height)
     ctx.clip()
+    const transition = track.kind === 'video' ? transitionVisualAt(this.project, clip.id, this.lastTime) : undefined
+    if (transition) {
+      ctx.globalAlpha *= transition.opacity
+      ctx.beginPath()
+      ctx.rect(transition.mask.x * clip.width, transition.mask.y * clip.height, transition.mask.width * clip.width, transition.mask.height * clip.height)
+      ctx.clip()
+      ctx.translate(transition.translateX * clip.width, 0)
+      ctx.translate(clip.width / 2, clip.height / 2)
+      ctx.scale(transition.scale, transition.scale)
+      ctx.translate(-clip.width / 2, -clip.height / 2)
+    }
     if (track.kind === 'text' || clip.text !== undefined) {
       drawTextClip(ctx, clip)
     } else if (track.kind !== 'audio') {

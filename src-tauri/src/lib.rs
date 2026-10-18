@@ -11,6 +11,8 @@ pub mod clip_filters;
 pub mod chroma_key;
 pub mod preview;
 pub mod project_files;
+pub mod mcp;
+pub mod mcp_files;
 #[cfg(any(feature = "desktop", test))]
 pub mod image_clipboard;
 pub mod speech;
@@ -36,6 +38,7 @@ mod desktop {
         engine::{self, Asset, JobManager, MediaJob, MediaStore, Runtime, RuntimeStatus},
         preview::{self, PreviewResult},
         project_files::{self, ProjectFile, ProjectFiles, ProjectTarget},
+        mcp::{McpConfig, McpManager, McpRequest, McpStatus},
         image_clipboard::{self, ImageClipboard},
         recording_controls::{ControlsAction, ControlsManager, ControlsSnapshot},
         speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
@@ -81,6 +84,90 @@ mod desktop {
                 .await
                 .map_err(|e| format!("操作未能完成：{e}"))?
         }
+    }
+
+    fn require_mcp_window(window: &tauri::WebviewWindow) -> engine::Result<()> {
+        let url = window.url().map_err(|_| "无法确认 MCP 请求来源。")?;
+        crate::mcp_files::require_editor_origin(window.label(), url.scheme(), url.host_str(), url.port(), cfg!(debug_assertions))
+    }
+
+    #[tauri::command]
+    pub fn mcp_get_config(window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<McpConfig> {
+        require_mcp_window(&window)?;
+        Ok(state.config())
+    }
+    #[tauri::command]
+    pub fn mcp_get_status(window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<McpStatus> {
+        require_mcp_window(&window)?;
+        Ok(state.status())
+    }
+    #[tauri::command]
+    pub async fn mcp_save_config(config: McpConfig, window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<McpConfig> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.save_config(config)).await
+    }
+    #[tauri::command]
+    pub async fn mcp_start(app: tauri::AppHandle, window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<McpStatus> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || {
+            let tools: Vec<Value> = serde_json::from_str(include_str!("../../src/mcp-tools.json"))
+                .map_err(|_| "MCP 工具清单无法读取。")?;
+            let dispatch = Arc::new(move |request: McpRequest| {
+                let window = app.get_webview_window("main").ok_or("主窗口已关闭。")?;
+                require_mcp_window(&window)?;
+                window.emit("mcp-request", request).map_err(|error| format!("无法发送 MCP 编辑请求：{error}"))
+            });
+            state.start(state.config(), tools, dispatch)
+        }).await
+    }
+    #[tauri::command]
+    pub async fn mcp_stop(window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<McpStatus> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || Ok(state.stop())).await
+    }
+    #[tauri::command]
+    pub fn mcp_pending(window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<Vec<McpRequest>> {
+        require_mcp_window(&window)?;
+        Ok(state.pending())
+    }
+    #[tauri::command]
+    pub fn mcp_claim(id: String, window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<bool> {
+        require_mcp_window(&window)?;
+        Ok(state.claim(&id))
+    }
+    #[tauri::command]
+    pub fn mcp_complete(id: String, result: Value, is_error: bool, window: tauri::WebviewWindow, state: State<'_, McpManager>) -> engine::Result<bool> {
+        require_mcp_window(&window)?;
+        Ok(state.complete(&id, result, is_error))
+    }
+    #[tauri::command]
+    pub async fn mcp_import_media_paths(paths: Vec<String>, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Vec<Asset>> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || crate::mcp_files::import_media_paths(&state.store, &state.runtime()?, &paths)).await
+    }
+    #[tauri::command]
+    pub async fn mcp_save_project_file(bytes: Vec<u8>, token: Option<String>, path: Option<String>, overwrite: Option<bool>, window: tauri::WebviewWindow, media: State<'_, MediaState>, files: State<'_, ProjectFiles>) -> engine::Result<ProjectTarget> {
+        require_mcp_window(&window)?;
+        project_files::validate_project_size(bytes.len() as u64)?;
+        let store = media.store.clone();
+        let files = files.inner().clone();
+        blocking(move || crate::mcp_files::save_project(&files, &store, &bytes, token.as_deref(), path.as_deref(), overwrite.unwrap_or(false))).await
+    }
+    #[tauri::command]
+    pub async fn mcp_open_project_file(path: String, window: tauri::WebviewWindow, state: State<'_, ProjectFiles>) -> engine::Result<ProjectFile> {
+        require_mcp_window(&window)?;
+        let files = state.inner().clone();
+        blocking(move || crate::mcp_files::open_project(&files, &path)).await
+    }
+    #[tauri::command]
+    pub async fn mcp_begin_media_job(spec: Value, output_path: String, overwrite: Option<bool>, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<MediaJob> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || crate::mcp_files::begin_export(&state.store, &state.runtime()?, &state.jobs, &spec, &output_path, overwrite.unwrap_or(false))).await
     }
 
     #[tauri::command]
@@ -666,6 +753,7 @@ mod desktop {
                 let data = app.path().app_data_dir()?;
                 fs::create_dir_all(&data)?;
                 app.manage(ProjectFiles::persistent(data.join("project-file-targets.json")).map_err(std::io::Error::other)?);
+                app.manage(McpManager::new(data.join("mcp-settings.json")).map_err(std::io::Error::other)?);
                 let resource = app.path().resource_dir()?;
                 let settings = data.join("media-engine-path.txt");
                 let selected = fs::read_to_string(&settings).ok().map(PathBuf::from);
@@ -708,6 +796,18 @@ mod desktop {
                 }
             })
             .invoke_handler(tauri::generate_handler![
+                mcp_get_config,
+                mcp_get_status,
+                mcp_save_config,
+                mcp_start,
+                mcp_stop,
+                mcp_pending,
+                mcp_claim,
+                mcp_complete,
+                mcp_import_media_paths,
+                mcp_save_project_file,
+                mcp_open_project_file,
+                mcp_begin_media_job,
                 get_runtime_status,
                 select_runtime,
                 pick_media_assets,
@@ -766,6 +866,7 @@ mod desktop {
             }
             if matches!(event, tauri::RunEvent::Exit) {
                 let state = handle.state::<MediaState>();
+                handle.state::<McpManager>().stop();
                 handle.state::<crate::screenshot_shortcut::ShortcutManager>().shutdown();
                 handle.state::<ControlsManager>().close(handle);
                 handle.state::<ImageClipboard>().shutdown();

@@ -44,7 +44,7 @@ test('当前画面参考排除透明、非活跃、音频、缺失素材与画�
   const asset = { id: 'image', name: '水印.png', kind: 'image', url: 'blob:image', duration: 0, width: 20, height: 20, size: 100, mime: 'image/png' }
   p.assets.push(asset)
   const label = (id, options = {}) => createTextClip(p, { ...geometry, id, trimOut: 3, text: id, ...options })
-  text.clips.push(label('locked'), label('invisible', { opacity: 0 }), label('past', { start: 0, trimOut: 1 }), label('future', { start: 4 }), label('outside', { x: -300 }), label('partial', { x: -80 }), label('empty', { text: '', background: 'transparent' }), label('background', { text: '', background: '#cc2233' }), label('fade-start', { start: 1, fadeIn: 1 }))
+  text.clips.push(label('locked'), label('invisible', { opacity: 0 }), label('past', { start: 0, trimOut: 1 }), label('future', { start: 4 }), label('outside', { x: -300 }), label('partial', { x: -80 }), label('empty', { text: '', background: 'transparent' }), label('empty-subtitle-background', { text: '', background: '#cc2233' }), label('background', { text: '', textRole: 'watermark', background: '#cc2233' }), label('fade-start', { start: 1, fadeIn: 1 }))
   picture.clips.push(createClip(asset, p, { id: 'watermark', width: 20, height: 20 }), createClip(asset, p, { id: 'missing', assetId: 'missing' }))
   audio.clips.push(createClip(asset, p, { id: 'audio-only' }))
   p.tracks = [text, picture, audio]

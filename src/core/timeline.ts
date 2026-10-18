@@ -1,5 +1,6 @@
 import { cloneProject, createTrack, newId, validateProject } from './project.ts'
 import { isSubtitleClip, SUBTITLE_STYLE_KEYS, subtitleStyleFromClip } from './subtitle-style.ts'
+import { reconcileTransitions } from './transitions.ts'
 import type { Clip, MediaAsset, Project, ProjectHistory, Track, TrackKind } from './types.ts'
 
 export function clipDuration(clip: Clip): number { return Math.max(0, (clip.trimOut - clip.trimIn) / clip.speed) }
@@ -22,6 +23,7 @@ export function activeClips(project: Project, time: number): { track: Track; cli
 function edit(project: Project, action: (copy: Project) => void): Project {
   const copy = cloneProject(project)
   action(copy)
+  reconcileTransitions(copy, project)
   copy.updatedAt = new Date().toISOString()
   return validateProject(copy, { trusted: true })
 }
@@ -83,6 +85,7 @@ export function addClips(project: Project, trackId: string, clips: Clip[]): Proj
 export function updateClip(project: Project, clipId: string, patch: Partial<Omit<Clip, 'id' | 'assetId'>>): Project {
   return edit(project, (copy) => {
     const { clip, track } = requireClip(copy, clipId)
+    if (track.kind === 'transition') throw new Error('请通过转场属性调整效果和时长，转场会固定在视频切点。')
     const textChanged = track.kind === 'text' && patch.text !== undefined && patch.text !== clip.text
     const subtitleStyleChanged = isSubtitleClip(track, clip) && SUBTITLE_STYLE_KEYS.some(key => patch[key] !== undefined && patch[key] !== clip[key])
     const oldId = clip.id
@@ -119,11 +122,12 @@ export function applySubtitleStyleToTrack(project: Project, sourceClipId: string
   })
 }
 export function moveClip(project: Project, clipId: string, targetTrackId: string, start: number): Project {
-  return edit(project, (copy) => { const { track, clip, index } = requireClip(copy, clipId); const target = trackById(copy, targetTrackId); editable(target); if ((track.kind === 'text') !== (target.kind === 'text')) throw new Error('字幕和媒体片段不能相互移动到对方轨道。'); track.clips.splice(index, 1); clip.start = start; if (target.kind === 'audio') { delete clip.filters; delete clip.chromaKey }; target.clips.push(clip) })
+  return edit(project, (copy) => { const { track, clip, index } = requireClip(copy, clipId); const target = trackById(copy, targetTrackId); editable(target); if (track.kind === 'transition' || target.kind === 'transition') throw new Error('转场只能固定在相邻视频的切点，不能自由移动。'); if ((track.kind === 'text') !== (target.kind === 'text')) throw new Error('字幕和媒体片段不能相互移动到对方轨道。'); track.clips.splice(index, 1); clip.start = start; if (target.kind === 'audio') { delete clip.filters; delete clip.chromaKey }; target.clips.push(clip) })
 }
 export function splitClip(project: Project, clipId: string, time: number): Project {
   return edit(project, (copy) => {
     const { track, clip, index } = requireClip(copy, clipId)
+    if (track.kind === 'transition') throw new Error('转场不能分割，请调整转场时长。')
     if (!Number.isFinite(time) || time <= clip.start + 1e-6 || time >= clipEnd(clip) - 1e-6) throw new Error('请将播放头移到片段内部再分割。')
     const source = sourceTimeAt(clip, time)
     if (track.kind === 'text') detachSpeechSources(copy, new Set([clip.id]))
@@ -134,10 +138,13 @@ export function splitClip(project: Project, clipId: string, time: number): Proje
     clip.fadeIn = Math.min(clip.fadeIn, clipDuration(clip))
     right.fadeOut = Math.min(right.fadeOut, clipDuration(right))
     track.clips.splice(index + 1, 0, right)
+    for (const effectTrack of copy.tracks) for (const transition of effectTrack.clips) {
+      if (transition.transition?.fromClipId === clip.id) transition.transition.fromClipId = right.id
+    }
   })
 }
 export function duplicateClip(project: Project, clipId: string, start?: number): Project {
-  return edit(project, (copy) => { const { track, clip } = requireClip(copy, clipId); const duplicate = { ...clip, ...(clip.speech ? { speech: { ...clip.speech } } : {}), id: newId('clip'), start: start ?? clipEnd(clip) }; if (duplicate.speech) delete duplicate.speech.textClipId; track.clips.push(duplicate) })
+  return edit(project, (copy) => { const { track, clip } = requireClip(copy, clipId); if (track.kind === 'transition') throw new Error('转场不能直接复制，请在其他视频切点添加。'); const duplicate = { ...clip, ...(clip.speech ? { speech: { ...clip.speech } } : {}), id: newId('clip'), start: start ?? clipEnd(clip) }; if (duplicate.speech) delete duplicate.speech.textClipId; track.clips.push(duplicate) })
 }
 export function deleteClip(project: Project, clipId: string): Project {
   return edit(project, (copy) => { const { track, index } = requireClip(copy, clipId); if (track.kind === 'text') detachSpeechSources(copy, new Set([clipId])); track.clips.splice(index, 1) })

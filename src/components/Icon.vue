@@ -1,6 +1,7 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ name: string; size?: number }>(), { size: 18 })
 const paths: Record<string, string> = {
+  mcp: 'M4 19V5l8 10 8-10v14',
   home: 'm3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9',
   menu: 'M4 6h16M4 12h16M4 18h16',
   panel: 'M4 3h16v18H4zM9 3v18',
@@ -12,6 +13,7 @@ const paths: Record<string, string> = {
   upload: 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
   export: 'M13 3h8v8m0-8-12 12M10 5H3v16h16v-7',
+  transition: 'M3 5h7v14H3zM14 5h7v14h-7zM7 9l4 3-4 3M17 9l-4 3 4 3',
   video: 'M3 5h13v14H3zM16 9l5-3v12l-5-3',
   record: 'M3 4h18v13H3zM8 21h8m-4-4v4M15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
   screen: 'M3 4h18v13H3zM8 21h8m-4-4v4',
@@ -61,6 +63,8 @@ const paths: Record<string, string> = {
   'zoom-in': 'M18 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0m-2 6 6 6M7 10h6M10 7v6',
   'zoom-out': 'M18 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0m-2 6 6 6M7 10h6',
   grip: 'M8 5h1M15 5h1M8 12h1M15 12h1M8 19h1M15 19h1',
+  eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
+  'eye-off': 'm3 3 18 18M10 5a10 10 0 0 1 2 0c6 0 10 7 10 7a23 23 0 0 1-3 4M6 6a24 24 0 0 0-4 6s4 7 10 7a12 12 0 0 0 5-1M10 10a3 3 0 0 0 4 4',
   layers: 'm12 3 10 5-10 5L2 8zM2 12l10 5 10-5M2 16l10 5 10-5',
   refresh: 'M20 7a9 9 0 0 0-15-2L2 8m0-6v6h6M4 17a9 9 0 0 0 15 2l3-3m0 6v-6h-6',
   crop: 'M6 2v16h16M2 6h16v16',

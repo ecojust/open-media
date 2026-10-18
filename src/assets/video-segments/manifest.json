@@ -1,0 +1,117 @@
+{
+  "author": "Open Media",
+  "license": "MIT",
+  "generator": "scripts/generate-video-segments.py",
+  "items": [
+    {
+      "id": "midnight-orbit",
+      "filename": "midnight-orbit.webm",
+      "poster": "midnight-orbit.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 36625,
+      "sha256": "5407f2d59b6f6a8201e0e517c2f6f0f9dd668a5dc99300e0a6f12939afa9b86f"
+    },
+    {
+      "id": "prism-dawn",
+      "filename": "prism-dawn.webm",
+      "poster": "prism-dawn.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 22051,
+      "sha256": "3e82424815fb04f5e5f2d2bc7b4dac66e4841b7facf6eca2b5cf6206ebf14cf7"
+    },
+    {
+      "id": "gold-horizon",
+      "filename": "gold-horizon.webm",
+      "poster": "gold-horizon.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 50504,
+      "sha256": "7d5b08f82167f525b702fe912a998d1c33ec8c2f0a70afdae0cd6dc320933830"
+    },
+    {
+      "id": "paper-morning",
+      "filename": "paper-morning.webm",
+      "poster": "paper-morning.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 41076,
+      "sha256": "9d082e365afffbda8ff8fbf6d67f1619daaaf53fed6eff423cf7280cd128a97a"
+    },
+    {
+      "id": "azure-grid",
+      "filename": "azure-grid.webm",
+      "poster": "azure-grid.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 51273,
+      "sha256": "121a1873a1aca2d6bb8f15d959a0ebf605e723afe299ee0f6792beea4c8689fe"
+    },
+    {
+      "id": "velvet-curtain",
+      "filename": "velvet-curtain.webm",
+      "poster": "velvet-curtain.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 31353,
+      "sha256": "1e75f6b99238f66cd85737fe46b7b559609464b293f1032c47c1a42da9cae3c5"
+    },
+    {
+      "id": "ocean-line",
+      "filename": "ocean-line.webm",
+      "poster": "ocean-line.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 18379,
+      "sha256": "a0fe00c6aaf7887e0ff064f1744b7aa933cff2399759f21cfc93587f11377469"
+    },
+    {
+      "id": "graphite-frame",
+      "filename": "graphite-frame.webm",
+      "poster": "graphite-frame.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 15809,
+      "sha256": "613ad98e33bc0aea3dbacd70eedfeb11fccec1fc6cd05191705bf332d52537ff"
+    },
+    {
+      "id": "coral-sunset",
+      "filename": "coral-sunset.webm",
+      "poster": "coral-sunset.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 17500,
+      "sha256": "197d14de8fe1d342c6f8480d238352333257fbcd91a1ecd40f95feffd89eb889"
+    },
+    {
+      "id": "starlit-finale",
+      "filename": "starlit-finale.webm",
+      "poster": "starlit-finale.jpg",
+      "width": 1280,
+      "height": 720,
+      "fps": 24,
+      "duration": 5,
+      "size": 51912,
+      "sha256": "edaaca83a2c2401040fc48c814e8110205751f1fe9abdb63df121ebd4cd14bae"
+    }
+  ]
+}

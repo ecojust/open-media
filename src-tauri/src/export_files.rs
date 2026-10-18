@@ -36,7 +36,7 @@ fn origin_record(store: &MediaStore, imported: &Path) -> Result<PathBuf> {
     Ok(store.root.join(".origins").join(record))
 }
 
-/// Only the native file picker calls this; portable projects cannot choose an origin.
+/// Origins come from explicitly selected local paths; portable projects cannot supply them.
 pub fn remember_asset_source(store: &MediaStore, asset: &Asset, source: &Path) -> Result<()> {
     let imported =
         store.authorized_path(&serde_json::json!({ "nativePath": asset.native_path }))?;

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "sourceLock": "src-tauri/Cargo.lock",
-  "sourceLockSha256": "fcfb24f9abd5489eaae2b976344de60815c4d99c1a5265e31ae7a0a8144d72cc",
+  "sourceLockSha256": "fe0fe4ae09c2420a7cf2cf8bec31f3f1fe64e39d02fdf44ec5abd787fb782756",
   "coverage": "All registry packages in the locked dependency graph, including build-only and platform-specific packages. The inventory may exceed the dependencies present in an individual installer.",
   "originalTextPolicy": "Original license, copyright and notice bytes are retained without modification. Identical texts share one stored copy. Supplemental upstream sources are recorded where published package archives omit their notices.",
   "packages": [
@@ -4490,6 +4490,40 @@
             "kind": "locked-crate",
             "url": "https://crates.io/api/v1/crates/httparse/1.10.1/download",
             "archiveSha256": "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
+          }
+        }
+      ]
+    },
+    {
+      "name": "httpdate",
+      "version": "1.0.3",
+      "declaredLicense": "MIT OR Apache-2.0",
+      "authors": [
+        "Pyfisch <pyfisch@posteo.org>"
+      ],
+      "source": "https://crates.io/api/v1/crates/httpdate/1.0.3/download",
+      "archiveSha256": "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9",
+      "notices": [
+        {
+          "file": "texts/934887691e05d69d7c86ad3f2c360980fa30c15b035e351f3c9865e99da4debc.txt",
+          "sha256": "934887691e05d69d7c86ad3f2c360980fa30c15b035e351f3c9865e99da4debc",
+          "bytes": 1051,
+          "originalPath": "LICENSE-MIT",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/httpdate/1.0.3/download",
+            "archiveSha256": "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+          }
+        },
+        {
+          "file": "texts/4d10fe5f3aa176b05b229a248866bad70b834c173f1252a814ff4748d8a13837.txt",
+          "sha256": "4d10fe5f3aa176b05b229a248866bad70b834c173f1252a814ff4748d8a13837",
+          "bytes": 10255,
+          "originalPath": "LICENSE-APACHE",
+          "origin": {
+            "kind": "locked-crate",
+            "url": "https://crates.io/api/v1/crates/httpdate/1.0.3/download",
+            "archiveSha256": "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
           }
         }
       ]

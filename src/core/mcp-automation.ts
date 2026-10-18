@@ -1,0 +1,291 @@
+import type { ImportedProject, MediaAsset, Project } from './types.ts'
+import type { MediaJob, ProjectFileTarget } from '../native.ts'
+import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelMediaJob, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getMediaJobs, getSpeechJob, getSpeechStatus, repairSpeechModel } from '../native.ts'
+import { beginMcpMediaJob, importMcpMediaPaths, openMcpProjectFile, saveMcpProjectFile } from '../native-mcp-files.ts'
+import { cloneProject, createProject, newId } from './project.ts'
+import { addAssets } from './timeline.ts'
+import { adoptFirstVideoSize } from './project-size.ts'
+import { exportProjectFile, importProjectFile } from './project-file.ts'
+import { prepareNativeProject } from './native-project.ts'
+import { executeProjectTool, inspectMcpProject, isProjectTool, validateMcpToolArguments } from './mcp-tools.ts'
+import { createMcpSpeechJobs, type McpSpeechJob } from './mcp-speech-jobs.ts'
+import { getSpeechSettings, updateSpeechSettings } from './speech-settings.ts'
+
+export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
+export interface McpAutomationHost {
+  getProject(): Project
+  getRevision(): number
+  isBusy(): boolean
+  isDirty(): boolean
+  getBlobs(): Map<string, Blob>
+  getSaveTarget(): ProjectFileTarget | undefined
+  commit(project: Project, label: string, expected: { projectId: string; revision: number }): boolean
+  adopt(project: Project): Promise<void>
+  hydrate(imported: ImportedProject): Promise<Project>
+  didSave(project: Project, target: ProjectFileTarget): Promise<void>
+  didOpen(target: ProjectFileTarget): Promise<void>
+  history(direction: 'undo' | 'redo'): void
+  getPlayback(): McpPlayback
+  setPlayback(patch: Partial<McpPlayback>): Promise<McpPlayback>
+  ownAsset(asset: MediaAsset, blob?: Blob): void
+  onBusy(value: boolean): void
+  onJobsChanged(): void
+  announce(message: string): void
+}
+export interface McpAutomationJob {
+  id: string
+  name: string
+  kind: string
+  projectId: string
+  revision: number
+  state: 'running' | 'completed' | 'failed' | 'cancelled'
+  cancelable: boolean
+  cancelling?: boolean
+  startedAt: number
+  finishedAt?: number
+  elapsedSeconds: number
+  progress?: number
+  stage: string
+  error?: string
+  result?: unknown
+}
+interface Operation {
+  job: McpAutomationJob
+  source: Project
+  controller: AbortController
+  cancelNative?: () => Promise<void>
+  irrevocable?: boolean
+}
+const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
+
+/** The displayed project remains authoritative; remote edits use its undo and save path. */
+export function createMcpAutomation(host: McpAutomationHost) {
+  const operations = new Map<string, Operation>()
+  let active: Operation | undefined, disposed = false
+  const speech = createMcpSpeechJobs({
+    getProject: host.getProject, getRevision: host.getRevision, isBusy: () => !!active || host.isBusy(),
+    onBusy: host.onBusy, commit: host.commit, onAssets: assets => assets.forEach(asset => host.ownAsset(asset)),
+    onChange: () => host.onJobsChanged(),
+    native: { getSpeechStatus, beginSpeechJob, getSpeechJob, cancelSpeechJob, discardSpeechJob, acceptSpeechJobs },
+  })
+  function available(): void {
+    if (disposed) throw new Error('应用正在关闭，MCP 操作已停止。')
+    if (active || speech.list().some(job => job.state === 'running') || host.isBusy()) throw new Error('当前项目正在处理其他操作，请等待完成或取消任务后重试。')
+  }
+  function check(operation: Operation): void {
+    if (disposed || operation.controller.signal.aborted) throw new DOMException('MCP 任务已取消。', 'AbortError')
+    if (host.getProject().id !== operation.job.projectId || host.getRevision() !== operation.job.revision) throw new Error('项目已发生变化，本次操作未写入项目。请重新读取项目后重试。')
+  }
+  function changed(operation: Operation, stage?: string, progress?: number): void {
+    if (stage) operation.job.stage = stage
+    operation.job.progress = progress
+    host.onJobsChanged()
+  }
+  function snapshot(operation: Operation): McpAutomationJob {
+    return structuredClone({ ...operation.job, elapsedSeconds: Math.max(0, ((operation.job.finishedAt ?? Date.now()) - operation.job.startedAt) / 1000) })
+  }
+  function start(kind: string, name: string, action: (operation: Operation) => Promise<unknown>): McpAutomationJob & { jobId: string } {
+    available()
+    const source = cloneProject(host.getProject())
+    const operation: Operation = { source, controller: new AbortController(), job: {
+      id: newId('mcp-job'), name, kind, projectId: source.id, revision: host.getRevision(), state: 'running',
+      cancelable: true, startedAt: Date.now(), elapsedSeconds: 0, stage: '正在准备',
+    } }
+    active = operation; operations.set(operation.job.id, operation); host.onBusy(true); host.onJobsChanged()
+    while (operations.size > 100) {
+      const oldest = [...operations.values()].find(item => item !== active && item.job.state !== 'running')
+      if (!oldest) break
+      operations.delete(oldest.job.id)
+    }
+    void Promise.resolve().then(() => { check(operation); return action(operation) }).then(result => {
+      operation.job.result = result; operation.job.state = 'completed'; operation.job.progress = 1; operation.job.stage = '已完成'
+      host.announce(`MCP：${name}已完成`)
+    }).catch(async cause => {
+      if (!operation.irrevocable) await operation.cancelNative?.().catch(() => {})
+      operation.job.state = (operation.controller.signal.aborted || cause instanceof Error && cause.name === 'AbortError') && !operation.irrevocable ? 'cancelled' : 'failed'
+      operation.job.error = message(cause); operation.job.stage = operation.job.state === 'cancelled' ? '已取消' : '失败'
+      host.announce(`MCP：${name}${operation.job.state === 'cancelled' ? '已取消' : `失败：${message(cause)}`}`)
+    }).finally(() => {
+      operation.job.finishedAt = Date.now(); operation.job.cancelable = false; operation.job.cancelling = false
+      if (active === operation) { active = undefined; host.onBusy(false) }
+      host.onJobsChanged()
+    })
+    return { ...snapshot(operation), jobId: operation.job.id }
+  }
+  function commit(operation: Operation, project: Project, label: string): void {
+    check(operation)
+    if (!host.commit(project, `MCP：${label}`, { projectId: operation.job.projectId, revision: operation.job.revision })) throw new Error('项目拒绝了本次修改，请重新读取项目。')
+    operation.irrevocable = true; operation.job.cancelable = false
+  }
+  function wait(operation: Operation, milliseconds = 400): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const abort = () => { clearTimeout(timer); operation.controller.signal.removeEventListener('abort', abort); reject(new DOMException('已取消', 'AbortError')) }
+      const timer = setTimeout(() => { operation.controller.signal.removeEventListener('abort', abort); resolve() }, milliseconds)
+      operation.controller.signal.addEventListener('abort', abort, { once: true })
+      if (operation.controller.signal.aborted) abort()
+    })
+  }
+  async function execute(name: string, input: unknown): Promise<unknown> {
+    if (disposed) throw new Error('MCP 操作已停止。')
+    const args = validateMcpToolArguments(name, input)
+    if (args.expectedRevision !== undefined && args.expectedRevision !== host.getRevision()) throw new Error(`项目版本已变化：当前 revision=${host.getRevision()}，请先重新读取项目。`)
+    if (isProjectTool(name)) {
+      const revision = host.getRevision(), source = host.getProject(), result = executeProjectTool(source, name, args)
+      if (result.project) {
+        available()
+        if (!host.commit(result.project, `MCP：${result.label || '编辑项目'}`, { projectId: source.id, revision })) throw new Error('项目拒绝了本次修改。')
+      }
+      if (result.selection?.clipId) void host.setPlayback({ selectedClipId: result.selection.clipId }).catch(() => {})
+      return { ...(result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data : { data: result.data }), projectId: host.getProject().id, revision: host.getRevision() }
+    }
+    switch (name) {
+      case 'open_media_project_history': {
+        available(); host.history(args.direction as 'undo' | 'redo')
+        return { projectId: host.getProject().id, revision: host.getRevision(), project: inspectMcpProject(host.getProject()) }
+      }
+      case 'open_media_project_new':
+        return start('project', '新建工程', async operation => {
+          if (host.isDirty() && args.discardUnsaved !== true) throw new Error('当前项目有未保存的修改。请先保存，或明确设置 discardUnsaved=true。')
+          const project = createProject(args.title as string | undefined, { ...(args.width !== undefined ? { width: args.width as number } : {}), ...(args.height !== undefined ? { height: args.height as number } : {}), ...(args.fps !== undefined ? { fps: args.fps as number } : {}), ...(args.background !== undefined ? { background: args.background as string } : {}) })
+          check(operation); operation.irrevocable = true; operation.job.cancelable = false
+          await host.adopt(project)
+          return { projectId: project.id, revision: host.getRevision() }
+        })
+      case 'open_media_project_open':
+        return start('project', '打开工程', async operation => {
+          if (host.isDirty() && args.discardUnsaved !== true) throw new Error('当前项目有未保存的修改。请先保存，或明确设置 discardUnsaved=true。')
+          changed(operation, '正在读取项目文件')
+          const target = await openMcpProjectFile(args.path as string)
+          check(operation)
+          const imported = await importProjectFile(new Uint8Array(target.bytes))
+          try {
+            check(operation)
+            const project = await host.hydrate(imported)
+            check(operation); operation.irrevocable = true; operation.job.cancelable = false
+            await host.adopt(project); await host.didOpen(target)
+            return { projectId: project.id, revision: host.getRevision(), path: target.path }
+          } catch (cause) { imported.revoke(); throw cause }
+        })
+      case 'open_media_project_save':
+        return start('save', '保存工程', async operation => {
+          const target = args.path ? undefined : host.getSaveTarget()
+          if (!args.path && !target) throw new Error('工程尚无保存位置，请通过 path 指定 .omedia 文件路径。')
+          const blob = await exportProjectFile(operation.source, { blobs: host.getBlobs(), signal: operation.controller.signal,
+            onProgress: (done, total) => changed(operation, '正在打包项目与素材', done / Math.max(1, total) * .9) })
+          check(operation)
+          const bytes = new Uint8Array(await blob.arrayBuffer())
+          check(operation); operation.irrevocable = true; operation.job.cancelable = false; changed(operation, '正在写入项目文件', .95)
+          const saved = await saveMcpProjectFile(bytes, { token: target?.token, path: args.path as string | undefined, overwrite: args.overwrite as boolean | undefined })
+          await host.didSave(operation.source, saved)
+          return { projectId: operation.source.id, path: saved.path, revision: host.getRevision() }
+        })
+      case 'open_media_asset_import':
+        return start('import', '导入素材', async operation => {
+          changed(operation, '正在读取和准备媒体')
+          const assets = await importMcpMediaPaths(args.paths as string[])
+          check(operation)
+          const next = adoptFirstVideoSize(addAssets(operation.source, assets), assets)
+          commit(operation, next, '导入素材'); assets.forEach(asset => host.ownAsset(asset))
+          return { assetIds: assets.map(asset => asset.id), revision: host.getRevision() }
+        })
+      case 'open_media_playback_get': return host.getPlayback()
+      case 'open_media_playback_set': {
+        available()
+        return host.setPlayback({ ...(args.time !== undefined ? { time: args.time as number } : {}), ...(args.playing !== undefined ? { playing: args.playing as boolean } : {}), ...(args.selectedClipId !== undefined ? { selectedClipId: args.selectedClipId as string } : {}) })
+      }
+      case 'open_media_speech_voices': return getSpeechStatus()
+      case 'open_media_speech_settings_get': return getSpeechSettings()
+      case 'open_media_speech_settings_set': {
+        available()
+        const { expectedRevision: _revision, ...patch } = args
+        return updateSpeechSettings(patch)
+      }
+      case 'open_media_speech_generate': {
+        available()
+        const job = speech.startSpeech({
+          ...(args.clipIds !== undefined ? { clipIds: args.clipIds as string[] } : {}),
+          ...(args.voiceId !== undefined ? { voiceId: args.voiceId as string } : {}),
+          ...(args.rate !== undefined ? { rate: args.rate as number } : {}),
+          ...(args.alignText !== undefined ? { alignText: args.alignText as boolean } : {}),
+        })
+        return { ...job, jobId: job.id }
+      }
+      case 'open_media_speech_model': {
+        const modelId = args.modelId as string
+        if (args.action === 'status') return getSpeechStatus()
+        if (!modelId) throw new Error('请提供 modelId。')
+        if (args.action === 'cancel') return cancelSpeechModelDownload(modelId)
+        available()
+        return args.action === 'repair' ? repairSpeechModel(modelId) : beginSpeechModelDownload(modelId)
+      }
+      case 'open_media_job_list': return list()
+      case 'open_media_job_get': return status(args.id as string)
+      case 'open_media_job_cancel': return cancel(args.id as string)
+      case 'open_media_material_list': {
+        const { listMcpMaterials } = await import('./mcp-materials.ts')
+        return listMcpMaterials(args as unknown as Parameters<typeof listMcpMaterials>[0])
+      }
+      case 'open_media_material_add':
+        return start('material', '添加内置素材', async operation => {
+          const { prepareMcpMaterial } = await import('./mcp-materials.ts')
+          check(operation)
+          const result = await prepareMcpMaterial(operation.source, { ...args, ...(args.kind !== 'video_segment' ? { start: args.start ?? host.getPlayback().time } : {}) } as Parameters<typeof prepareMcpMaterial>[1], { signal: operation.controller.signal })
+          try { check(operation); commit(operation, result.project, result.label) }
+          catch (cause) {
+            for (const { asset } of result.assets ?? []) for (const url of new Set([asset.url, asset.sourceUrl])) if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
+            throw cause
+          }
+          result.assets?.forEach(({ asset, blob }) => host.ownAsset(asset, blob))
+          if (result.selection?.clipId) void host.setPlayback({ selectedClipId: result.selection.clipId }).catch(() => {})
+          return { ...result.selection, revision: host.getRevision() }
+        })
+      case 'open_media_export_start':
+        return start('export', '导出视频', async operation => {
+          changed(operation, '正在准备导出图层')
+          const config = { format: args.format as 'mp4' | 'webm' | 'mov' | 'gif', width: Math.ceil(operation.source.width / 2) * 2, height: Math.ceil(operation.source.height / 2) * 2, fps: args.fps as number | undefined ?? Math.min(60, operation.source.fps), quality: (args.quality as 'draft' | 'balanced' | 'high' | undefined) ?? 'balanced' }
+          const prepared = await prepareNativeProject(operation.source, operation.controller.signal)
+          check(operation)
+          let job: MediaJob = await beginMcpMediaJob({ kind: 'timeline', ...prepared, config }, args.outputPath as string, args.overwrite === true)
+          operation.cancelNative = () => cancelMediaJob(job.id)
+          if (operation.controller.signal.aborted) await operation.cancelNative()
+          while (true) {
+            check(operation)
+            changed(operation, job.stage || '正在导出', job.progress)
+            if (job.state === 'completed') {
+              operation.irrevocable = true; operation.job.cancelable = false
+              return { outputPath: job.outputPath, nativeJobId: job.id, backend: job.backend, elapsedSeconds: job.elapsedSeconds, fallbackReason: job.fallbackReason }
+            }
+            if (job.state === 'failed') throw new Error(job.error || '视频导出失败。')
+            if (job.state === 'cancelled') throw new DOMException('导出已取消。', 'AbortError')
+            await wait(operation)
+            const current = (await getMediaJobs()).find(item => item.id === job.id)
+            if (!current) throw new Error('导出任务已不存在。')
+            job = current
+          }
+        })
+      default: throw new Error('此 MCP 工具尚未接入。')
+    }
+  }
+  function list(): (McpAutomationJob | McpSpeechJob)[] {
+    return [...[...operations.values()].map(snapshot), ...speech.list()].sort((a, b) => b.startedAt - a.startedAt)
+  }
+  function status(id: string): McpAutomationJob | McpSpeechJob {
+    const operation = operations.get(id)
+    if (operation) return snapshot(operation)
+    return speech.status(id)
+  }
+  async function cancel(id: string): Promise<unknown> {
+    const operation = operations.get(id)
+    if (!operation) return speech.cancel(id)
+    if (operation.job.state !== 'running') return snapshot(operation)
+    if (!operation.job.cancelable || operation.irrevocable) throw new Error('任务正在写入最终结果，已经无法取消。')
+    operation.controller.abort(); operation.job.cancelling = true; changed(operation, '正在取消')
+    await operation.cancelNative?.()
+    return snapshot(operation)
+  }
+  async function cancelAll(): Promise<void> {
+    await Promise.allSettled(list().filter(job => job.state === 'running' && job.cancelable).map(job => cancel(job.id)))
+  }
+  async function dispose(): Promise<void> { disposed = true; await cancelAll(); await speech.dispose() }
+  return { execute, list, status, cancel, cancelAll, dispose }
+}

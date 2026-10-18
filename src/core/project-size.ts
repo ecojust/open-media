@@ -22,7 +22,7 @@ export function resizeProject(project: Project, width: number, height: number): 
   next.width = width; next.height = height; next.autoSizeFromVideo = false
   next.updatedAt = new Date().toISOString()
   if (sx !== 1 || sy !== 1) {
-    const visuals = next.tracks.filter(track => track.kind !== 'audio').flatMap(track => track.clips)
+    const visuals = next.tracks.filter(track => track.kind !== 'audio' && track.kind !== 'transition').flatMap(track => track.clips)
     const geometry = [...visuals, ...(next.subtitleStyle ? [next.subtitleStyle] : [])]
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
     for (const clip of geometry) {

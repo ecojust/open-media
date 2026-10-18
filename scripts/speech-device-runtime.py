@@ -94,6 +94,13 @@ def probe_qwen_grouped_attention(torch, device: str):
                 query, key, value, attn_mask=mask, enable_gqa=True).transpose(1, 2).contiguous()
         if output.shape != (1, query_length, 16, 128):
             raise RuntimeError("Grouped speech attention returned an unexpected shape")
+        # A finite tensor can still be numerically wrong on an accelerated
+        # backend. Compare the actual grouped/masked operation to independent
+        # CPU FP32 math before allowing it to generate discrete audio codes.
+        reference, _ = eager_attention_forward(
+            module, query.float().cpu(), key.float().cpu(), value.float().cpu(),
+            mask.float().cpu() if mask is not None else None, scaling=128 ** -0.5)
+        torch.testing.assert_close(output.float().cpu(), reference, rtol=0.03, atol=0.02)
         outputs.append(output)
     return outputs
 
@@ -176,7 +183,8 @@ def require_module_device(module, device: str, *, dtype=None) -> None:
         raise RuntimeError("The speech model did not retain its required precision")
 
 
-def move_decoder_to_cpu(runtime, tokenizer, torch, device: str, config: dict, reason: str) -> None:
+def move_decoder_to_cpu(runtime, tokenizer, torch, device: str, config: dict, reason: str,
+                        *, report: bool = True) -> None:
     dtypes = [parameter.dtype for parameter in tokenizer.model.parameters()]
     tokenizer.model.to(device="cpu")
     tokenizer.device = torch.device("cpu")
@@ -187,7 +195,99 @@ def move_decoder_to_cpu(runtime, tokenizer, torch, device: str, config: dict, re
         raise RuntimeError("The audio decoder did not move to CPU")
     if dtypes != [parameter.dtype for parameter in tokenizer.model.parameters()]:
         raise RuntimeError("The audio decoder changed precision while moving to CPU")
-    report_audio_cpu(runtime, device, config, reason)
+    if report:
+        report_audio_cpu(runtime, device, config, reason)
+
+
+def decoder_relative_error(accelerated, reference, sample_rate: int, np, *, allow_silence=False) -> float:
+    """Compare identical audio codes, not independently sampled utterances.
+
+    This verifies decoder math, not whether spoken words match the subtitle.
+    CPU output remains the reference if accelerated decoding is corrupt.
+    """
+    if reference[1] != sample_rate or len(reference[0]) != 1:
+        raise RuntimeError("The reference audio decoder returned an unexpected format")
+    expected = np.asarray(reference[0][0], dtype=np.float64)
+    if expected.ndim != 1 or not expected.size or not np.isfinite(expected).all():
+        raise RuntimeError("The reference audio decoder returned invalid samples")
+    reference_rms = float(np.sqrt(np.mean(expected * expected)))
+    if reference_rms < 1e-5 and not allow_silence:
+        raise RuntimeError("The reference audio decoder returned silent audio")
+    if accelerated[1] != sample_rate or len(accelerated[0]) != 1:
+        return float("inf")
+    observed = np.asarray(accelerated[0][0], dtype=np.float64)
+    if observed.shape != expected.shape or not np.isfinite(observed).all():
+        return float("inf")
+    return float(np.sqrt(np.mean((observed - expected) ** 2))) / max(reference_rms, 1e-6)
+
+
+def decoder_probe_codes(encoded):
+    # CustomVoice passes one [frames, 16] code tensor for each subtitle chunk.
+    # 24 codec frames are 1.92 seconds; keep CPU verification bounded even for
+    # long subtitles. This causal decoder reconstructs the same prefix when
+    # supplied with the complete sequence.
+    if not isinstance(encoded, list) or len(encoded) != 1 or not isinstance(encoded[0], dict):
+        raise RuntimeError("The speech generator returned unexpected audio codes")
+    codes = encoded[0].get("audio_codes")
+    if codes is None or codes.ndim != 2 or codes.shape[0] < 1 or codes.shape[1] != 16:
+        raise RuntimeError("The speech generator returned unexpected audio code dimensions")
+    return [{"audio_codes": codes[:24]}]
+
+
+def guard_qwen_decoder(runtime, config, tokenizer, torch, np, device: str) -> None:
+    """Verify GPU waveform reconstruction and retry only that stage if needed.
+
+    A small random convolution probe cannot catch shape-dependent corruption
+    in the loaded decoder. Each generated chunk is decoded from the same
+    code prefix on CPU for a numerical comparison. This adds bounded decoder work, but
+    avoids rerunning the much larger autoregressive model on CPU and never
+    substitutes a newly sampled utterance for the original one.
+    """
+    original_decode = tokenizer.decode
+
+    def checked_decode(encoded):
+        if tokenizer.device.type == "cpu":
+            return original_decode(encoded)
+        probe_codes = decoder_probe_codes(encoded)
+        accelerated, failure = None, None
+        try:
+            accelerated = original_decode(encoded)
+            synchronize(torch, device)
+        except Exception as error:
+            failure = safe_reason(error)
+        runtime.stage("decoder-check", engine="qwen3", device=device, reference="cpu")
+        move_decoder_to_cpu(runtime, tokenizer, torch, device, config, "Audio decoder verification", report=False)
+        reference = original_decode(probe_codes)
+        observed = accelerated
+        if accelerated is not None and len(accelerated[0]) == 1 and len(reference[0]) == 1:
+            observed = ([accelerated[0][0][:len(reference[0][0])]], accelerated[1])
+        # A pause at the beginning is legitimate; this is a numerical probe,
+        # while the complete output is checked for audible energy afterwards.
+        relative_error = decoder_relative_error(
+            reference if observed is None else observed, reference, runtime.SAMPLE_RATE, np, allow_silence=True)
+        if failure is None and relative_error > 0.1:
+            failure = f"Audio decoder differs from CPU reference (relative RMS error {relative_error:.4f})"
+        if failure is not None:
+            report_audio_cpu(runtime, device, config, failure)
+            runtime.stage("decoder-check", engine="qwen3", device="cpu", status="recovered")
+            return original_decode(encoded)
+        try:
+            dtypes = [parameter.dtype for parameter in tokenizer.model.parameters()]
+            tokenizer.model.to(device=device)
+            tokenizer.device = torch.device(device)
+            if hasattr(tokenizer.model, "hf_device_map"):
+                tokenizer.model.hf_device_map = {"": device}
+            require_module_device(tokenizer.model, device)
+            if dtypes != [parameter.dtype for parameter in tokenizer.model.parameters()]:
+                raise RuntimeError("The audio decoder changed precision after verification")
+        except Exception as error:
+            move_decoder_to_cpu(runtime, tokenizer, torch, device, config, safe_reason(error))
+            return original_decode(encoded)
+        runtime.stage("decoder-check", engine="qwen3", device=device, status="passed",
+                      relative_rms_error=f"{relative_error:.6f}")
+        return accelerated
+
+    tokenizer.decode = checked_decode
 
 
 def generate_f5(runtime, config, root, text, speed, torch, np, sf, device):
@@ -319,6 +419,7 @@ def generate_qwen(runtime, config, root, text, speed, torch, np, device):
         # decoding. Moving that module explicitly preserves GPU generation and
         # keeps the decoder's loaded precision unchanged.
         move_decoder_to_cpu(runtime, tokenizer, torch, device, config, safe_reason(error))
+    guard_qwen_decoder(runtime, config, tokenizer, torch, np, device)
     original_generate = talker.generate
     eos_token_id = model.model.config.talker_config.codec_eos_token_id
 

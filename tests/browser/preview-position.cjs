@@ -55,11 +55,37 @@ async function installEditor(page, url) {
     fixture.app.mount('#app'); await nextTick(); editor.value.seek(1)
   })
   await expect(page.locator('[data-clip-id="subtitle"].timeline-clip')).toBeVisible()
-  await expect.poll(() => pixel(page, 65, 45)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => subtitleBackgroundPixel(page, 60, 40)).toEqual([204, 34, 51, 255])
 }
 
 async function pixel(page, x, y) {
   return page.getByTestId('video-preview').evaluate((canvas, { x, y }) => [...canvas.getContext('2d').getImageData(Math.round(x / 640 * canvas.width), Math.round(y / 360 * canvas.height), 1, 1).data], { x, y })
+}
+async function subtitleBackgroundPixel(page, x, y, rotation = 0) {
+  return page.getByTestId('video-preview').evaluate(async (canvas, target) => {
+    const { drawTextClip } = await import('/src/core/preview.ts')
+    const clip = window.positionFixture.state.value.tracks.flatMap(track => track.clips).find(clip => clip.id === 'subtitle')
+    const expected = document.createElement('canvas'); expected.width = canvas.width; expected.height = canvas.height
+    const ctx = expected.getContext('2d')
+    ctx.scale(canvas.width / 640, canvas.height / 360)
+    ctx.translate(target.x + clip.width / 2, target.y + clip.height / 2)
+    ctx.rotate(target.rotation * Math.PI / 180)
+    ctx.translate(-clip.width / 2, -clip.height / 2)
+    drawTextClip(ctx, clip)
+    const pixels = ctx.getImageData(0, 0, expected.width, expected.height).data
+    const matches = (x, y) => {
+      const i = (y * expected.width + x) * 4
+      return pixels[i] === 204 && pixels[i + 1] === 34 && pixels[i + 2] === 51 && pixels[i + 3] === 255
+    }
+    // Find a solid interior point in the expected glyph background. The expected
+    // location remains independent of the editor's actual dragged coordinates.
+    for (let y = 1; y < expected.height - 1; y++) for (let x = 1; x < expected.width - 1; x++) {
+      if (matches(x, y) && matches(x - 1, y) && matches(x + 1, y) && matches(x, y - 1) && matches(x, y + 1)) {
+        return [...canvas.getContext('2d').getImageData(x, y, 1, 1).data]
+      }
+    }
+    throw new Error('测试字幕应含可采样的真实文字背景')
+  }, { x, y, rotation })
 }
 async function guidePresent(page, axis) {
   const guide = page.getByTestId(`preview-snap-${axis}`)
@@ -100,8 +126,8 @@ async function liveAndHistoryChecks(page) {
     assert.equal((await clip(page)).x, 60)
     await guidePresent(page, 'x')
     await guidePresent(page, 'y')
-    await expect.poll(() => pixel(page, 245, 165)).toEqual([204, 34, 51, 255])
-    await expect.poll(() => pixel(page, 65, 45)).toEqual([16, 32, 48, 255])
+    await expect.poll(() => subtitleBackgroundPixel(page, 240, 160)).toEqual([204, 34, 51, 255])
+    await expect.poll(() => subtitleBackgroundPixel(page, 60, 40)).toEqual([16, 32, 48, 255])
     await page.screenshot({ path: path.join(artifacts, 'center-snap.png') })
   } })
   const after = await clip(page)
@@ -111,10 +137,10 @@ async function liveAndHistoryChecks(page) {
   await expect(page.getByTestId('preview-snap-x')).toHaveCount(0)
   await page.evaluate(() => window.positionFixture.undo())
   assert.deepEqual(await state(page), before)
-  await expect.poll(() => pixel(page, 65, 45)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => subtitleBackgroundPixel(page, 60, 40)).toEqual([204, 34, 51, 255])
   await page.evaluate(() => window.positionFixture.redo())
   coordinate((await clip(page)).x, 240)
-  await expect.poll(() => pixel(page, 245, 165)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => subtitleBackgroundPixel(page, 240, 160)).toEqual([204, 34, 51, 255])
   console.log('PASS 字幕选框和真实预览随拖动更新；画布中心吸附及参考线正确；一次拖动只提交一次，撤销/重做恢复像素与坐标')
 }
 
@@ -144,7 +170,7 @@ async function snappingAndScaleChecks(page) {
   await select(page)
   await drag(page, 111, 117, { alt: true })
   draggedCoordinate((await clip(page)).x, 111); draggedCoordinate((await clip(page)).y, 117)
-  await expect.poll(() => pixel(page, 116, 122)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => subtitleBackgroundPixel(page, 111, 117)).toEqual([204, 34, 51, 255])
   await page.setViewportSize({ width: 1440, height: 1000 })
   console.log('PASS 四侧边缘、其他片段边缘吸附；Alt 自由移动；图片水印真实移动；不同显示比例仍使用正确项目像素坐标')
 }
@@ -154,12 +180,12 @@ async function cancellationChecks(page) {
   const before = await state(page)
   for (const cancel of ['escape', 'pointer', 'blur']) {
     await drag(page, 240, 160, { cancel, during: async () => {
-      await expect.poll(() => pixel(page, 245, 165)).toEqual([204, 34, 51, 255])
+      await expect.poll(() => subtitleBackgroundPixel(page, 240, 160)).toEqual([204, 34, 51, 255])
     } })
     assert.deepEqual(await state(page), before, `${cancel} 必须完整恢复项目`)
     assert.equal(await changes(page), 0)
     await expect(page.getByTestId('preview-snap-x')).toHaveCount(0)
-    await expect.poll(() => pixel(page, 65, 45)).toEqual([204, 34, 51, 255])
+    await expect.poll(() => subtitleBackgroundPixel(page, 60, 40)).toEqual([204, 34, 51, 255])
   }
   await selection(page).click()
   assert.equal(await changes(page), 0, '无位移点击不得创建空历史')
@@ -180,8 +206,8 @@ async function rotatedAndInterruptedChecks(page) {
   await drag(page, 220, 120, { alt: true })
   assert.equal((await clip(page)).rotation, 90)
   draggedCoordinate((await clip(page)).x, 220); draggedCoordinate((await clip(page)).y, 120)
-  await expect.poll(() => pixel(page, 285, 65)).toEqual([204, 34, 51, 255])
-  await expect.poll(() => pixel(page, 125, 5)).toEqual([16, 32, 48, 255])
+  await expect.poll(() => subtitleBackgroundPixel(page, 220, 120, 90)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => subtitleBackgroundPixel(page, 60, 40, 90)).toEqual([16, 32, 48, 255])
   await reset(page)
   const before = await state(page)
   await drag(page, 240, 160, { during: async () => {
@@ -348,10 +374,7 @@ async function subtitleRatioChecks(page) {
   await setProperty(page, '高度', 60)
   await drag(page, 100, 180, { alt: true })
   const before = await clip(page)
-  await page.getByRole('button', { name: '项目设置', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '项目设置', exact: true })
-  await dialog.getByLabel('画面比例', { exact: true }).selectOption('portrait')
-  await dialog.getByRole('button', { name: '关闭项目设置', exact: true }).click()
+  await page.getByLabel('画面比例', { exact: true }).selectOption('portrait')
   const project = await state(page)
   assert.equal(project.width, 1080); assert.equal(project.height, 1920)
   const resized = await clip(page)
@@ -362,7 +385,7 @@ async function subtitleRatioChecks(page) {
   }
   const added = await addSubtitle(page, 2)
   assert.deepEqual(subtitleAppearance(added), subtitleAppearance(resized), '切换为竖屏后新增字幕应继承缩放后的配置，不得沿用旧画幅坐标')
-  console.log('PASS 项目设置切换为竖屏时已有字幕与记忆配置同步缩放，后续新增字幕保留一致的位置、尺寸和字号')
+  console.log('PASS 主界面切换为竖屏时已有字幕与记忆配置同步缩放，后续新增字幕保留一致的位置、尺寸和字号')
 }
 
 async function main() {

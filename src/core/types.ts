@@ -1,6 +1,15 @@
 export type AssetKind = 'video' | 'audio' | 'image'
-export type TrackKind = 'video' | 'audio' | 'text'
+export type TrackKind = 'video' | 'audio' | 'text' | 'transition'
 export type MediaFit = 'contain' | 'cover' | 'fill'
+
+export type TransitionEffect = 'fade' | 'wipe-up' | 'wipe-down' | 'wipe-left' | 'wipe-right' | 'close-vertical' | 'close-horizontal' | 'slide-left' | 'slide-right' | 'zoom'
+
+/** A transition is anchored to the shared cut of two adjacent video clips. */
+export interface ClipTransition {
+  effect: TransitionEffect
+  fromClipId: string
+  toClipId: string
+}
 
 export interface MediaAsset {
   id: string
@@ -82,6 +91,7 @@ export interface Clip {
   speech?: SpeechBinding
   filters?: ClipFilters
   chromaKey?: ClipChromaKey
+  transition?: ClipTransition
 }
 
 /** Visual settings remembered independently of subtitle content and timing. */

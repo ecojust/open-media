@@ -1,0 +1,120 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "device": "cpu",
+  "hardwareMpsVerified": false,
+  "torchVersion": "2.9.1+cpu",
+  "implementation": "eager",
+  "sdpaInvoked": false,
+  "applicationProbePassed": true,
+  "cases": [
+    {
+      "queryShape": [
+        1,
+        16,
+        49,
+        128
+      ],
+      "keyShape": [
+        1,
+        8,
+        49,
+        128
+      ],
+      "causal": false,
+      "outputShape": [
+        1,
+        49,
+        16,
+        128
+      ],
+      "dtype": "torch.bfloat16",
+      "finite": true,
+      "maxAbsoluteDifference": 0.011216521263122559,
+      "rmsDifference": 0.0009952413383871317,
+      "relativeTolerance": 0.03,
+      "absoluteTolerance": 0.02
+    },
+    {
+      "queryShape": [
+        1,
+        16,
+        49,
+        128
+      ],
+      "keyShape": [
+        1,
+        8,
+        49,
+        128
+      ],
+      "causal": true,
+      "outputShape": [
+        1,
+        49,
+        16,
+        128
+      ],
+      "dtype": "torch.bfloat16",
+      "finite": true,
+      "maxAbsoluteDifference": 0.013551592826843262,
+      "rmsDifference": 0.0013083432568237185,
+      "relativeTolerance": 0.03,
+      "absoluteTolerance": 0.02
+    },
+    {
+      "queryShape": [
+        1,
+        16,
+        1,
+        128
+      ],
+      "keyShape": [
+        1,
+        8,
+        50,
+        128
+      ],
+      "causal": false,
+      "outputShape": [
+        1,
+        1,
+        16,
+        128
+      ],
+      "dtype": "torch.bfloat16",
+      "finite": true,
+      "maxAbsoluteDifference": 0.006382942199707031,
+      "rmsDifference": 0.000933758681640029,
+      "relativeTolerance": 0.03,
+      "absoluteTolerance": 0.02
+    },
+    {
+      "queryShape": [
+        1,
+        16,
+        7,
+        128
+      ],
+      "keyShape": [
+        1,
+        8,
+        13,
+        128
+      ],
+      "causal": true,
+      "outputShape": [
+        1,
+        7,
+        16,
+        128
+      ],
+      "dtype": "torch.bfloat16",
+      "finite": true,
+      "maxAbsoluteDifference": 0.010532379150390625,
+      "rmsDifference": 0.001386055490002036,
+      "relativeTolerance": 0.03,
+      "absoluteTolerance": 0.02
+    }
+  ]
+}

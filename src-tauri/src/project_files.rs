@@ -77,11 +77,30 @@ impl ProjectFiles {
     }
 
     pub fn save_selected(&self, path: PathBuf, bytes: &[u8]) -> Result<ProjectTarget> {
+        self.save_selected_with_overwrite(path, bytes, true)
+    }
+
+    pub fn save_selected_with_overwrite(
+        &self,
+        path: PathBuf,
+        bytes: &[u8],
+        overwrite: bool,
+    ) -> Result<ProjectTarget> {
         validate_project_size(bytes.len() as u64)?;
         validate_target_path(&path)?;
         let mut targets = self.targets.lock().map_err(|_| "项目保存状态不可用。")?;
         let token = selected_token(&targets, &path)?;
-        write_atomic(&path, bytes)?;
+        if overwrite {
+            write_atomic(&path, bytes)?;
+        } else {
+            let parent = path.parent().ok_or("保存目录无效。")?;
+            let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+            staged.write_all(bytes).map_err(|e| e.to_string())?;
+            staged.as_file().sync_all().map_err(|e| e.to_string())?;
+            staged.persist_noclobber(&path).map_err(|e| {
+                format!("无法保存项目（默认不覆盖已有文件）：{}", e.error)
+            })?;
+        }
         self.register(&mut targets, token.clone(), path.clone())?;
         Ok(target(&path, token))
     }

@@ -1,4 +1,4 @@
-import test from 'node:test'
+import test, { beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
@@ -8,6 +8,28 @@ import { addClip, clipDuration } from '../src/core/timeline.ts'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity } from '../src/core/speech.ts'
 import { compactVoiceCatalog } from '../src/core/voice-catalog.ts'
 import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade } from '../src/core/voice-downloads.ts'
+import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../src/core/speech-settings.ts'
+
+const mountedPanels = new Set()
+let previousSettings, previousStorage
+beforeEach(() => {
+  previousSettings = getSpeechSettings()
+  previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const stored = new Map()
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => { stored.set(key, String(value)) },
+    removeItem: key => { stored.delete(key) },
+    clear: () => { stored.clear() },
+  } })
+  updateSpeechSettings({ voiceId: '', rate: 1, alignText: true })
+})
+afterEach(() => {
+  for (const harness of mountedPanels) harness.dispose()
+  updateSpeechSettings(previousSettings)
+  if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage)
+  else delete globalThis.localStorage
+})
 
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 function fixture() {
@@ -30,6 +52,7 @@ function panel(overrides = {}, options = {}) {
     onBeforeUnmount: callback => unmount.push(callback), defineProps: () => props,
     defineEmits: () => (...event) => { events.push(event); if (event[0] === 'change' && options.applyChanges !== false) props.project = event[1] }, defineExpose: () => {},
     planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade, isDesktop: () => true,
+    getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings,
     bundledVoicePreviewUrl: () => undefined,
     VOICE_PREVIEW_TEXT: { zh: '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。', en: '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。' },
     getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }),
@@ -45,9 +68,68 @@ function panel(overrides = {}, options = {}) {
   }
   const scope = vue.effectScope()
   const state = scope.run(() => new Function(...Object.keys(injections), compiled)(...Object.values(injections)))
-  return { state, props, events, calls, dispose() { unmount.forEach(callback => callback()); scope.stop() } }
+  let disposed = false
+  const harness = { state, props, events, calls, dispose() {
+    if (disposed) return
+    disposed = true
+    unmount.forEach(callback => callback()); scope.stop(); mountedPanels.delete(harness)
+  } }
+  mountedPanels.add(harness)
+  return harness
 }
 async function settle() { for (let index = 0; index < 8; index++) await Promise.resolve(); await vue.nextTick() }
+
+test('shared speech settings initialize the panel, synchronize both directions and persist without feedback loops', async () => {
+  updateSpeechSettings({ voiceId: 'voice-2', rate: 1.3, alignText: false })
+  const harness = panel({}, { active: false }), updates = []
+  const unsubscribe = subscribeSpeechSettings(value => updates.push(value))
+  try {
+    assert.equal(harness.state.voiceId.value, 'voice-2')
+    assert.equal(harness.state.speed.value, 1.3)
+    assert.equal(harness.state.alignText.value, false)
+    updateSpeechSettings({ voiceId: 'voice-1', rate: 0.75, alignText: true })
+    await settle()
+    assert.equal(updates.length, 1, 'a remote settings patch must not feed back from the three panel watchers')
+    assert.equal(harness.state.voiceId.value, 'voice-1')
+    assert.equal(harness.state.speed.value, 0.75)
+    assert.equal(harness.state.alignText.value, true)
+    harness.state.speed.value = 1.15
+    assert.equal(updates.length, 2)
+    assert.equal(getSpeechSettings().rate, 1.15)
+    assert.deepEqual(JSON.parse(localStorage.getItem('open-media:speech-settings')), getSpeechSettings())
+    harness.props.active = true
+    await settle()
+    assert.equal(harness.state.speed.value, 1.15, 'loading the catalog preserves configured speed')
+    assert.equal(updates.length, 2)
+  } finally { unsubscribe(); harness.dispose() }
+})
+
+test('unmounted panels release shared subscriptions while a reopened panel inherits current preferences', async () => {
+  const first = panel({}, { active: false }), second = panel({}, { active: false })
+  try {
+    first.state.voiceId.value = 'voice-2'
+    first.state.speed.value = 1.4
+    first.state.alignText.value = false
+    assert.equal(second.state.voiceId.value, 'voice-2')
+    assert.equal(second.state.speed.value, 1.4)
+    assert.equal(second.state.alignText.value, false)
+    first.dispose()
+    updateSpeechSettings({ voiceId: 'voice-1', rate: 0.8, alignText: true })
+    await settle()
+    assert.equal(first.state.voiceId.value, 'voice-2', 'a disposed subscription cannot update dead component state')
+    assert.equal(first.state.speed.value, 1.4)
+    assert.equal(second.state.voiceId.value, 'voice-1')
+    assert.equal(second.state.speed.value, 0.8)
+    first.state.speed.value = 1.9
+    assert.equal(getSpeechSettings().rate, 0.8, 'disposed watchers cannot write shared preferences')
+    const reopened = panel({}, { active: false })
+    try {
+      assert.equal(reopened.state.voiceId.value, 'voice-1')
+      assert.equal(reopened.state.speed.value, 0.8)
+      assert.equal(reopened.state.alignText.value, true)
+    } finally { reopened.dispose() }
+  } finally { first.dispose(); second.dispose() }
+})
 
 function downloadableCatalog(state = 'not-downloaded') {
   return { ready: true, voices: [

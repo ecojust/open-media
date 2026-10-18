@@ -1,12 +1,14 @@
 import { cloneProject, validateProject } from './project.ts'
 import { clipDuration, clipEnd, deleteClip, findClip, projectDuration, sourceTimeAt } from './timeline.ts'
 import type { Project } from './types.ts'
+import { reconcileTransitions } from './transitions.ts'
 
 const TIME_EPSILON = 1e-6
 const EDIT_EPSILON = 1e-7
 interface TimeRange { start: number; end: number }
 
-function finish(project: Project): Project {
+function finish(project: Project, previous?: Project): Project {
+  reconcileTransitions(project, previous)
   project.updatedAt = new Date().toISOString()
   return validateProject(project, { trusted: true })
 }
@@ -25,7 +27,7 @@ export function restoreAudioClipLength(project: Project, clipId: string): Projec
   clip.fadeIn = Math.min(clip.fadeIn, clipDuration(clip))
   clip.fadeOut = Math.min(clip.fadeOut, clipDuration(clip))
   if (clip.speech) delete clip.speech.textClipId
-  return finish(copy)
+  return finish(copy, project)
 }
 
 /** Crop at a timeline position while retaining the source timing of the remaining media. */
@@ -33,6 +35,7 @@ export function trimClipAtPlayhead(project: Project, clipId: string, time: numbe
   const current = findClip(project, clipId)
   if (!current) throw new Error('片段不存在。')
   if (current.track.locked) throw new Error('请先解锁此轨道。')
+  if (current.track.kind === 'transition') throw new Error('转场不能按播放头裁剪，请调整转场时长。')
   if (side !== 'start' && side !== 'end') throw new Error('裁剪方向无效。')
   if (!Number.isFinite(time) || time <= current.clip.start + EDIT_EPSILON || time >= clipEnd(current.clip) - EDIT_EPSILON) throw new Error('请将播放头移到片段内部再裁剪。')
   const remaining = side === 'start' ? clipEnd(current.clip) - time : time - current.clip.start
@@ -55,12 +58,12 @@ export function trimClipAtPlayhead(project: Project, clipId: string, time: numbe
   const duration = clipDuration(edited.clip)
   edited.clip.fadeIn = Math.min(edited.clip.fadeIn, duration)
   edited.clip.fadeOut = Math.min(edited.clip.fadeOut, duration)
-  return finish(copy)
+  return finish(copy, project)
 }
 
 /** Every track, including muted or locked tracks, contributes occupied time. */
 function commonGaps(project: Project, range: TimeRange): TimeRange[] {
-  const occupied = project.tracks.flatMap((track) => track.clips.map((clip) => ({ start: clip.start, end: clipEnd(clip) })))
+  const occupied = project.tracks.filter(track => track.kind !== 'transition').flatMap((track) => track.clips.map((clip) => ({ start: clip.start, end: clipEnd(clip) })))
     .filter((interval) => interval.end > range.start && interval.start < range.end)
     .sort((a, b) => a.start - b.start || a.end - b.end)
   const gaps: TimeRange[] = []
@@ -78,6 +81,7 @@ function compressGaps(project: Project, gaps: TimeRange[]): Project {
   if (!gaps.length) return project
   const moves = new Map<string, number>()
   for (const track of project.tracks) for (const clip of track.clips) {
+    if (track.kind === 'transition') continue
     const offset = gaps.reduce((sum, gap) => sum + Math.max(0, Math.min(clip.start, gap.end) - gap.start), 0)
     if (offset <= TIME_EPSILON) continue
     if (track.locked) throw new Error(`轨道“${track.name}”上的片段需要移动，请先解锁此轨道。`)
@@ -89,7 +93,7 @@ function compressGaps(project: Project, gaps: TimeRange[]): Project {
     const start = moves.get(clip.id)
     if (start !== undefined) clip.start = start
   }
-  return finish(copy)
+  return finish(copy, project)
 }
 
 /** Remove only periods in which the entire timeline is empty. */

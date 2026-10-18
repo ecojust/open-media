@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "78f95414cb14795986ee8e6b11f042dafe38f1e880159677e5b5eeff3c7ea079",
-      "reviewMethod": "Added browser regressions for editor new-project protection and save-target isolation, and video source filtering, ordering, folder actions and selection. Production dependencies and original license texts are unchanged."
+      "sha256": "17826cc1a5bf498d6ffa2dc22f67119a41504e7036ccdf21cca80ea215c5a7ec",
+      "reviewMethod": "Application version updated to 0.1.15 with browser regressions for live dimensions, subtitle backgrounds, transitions, opening and ending segments, and MCP automation. Production dependency versions and original license texts are unchanged."
     },
     {
       "path": "package-lock.json",
-      "sha256": "6b66eb3797dd5c93128b6ae69117437634619a1b398ea16e509bc87295ac916d",
-      "reviewMethod": "Application version updated to 0.1.14; browser regression coverage includes speech generation progress. Dependency versions, locked dependency records and original license texts are unchanged. Only the application metadata and these input hashes were refreshed."
+      "sha256": "891e2c5d659f567d0597f7a5654e744d9ccdd54683b0ac9275b40a4032c95887",
+      "reviewMethod": "Application version updated to 0.1.15 with browser regressions for live dimensions, subtitle backgrounds, transitions, opening and ending segments, and MCP automation. Production dependency versions and original license texts are unchanged."
     },
     {
       "path": "vite.config.ts",

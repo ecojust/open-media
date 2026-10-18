@@ -1,6 +1,6 @@
 [package]
 name = "open-media"
-version = "0.1.14"
+version = "0.1.15"
 description = "Local recording, editing and media conversion"
 edition = "2021"
 rust-version = "1.90"
@@ -30,6 +30,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 tempfile = "3"
 getrandom = "0.3"
+hyper = { version = "=1.12.0", features = ["http1", "server"] }
+hyper-util = { version = "=0.1.21", features = ["tokio"] }
+http-body-util = "=0.1.5"
+tokio = { version = "=1.53.3", features = ["rt", "net", "sync", "time"] }
 arboard = { version = "=3.6.1", optional = true }
 
 reqwest = { version = "=0.13.5", default-features = false, features = ["blocking", "rustls-no-provider"] }

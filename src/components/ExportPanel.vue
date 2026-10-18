@@ -24,7 +24,7 @@ let destroyed = false
 const job = ref<MediaJob>()
 const duration = computed(() => projectDuration(props.project))
 const showAdjustedSize = computed(() => config.value.width !== props.project.width || config.value.height !== props.project.height)
-const dimensionError = computed(() => config.value.width > 7680 || config.value.height > 7680 ? '导出尺寸最大支持 7680 × 7680，请在项目设置中调整画面尺寸。' : '')
+const dimensionError = computed(() => config.value.width > 7680 || config.value.height > 7680 ? '导出尺寸最大支持 7680 × 7680，请在预览上方调整画面尺寸。' : '')
 const elapsedLabel = computed(() => {
   const seconds = Math.max(0, Math.floor(elapsedSeconds.value))
   const parts = [Math.floor(seconds / 60) % 60, seconds % 60].map(value => String(value).padStart(2, '0'))
@@ -126,7 +126,7 @@ onBeforeUnmount(() => { destroyed = true; controller?.abort(); clearTimeout(time
           <label>帧率<select v-model.number="config.fps" :disabled="exporting"><option v-for="fps in [12,15,24,25,30,60]" :key="fps" :value="fps">{{ fps }} fps</option></select></label>
           <label v-if="native">画质<select v-model="config.quality" :disabled="exporting"><option value="draft">较小文件</option><option value="balanced">均衡</option><option value="high">高画质</option></select></label>
         </div>
-        <p id="export-size-help" class="note">画面尺寸由项目设置统一管理，此处仅显示输出尺寸。</p>
+        <p id="export-size-help" class="note">画面尺寸可在预览上方调整，此处仅显示输出尺寸。</p>
         <p v-if="dimensionError" class="error-message" role="alert" data-testid="export-dimension-error">{{ dimensionError }}</p>
         <p v-if="showAdjustedSize" class="note" role="status" data-testid="export-dimension-adjustment">导出尺寸已按偶数要求调整：源 {{ project.width }} × {{ project.height }} → 导出 {{ config.width }} × {{ config.height }}。项目尺寸保持不变。</p>
         <p v-if="!native" class="note"><Icon name="info" :size="15"/>网页按播放时长实时生成 WebM，请保持当前窗口在前台。桌面端可导出更多格式。</p>
