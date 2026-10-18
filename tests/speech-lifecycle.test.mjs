@@ -7,7 +7,7 @@ import { createProject, createTextClip, validateProject } from '../src/core/proj
 import { addClip, clipDuration } from '../src/core/timeline.ts'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity } from '../src/core/speech.ts'
 import { compactVoiceCatalog } from '../src/core/voice-catalog.ts'
-import { voiceReady, voiceDownloading } from '../src/core/voice-downloads.ts'
+import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade } from '../src/core/voice-downloads.ts'
 
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes }); return { promise, resolve } }
 function fixture() {
@@ -29,11 +29,12 @@ function panel(overrides = {}, options = {}) {
     ref: vue.ref, computed: vue.computed, watch: vue.watch, nextTick: vue.nextTick,
     onBeforeUnmount: callback => unmount.push(callback), defineProps: () => props,
     defineEmits: () => (...event) => { events.push(event); if (event[0] === 'change' && options.applyChanges !== false) props.project = event[1] }, defineExpose: () => {},
-    planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, voiceReady, voiceDownloading, isDesktop: () => true,
+    planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade, isDesktop: () => true,
     bundledVoicePreviewUrl: () => undefined,
-    VOICE_PREVIEW_TEXT: { zh: '这是一款全程由AI接管并生成的软件', en: '这是一款全程由AI接管并生成的软件' },
+    VOICE_PREVIEW_TEXT: { zh: '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。', en: '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。' },
     getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }),
     beginSpeechModelDownload: async modelId => { throw new Error(`unexpected model download ${modelId}`) },
+    repairSpeechModel: async modelId => { throw new Error(`unexpected model repair ${modelId}`) },
     cancelSpeechModelDownload: async modelId => { throw new Error(`unexpected model cancellation ${modelId}`) },
     beginSpeechJob: async request => { calls.push(['begin', request]); return complete(request) },
     getSpeechJob: async id => { throw new Error(`unexpected poll ${id}`) },
@@ -134,6 +135,59 @@ test('model download cancellation, failed status and retry stay separate from sp
     assert.equal(harness.state.status.value.voices[0].status, 'downloading')
     assert.equal(harness.state.busy.value, false)
     assert.deepEqual(harness.events.filter(event => event[0] === 'change' || event[0] === 'busy'), [])
+  } finally { harness.dispose() }
+})
+
+test('GPU upgrades keep CPU synthesis available and route shared download cancellation and retry correctly', async () => {
+  let runtimeStatus = 'upgrade-available'
+  const requests = []
+  const current = () => ({ ready: true, voices: downloadableCatalog('ready').voices.map(voice => ({ ...voice, runtimeStatus, runtimeDownloadId: 'native-gpu-runtime' })) })
+  const pending = deferred()
+  const harness = panel({ getSpeechStatus: async () => current(),
+    beginSpeechModelDownload: async id => { requests.push(['start', id]); await pending.promise; runtimeStatus = 'upgrade-downloading'; return current() },
+    cancelSpeechModelDownload: async id => { requests.push(['cancel', id]); runtimeStatus = 'upgrade-available'; return current() },
+  })
+  try {
+    await settle()
+    harness.state.voiceId.value = 'extra-zh'
+    const downloading = harness.state.changeModelDownload('native-gpu-runtime')
+    await harness.state.changeModelDownload('native-gpu-runtime')
+    assert.deepEqual(requests, [['start', 'native-gpu-runtime']])
+    assert.deepEqual(harness.state.pendingModels.value, ['native-gpu-runtime'])
+    assert(harness.state.status.value.voices.every(voiceReady))
+    pending.resolve(); await downloading
+    assert(harness.state.status.value.voices.every(voiceReady))
+    assert(harness.state.status.value.voices.every(voiceDownloading))
+    await harness.state.generate()
+    assert(harness.calls.some(call => call[0] === 'begin'), 'CPU synthesis stays usable during GPU download')
+    await harness.state.changeModelDownload('native-gpu-runtime', true)
+    assert.deepEqual(requests[1], ['cancel', 'native-gpu-runtime'])
+    assert(harness.state.status.value.voices.every(voiceReady))
+    runtimeStatus = 'upgrade-failed'; await harness.state.loadStatus(false)
+    await harness.state.changeModelDownload('native-gpu-runtime')
+    assert.equal(requests.length, 3, 'failed GPU upgrades can be retried without redownloading the model')
+    assert.equal(harness.state.voiceId.value, 'extra-zh')
+  } finally { harness.dispose() }
+})
+
+test('repair addresses the installed model rather than its shared GPU download and deduplicates clicks', async () => {
+  const gate = deferred(), repairs = []
+  const catalog = downloadableCatalog('ready')
+  for (const voice of catalog.voices) if (voice.modelId) Object.assign(voice, { runtimeStatus: 'upgrade-failed', runtimeDownloadId: 'native-gpu-runtime' })
+  const harness = panel({ getSpeechStatus: async () => catalog,
+    repairSpeechModel: async id => { repairs.push(id); return gate.promise },
+  })
+  try {
+    await settle()
+    const task = harness.state.changeModelDownload('extra-model', false, true)
+    await harness.state.changeModelDownload('extra-model', false, true)
+    await harness.state.changeModelDownload('native-gpu-runtime')
+    assert.deepEqual(repairs, ['extra-model'])
+    assert.deepEqual(harness.state.pendingModels.value, ['extra-model'])
+    gate.resolve(catalog); await task
+    assert(harness.state.status.value.voices.every(voiceReady))
+    assert.deepEqual(harness.state.pendingModels.value, [])
+    assert.equal(harness.state.downloadError.value, '')
   } finally { harness.dispose() }
 })
 
@@ -406,7 +460,7 @@ test('Chinese card preview uses fixed sample text without adding timeline clips 
     await settle()
     await harness.state.previewVoice('voice-1')
     const request = harness.calls.find(call => call[0] === 'begin')[1]
-    assert.equal(request.text, '这是一款全程由AI接管并生成的软件')
+    assert.equal(request.text, '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。')
     assert.equal(harness.state.operationKind.value, 'preview')
     assert.match(harness.state.previewUrl.value, /^data:audio/)
     assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)
@@ -446,7 +500,7 @@ test('card audition uses the requested voice and shared corpus without selecting
     const request = harness.calls.find(call => call[0] === 'begin')[1]
     assert.equal(request.voiceId, 'english-audition')
     assert.equal(request.speed, 1.25)
-    assert.equal(request.text, '这是一款全程由AI接管并生成的软件')
+    assert.equal(request.text, '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。')
     assert.equal(harness.state.voiceId.value, 'chinese-selected')
     assert.equal(harness.state.previewVoiceId.value, 'english-audition')
     assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)

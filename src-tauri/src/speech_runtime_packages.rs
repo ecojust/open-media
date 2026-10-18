@@ -8,7 +8,25 @@ const MAX_RUNTIME_FILES: usize = 100_000;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct RuntimeArchive {
+pub(crate) struct RuntimePart {
+    pub url: String,
+    #[serde(default)]
+    pub mirrors: Vec<String>,
+    pub size: u64,
+    pub sha256: String,
+}
+
+#[derive(Clone, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum RuntimeKind {
+    #[default]
+    Python,
+    Native,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RuntimeArchive {
     pub url: String,
     #[serde(default)]
     pub mirrors: Vec<String>,
@@ -18,17 +36,21 @@ pub(super) struct RuntimeArchive {
     pub manifest_sha256: String,
     pub executable: String,
     pub script: String,
+    #[serde(default)]
+    pub parts: Vec<RuntimePart>,
+    #[serde(default)]
+    pub kind: RuntimeKind,
 }
 
 #[derive(Clone, Deserialize)]
-pub(super) struct RuntimeDefinition {
+pub(crate) struct RuntimeDefinition {
     pub id: String,
     pub version: u32,
     pub platforms: HashMap<String, RuntimeArchive>,
 }
 
 #[derive(Clone)]
-pub(super) struct SelectedRuntime {
+pub(crate) struct SelectedRuntime {
     pub id: String,
     pub version: u32,
     pub platform: String,
@@ -51,7 +73,7 @@ struct RuntimeManifest {
     files: Vec<RuntimeFile>,
 }
 
-pub(super) fn platform() -> &'static str {
+pub(crate) fn platform() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => "macos-arm64",
         ("macos", "x86_64") => "macos-x64",
@@ -61,11 +83,81 @@ pub(super) fn platform() -> &'static str {
     }
 }
 
+pub(crate) fn cuda_available() -> bool {
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(probe_cuda_driver)
+}
+
+#[cfg(windows)]
+fn probe_cuda_driver() -> bool {
+    use std::ffi::{c_char, c_void};
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn LoadLibraryExW(name: *const u16, file: *mut c_void, flags: u32) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, name: *const c_char) -> *mut c_void;
+        fn FreeLibrary(module: *mut c_void) -> i32;
+    }
+    // Search the operating-system directory only, never the working directory.
+    let name: Vec<u16> = "nvcuda.dll\0".encode_utf16().collect();
+    unsafe {
+        let library = LoadLibraryExW(name.as_ptr(), std::ptr::null_mut(), 0x00000800);
+        if library.is_null() {
+            return false;
+        }
+        let init = GetProcAddress(library, c"cuInit".as_ptr());
+        let count = GetProcAddress(library, c"cuDeviceGetCount".as_ptr());
+        let available = if init.is_null() || count.is_null() {
+            false
+        } else {
+            let init: unsafe extern "system" fn(u32) -> i32 = std::mem::transmute(init);
+            let count: unsafe extern "system" fn(*mut i32) -> i32 = std::mem::transmute(count);
+            let mut devices = 0;
+            init(0) == 0 && count(&mut devices) == 0 && devices > 0
+        };
+        FreeLibrary(library);
+        available
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn probe_cuda_driver() -> bool {
+    use std::ffi::{c_char, c_void};
+    #[link(name = "dl")]
+    extern "C" {
+        fn dlopen(name: *const c_char, flags: i32) -> *mut c_void;
+        fn dlsym(library: *mut c_void, name: *const c_char) -> *mut c_void;
+        fn dlclose(library: *mut c_void) -> i32;
+    }
+    unsafe {
+        let library = dlopen(c"libcuda.so.1".as_ptr(), 2);
+        if library.is_null() {
+            return false;
+        }
+        let init = dlsym(library, c"cuInit".as_ptr());
+        let count = dlsym(library, c"cuDeviceGetCount".as_ptr());
+        let available = if init.is_null() || count.is_null() {
+            false
+        } else {
+            let init: unsafe extern "C" fn(u32) -> i32 = std::mem::transmute(init);
+            let count: unsafe extern "C" fn(*mut i32) -> i32 = std::mem::transmute(count);
+            let mut devices = 0;
+            init(0) == 0 && count(&mut devices) == 0 && devices > 0
+        };
+        dlclose(library);
+        available
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn probe_cuda_driver() -> bool {
+    false
+}
+
 fn valid_hash(hash: &str) -> bool {
     hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-pub(super) fn validate(definitions: &[RuntimeDefinition]) -> Result<()> {
+pub(crate) fn validate(definitions: &[RuntimeDefinition]) -> Result<()> {
     let mut ids = HashSet::new();
     if definitions.len() > 16 {
         return Err("音色运行环境清单过大。".into());
@@ -100,12 +192,36 @@ pub(super) fn validate(definitions: &[RuntimeDefinition]) -> Result<()> {
             {
                 return Err("音色运行环境文件配置无效。".into());
             }
+            let mut total = 0_u64;
+            if archive.parts.len() > 16 {
+                return Err("音色运行环境分片过多。".into());
+            }
+            let mut sources = HashSet::new();
+            for part in &archive.parts {
+                if part.size == 0
+                    || part.size > 1_800_000_000
+                    || !valid_hash(&part.sha256)
+                    || !sources.insert(&part.url)
+                    || part.mirrors.len() > 8
+                    || std::iter::once(&part.url)
+                        .chain(&part.mirrors)
+                        .any(|url| reqwest::Url::parse(url).map_or(true, |url| !allowed_url(&url)))
+                {
+                    return Err("音色运行环境分片配置无效。".into());
+                }
+                total = total
+                    .checked_add(part.size)
+                    .ok_or("运行环境分片大小溢出。")?;
+            }
+            if !archive.parts.is_empty() && total != archive.size {
+                return Err("音色运行环境分片大小与整体不一致。".into());
+            }
         }
     }
     Ok(())
 }
 
-pub(super) fn select(
+pub(crate) fn select(
     id: &str,
     definitions: &[RuntimeDefinition],
 ) -> Result<Option<SelectedRuntime>> {
@@ -127,7 +243,7 @@ pub(super) fn select(
         }))
 }
 
-pub(super) fn path(root: &Path, runtime: &SelectedRuntime) -> PathBuf {
+pub(crate) fn path(root: &Path, runtime: &SelectedRuntime) -> PathBuf {
     root.join(format!(
         "runtime-{}-v{}-{}",
         runtime.id, runtime.version, runtime.platform
@@ -187,7 +303,7 @@ fn manifest(
     Ok(manifest)
 }
 
-pub(super) fn verify(
+pub(crate) fn verify(
     root: &Path,
     runtime: &SelectedRuntime,
     cancelled: &AtomicBool,
@@ -353,10 +469,13 @@ fn self_test(root: &Path, runtime: &SelectedRuntime, cancelled: &AtomicBool) -> 
         .open(log.path())
         .map_err(|e| e.to_string())?;
     let mut command = Command::new(checked_path(root, &runtime.archive.executable, false)?);
+    if runtime.archive.kind == RuntimeKind::Python {
+        command
+            .arg("-I")
+            .arg("-B")
+            .arg(checked_path(root, &runtime.archive.script, false)?);
+    }
     command
-        .arg("-I")
-        .arg("-B")
-        .arg(checked_path(root, &runtime.archive.script, false)?)
         .arg("--self-test")
         .current_dir(root)
         .env("HF_HUB_OFFLINE", "1")
@@ -401,11 +520,84 @@ fn self_test(root: &Path, runtime: &SelectedRuntime, cancelled: &AtomicBool) -> 
     }
 }
 
-pub(super) fn install(
+fn archive_file(archive: &RuntimeArchive) -> ModelFile {
+    ModelFile {
+        path: "runtime.zip".into(),
+        url: archive.url.clone(),
+        mirrors: archive.mirrors.clone(),
+        size: archive.size,
+        sha256: archive.sha256.clone(),
+        embedded: None,
+    }
+}
+
+fn download_archive(
+    archive: &RuntimeArchive,
+    destination: &Path,
+    cancelled: &AtomicBool,
+    download: &mut impl FnMut(&ModelFile, &Path, u64) -> Result<()>,
+) -> Result<()> {
+    let overall = archive_file(archive);
+    if archive.parts.is_empty() {
+        download(&overall, destination, 0)?;
+        hash_file(destination, &overall, cancelled)?;
+        return Ok(());
+    }
+    let mut combined = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|error| format!("无法创建运行环境合并文件：{error}"))?;
+    let mut completed = 0_u64;
+    for (index, part) in archive.parts.iter().enumerate() {
+        check_cancelled(cancelled)?;
+        let temporary =
+            tempfile::NamedTempFile::new_in(destination.parent().ok_or("运行环境下载目录无效。")?)
+                .map_err(|error| error.to_string())?;
+        let part_path = temporary.path().to_owned();
+        temporary.close().map_err(|error| error.to_string())?;
+        let file = ModelFile {
+            path: format!("runtime.part{index:03}"),
+            url: part.url.clone(),
+            size: part.size,
+            sha256: part.sha256.clone(),
+            mirrors: part.mirrors.clone(),
+            embedded: None,
+        };
+        let result: Result<()> = (|| {
+            download(&file, &part_path, completed)?;
+            hash_file(&part_path, &file, cancelled)?;
+            let mut input = File::open(&part_path).map_err(|error| error.to_string())?;
+            let mut buffer = vec![0_u8; BUFFER_BYTES];
+            loop {
+                check_cancelled(cancelled)?;
+                let count = input.read(&mut buffer).map_err(|error| error.to_string())?;
+                if count == 0 {
+                    break;
+                }
+                combined
+                    .write_all(&buffer[..count])
+                    .map_err(|error| format!("无法合并运行环境分片：{error}"))?;
+            }
+            Ok(())
+        })();
+        let _ = fs::remove_file(&part_path);
+        result?;
+        completed = completed
+            .checked_add(part.size)
+            .ok_or("运行环境分片大小溢出。")?;
+    }
+    combined.flush().map_err(|error| error.to_string())?;
+    drop(combined);
+    hash_file(destination, &overall, cancelled)?;
+    Ok(())
+}
+
+pub(crate) fn install(
     root: &Path,
     runtime: &SelectedRuntime,
     cancelled: &AtomicBool,
-    mut download: impl FnMut(&ModelFile, &Path) -> Result<()>,
+    mut download: impl FnMut(&ModelFile, &Path, u64) -> Result<()>,
 ) -> Result<Vec<FileStamp>> {
     let installed = path(root, runtime);
     if let Ok(stamps) = verify(&installed, runtime, cancelled) {
@@ -424,17 +616,7 @@ pub(super) fn install(
     // The downloader creates its destination exclusively.
     archive.close().map_err(|e| e.to_string())?;
     let result = (|| {
-        download(
-            &ModelFile {
-                path: "runtime.zip".into(),
-                url: runtime.archive.url.clone(),
-                size: runtime.archive.size,
-                sha256: runtime.archive.sha256.clone(),
-                mirrors: runtime.archive.mirrors.clone(),
-                embedded: None,
-            },
-            &archive_path,
-        )?;
+        download_archive(&runtime.archive, &archive_path, cancelled, &mut download)?;
         extract(&archive_path, staging.path(), runtime, cancelled)?;
         verify(staging.path(), runtime, cancelled)?;
         self_test(staging.path(), runtime, cancelled)?;
@@ -498,6 +680,8 @@ mod tests {
                 url: "https://github.com/ecojust/open-media/releases/download/test/runtime.zip"
                     .into(),
                 mirrors: Vec::new(),
+                parts: Vec::new(),
+                kind: RuntimeKind::Python,
                 size: contents.len() as u64,
                 sha256: format!("{:x}", Sha256::digest(&contents)),
                 manifest_sha256: format!("{:x}", Sha256::digest(&manifest)),
@@ -560,6 +744,111 @@ mod tests {
         assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
         runtime.archive.unpacked_size -= 1;
         assert!(extract(&archive, &destination, &runtime, &AtomicBool::new(false)).is_err());
+    }
+
+    fn split_archive(bytes: &[u8], runtime: &mut SelectedRuntime) -> Vec<Vec<u8>> {
+        let pieces: Vec<Vec<u8>> = bytes
+            .chunks((bytes.len() + 2) / 3)
+            .map(<[u8]>::to_vec)
+            .collect();
+        runtime.archive.parts = pieces.iter().enumerate().map(|(index, bytes)| RuntimePart {
+            url: format!("https://github.com/ecojust/open-media/releases/download/test/runtime.zip.{index:03}"),
+            mirrors: Vec::new(), size: bytes.len() as u64, sha256: format!("{:x}", Sha256::digest(bytes)),
+        }).collect();
+        pieces
+    }
+
+    #[test]
+    fn split_download_checks_each_part_and_combined_archive_with_cumulative_progress() {
+        let temporary = tempfile::tempdir().unwrap();
+        let (source, mut runtime) = archive(temporary.path(), None);
+        let bytes = fs::read(source).unwrap();
+        let pieces = split_archive(&bytes, &mut runtime);
+        let definition = RuntimeDefinition {
+            id: runtime.id.clone(),
+            version: 1,
+            platforms: HashMap::from([(platform().into(), runtime.archive.clone())]),
+        };
+        validate(&[definition]).unwrap();
+        let destination = temporary.path().join("combined.zip");
+        let mut index = 0;
+        let mut offset = 0;
+        download_archive(
+            &runtime.archive,
+            &destination,
+            &AtomicBool::new(false),
+            &mut |file, path, completed| {
+                assert_eq!(completed, offset);
+                assert_eq!(file.size, pieces[index].len() as u64);
+                assert_eq!(file.path, format!("runtime.part{index:03}"));
+                fs::write(path, &pieces[index]).unwrap();
+                offset += file.size;
+                index += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(index, pieces.len());
+        assert_eq!(fs::read(destination).unwrap(), bytes);
+    }
+
+    #[test]
+    fn split_archive_rejects_bad_parts_combined_hash_and_unsafe_metadata() {
+        let temporary = tempfile::tempdir().unwrap();
+        let (source, mut runtime) = archive(temporary.path(), None);
+        let bytes = fs::read(source).unwrap();
+        let pieces = split_archive(&bytes, &mut runtime);
+        for scenario in ["corrupt-part", "missing-part", "combined-hash", "cancel"] {
+            let mut archive = runtime.archive.clone();
+            if scenario == "combined-hash" {
+                archive.sha256 = "0".repeat(64);
+            }
+            let destination = temporary.path().join(format!("{scenario}.zip"));
+            let cancelled = AtomicBool::new(false);
+            let mut index = 0;
+            let result = download_archive(&archive, &destination, &cancelled, &mut |_, path, _| {
+                if scenario == "missing-part" && index == 1 {
+                    return Err("missing".into());
+                }
+                let mut data = pieces[index].clone();
+                if scenario == "corrupt-part" && index == 1 {
+                    data[0] ^= 1;
+                }
+                fs::write(path, data).unwrap();
+                if scenario == "cancel" {
+                    cancelled.store(true, Ordering::SeqCst);
+                }
+                index += 1;
+                Ok(())
+            });
+            assert!(result.is_err(), "{scenario}");
+        }
+        for scenario in ["sum", "part-size", "source", "hash", "duplicate", "many"] {
+            let mut archive = runtime.archive.clone();
+            match scenario {
+                "sum" => archive.size += 1,
+                "part-size" => archive.parts[0].size = 1_800_000_001,
+                "source" => archive.parts[0].url = "file:///tmp/untrusted".into(),
+                "hash" => archive.parts[0].sha256 = "bad".into(),
+                "duplicate" => archive.parts[1].url = archive.parts[0].url.clone(),
+                "many" => archive.parts = vec![archive.parts[0].clone(); 17],
+                _ => unreachable!(),
+            }
+            assert!(
+                validate(&[RuntimeDefinition {
+                    id: runtime.id.clone(),
+                    version: 1,
+                    platforms: HashMap::from([(platform().into(), archive)])
+                }])
+                .is_err(),
+                "{scenario}"
+            );
+        }
+        assert!(!fs::read_dir(temporary.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".tmp")));
     }
 
     #[test]

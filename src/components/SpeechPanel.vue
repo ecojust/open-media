@@ -3,9 +3,9 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Project } from '../core/types'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity, type SpeechSource } from '../core/speech'
 import { compactVoiceCatalog } from '../core/voice-catalog'
-import { voiceReady, voiceDownloading } from '../core/voice-downloads'
+import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade } from '../core/voice-downloads'
 import { bundledVoicePreviewUrl, VOICE_PREVIEW_TEXT } from '../core/voice-previews'
-import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getSpeechJob, getSpeechStatus, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
+import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getSpeechJob, getSpeechStatus, repairSpeechModel, isDesktop, type SpeechJob, type SpeechStatus } from '../native'
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
 
@@ -90,19 +90,20 @@ async function loadStatus(showLoading = true): Promise<void> {
   })()
   return statusPromise
 }
-async function changeModelDownload(modelId: string, cancelDownload = false): Promise<void> {
+async function changeModelDownload(modelId: string, cancelDownload = false, repair = false): Promise<void> {
   if (!desktop || disposed || busy.value || pendingModels.value.includes(modelId)) return
-  const model = status.value.voices.find(voice => voice.modelId === modelId)
-  if (!model || (cancelDownload ? !voiceDownloading(model) : voiceReady(model) || voiceDownloading(model))) return
+  const model = status.value.voices.find(voice => (repair ? voiceRepairId(voice) : voiceDownloadId(voice)) === modelId)
+  if (!model || [voiceDownloadId(model), voiceRepairId(model)].some(id => !!id && pendingModels.value.includes(id))) return
+  if (cancelDownload ? !voiceDownloading(model) : voiceDownloading(model) || (repair ? !voiceReady(model) : voiceReady(model) && !voiceRuntimeUpgrade(model))) return
   const revision = ++statusRevision
   stopStatusPoll()
   pendingModels.value = [...pendingModels.value, modelId]
   downloadError.value = ''
   try {
-    const result = await (cancelDownload ? cancelSpeechModelDownload(modelId) : beginSpeechModelDownload(modelId))
+    const result = await (cancelDownload ? cancelSpeechModelDownload(modelId) : repair ? repairSpeechModel(modelId) : beginSpeechModelDownload(modelId))
     if (!disposed && revision === statusRevision) { statusRevision++; applyStatus(result) }
   } catch (cause) {
-    if (!disposed) downloadError.value = `${cancelDownload ? '取消下载失败' : '无法开始下载'}：${errorText(cause)}`
+    if (!disposed) downloadError.value = `${cancelDownload ? '取消下载失败' : repair ? '无法检查修复' : '无法开始下载'}：${errorText(cause)}`
   } finally {
     pendingModels.value = pendingModels.value.filter(id => id !== modelId)
     if (!disposed && props.active && !pendingModels.value.length) {
@@ -313,7 +314,7 @@ defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel,
     <div v-else-if="!status.ready" class="speech-error" role="alert"><p>{{ status.error || '内置语音组件暂不可用。' }}</p><button :disabled="busy" @click="loadStatus()"><Icon name="refresh" :size="13" />重新检查</button></div>
     <template v-if="desktop">
       <fieldset :disabled="busy || loading">
-        <VoicePicker v-model="voiceId" :voices="status.voices" :disabled="busy || loading" :preview-voice-id="previewVoiceId" :preview-state="previewState" :pending-models="pendingModels" @preview="previewVoice" @download="changeModelDownload($event)" @cancel-download="changeModelDownload($event, true)" />
+        <VoicePicker v-model="voiceId" :voices="status.voices" :disabled="busy || loading" :preview-voice-id="previewVoiceId" :preview-state="previewState" :pending-models="pendingModels" @preview="previewVoice" @download="changeModelDownload($event)" @cancel-download="changeModelDownload($event, true)" @repair="changeModelDownload($event, false, true)" />
         <p v-if="downloadError" class="speech-error" role="alert">{{ downloadError }}</p>
         <label>语速 <output>{{ speed.toFixed(2).replace(/0$/, '') }}×</output><input v-model.number="speed" type="range" min="0.5" max="2" step="0.05" aria-label="配音语速" /></label>
         <label class="speech-check"><input v-model="alignText" type="checkbox" aria-label="文字时长对齐语音" /><span>文字时长对齐语音</span></label>

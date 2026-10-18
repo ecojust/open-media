@@ -25,13 +25,13 @@ case "$(uname -s)" in
     common+=(--host=x86_64-w64-mingw32)
     x264_platform+=(--host=x86_64-w64-mingw32)
     vpx_platform+=(--target=x86_64-win64-gcc)
-    ffmpeg_platform+=(--target-os=mingw32 --arch=x86_64 --disable-pthreads --enable-w32threads)
+    ffmpeg_platform+=(--target-os=mingw32 --arch=x86_64 --disable-pthreads --enable-w32threads --enable-ffnvcodec --enable-nvenc --enable-amf)
     export LDFLAGS="$LDFLAGS -static -static-libgcc -static-libstdc++"
     ;;
   Darwin)
     export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
     vpx_platform+=(--target="$(uname -m)-darwin23-gcc")
-    ffmpeg_platform+=(--enable-avfoundation)
+    ffmpeg_platform+=(--enable-avfoundation --enable-videotoolbox)
     ;;
 esac
 if ! command -v nasm >/dev/null 2>&1; then
@@ -67,6 +67,19 @@ build_component libvpx ./configure --prefix="$prefix_dir" --disable-shared --ena
 build_component opus ./configure "${common[@]}" --disable-doc --disable-extra-programs
 build_component libwebp ./configure "${common[@]}" --disable-everything --enable-libwebpmux --enable-libwebpdemux
 build_component lame env CFLAGS="$CFLAGS -std=gnu99 -Wno-implicit-function-declaration" ./configure "${common[@]}" --disable-frontend --disable-gtktest --disable-dependency-tracking
+
+# These are interface headers only. The installed graphics driver supplies the
+# hardware implementation; no toolkit, proprietary SDK binaries or GPU is
+# required to build. Automatic dependency detection remains disabled.
+case "$(uname -s)" in
+  MINGW*|MSYS*)
+    make -C "$source_dir/nv-codec-headers" PREFIX="$prefix_dir" install >"$work_dir/logs/nv-codec-headers.log" 2>&1 || {
+      tail -n 100 "$work_dir/logs/nv-codec-headers.log"; exit 1;
+    }
+    mkdir -p "$prefix_dir/include/AMF"
+    cp -R "$source_dir/amf/AMF/." "$prefix_dir/include/AMF/"
+    ;;
+esac
 
 build_component ffmpeg ./configure \
   --prefix="$prefix_dir" --disable-shared --enable-static --enable-gpl \

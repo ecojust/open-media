@@ -5,14 +5,14 @@ import { VOICE_GROUPS } from './voice-groups.ts'
 // System memory recommendations leave room for the editor and operating system.
 // The optional models' measured process memory is recorded in test/chinese-tts-benchmark.
 // These are configuration suggestions, not measured minimum requirements.
-const VOICE_MODELS: Readonly<Record<string, { name: string; memoryGb: number; acceleration: 'coreml' | 'gpu' }>> = {
-  matcha_zh_en_female: { name: 'Matcha 中英', memoryGb: 4, acceleration: 'coreml' },
-  zipvoice_zh_female: { name: 'ZipVoice Distill FP32', memoryGb: 8, acceleration: 'coreml' },
-  zipvoice_zh_male: { name: 'ZipVoice Distill FP32', memoryGb: 8, acceleration: 'coreml' },
-  f5_zh_female: { name: 'F5-TTS v1 Base FP32', memoryGb: 8, acceleration: 'gpu' },
-  f5_zh_male: { name: 'F5-TTS v1 Base FP32', memoryGb: 8, acceleration: 'gpu' },
-  qwen3_serena: { name: 'Qwen3-TTS 1.7B BF16', memoryGb: 16, acceleration: 'gpu' },
-  qwen3_uncle_fu: { name: 'Qwen3-TTS 1.7B BF16', memoryGb: 16, acceleration: 'gpu' },
+const VOICE_MODELS: Readonly<Record<string, { name: string; memoryGb: number }>> = {
+  matcha_zh_en_female: { name: 'Matcha 中英', memoryGb: 4 },
+  zipvoice_zh_female: { name: 'ZipVoice Distill FP32', memoryGb: 8 },
+  zipvoice_zh_male: { name: 'ZipVoice Distill FP32', memoryGb: 8 },
+  f5_zh_female: { name: 'F5-TTS v1 Base FP32', memoryGb: 8 },
+  f5_zh_male: { name: 'F5-TTS v1 Base FP32', memoryGb: 8 },
+  qwen3_serena: { name: 'Qwen3-TTS 1.7B BF16', memoryGb: 16 },
+  qwen3_uncle_fu: { name: 'Qwen3-TTS 1.7B BF16', memoryGb: 16 },
 }
 
 export function voiceModelName(voice: Pick<SpeechVoice, 'id' | 'name'>): string {
@@ -25,7 +25,7 @@ export function voiceRecommendedMemoryGb(voice: Pick<SpeechVoice, 'id'>): number
 
 export function voiceComputeLabel(voice: Pick<SpeechVoice, 'id'>): string | undefined {
   if (!Object.hasOwn(VOICE_MODELS, voice.id)) return undefined
-  return VOICE_MODELS[voice.id]!.acceleration === 'gpu' ? '优先可用 GPU · CPU 自动回退' : '优先 CoreML · CPU 自动回退'
+  return '优先可用 GPU · CPU 自动回退'
 }
 
 export function voiceActionName(voice: SpeechVoice): string {

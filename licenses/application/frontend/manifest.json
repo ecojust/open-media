@@ -5,8 +5,8 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "8779ef8c8589568e762ed07d6236e05de27fae5a4d55d2ac6bafc08fc8edbe9f",
-      "reviewMethod": "Application version updated to 0.1.14; browser regression coverage includes speech generation progress. Dependency versions, locked dependency records and original license texts are unchanged. Only the application metadata and these input hashes were refreshed."
+      "sha256": "2b47510af72bb41754a9326987f396c7b235e71638d878c01f58d2fad8a8ba46",
+      "reviewMethod": "Added browser regressions for continuous split playback and shared dialog backdrops. Dependency versions, locked package records and original license texts are unchanged."
     },
     {
       "path": "package-lock.json",
@@ -15,8 +15,8 @@
     },
     {
       "path": "vite.config.ts",
-      "sha256": "41a593fde2229fce8f4f45959696c446bccbade185dc57aef75f09de846a6d07",
-      "reviewMethod": "Source-only review of build version and timestamp constants. Package metadata is read by the configuration process; dependencies, plugins, aliases and build target are unchanged. No new production build was run for this input update."
+      "sha256": "1a63438982834e89dc1f8eda6d8440b95f79411b88f5a8ed2e6ab9e18893125b",
+      "reviewMethod": "Source review of development-only file watching exclusions for generated runtime and compiler output. Production dependencies, plugins, aliases and build settings are unchanged."
     }
   ],
   "packages": [

@@ -100,9 +100,9 @@ test('model labels replace legacy voice names while retaining searchable aliases
   assert.equal(voiceComputeLabel(custom), undefined, 'unknown engines have no invented device support')
 })
 
-test('运行设备说明区分CoreML与GPU优先策略，均说明CPU回退且不承诺固定显存', () => {
+test('运行设备说明统一GPU优先与CPU自动回退，不承诺固定显存', () => {
   for (const id of ['matcha_zh_en_female', 'zipvoice_zh_female', 'zipvoice_zh_male']) {
-    assert.equal(voiceComputeLabel({ id }), '优先 CoreML · CPU 自动回退')
+    assert.equal(voiceComputeLabel({ id }), '优先可用 GPU · CPU 自动回退')
   }
   for (const id of ['f5_zh_female', 'f5_zh_male', 'qwen3_serena', 'qwen3_uncle_fu']) {
     assert.equal(voiceComputeLabel({ id }), '优先可用 GPU · CPU 自动回退')

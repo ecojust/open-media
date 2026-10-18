@@ -6,6 +6,7 @@ pub mod capture_picker;
 #[cfg(any(target_os = "windows", test))]
 mod capture_windows;
 pub mod engine;
+pub mod export_files;
 pub mod clip_filters;
 pub mod chroma_key;
 pub mod preview;
@@ -217,6 +218,17 @@ mod desktop {
     pub fn cancel_media_job(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
         state.jobs.cancel(&id)
     }
+
+    #[tauri::command]
+    pub async fn reveal_media_job_output(
+        window: tauri::Window,
+        id: String,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let jobs = state.jobs.list();
+        blocking(move || crate::export_files::reveal_job_output(&jobs, &id)).await
+    }
     #[tauri::command]
     pub async fn get_speech_status(state: State<'_, MediaState>) -> engine::Result<SpeechStatus> {
         let speech = state.speech.clone();
@@ -237,6 +249,14 @@ mod desktop {
     ) -> engine::Result<SpeechStatus> {
         let speech = state.speech.clone();
         blocking(move || speech.cancel_model_download(&model_id)).await
+    }
+    #[tauri::command]
+    pub async fn repair_speech_model(
+        model_id: String,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<SpeechStatus> {
+        let speech = state.speech.clone();
+        blocking(move || speech.repair_model(&model_id)).await
     }
     #[tauri::command]
     pub async fn begin_speech_job(
@@ -627,13 +647,13 @@ mod desktop {
             .plugin(tauri_plugin_dialog::init())
             .manage(Closing::default())
             .manage(CapturePicker::default())
-            .manage(ProjectFiles::default())
             .manage(ImageClipboard::default())
             .manage(ControlsManager::default())
             .setup(|app| {
                 app.manage(crate::screenshot_shortcut::ShortcutManager::new(app.handle().clone()));
                 let data = app.path().app_data_dir()?;
                 fs::create_dir_all(&data)?;
+                app.manage(ProjectFiles::persistent(data.join("project-file-targets.json")).map_err(std::io::Error::other)?);
                 let resource = app.path().resource_dir()?;
                 let settings = data.join("media-engine-path.txt");
                 let selected = fs::read_to_string(&settings).ok().map(PathBuf::from);
@@ -684,9 +704,11 @@ mod desktop {
                 begin_media_job,
                 get_media_jobs,
                 cancel_media_job,
+                reveal_media_job_output,
                 get_speech_status,
                 begin_speech_model_download,
                 cancel_speech_model_download,
+                repair_speech_model,
                 begin_speech_job,
                 get_speech_job,
                 cancel_speech_job,

@@ -14,6 +14,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+#[path = "export_acceleration.rs"]
+mod export_acceleration;
+
 pub type Result<T> = std::result::Result<T, String>;
 
 pub fn new_id() -> String {
@@ -402,20 +405,34 @@ pub struct MediaJob {
     pub name: String,
     pub output_path: Option<String>,
     pub error: Option<String>,
+    pub started_at: u64,
+    pub elapsed_seconds: f64,
+    pub backend: Option<String>,
+    pub stage: String,
+    pub fallback_reason: Option<String>,
 }
 struct JobEntry {
     job: MediaJob,
     cancelled: Arc<AtomicBool>,
+    started: std::time::Instant,
 }
 #[derive(Clone, Default)]
 pub struct JobManager {
     jobs: Arc<Mutex<HashMap<String, JobEntry>>>,
+}
+#[derive(Clone, Debug)]
+pub struct VideoTarget {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    pub quality: String,
 }
 pub struct RenderPlan {
     pub args: Vec<String>,
     pub duration: f64,
     pub format: String,
     pub workspace: tempfile::TempDir,
+    pub video: Option<VideoTarget>,
 }
 impl JobManager {
     pub fn list(&self) -> Vec<MediaJob> {
@@ -424,7 +441,13 @@ impl JobManager {
             .lock()
             .unwrap()
             .values()
-            .map(|j| j.job.clone())
+            .map(|entry| {
+                let mut job = entry.job.clone();
+                if job.state == "running" {
+                    job.elapsed_seconds = entry.started.elapsed().as_secs_f64();
+                }
+                job
+            })
             .collect::<Vec<_>>();
         jobs.sort_by(|a, b| a.id.cmp(&b.id));
         jobs
@@ -450,28 +473,15 @@ impl JobManager {
         }
     }
     pub fn begin(&self, runtime: &Runtime, plan: RenderPlan, output: PathBuf) -> Result<MediaJob> {
-        if self
-            .jobs
-            .lock()
-            .unwrap()
-            .values()
-            .filter(|e| e.job.state == "running")
-            .count()
-            >= 4
-        {
-            return Err("已有 4 个导出任务，请等待完成后再试。".into());
-        }
         let parent = output.parent().ok_or("请选择有效的保存目录。")?;
         let staging = tempfile::NamedTempFile::new_in(parent)
             .map_err(|e| format!("无法创建输出文件：{e}"))?;
-        let id = format!(
-            "{}-{}",
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis(),
-            new_id()
-        );
+        let started = std::time::Instant::now();
+        let started_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let id = format!("{started_at}-{}", new_id());
         let job = MediaJob {
             id: id.clone(),
             state: "running".into(),
@@ -483,10 +493,197 @@ impl JobManager {
                 .into(),
             output_path: None,
             error: None,
+            started_at,
+            elapsed_seconds: 0.0,
+            backend: None,
+            stage: "正在准备导出".into(),
+            fallback_reason: None,
         };
         let cancelled = Arc::new(AtomicBool::new(false));
-        let mut cmd = process(&runtime.encoder);
-        cmd.args([
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            if jobs
+                .values()
+                .filter(|entry| entry.job.state == "running")
+                .count()
+                >= 4
+            {
+                return Err("已有 4 个导出任务，请等待完成后再试。".into());
+            }
+            jobs.insert(
+                id.clone(),
+                JobEntry {
+                    job: job.clone(),
+                    cancelled: cancelled.clone(),
+                    started,
+                },
+            );
+        }
+        let jobs = self.jobs.clone();
+        let runtime = runtime.clone();
+        let worker_id = id.clone();
+        let spawned = thread::Builder::new()
+            .name("media-export".into())
+            .spawn(move || {
+                let id = worker_id;
+                let mut detail = String::new();
+                let result = (|| -> Result<()> {
+                    if cancelled.load(Ordering::SeqCst) {
+                        return Err("cancelled".into());
+                    }
+                    let mut encoder = export_acceleration::Encoder::Cpu;
+                    if let Some(target) = plan.video.as_ref().filter(|_| {
+                        !export_acceleration::candidates(&plan.args, std::env::consts::OS)
+                            .is_empty()
+                    }) {
+                        update_export_job(&jobs, &id, |job| job.stage = "正在检查硬件编码".into());
+                        encoder = export_acceleration::select(
+                            &runtime,
+                            &plan.args,
+                            target,
+                            plan.workspace.path(),
+                            &cancelled,
+                        )?;
+                    }
+                    update_export_job(&jobs, &id, |job| {
+                        job.backend = Some(encoder.label().into());
+                        job.stage = "正在导出".into();
+                    });
+                    loop {
+                        if cancelled.load(Ordering::SeqCst) {
+                            return Err("cancelled".into());
+                        }
+                        let args = plan.video.as_ref().map_or_else(
+                            || plan.args.clone(),
+                            |target| export_acceleration::arguments(&plan.args, target, encoder),
+                        );
+                        let attempt = run_export_attempt(
+                            &runtime,
+                            &args,
+                            &plan.format,
+                            plan.duration,
+                            staging.path(),
+                            &jobs,
+                            &id,
+                            &cancelled,
+                        )?;
+                        detail = attempt.detail;
+                        if attempt.success {
+                            detail.clear();
+                            break;
+                        }
+                        if cancelled.load(Ordering::SeqCst) {
+                            return Err("cancelled".into());
+                        }
+                        if export_acceleration::retryable_failure(
+                            encoder,
+                            &detail,
+                            attempt.abnormal_exit,
+                        ) {
+                            let reason = format!("{} 编码失败，已改用 CPU", encoder.label());
+                            staging
+                                .as_file()
+                                .set_len(0)
+                                .map_err(|e| format!("无法清理未完成的导出：{e}"))?;
+                            encoder = export_acceleration::Encoder::Cpu;
+                            update_export_job(&jobs, &id, |job| {
+                                job.progress = 0.0;
+                                job.backend = Some("CPU".into());
+                                job.stage = "硬件编码不可用，正在使用 CPU 导出".into();
+                                job.fallback_reason = Some(reason);
+                            });
+                            continue;
+                        }
+                        return Err("编码进程未成功完成。".into());
+                    }
+                    if cancelled.load(Ordering::SeqCst) {
+                        return Err("cancelled".into());
+                    }
+                    staging
+                        .as_file()
+                        .sync_all()
+                        .map_err(|e| format!("无法写入导出文件：{e}"))?;
+                    if cancelled.load(Ordering::SeqCst) {
+                        return Err("cancelled".into());
+                    }
+                    staging
+                        .persist(&output)
+                        .map(|_| ())
+                        .map_err(|e| format!("无法保存导出文件：{}", e.error))
+                })();
+                if let Some(entry) = jobs.lock().unwrap().get_mut(&id) {
+                    entry.job.elapsed_seconds = entry.started.elapsed().as_secs_f64();
+                    match result {
+                        Ok(()) => {
+                            entry.job.state = "completed".into();
+                            entry.job.stage = "导出完成".into();
+                            entry.job.progress = 1.0;
+                            entry.job.output_path = Some(output.to_string_lossy().into());
+                        }
+                        Err(error) if error == "cancelled" => {
+                            entry.job.state = "cancelled".into();
+                            entry.job.stage = "已取消".into();
+                        }
+                        Err(error) => {
+                            entry.job.state = "failed".into();
+                            entry.job.stage = "导出失败".into();
+                            entry.job.error = Some(if detail.is_empty() {
+                                format!("导出失败：{error}")
+                            } else {
+                                format!(
+                                    "导出失败：{}",
+                                    detail.chars().take(1800).collect::<String>()
+                                )
+                            });
+                        }
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            self.jobs.lock().unwrap().remove(&id);
+            return Err(format!("无法启动导出任务：{error}"));
+        }
+        Ok(job)
+    }
+}
+
+fn update_export_job(
+    jobs: &Mutex<HashMap<String, JobEntry>>,
+    id: &str,
+    update: impl FnOnce(&mut MediaJob),
+) {
+    if let Some(entry) = jobs.lock().unwrap().get_mut(id) {
+        update(&mut entry.job);
+    }
+}
+
+struct ExportAttempt {
+    success: bool,
+    abnormal_exit: bool,
+    detail: String,
+}
+struct ExportChild(std::process::Child);
+impl Drop for ExportChild {
+    fn drop(&mut self) {
+        if !matches!(self.0.try_wait(), Ok(Some(_))) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+}
+fn run_export_attempt(
+    runtime: &Runtime,
+    args: &[String],
+    format: &str,
+    duration: f64,
+    output: &Path,
+    jobs: &Arc<Mutex<HashMap<String, JobEntry>>>,
+    id: &str,
+    cancelled: &AtomicBool,
+) -> Result<ExportAttempt> {
+    let mut command = process(&runtime.encoder);
+    command
+        .args([
             "-hide_banner",
             "-nostdin",
             "-y",
@@ -497,115 +694,78 @@ impl JobManager {
             "-filter_complex_threads",
             "1",
         ])
-        .args(&plan.args)
-        .args(["-progress", "pipe:1", "-nostats", "-f", &plan.format])
-        .arg(staging.path())
+        .args(args)
+        .args(["-progress", "pipe:1", "-nostats", "-f", format])
+        .arg(output)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| format!("无法启动导出：{e}"))?;
-        self.jobs.lock().unwrap().insert(
-            id.clone(),
-            JobEntry {
-                job: job.clone(),
-                cancelled: cancelled.clone(),
-            },
-        );
-        let jobs = self.jobs.clone();
-        thread::spawn(move || {
-            let _workspace = plan.workspace;
-            let stderr = child.stderr.take().unwrap();
-            let errors = thread::spawn(move || {
-                let mut tail = Vec::new();
-                for line in BufReader::new(stderr)
-                    .lines()
-                    .map_while(std::result::Result::ok)
-                {
-                    tail.push(line);
-                    if tail.len() > 30 {
-                        tail.remove(0);
-                    }
-                }
-                tail.join("\n")
-            });
-            let stdout = child.stdout.take().unwrap();
-            let progress_jobs = jobs.clone();
-            let progress_id = id.clone();
-            let duration = plan.duration;
-            let progress_thread = thread::spawn(move || {
-                for line in BufReader::new(stdout)
-                    .lines()
-                    .map_while(std::result::Result::ok)
-                {
-                    if let Some(v) = line
-                        .strip_prefix("out_time_us=")
-                        .and_then(|s| s.parse::<f64>().ok())
-                    {
-                        if duration > 0.0 {
-                            if let Some(entry) = progress_jobs.lock().unwrap().get_mut(&progress_id)
-                            {
-                                entry.job.progress = (v / 1_000_000.0 / duration).clamp(0.0, 0.99);
-                            }
-                        }
-                    }
-                }
-            });
-            let outcome = loop {
-                if cancelled.load(Ordering::SeqCst) {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break Err("cancelled".to_string());
-                }
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        break if status.success() {
-                            Ok(())
-                        } else {
-                            Err("failed".into())
-                        }
-                    }
-                    Err(e) => break Err(e.to_string()),
-                    _ => thread::sleep(Duration::from_millis(80)),
-                }
-            };
-            let _ = progress_thread.join();
-            let detail = errors.join().unwrap_or_default();
-            let result = if cancelled.load(Ordering::SeqCst) {
-                Err("cancelled".into())
-            } else {
-                outcome
-                    .and_then(|_| staging.as_file().sync_all().map_err(|e| e.to_string()))
-                    .and_then(|_| {
-                        staging
-                            .persist(&output)
-                            .map(|_| ())
-                            .map_err(|e| e.error.to_string())
-                    })
-            };
-            if let Some(entry) = jobs.lock().unwrap().get_mut(&id) {
-                match result {
-                    Ok(()) => {
-                        entry.job.state = "completed".into();
-                        entry.job.progress = 1.0;
-                        entry.job.output_path = Some(output.to_string_lossy().into());
-                    }
-                    Err(e) if e == "cancelled" => entry.job.state = "cancelled".into(),
-                    Err(e) => {
-                        entry.job.state = "failed".into();
-                        entry.job.error = Some(if detail.is_empty() {
-                            format!("导出失败：{e}")
-                        } else {
-                            format!(
-                                "导出失败：{}",
-                                detail.chars().take(1800).collect::<String>()
-                            )
-                        });
-                    }
+    let mut child = ExportChild(
+        command
+            .spawn()
+            .map_err(|error| format!("无法启动导出：{error}"))?,
+    );
+    let stderr = child.0.stderr.take().ok_or("无法读取导出日志。")?;
+    let errors = thread::spawn(move || {
+        let mut tail = std::collections::VecDeque::new();
+        for line in BufReader::new(stderr)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
+            tail.push_back(line.chars().take(1600).collect::<String>());
+            if tail.len() > 30 {
+                tail.pop_front();
+            }
+        }
+        tail.into_iter().collect::<Vec<_>>().join("\n")
+    });
+    let stdout = child.0.stdout.take().ok_or("无法读取导出进度。")?;
+    let progress_jobs = jobs.clone();
+    let progress_id = id.to_owned();
+    let progress_thread = thread::spawn(move || {
+        for line in BufReader::new(stdout)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
+            if let Some(time) = line
+                .strip_prefix("out_time_us=")
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| value.is_finite())
+            {
+                if duration > 0.0 {
+                    update_export_job(&progress_jobs, &progress_id, |job| {
+                        job.progress = (time / 1_000_000.0 / duration).clamp(0.0, 0.99)
+                    });
                 }
             }
-        });
-        Ok(job)
-    }
+        }
+    });
+    let outcome = loop {
+        if cancelled.load(Ordering::SeqCst) {
+            let _ = child.0.kill();
+            let _ = child.0.wait();
+            break Err("cancelled".to_owned());
+        }
+        match child.0.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Err(error) => {
+                let _ = child.0.kill();
+                let _ = child.0.wait();
+                break Err(error.to_string());
+            }
+            _ => thread::sleep(Duration::from_millis(50)),
+        }
+    };
+    let _ = progress_thread.join();
+    let detail = errors.join().unwrap_or_default();
+    let status = outcome?;
+    Ok(ExportAttempt {
+        success: status.success(),
+        abnormal_exit: status.code().is_none_or(|code| (code as u32) >= 0xc0000000),
+        detail,
+    })
 }
+
 pub fn number(v: &Value, key: &str, default: f64, min: f64, max: f64) -> Result<f64> {
     let x = v.get(key).and_then(Value::as_f64).unwrap_or(default);
     if !x.is_finite() || x < min || x > max {
@@ -820,7 +980,32 @@ fn convert_plan(
         }
         arg(&mut args, &["-ar", &rate.to_string()]);
     }
+    let video = if !image && !audio && format != "gif" {
+        let source_width = number(&spec["asset"], "width", 1920.0, 1.0, 32768.0)? as u32;
+        let source_height = number(&spec["asset"], "height", 1080.0, 1.0, 32768.0)? as u32;
+        let (output_width, output_height) = match (width, height) {
+            (0, 0) => (source_width / 2 * 2, source_height / 2 * 2),
+            (w, 0) => (
+                w,
+                ((source_height as f64 * w as f64 / source_width as f64 / 2.0).round() as u32) * 2,
+            ),
+            (0, h) => (
+                ((source_width as f64 * h as f64 / source_height as f64 / 2.0).round() as u32) * 2,
+                h,
+            ),
+            (w, h) => (w, h),
+        };
+        Some(VideoTarget {
+            width: output_width.max(2),
+            height: output_height.max(2),
+            fps,
+            quality: spec["quality"].as_str().unwrap_or("balanced").into(),
+        })
+    } else {
+        None
+    };
     Ok(RenderPlan {
+        video,
         args,
         duration: (end - start).max(0.1),
         format: container,
@@ -878,6 +1063,7 @@ fn gif_plan(store: &MediaStore, spec: &Value, workspace: tempfile::TempDir) -> R
         duration,
         format: "gif".into(),
         workspace,
+        video: None,
     })
 }
 fn safe_color(value: &str) -> String {
@@ -1055,8 +1241,12 @@ fn timeline_plan(
             if let Some(filter) = &color_filter {
                 chain += &format!(",format=rgba,split[filter_input{index}][filter_alpha{index}]");
                 filters.push(chain);
-                filters.push(format!("[filter_alpha{index}]alphaextract[filter_mask{index}]"));
-                filters.push(format!("[filter_input{index}]{filter}[filter_color{index}]"));
+                filters.push(format!(
+                    "[filter_alpha{index}]alphaextract[filter_mask{index}]"
+                ));
+                filters.push(format!(
+                    "[filter_input{index}]{filter}[filter_color{index}]"
+                ));
                 chain = format!("[filter_color{index}][filter_mask{index}]alphamerge");
             }
             chain += &format!(",colorchannelmixer=aa={opacity}");
@@ -1075,7 +1265,10 @@ fn timeline_plan(
             }
             chain += &format!(",setpts=PTS+{start}/TB[v{index}]");
             filters.push(chain);
-            filters.push(format!("[base{visuals}][v{index}]overlay=x='{x}+({cw}-overlay_w)/2':y='{y}+({ch}-overlay_h)/2':enable='gte(t,{start})*lt(t,{})':eof_action=pass:format=auto[base{}]",start+duration,visuals+1));
+            // A trimmed stream can reach EOF between output frame timestamps.
+            // Its final decoded frame remains valid until the clip's exclusive
+            // endpoint; passing the background here would insert a black frame.
+            filters.push(format!("[base{visuals}][v{index}]overlay=x='{x}+({cw}-overlay_w)/2':y='{y}+({ch}-overlay_h)/2':enable='gte(t,{start})*lt(t,{})':eof_action=repeat:repeatlast=1:format=auto[base{}]",start+duration,visuals+1));
             visuals += 1;
         }
         let volume = number(clip, "volume", 1.0, 0.0, 4.0)?;
@@ -1136,6 +1329,12 @@ fn timeline_plan(
         args,
         duration: total,
         format: format.into(),
+        video: Some(VideoTarget {
+            width,
+            height,
+            fps,
+            quality: config["quality"].as_str().unwrap_or("balanced").into(),
+        }),
         workspace,
     })
 }

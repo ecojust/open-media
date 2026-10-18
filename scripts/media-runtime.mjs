@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { access, chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { access, chmod, copyFile, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { verifyHardwareEncoderInventory, verifyHardwareProbeOutput } from './media-runtime-capabilities.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const cache = join(root, '.media-runtime');
 const runtime = join(root, 'src-tauri/resources/media');
 const lockPath = join(root, 'scripts/media-runtime.lock.json');
+const capabilitiesPath = join(root, 'scripts/media-runtime-capabilities.mjs');
 const lock = JSON.parse(await readFile(lockPath, 'utf8'));
 const binaryExtension = process.platform === 'win32' ? '.exe' : '';
 const exists = async (path) => { try { await access(path); return true; } catch { return false; } };
@@ -62,6 +64,11 @@ async function download(source) {
 }
 async function prepare() {
   for (const source of lock.sources) {
+    for (const notice of source.additionalNotices ?? []) {
+      if (await sha256(join(root, notice.file)) !== notice.sha256) throw new Error(`Source notice checksum mismatch: ${notice.file}`);
+    }
+  }
+  for (const source of lock.sources) {
     const archive = await download(source);
     const directory = join(cache, 'sources', source.id);
     const marker = join(directory, '.open-media-source-sha256');
@@ -89,12 +96,27 @@ async function finalize() {
     for (const item of await readdir(from, { withFileTypes: true })) {
       if (item.isFile() && /^(copying|license|authors|patents)([.\-_]|$)/i.test(item.name)) await copyFile(join(from, item.name), join(to, item.name));
     }
+    // Some header-only dependencies retain the complete license in each header.
+    for (const file of source.noticeFiles ?? []) {
+      await mkdir(dirname(join(to, file)), { recursive: true });
+      await copyFile(join(from, file), join(to, file));
+    }
+    for (const directory of source.noticeDirectories ?? []) {
+      await cp(join(from, directory), join(to, directory), { recursive: true });
+    }
+    for (const notice of source.additionalNotices ?? []) {
+      if (await sha256(join(root, notice.file)) !== notice.sha256) throw new Error(`Source notice checksum mismatch: ${notice.file}`);
+      await copyFile(join(root, notice.file), join(to, basename(notice.file)));
+    }
   }
   await copyFile(lockPath, join(runtime, 'source-lock.json'));
   await writeFile(join(runtime, 'runtime.json'), JSON.stringify({
     schema: 1, platform: process.platform, arch: process.arch, license: lock.license,
     sourceLockSha256: await sha256(lockPath),
     buildScriptSha256: await sha256(join(root, 'scripts/build-media-runtime.sh')),
+    capabilitiesScriptSha256: await sha256(capabilitiesPath),
+    hardwareEncoders: verifyHardwareEncoderInventory(process.platform,
+      run(join(runtime, `ffmpeg${binaryExtension}`), ['-hide_banner', '-encoders'])),
     binaries, sources: lock.sources.map(({ id, version, license }) => ({ id, version, license })),
   }, null, 2) + '\n');
 }
@@ -102,12 +124,15 @@ async function verify() {
   const manifest = JSON.parse(await readFile(join(runtime, 'runtime.json'), 'utf8'));
   if (manifest.platform !== process.platform || manifest.arch !== process.arch) throw new Error('Runtime platform does not match this build host.');
   if (manifest.sourceLockSha256 !== await sha256(lockPath) || manifest.buildScriptSha256 !== await sha256(join(root, 'scripts/build-media-runtime.sh'))) throw new Error('Runtime cache is stale; rebuild from the current source lock and script.');
+  if (manifest.capabilitiesScriptSha256 !== await sha256(capabilitiesPath)) throw new Error('Runtime capability checks changed; rebuild the media runtime.');
   for (const [file, expected] of Object.entries(manifest.binaries)) if (await sha256(join(runtime, file)) !== expected) throw new Error(`Runtime binary checksum mismatch: ${file}`);
   const ffmpeg = join(runtime, `ffmpeg${binaryExtension}`);
   const ffprobe = join(runtime, `ffprobe${binaryExtension}`);
   const version = run(ffmpeg, ['-version']);
   if (!version.startsWith(`ffmpeg version ${lock.sources.find(source => source.id === 'ffmpeg').version}`)) throw new Error('Unexpected runtime version.');
   const encoders = run(ffmpeg, ['-hide_banner', '-encoders']);
+  const hardwareEncoders = verifyHardwareEncoderInventory(process.platform, encoders);
+  if (JSON.stringify(manifest.hardwareEncoders) !== JSON.stringify(hardwareEncoders)) throw new Error('Runtime hardware encoder inventory does not match its manifest.');
   for (const encoder of ['libx264', 'libvpx-vp9', 'libopus', 'libmp3lame', 'libwebp', 'aac', 'png', 'mjpeg', 'gif', 'flac', 'pcm_s16le']) {
     if (!new RegExp(`\\s${encoder}\\s`).test(encoders)) throw new Error(`Missing required encoder: ${encoder}`);
   }
@@ -133,6 +158,27 @@ async function verify() {
   if (!info.streams.some(stream => stream.codec_name === 'h264') || !info.streams.some(stream => stream.codec_name === 'aac')) throw new Error('Packaged runtime failed its video and audio encoding check.');
   run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', movie, '-frames:v', '1', join(directory, 'sample.png')]);
   run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', movie, '-c:v', 'libvpx-vp9', '-deadline', 'realtime', '-cpu-used', '8', '-c:a', 'libopus', join(directory, 'sample.webm')]);
+  const hardware = [];
+  for (const encoder of hardwareEncoders) {
+    const output = join(directory, `${encoder}.mp4`);
+    const result = spawnSync(ffmpeg, ['-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
+      '-f', 'lavfi', '-i', 'color=c=0x456be8:s=128x72:r=25', '-frames:v', '3', '-an',
+      '-pix_fmt', 'yuv420p', '-c:v', encoder,
+      ...(encoder === 'h264_videotoolbox' ? ['-allow_sw', '0'] : []), output],
+    { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+    const available = !result.error && result.status === 0;
+    if (available) {
+      verifyHardwareProbeOutput(JSON.parse(run(ffprobe, ['-v', 'error', '-count_frames',
+        '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,width,height,nb_read_frames', '-of', 'json', output])));
+    }
+    const record = { encoder, compiled: true, hardwareEncodingVerified: available,
+      exitCode: result.status, signal: result.signal,
+      ...(available ? {} : { reason: String(result.error?.message ?? result.stderr ?? 'Hardware encoding unavailable').slice(-2500), fallback: 'CPU encoding verified separately' }) };
+    hardware.push(record);
+    console.log(`Hardware encoding verification: ${JSON.stringify(record)}`);
+  }
+  await writeFile(join(directory, 'hardware-encoding.json'), JSON.stringify({ platform: process.platform, arch: process.arch,
+    cpuEncodingVerified: true, hardware }, null, 2) + '\n');
   console.log(`Verified bundled runtime on ${process.platform}/${process.arch}.`);
 }
 async function sources() {
@@ -144,7 +190,8 @@ async function sources() {
   await rm(stage, { recursive: true, force: true });
   await mkdir(join(bundle, '.media-runtime/downloads'), { recursive: true });
   for (const source of lock.sources) await copyFile(join(cache, 'downloads', source.archive), join(bundle, '.media-runtime/downloads', source.archive));
-  for (const file of ['scripts/media-runtime.mjs', 'scripts/media-runtime.lock.json', 'scripts/build-media-runtime.sh', 'docs/MEDIA_RUNTIME.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE']) {
+  for (const file of ['scripts/media-runtime.mjs', 'scripts/media-runtime-capabilities.mjs', 'scripts/media-runtime.lock.json', 'scripts/build-media-runtime.sh', 'docs/MEDIA_RUNTIME.md', 'THIRD_PARTY_NOTICES.md', 'LICENSE',
+    ...lock.sources.flatMap(source => (source.additionalNotices ?? []).map(notice => notice.file))]) {
     await mkdir(dirname(join(bundle, file)), { recursive: true });
     await copyFile(join(root, file), join(bundle, file));
   }

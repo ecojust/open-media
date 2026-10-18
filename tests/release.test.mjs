@@ -5,7 +5,7 @@ import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateBuild, verifyDigest, verifyMetadata, digest, verifySpeechMetadata, verifySpeechSynthesis, installedSpeechVoiceIds, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
+import { validateBuild, verifyDigest, verifyMetadata, digest, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, installedSpeechVoiceIds, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
 import { verifySourceContents } from '../scripts/release-source.mjs';
 
 const commit = 'a'.repeat(40);
@@ -46,6 +46,39 @@ test('installer digest and provenance must match before publishing', () => {
   assert.throws(() => verifyDigest(Buffer.from('changed'), `sha256:${digest(bytes)}`));
   verifyMetadata({ commit, version: '0.1.0', platform: 'windows-x64' }, 'windows-x64', commit, '0.1.0');
   assert.throws(() => verifyMetadata({ commit, version: '0.1.0', platform: 'macos-x64' }, 'windows-x64', commit, '0.1.0'));
+});
+test('media encoder capabilities must come from the release source and ship in corresponding sources', () => {
+  const expected = { sourceLockSha256: 'a'.repeat(64), buildScriptSha256: 'b'.repeat(64), capabilitiesScriptSha256: 'c'.repeat(64) };
+  verifyMediaMetadata({ ...expected }, 'windows-x64', expected);
+  for (const field of Object.keys(expected)) {
+    const stale = { ...expected, [field]: 'd'.repeat(64) };
+    assert.throws(() => verifyMediaMetadata(stale, 'windows-x64', expected), /stale media runtime/);
+    delete stale[field];
+    assert.throws(() => verifyMediaMetadata(stale, 'windows-x64', expected), /stale media runtime/);
+  }
+  assert.ok(mediaRuntimeSourceFiles.includes('scripts/media-runtime-capabilities.mjs'));
+  const directory = mkdtempSync(join(tmpdir(), 'open-media-capabilities-source-'));
+  const archive = join(directory, 'source.tar.gz');
+  const expectedFiles = new Map(mediaRuntimeSourceFiles.map(file => [file, digest(Buffer.from(file))]));
+  try {
+    const createArchive = omitted => execFileSync('python3', ['-c', `
+import io,json,sys,tarfile
+archive,omitted=sys.argv[1:]
+with tarfile.open(archive,'w:gz') as out:
+    for name in json.load(sys.stdin):
+        if name==omitted: continue
+        data=name.encode()
+        info=tarfile.TarInfo('media-runtime-source/'+name)
+        info.size=len(data)
+        out.addfile(info,io.BytesIO(data))
+`, archive, omitted], { input: JSON.stringify(mediaRuntimeSourceFiles) });
+    createArchive('');
+    verifySourceContents(archive, 'media-runtime-source', expectedFiles);
+    createArchive('scripts/media-runtime-capabilities.mjs');
+    assert.throws(() => verifySourceContents(archive, 'media-runtime-source', expectedFiles), /Missing corresponding source files/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 function speechFixture() {
   const expected = { sourceLockSha256: 'a'.repeat(64), prepareScriptSha256: 'b'.repeat(64), runnerSourceSha256: 'c'.repeat(64), runnerManifestSha256: 'd'.repeat(64), model: { id: 'offline-voices', version: '1.0', license: 'Apache-2.0' } };

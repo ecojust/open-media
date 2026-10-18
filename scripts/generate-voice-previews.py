@@ -18,8 +18,8 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TEXTS = {
-    "zh": "这是一款全程由AI接管并生成的软件",
-    "en": "这是一款全程由AI接管并生成的软件",
+    "zh": "欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。",
+    "en": "欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。",
 }
 SETTINGS = {"speed": 1, "silenceScale": 0.2, "sampleRate": 16000, "noiseScale": 1,
             "channels": 1, "bitrate": 64000, "threads": 2}

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const { chromium, expect } = require('@playwright/test')
+const auditionText = '欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。'
 
 function audioFixture() {
   const samples = 24000 * 2.5, bytes = Buffer.alloc(44 + samples * 2)
@@ -514,7 +515,7 @@ async function main() {
     assert.equal(await page.getByLabel('声音试听音频').evaluate(audio => audio.duration), 2.5)
     const englishPreview = (await speechRequests(page)).at(-1)
     assert.equal(englishPreview.voiceId, 'english-first')
-    assert.equal(englishPreview.text, '这是一款全程由AI接管并生成的软件', '所有卡片试听应使用同一个固定样句')
+    assert.equal(englishPreview.text, auditionText, '所有卡片试听应使用同一个软件介绍')
     assert.equal((await speechRequests(page)).length, beforeCardPreview + 1)
     await expect(speaker).toHaveAttribute('aria-pressed', 'true')
     await speaker.click()
@@ -558,7 +559,7 @@ async function main() {
     await page.evaluate(() => { window.speechHarness.mode = 'completed' })
     await page.getByRole('button', { name: '试听 温和 · 男声', exact: true }).click()
     await expect(page.getByLabel('声音试听音频')).toHaveJSProperty('readyState', 4)
-    assert.equal((await speechRequests(page)).at(-1).text, '这是一款全程由AI接管并生成的软件', '所有卡片试听应使用同一个固定样句')
+    assert.equal((await speechRequests(page)).at(-1).text, auditionText, '所有卡片试听应使用同一个软件介绍')
     assert.equal((await speechRequests(page)).at(-1).voiceId, 'voice-2')
     const fixedPreviewId = (await speechRequests(page)).at(-1).requestId
     await selectVoice(page, '清朗')

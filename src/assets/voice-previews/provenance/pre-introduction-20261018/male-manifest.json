@@ -1,0 +1,339 @@
+{
+  "schema": 1,
+  "text": "这是一款全程由AI接管并生成的软件",
+  "previews": [
+    {
+      "voiceId": "qwen3_uncle_fu",
+      "file": "qwen3_uncle_fu.mp3",
+      "text": "这是一款全程由AI接管并生成的软件",
+      "bytes": 65280,
+      "sha256": "2094763426238c2d5630845fbb43f716a1c10440a5a14dac948e7d2f66114840",
+      "wavSha256": "8c7ba3f6bf8f69fae4bc8f12682d9c208b21a9865ed376d033a65f898b3e0395",
+      "wav": "/workspace/male-voice-previews-20261018/qwen3_uncle_fu/speech.wav",
+      "modelId": "qwen3-tts-1.7b-serena",
+      "generationSeconds": 36.3415473170171,
+      "sampleRate": 24000,
+      "channels": 1,
+      "durationSeconds": 4.0,
+      "peak": 0.50390625,
+      "rms": 0.08491294324689382,
+      "modelFiles": [
+        {
+          "path": "config.json",
+          "bytes": 4908,
+          "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9"
+        },
+        {
+          "path": "generation_config.json",
+          "bytes": 245,
+          "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa"
+        },
+        {
+          "path": "merges.txt",
+          "bytes": 1671839,
+          "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3"
+        },
+        {
+          "path": "model.safetensors",
+          "bytes": 3833402552,
+          "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137"
+        },
+        {
+          "path": "preprocessor_config.json",
+          "bytes": 127,
+          "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119"
+        },
+        {
+          "path": "speech_tokenizer/config.json",
+          "bytes": 2336,
+          "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167"
+        },
+        {
+          "path": "speech_tokenizer/configuration.json",
+          "bytes": 76,
+          "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd"
+        },
+        {
+          "path": "speech_tokenizer/model.safetensors",
+          "bytes": 682293092,
+          "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+        },
+        {
+          "path": "speech_tokenizer/preprocessor_config.json",
+          "bytes": 234,
+          "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 7344,
+          "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670"
+        },
+        {
+          "path": "vocab.json",
+          "bytes": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        }
+      ],
+      "decodedDurationSeconds": 4.0,
+      "decodedPeak": 0.48031455278396606,
+      "decodedRms": 0.0806628916141127,
+      "referenceAudio": null,
+      "settings": {
+        "device": "cpu",
+        "speed": 1,
+        "sampleRate": 24000,
+        "channels": 1,
+        "bitrate": 128000,
+        "config": {
+          "schema": 1,
+          "engine": "qwen3",
+          "dtype": "bfloat16",
+          "model": ".",
+          "speaker": "Uncle_Fu",
+          "language": "Chinese",
+          "instruct": "用自然流畅的标准普通话朗读，语气温和，语速适中。",
+          "sampleRate": 24000,
+          "seed": 20261017
+        },
+        "threads": 4,
+        "dtype": "bfloat16",
+        "speaker": "Uncle_Fu"
+      },
+      "command": [
+        "/workspace/tts-benchmark-20261017/venv/bin/python",
+        "-I",
+        "-B",
+        "/workspace/male-voice-previews-20261018/qwen3_uncle_fu/speech-voice-adapter.py",
+        "--runtime-script",
+        "/workspace/tts-benchmark-20261017/runtime-runner-test/runner/tts.py",
+        "--voice",
+        "qwen3_uncle_fu",
+        "--config",
+        "/workspace/tts-benchmark-20261017/large/model/runner-config.json",
+        "--text-file",
+        "/workspace/male-voice-previews-20261018/qwen3_uncle_fu/text.txt",
+        "--output-filename",
+        "/workspace/male-voice-previews-20261018/qwen3_uncle_fu/speech.wav",
+        "--speed",
+        "1",
+        "--threads",
+        "4"
+      ],
+      "generator": {
+        "script": "src/assets/voice-previews/provenance/male-20261018/generate-male-voice-previews.py",
+        "scriptSha256": "2abbc125fd9a6e1de52a63ffa9cd691c08babbd052082c34be93930904eb3c82",
+        "adapterSha256": "2c427a8d6ec370e27d60e6976b91ee54a962ebd881682c4ae0783c1578185df3",
+        "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+        "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+        "python": "3.12.14",
+        "generatedAt": "2026-10-18T02:24:58.578882+00:00",
+        "adapter": "src/assets/voice-previews/provenance/male-20261018/speech-voice-adapter.py"
+      }
+    },
+    {
+      "voiceId": "f5_zh_male",
+      "file": "f5_zh_male.mp3",
+      "text": "这是一款全程由AI接管并生成的软件",
+      "bytes": 68736,
+      "sha256": "d629ef68cb66c3186eeffe6d66187f337b0323b3943a8b10d0d1c336a990374c",
+      "wavSha256": "1fe2557e3e4360f0f251118fe91aea1d6879e04e3edc1a8c16323f85643ad74d",
+      "wav": "/workspace/male-voice-previews-20261018/f5_zh_male/speech.wav",
+      "modelId": "f5-v1-base-fp32",
+      "generationSeconds": 262.2374195790035,
+      "sampleRate": 24000,
+      "channels": 1,
+      "durationSeconds": 4.224,
+      "peak": 0.7375661730766296,
+      "rms": 0.10761290222292963,
+      "modelFiles": [
+        {
+          "path": "model_1250000.safetensors",
+          "bytes": 1348435761,
+          "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+        },
+        {
+          "path": "vocab.txt",
+          "bytes": 13800,
+          "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+        },
+        {
+          "path": "vocos/pytorch_model.bin",
+          "bytes": 54365991,
+          "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+        },
+        {
+          "path": "vocos/config.yaml",
+          "bytes": 461,
+          "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc"
+        }
+      ],
+      "decodedDurationSeconds": 4.224,
+      "decodedPeak": 0.7013720273971558,
+      "decodedRms": 0.10224247216060321,
+      "referenceAudio": {
+        "file": "scripts/optional-speech-assets/male-reference.wav",
+        "sha256": "ff4553534d67e418faec606f472fdec58cad4bed613e6bafff16762609c29cdf",
+        "text": "清晨的阳光照进房间，翻开今天的计划，让每一个想法慢慢变成现实。",
+        "speaker": "Uncle_Fu",
+        "synthetic": true
+      },
+      "settings": {
+        "device": "cpu",
+        "speed": 1,
+        "sampleRate": 24000,
+        "channels": 1,
+        "bitrate": 128000,
+        "config": {
+          "schema": 1,
+          "engine": "f5",
+          "dtype": "float32",
+          "model": "models/f5/model_1250000.safetensors",
+          "vocabulary": "models/f5/vocab.txt",
+          "vocoderConfig": "models/vocos/config.yaml",
+          "vocoderModel": "models/vocos/pytorch_model.bin",
+          "referenceAudio": "job/male-reference.wav",
+          "referenceText": "job/male-reference.txt",
+          "sampleRate": 24000,
+          "steps": 32,
+          "cfgStrength": 2.0,
+          "swaySamplingCoefficient": -1.0,
+          "seed": 20261117
+        },
+        "threads": 4,
+        "dtype": "float32",
+        "speaker": "synthetic reference"
+      },
+      "command": [
+        "/workspace/tts-benchmark-20261017/venv/bin/python",
+        "-I",
+        "-B",
+        "/workspace/male-voice-previews-20261018/f5_zh_male/speech-voice-adapter.py",
+        "--runtime-script",
+        "/workspace/tts-benchmark-20261017/runtime-runner-test/runner/tts.py",
+        "--voice",
+        "f5_zh_male",
+        "--config",
+        "/workspace/tts-benchmark-20261017/mid/runtime-runner-config.json",
+        "--text-file",
+        "/workspace/male-voice-previews-20261018/f5_zh_male/text.txt",
+        "--output-filename",
+        "/workspace/male-voice-previews-20261018/f5_zh_male/speech.wav",
+        "--speed",
+        "1",
+        "--threads",
+        "4"
+      ],
+      "generator": {
+        "script": "src/assets/voice-previews/provenance/male-20261018/generate-male-voice-previews.py",
+        "scriptSha256": "2abbc125fd9a6e1de52a63ffa9cd691c08babbd052082c34be93930904eb3c82",
+        "adapterSha256": "2c427a8d6ec370e27d60e6976b91ee54a962ebd881682c4ae0783c1578185df3",
+        "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+        "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+        "python": "3.12.14",
+        "generatedAt": "2026-10-18T02:25:41.020554+00:00",
+        "adapter": "src/assets/voice-previews/provenance/male-20261018/speech-voice-adapter.py"
+      }
+    },
+    {
+      "voiceId": "zipvoice_zh_male",
+      "file": "zipvoice_zh_male.mp3",
+      "text": "这是一款全程由AI接管并生成的软件",
+      "bytes": 85632,
+      "sha256": "7f188ceea216749ae06e4229e5615d24022f735f355b9bf20958831d1bc7d0be",
+      "wavSha256": "10dda44652350bb8a1ef3060e6f6a894a6ababd076a2e7be6bc85f0ec2c5998f",
+      "wav": "/workspace/male-voice-previews-20261018/zipvoice_zh_male/speech.wav",
+      "modelId": "zipvoice-distill-fp32",
+      "generationSeconds": 23.30137984099565,
+      "sampleRate": 24000,
+      "channels": 1,
+      "durationSeconds": 5.269333333333333,
+      "peak": 0.997344970703125,
+      "rms": 0.12080004442092908,
+      "modelFiles": [
+        {
+          "path": "encoder.onnx",
+          "bytes": 17633735,
+          "sha256": "495eca2d5f8a911f5c361bcce5bd55cdd2508ccdd26ce3e9bf1d3c29eb974861"
+        },
+        {
+          "path": "decoder.onnx",
+          "bytes": 477534010,
+          "sha256": "4510d4f5f049f14ef80207fca695e13c820e2cea61635f402954950bc62b1e3c"
+        },
+        {
+          "path": "tokens.txt",
+          "bytes": 2570,
+          "sha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda"
+        },
+        {
+          "path": "vocos_24khz.onnx",
+          "bytes": 54157409,
+          "sha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0"
+        }
+      ],
+      "decodedDurationSeconds": 5.269333333333333,
+      "decodedPeak": 0.9478262066841125,
+      "decodedRms": 0.1147584972402475,
+      "referenceAudio": {
+        "file": "scripts/optional-speech-assets/male-reference.wav",
+        "sha256": "ff4553534d67e418faec606f472fdec58cad4bed613e6bafff16762609c29cdf",
+        "text": "清晨的阳光照进房间，翻开今天的计划，让每一个想法慢慢变成现实。",
+        "speaker": "Uncle_Fu",
+        "synthetic": true
+      },
+      "settings": {
+        "device": "cpu",
+        "speed": 1,
+        "sampleRate": 24000,
+        "channels": 1,
+        "bitrate": 128000,
+        "dtype": "float32",
+        "threads": 1,
+        "steps": 8,
+        "featScale": 0.1,
+        "tShift": 0.5,
+        "targetRms": 0.1,
+        "guidanceScale": 1,
+        "silenceScale": 1,
+        "textNormalization": "Unchanged: the first corpus sentence contains no numbers"
+      },
+      "command": [
+        "/workspace/tts-zip-runtime-audit/prepared/runtime/bin/open-media-speech",
+        "--zipvoice-encoder=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/encoder.onnx",
+        "--zipvoice-decoder=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/decoder.onnx",
+        "--zipvoice-tokens=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/tokens.txt",
+        "--zipvoice-vocoder=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/vocos_24khz.onnx",
+        "--zipvoice-lexicon=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/lexicon.txt",
+        "--zipvoice-data-dir=/workspace/tts-zip-runtime-audit/prepared/model/espeak-ng-data",
+        "--reference-audio=/workspace/open-media/scripts/optional-speech-assets/male-reference.wav",
+        "--reference-text-file=/workspace/open-media/scripts/optional-speech-assets/male-reference.txt",
+        "--num-steps=8",
+        "--sample-rate=24000",
+        "--sid=0",
+        "--speed=1",
+        "--text-file=/workspace/male-voice-previews-20261018/zipvoice_zh_male/text.txt",
+        "--output-filename=/workspace/male-voice-previews-20261018/zipvoice_zh_male/speech.wav"
+      ],
+      "generator": {
+        "script": "src/assets/voice-previews/provenance/male-20261018/generate-male-voice-previews.py",
+        "scriptSha256": "2abbc125fd9a6e1de52a63ffa9cd691c08babbd052082c34be93930904eb3c82",
+        "adapterSha256": "2c427a8d6ec370e27d60e6976b91ee54a962ebd881682c4ae0783c1578185df3",
+        "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+        "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+        "python": "3.12.14",
+        "generatedAt": "2026-10-18T02:30:10.858883+00:00",
+        "adapter": "src/assets/voice-previews/provenance/male-20261018/speech-voice-adapter.py"
+      }
+    }
+  ],
+  "generator": {
+    "script": "src/assets/voice-previews/provenance/male-20261018/generate-male-voice-previews.py",
+    "scriptSha256": "2abbc125fd9a6e1de52a63ffa9cd691c08babbd052082c34be93930904eb3c82",
+    "adapterSha256": "2c427a8d6ec370e27d60e6976b91ee54a962ebd881682c4ae0783c1578185df3",
+    "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+    "python": "3.12.14",
+    "generatedAt": "2026-10-18T02:30:10.858883+00:00",
+    "adapter": "src/assets/voice-previews/provenance/male-20261018/speech-voice-adapter.py"
+  }
+}

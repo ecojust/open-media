@@ -1,6 +1,6 @@
 use crate::{
     engine::Result,
-    speech::{Model, ModelKind, SpeechRuntime, SpeechVoice},
+    speech::{Model, ModelKind, PythonCpuFallback, SpeechRuntime, SpeechVoice},
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -17,23 +17,25 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+#[path = "speech_native_acceleration.rs"]
+mod native_acceleration;
 #[path = "speech_runtime_packages.rs"]
-mod runtime_packages;
+pub(crate) mod runtime_packages;
 
 const CANCELLED: &str = "音色下载已取消。";
 const BUFFER_BYTES: usize = 128 * 1024;
 
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ModelFile {
-    path: String,
-    url: String,
+pub(crate) struct ModelFile {
+    pub(crate) path: String,
+    pub(crate) url: String,
     #[serde(default)]
-    mirrors: Vec<String>,
+    pub(crate) mirrors: Vec<String>,
     #[serde(default)]
-    embedded: Option<String>,
-    size: u64,
-    sha256: String,
+    pub(crate) embedded: Option<String>,
+    pub(crate) size: u64,
+    pub(crate) sha256: String,
 }
 
 #[derive(Clone, Deserialize)]
@@ -49,6 +51,12 @@ struct Package {
     #[serde(default)]
     runtime_id: String,
     #[serde(default)]
+    accelerated_runtime_id: String,
+    #[serde(skip)]
+    fallback_runtime: Option<runtime_packages::SelectedRuntime>,
+    #[serde(skip)]
+    runtime_only: bool,
+    #[serde(default)]
     license: String,
     #[serde(default)]
     usage_note: String,
@@ -57,8 +65,11 @@ struct Package {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Catalog {
     schema: u32,
+    #[serde(default)]
+    native_acceleration_runtime_id: String,
     models: Vec<Package>,
     #[serde(default)]
     runtimes: Vec<runtime_packages::RuntimeDefinition>,
@@ -90,7 +101,7 @@ impl State {
 }
 
 #[derive(Clone)]
-struct FileStamp {
+pub(crate) struct FileStamp {
     path: PathBuf,
     size: u64,
     modified: Option<SystemTime>,
@@ -230,29 +241,56 @@ fn allowed_url(url: &reqwest::Url) -> bool {
 }
 
 fn load_catalog(text: &str) -> Result<Vec<Package>> {
+    load_catalog_with_acceleration(text, runtime_packages::cuda_available())
+}
+
+fn load_catalog_with_acceleration(text: &str, cuda: bool) -> Result<Vec<Package>> {
     let mut catalog: Catalog = serde_json::from_str(text).map_err(|_| "可下载音色清单无效。")?;
     if !matches!(catalog.schema, 1 | 2) || catalog.models.len() > 16 {
         return Err("可下载音色清单版本不受支持。".into());
     }
     runtime_packages::validate(&catalog.runtimes)?;
+    native_acceleration::append_package(&mut catalog)?;
     let mut ids = HashSet::new();
     let mut voice_ids = HashSet::new();
     for package in &mut catalog.models {
         if !valid_id(&package.id)
             || !ids.insert(&package.id)
             || package.version == 0
-            || package.files.is_empty()
+            || (!package.runtime_only && package.files.is_empty())
             || package.files.len() > 64
-            || package.voices.is_empty()
+            || (!package.runtime_only && package.voices.is_empty())
             || package.voices.len() > 128
         {
             return Err("可下载音色配置无效。".into());
         }
         package.runtime = runtime_packages::select(&package.runtime_id, &catalog.runtimes)?;
-        if matches!(package.model.kind, ModelKind::F5 | ModelKind::Qwen3)
-            != !package.runtime_id.is_empty()
+        if !package.accelerated_runtime_id.is_empty() {
+            let accelerated =
+                runtime_packages::select(&package.accelerated_runtime_id, &catalog.runtimes)?;
+            if let Some(accelerated) = accelerated {
+                if accelerated.archive.kind != runtime_packages::RuntimeKind::Python
+                    || !matches!(package.model.kind, ModelKind::F5 | ModelKind::Qwen3)
+                {
+                    return Err("加速运行环境与模型类型不一致。".into());
+                }
+                if cuda {
+                    package.fallback_runtime = package.runtime.take();
+                    package.runtime_id = accelerated.id.clone();
+                    package.runtime = Some(accelerated);
+                }
+            }
+        }
+        if !package.runtime_only
+            && matches!(package.model.kind, ModelKind::F5 | ModelKind::Qwen3)
+                != !package.runtime_id.is_empty()
         {
             return Err("音色运行环境与模型类型不一致。".into());
+        }
+        if package.runtime.as_ref().is_some_and(|runtime| {
+            (runtime.archive.kind == runtime_packages::RuntimeKind::Native) != package.runtime_only
+        }) {
+            return Err("音色运行环境类型无效。".into());
         }
         let mut paths = HashSet::new();
         let mut total = 0_u64;
@@ -314,6 +352,9 @@ fn load_catalog(text: &str) -> Result<Vec<Package>> {
             {
                 return Err("可下载音色列表无效。".into());
             }
+        }
+        if package.runtime_only {
+            continue;
         }
         let model = &package.model;
         if !matches!(model.sample_rate, 16000 | 22050 | 24000 | 44100 | 48000)
@@ -527,6 +568,10 @@ fn resolve_runtime(
     root: &Path,
     bundled: Option<&SpeechRuntime>,
 ) -> Result<SpeechRuntime> {
+    if let Some(native) = native_acceleration::resolve(package, root, bundled) {
+        return native;
+    }
+
     let mut model = package.model.clone();
     let resolve = |value: &str, directory: bool| -> Result<String> {
         if value.is_empty() {
@@ -590,6 +635,8 @@ fn resolve_runtime(
         return Err("当前系统暂不支持此音色的运行环境。".into());
     };
     Ok(SpeechRuntime {
+        native_cpu_fallback: None,
+        python_cpu_fallback: None,
         root: root.canonicalize().map_err(|e| e.to_string())?,
         executable,
         script,
@@ -613,16 +660,64 @@ fn verify_package(
         let path = checked_path(root, &file.path, false)?;
         stamps.push(hash_file(&path, file, cancelled)?);
     }
+    let mut selected = package.clone();
     if let Some(runtime) = &package.runtime {
         let store = root.parent().ok_or("音色模型目录无效。")?;
-        stamps.extend(runtime_packages::verify(
-            &runtime_packages::path(store, runtime),
-            runtime,
-            cancelled,
-        )?);
+        match runtime_packages::verify(&runtime_packages::path(store, runtime), runtime, cancelled)
+        {
+            Ok(verified) => stamps.extend(verified),
+            Err(error) => {
+                check_cancelled(cancelled)?;
+                let Some(fallback) = &package.fallback_runtime else {
+                    return Err(error);
+                };
+                stamps.extend(runtime_packages::verify(
+                    &runtime_packages::path(store, fallback),
+                    fallback,
+                    cancelled,
+                )?);
+                selected.runtime = Some(fallback.clone());
+                selected.runtime_id = fallback.id.clone();
+            }
+        }
     }
     check_cancelled(cancelled)?;
-    Ok((resolve_runtime(package, root, bundled)?, stamps))
+    let mut resolved = resolve_runtime(&selected, root, bundled)?;
+    if let Some(fallback) = package.fallback_runtime.as_ref().filter(|fallback| {
+        matches!(package.model.kind, ModelKind::F5 | ModelKind::Qwen3)
+            && selected.runtime_id != fallback.id
+    }) {
+        let store = root.parent().ok_or("音色模型目录无效。")?;
+        let fallback_root = runtime_packages::path(store, fallback);
+        if let Ok(mut verified) = runtime_packages::verify(&fallback_root, fallback, cancelled) {
+            resolved.python_cpu_fallback = Some(PythonCpuFallback {
+                executable: checked_path(&fallback_root, &fallback.archive.executable, false)?,
+                script: checked_path(&fallback_root, &fallback.archive.script, false)?,
+            });
+            // A damaged optional fallback does not make the primary GPU runtime
+            // unavailable. Before synthesis, a changed stamp triggers full revalidation.
+            for stamp in &mut verified {
+                stamp.defer_display_check = true;
+            }
+            stamps.extend(verified);
+        }
+        check_cancelled(cancelled)?;
+    }
+    Ok((resolved, stamps))
+}
+
+fn preferred_runtime_active(
+    package: &Package,
+    runtime: Option<&SpeechRuntime>,
+    store: &Path,
+) -> bool {
+    package.runtime.as_ref().is_none_or(|preferred| {
+        runtime.is_some_and(|runtime| {
+            runtime
+                .executable
+                .starts_with(runtime_packages::path(store, preferred))
+        })
+    })
 }
 
 fn stamps_unchanged(stamps: &[FileStamp]) -> bool {
@@ -694,7 +789,13 @@ fn finished(
             .filter(|entry| entry.generation == generation)
         {
             entry.download_source = None;
-            if entry.cancelled.load(Ordering::SeqCst) {
+            if entry.cancelled.load(Ordering::SeqCst)
+                && entry.runtime.is_some()
+                && stamps_unchanged(&entry.stamps)
+            {
+                entry.state = State::Ready;
+                entry.error = None;
+            } else if entry.cancelled.load(Ordering::SeqCst) {
                 entry.state = State::NotDownloaded;
                 entry.downloaded = 0;
                 entry.error = None;
@@ -710,10 +811,14 @@ fn finished(
                         entry.stamps = stamps;
                     }
                     Err(error) => {
-                        entry.state = State::Failed;
                         entry.error = Some(error);
-                        entry.runtime = None;
-                        entry.stamps.clear();
+                        if entry.runtime.is_some() && stamps_unchanged(&entry.stamps) {
+                            entry.state = State::Ready;
+                        } else {
+                            entry.state = State::Failed;
+                            entry.runtime = None;
+                            entry.stamps.clear();
+                        }
                     }
                 }
             }
@@ -842,6 +947,7 @@ impl SpeechModels {
                 let entry = downloads.entries.get(&package.id)?;
                 (entry.state == State::Ready
                     && !package.runtime_id.is_empty()
+                    && preferred_runtime_active(package, entry.runtime.as_ref(), &self.root)
                     && display_stamps_unchanged(&entry.stamps))
                 .then_some(package.runtime_id.clone())
             }))
@@ -866,10 +972,23 @@ impl SpeechModels {
                     .map_or(0, |runtime| runtime.archive.size);
                 voice.download_size = Some(package.download_size + runtime_size);
                 voice.runtime_size = Some(runtime_size);
+                voice.runtime_download_id = package.runtime.as_ref().map(|_| package.id.clone());
                 voice.runtime_status = if package.runtime_id.is_empty() {
                     None
                 } else if ready_runtimes.contains(&package.runtime_id) {
                     Some("ready".into())
+                } else if entry.runtime.is_some()
+                    && !preferred_runtime_active(package, entry.runtime.as_ref(), &self.root)
+                {
+                    Some(
+                        match entry.state {
+                            State::Downloading => "upgrade-downloading",
+                            State::Verifying => "upgrade-verifying",
+                            _ if entry.error.is_some() => "upgrade-failed",
+                            _ => "upgrade-available",
+                        }
+                        .into(),
+                    )
                 } else {
                     Some(entry.state.name().into())
                 };
@@ -883,7 +1002,13 @@ impl SpeechModels {
                 voice.license = (!package.license.is_empty()).then(|| package.license.clone());
                 voice.usage_note =
                     (!package.usage_note.is_empty()).then(|| package.usage_note.clone());
-                voice.status = Some(entry.state.name().into());
+                voice.status = Some(
+                    if entry.runtime.is_some() && display_stamps_unchanged(&entry.stamps) {
+                        "ready".into()
+                    } else {
+                        entry.state.name().into()
+                    },
+                );
                 voice.downloaded_bytes = Some(entry.downloaded);
                 voice.error = entry.error.clone();
                 voice.download_sources = Some(download_sources(package));
@@ -914,8 +1039,34 @@ impl SpeechModels {
             .entries
             .get_mut(&package.id)
             .ok_or("音色模型不存在。")?;
-        if entry.state != State::Ready {
+        if entry.state != State::Ready && entry.runtime.is_none() {
             return Err("请先下载所选音色，等待校验完成后再生成配音。".into());
+        }
+        if !preferred_runtime_active(package, entry.runtime.as_ref(), &self.root)
+            && package
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime_packages::path(&self.root, runtime).is_dir())
+        {
+            let (runtime, stamps) = verify_package(
+                package,
+                &package_path(&self.root, package),
+                self.bundled.as_ref().ok(),
+                &AtomicBool::new(false),
+            )?;
+            entry.runtime = Some(runtime);
+            entry.stamps = stamps;
+        }
+        if !stamps_unchanged(&entry.stamps) && package.fallback_runtime.is_some() {
+            if let Ok((runtime, stamps)) = verify_package(
+                package,
+                &package_path(&self.root, package),
+                self.bundled.as_ref().ok(),
+                &AtomicBool::new(false),
+            ) {
+                entry.runtime = Some(runtime);
+                entry.stamps = stamps;
+            }
         }
         if !stamps_unchanged(&entry.stamps) {
             entry.state = State::Failed;
@@ -930,6 +1081,14 @@ impl SpeechModels {
     }
 
     pub fn begin(&self, id: &str) -> Result<()> {
+        self.begin_with_repair(id, false)
+    }
+
+    pub fn repair(&self, id: &str) -> Result<()> {
+        self.begin_with_repair(id, true)
+    }
+
+    fn begin_with_repair(&self, id: &str, repair: bool) -> Result<()> {
         let package = self.package(id)?;
         if !package.runtime_id.is_empty() && package.runtime.is_none() {
             return Err("此音色尚无适合当前系统的运行环境。".into());
@@ -955,7 +1114,11 @@ impl SpeechModels {
             if entry.state.working() && !entry.cancelled.load(Ordering::SeqCst) {
                 return Ok(());
             }
-            if entry.state == State::Ready && stamps_unchanged(&entry.stamps) {
+            if !repair
+                && entry.state == State::Ready
+                && stamps_unchanged(&entry.stamps)
+                && preferred_runtime_active(&package, entry.runtime.as_ref(), &self.root)
+            {
                 return Ok(());
             }
             entry.generation += 1;
@@ -963,8 +1126,10 @@ impl SpeechModels {
             entry.downloaded = 0;
             entry.error = None;
             entry.download_source = None;
-            entry.runtime = None;
-            entry.stamps.clear();
+            if !stamps_unchanged(&entry.stamps) {
+                entry.runtime = None;
+                entry.stamps.clear();
+            }
             entry.cancelled = cancelled.clone();
             let generation = entry.generation;
             downloads.workers += 1;
@@ -1015,7 +1180,11 @@ impl SpeechModels {
         let entry = downloads.entries.get_mut(id).ok_or("音色模型不存在。")?;
         if entry.state.working() {
             entry.cancelled.store(true, Ordering::SeqCst);
-            entry.state = State::NotDownloaded;
+            entry.state = if entry.runtime.is_some() && stamps_unchanged(&entry.stamps) {
+                State::Ready
+            } else {
+                State::NotDownloaded
+            };
             entry.downloaded = 0;
             entry.error = None;
             entry.download_source = None;
@@ -1097,7 +1266,16 @@ fn download_sources(package: &Package) -> Vec<String> {
         }
     }
     if let Some(runtime) = &package.runtime {
-        for url in std::iter::once(&runtime.archive.url).chain(&runtime.archive.mirrors) {
+        for url in std::iter::once(&runtime.archive.url)
+            .chain(&runtime.archive.mirrors)
+            .chain(
+                runtime
+                    .archive
+                    .parts
+                    .iter()
+                    .flat_map(|part| std::iter::once(&part.url).chain(&part.mirrors)),
+            )
+        {
             let source = source_origin(url);
             if !source.is_empty() && !sources.contains(&source) {
                 sources.push(source);
@@ -1362,6 +1540,7 @@ fn download_package(
     // still waiting for its current network read to finish.
     let _store_lock = wait_store_lock(root, cancelled)?;
     let installed = package_path(root, package);
+    let mut existing_models_valid = false;
     if installed.symlink_metadata().is_ok() {
         update(
             downloads,
@@ -1372,7 +1551,10 @@ fn download_package(
         );
         if let Ok(verified) = verify_package(package, &installed, bundled, cancelled) {
             check_cancelled(cancelled)?;
-            return Ok(verified);
+            if preferred_runtime_active(package, Some(&verified.0), root) {
+                return Ok(verified);
+            }
+            existing_models_valid = true;
         }
         check_cancelled(cancelled)?;
         update(downloads, &package.id, generation, State::Downloading, 0);
@@ -1402,17 +1584,29 @@ fn download_package(
     let mut completed = 0_u64;
     if let Some(runtime) = &package.runtime {
         let runtime_stamps =
-            runtime_packages::install(root, runtime, cancelled, |file, destination| {
-                download_file(&client, file, destination, cancelled, |received, source| {
-                    update_source(downloads, &package.id, generation, source);
-                    update(
-                        downloads,
-                        &package.id,
-                        generation,
-                        State::Downloading,
-                        received,
-                    );
-                })
+            runtime_packages::install(root, runtime, cancelled, |file, destination, offset| {
+                download_cached_file(
+                    &client,
+                    file,
+                    destination,
+                    root,
+                    cancelled,
+                    |received, source| {
+                        update_source(downloads, &package.id, generation, source);
+                        update(
+                            downloads,
+                            &package.id,
+                            generation,
+                            State::Downloading,
+                            if existing_models_valid {
+                                package.download_size
+                            } else {
+                                0
+                            } + offset
+                                + received,
+                        );
+                    },
+                )
             })?;
         if let Ok(mut state) = downloads.lock() {
             state
@@ -1420,6 +1614,25 @@ fn download_package(
                 .insert(package.runtime_id.clone(), runtime_stamps);
         }
         completed = runtime.archive.size;
+        let hashes: Vec<_> = if runtime.archive.parts.is_empty() {
+            vec![&runtime.archive.sha256]
+        } else {
+            runtime
+                .archive
+                .parts
+                .iter()
+                .map(|part| &part.sha256)
+                .collect()
+        };
+        for hash in hashes {
+            let _ = fs::remove_file(root.join(".verified-files").join(hash.to_lowercase()));
+        }
+    }
+    if existing_models_valid {
+        // An acceleration upgrade changes only the runtime. Keep the verified
+        // model directory in place, including files currently mapped by a CPU job.
+        check_cancelled(cancelled)?;
+        return verify_package(package, &installed, bundled, cancelled);
     }
     for file in &package.files {
         update_source(downloads, &package.id, generation, "");
@@ -1465,7 +1678,8 @@ fn download_package(
         State::Verifying,
         completed,
     );
-    let (_, mut stamps) = verify_package(package, staging.path(), bundled, cancelled)?;
+    let (verified_runtime, mut stamps) =
+        verify_package(package, staging.path(), bundled, cancelled)?;
     let staging_root = staging.path().canonicalize().map_err(|e| e.to_string())?;
     check_cancelled(cancelled)?;
     // Hold the state lock around the commit so cancellation cannot race the final rename.
@@ -1482,7 +1696,8 @@ fn download_package(
     remove_package(&installed)?;
     fs::rename(staging.path(), &installed).map_err(|e| format!("无法安装已下载音色：{e}"))?;
     // The verified file content is unchanged after the atomic rename.
-    let runtime = resolve_runtime(package, &installed, bundled)?;
+    let mut runtime = resolve_runtime(package, &installed, bundled)?;
+    runtime.python_cpu_fallback = verified_runtime.python_cpu_fallback;
     let installed_root = installed.canonicalize().map_err(|e| e.to_string())?;
     for stamp in &mut stamps {
         if let Ok(relative) = stamp.path.strip_prefix(&staging_root) {
@@ -1729,6 +1944,47 @@ mod tests {
         value["runtimes"][0]["platforms"]["macos-arm64"]["mirrors"] =
             json!(["https://ghfast.top/https://github.com/ecojust/open-media/runtime.zip"]);
         assert!(load_catalog(&value.to_string()).is_ok());
+    }
+
+    #[test]
+    fn accelerated_python_runtime_selection_preserves_cpu_package_and_weights() {
+        let mut value = catalog();
+        value["schema"] = json!(2);
+        value["models"][0]["runtimeId"] = json!("python-cpu-v1");
+        value["models"][0]["acceleratedRuntimeId"] = json!("python-cuda-v1");
+        value["models"][0]["model"] = json!({"kind":"f5","config":"model.onnx","sampleRate":24000});
+        let archive = json!({"url":"https://github.com/ecojust/open-media/releases/download/test/runtime.zip",
+            "size":100,"unpackedSize":200,"sha256":"a".repeat(64),"manifestSha256":"b".repeat(64),
+            "executable":"python/python.exe","script":"runner/tts.py"});
+        value["runtimes"] = json!([
+            {"id":"python-cpu-v1","version":1,"platforms":{runtime_packages::platform():archive.clone()}},
+            {"id":"python-cuda-v1","version":1,"platforms":{runtime_packages::platform():archive.clone()}}
+        ]);
+        let cpu = load_catalog_with_acceleration(&value.to_string(), false)
+            .unwrap()
+            .remove(0);
+        assert_eq!(cpu.runtime_id, "python-cpu-v1");
+        assert!(cpu.fallback_runtime.is_none());
+        let gpu = load_catalog_with_acceleration(&value.to_string(), true)
+            .unwrap()
+            .remove(0);
+        assert_eq!(gpu.runtime_id, "python-cuda-v1");
+        assert_eq!(gpu.fallback_runtime.as_ref().unwrap().id, "python-cpu-v1");
+        assert_eq!(cpu.id, gpu.id);
+        assert_eq!(cpu.version, gpu.version);
+        assert_eq!(cpu.model_size, gpu.model_size);
+        assert_eq!(
+            cpu.files
+                .iter()
+                .map(|file| (&file.path, &file.sha256))
+                .collect::<Vec<_>>(),
+            gpu.files
+                .iter()
+                .map(|file| (&file.path, &file.sha256))
+                .collect::<Vec<_>>()
+        );
+        value["runtimes"][1]["platforms"] = json!({"unsupported":archive});
+        assert!(load_catalog_with_acceleration(&value.to_string(), true).is_err());
     }
 
     #[test]
@@ -2188,6 +2444,8 @@ mod tests {
         let bundled_root = root.join("bundled");
         fs::create_dir_all(bundled_root.join("model/espeak-ng-data")).unwrap();
         let bundled = SpeechRuntime {
+            native_cpu_fallback: None,
+            python_cpu_fallback: None,
             root: bundled_root,
             executable: root.join("not-executed"),
             script: None,
@@ -2195,6 +2453,143 @@ mod tests {
             voices: Vec::new(),
         };
         (package, bundled)
+    }
+
+    fn installed_test_runtime(
+        root: &Path,
+        id: &str,
+        install: bool,
+    ) -> runtime_packages::SelectedRuntime {
+        let files = [
+            ("python/python.exe", b"interpreter".as_slice()),
+            ("runner/tts.py", b"runner".as_slice()),
+        ];
+        let manifest = serde_json::to_vec(&json!({"schema":1,"files":files.iter().map(|(path, bytes)| json!({
+            "path":path,"size":bytes.len(),"sha256":format!("{:x}",Sha256::digest(bytes)),"executable":false
+        })).collect::<Vec<_>>()})).unwrap();
+        let archive: runtime_packages::RuntimeArchive = serde_json::from_value(json!({
+            "url":"https://github.com/ecojust/open-media/releases/download/test/runtime.zip",
+            "size":100,"unpackedSize":manifest.len()+files.iter().map(|(_,b)|b.len()).sum::<usize>(),
+            "sha256":"a".repeat(64),"manifestSha256":format!("{:x}",Sha256::digest(&manifest)),
+            "executable":"python/python.exe","script":"runner/tts.py"
+        })).unwrap();
+        let runtime = runtime_packages::SelectedRuntime {
+            id: id.into(),
+            version: 1,
+            platform: runtime_packages::platform().into(),
+            archive,
+        };
+        if install {
+            let directory = runtime_packages::path(root, &runtime);
+            for (path, bytes) in files {
+                let file = directory.join(path);
+                fs::create_dir_all(file.parent().unwrap()).unwrap();
+                fs::write(file, bytes).unwrap();
+            }
+            fs::write(directory.join("manifest.json"), manifest).unwrap();
+        }
+        runtime
+    }
+
+    #[test]
+    fn gpu_upgrade_preserves_verified_cpu_voice_on_failure_cancel_and_switches_when_ready() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut package, bundled) = fixture_package(root.path());
+        package.model.kind = ModelKind::F5;
+        package.model.config = "model.onnx".into();
+        package.runtime_id = "python-cuda-v1".into();
+        package.runtime = Some(installed_test_runtime(root.path(), "python-cuda-v1", false));
+        package.fallback_runtime = Some(installed_test_runtime(root.path(), "python-cpu-v1", true));
+        let id = package.id.clone();
+        let (cpu, stamps) = verify_package(
+            &package,
+            &package_path(root.path(), &package),
+            Some(&bundled),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(cpu.executable.starts_with(runtime_packages::path(
+            root.path(),
+            package.fallback_runtime.as_ref().unwrap()
+        )));
+        let mut entry = Entry::default();
+        entry.state = State::Ready;
+        entry.runtime = Some(cpu.clone());
+        entry.stamps = stamps;
+        let manager = SpeechModels {
+            catalog: Arc::new(vec![package.clone()]),
+            root: root.path().into(),
+            bundled: Ok(bundled),
+            owner: Arc::new(Owner {
+                downloads: Arc::new(Mutex::new(Downloads {
+                    entries: HashMap::from([(id.clone(), entry)]),
+                    ..Downloads::default()
+                })),
+            }),
+        };
+        assert_eq!(
+            manager.voices()[0].runtime_status.as_deref(),
+            Some("upgrade-available")
+        );
+        assert_eq!(manager.voices()[0].status.as_deref(), Some("ready"));
+        update(&manager.owner.downloads, &id, 0, State::Downloading, 10);
+        assert_eq!(
+            manager.voices()[0].runtime_status.as_deref(),
+            Some("upgrade-downloading")
+        );
+        assert_eq!(
+            manager.runtime_for_voice("extra_voice").unwrap().executable,
+            cpu.executable
+        );
+        update(&manager.owner.downloads, &id, 0, State::Verifying, 10);
+        assert_eq!(
+            manager.voices()[0].runtime_status.as_deref(),
+            Some("upgrade-verifying")
+        );
+        finished(
+            &manager.owner.downloads,
+            &id,
+            0,
+            Err("组件下载失败".into()),
+            100,
+        );
+        assert_eq!(
+            manager.voices()[0].runtime_status.as_deref(),
+            Some("upgrade-failed")
+        );
+        assert_eq!(
+            manager.runtime_for_voice("extra_voice").unwrap().executable,
+            cpu.executable
+        );
+        update(&manager.owner.downloads, &id, 0, State::Downloading, 10);
+        manager.cancel(&id).unwrap();
+        finished(&manager.owner.downloads, &id, 0, Err(CANCELLED.into()), 100);
+        assert_eq!(
+            manager.voices()[0].runtime_status.as_deref(),
+            Some("upgrade-available")
+        );
+        assert_eq!(
+            manager.runtime_for_voice("extra_voice").unwrap().executable,
+            cpu.executable
+        );
+        installed_test_runtime(root.path(), "python-cuda-v1", true);
+        let gpu = manager.runtime_for_voice("extra_voice").unwrap();
+        assert!(gpu.executable.starts_with(runtime_packages::path(
+            root.path(),
+            package.runtime.as_ref().unwrap()
+        )));
+        assert_eq!(manager.voices()[0].runtime_status.as_deref(), Some("ready"));
+        let fallback = gpu
+            .python_cpu_fallback
+            .as_ref()
+            .expect("verified CPU runtime is available for loader failures");
+        assert_eq!(fallback.executable, cpu.executable);
+        assert_eq!(fallback.script, cpu.script.clone().unwrap());
+        fs::write(&fallback.executable, b"corrupt fallback executable").unwrap();
+        assert_eq!(manager.voices()[0].status.as_deref(), Some("ready"));
+        let still_gpu = manager.runtime_for_voice("extra_voice").unwrap();
+        assert_eq!(still_gpu.executable, gpu.executable);
+        assert!(still_gpu.python_cpu_fallback.is_none());
     }
 
     #[test]
@@ -2252,6 +2647,71 @@ mod tests {
             assert_eq!(voice.status.as_deref(), Some("failed"));
             assert!(voice.error.is_some());
         }
+    }
+
+    #[test]
+    fn explicit_repair_rechecks_ready_resources_and_reuses_local_files() {
+        let root = tempfile::tempdir().unwrap();
+        let (mut package, bundled) = fixture_package(root.path());
+        let bytes = embedded_file("f5-reference.txt").unwrap();
+        let installed = package_path(root.path(), &package);
+        for file in &mut package.files {
+            file.embedded = Some("f5-reference.txt".into());
+            file.size = bytes.len() as u64;
+            file.sha256 = format!("{:x}", Sha256::digest(bytes));
+            fs::write(installed.join(&file.path), bytes).unwrap();
+        }
+        package.model_size = bytes.len() as u64 * package.files.len() as u64;
+        package.download_size = 0;
+        let (runtime, stamps) = verify_package(
+            &package,
+            &installed,
+            Some(&bundled),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let mut entry = Entry::default();
+        entry.state = State::Ready;
+        entry.runtime = Some(runtime);
+        entry.stamps = stamps;
+        let id = package.id.clone();
+        let manager = SpeechModels {
+            catalog: Arc::new(vec![package]),
+            root: root.path().into(),
+            bundled: Ok(bundled),
+            owner: Arc::new(Owner {
+                downloads: Arc::new(Mutex::new(Downloads {
+                    entries: HashMap::from([(id.clone(), entry)]),
+                    ..Downloads::default()
+                })),
+            }),
+        };
+        let changed = installed.join("model.onnx");
+        let modified = fs::metadata(&changed).unwrap().modified().unwrap();
+        fs::write(&changed, vec![b'x'; bytes.len()]).unwrap();
+        File::open(&changed)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert!(stamps_unchanged(
+            &manager.owner.downloads.lock().unwrap().entries[&id].stamps
+        ));
+        manager.begin(&id).unwrap();
+        assert_eq!(
+            manager.owner.downloads.lock().unwrap().entries[&id].generation,
+            0
+        );
+        manager.repair(&id).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while manager.owner.downloads.lock().unwrap().workers > 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let state = manager.owner.downloads.lock().unwrap();
+        let entry = &state.entries[&id];
+        assert_eq!(entry.generation, 1);
+        assert_eq!(entry.state.name(), "ready", "{:?}", entry.error);
+        assert_eq!(state.workers, 0);
+        assert_eq!(fs::read(changed).unwrap(), bytes);
     }
 
     #[test]

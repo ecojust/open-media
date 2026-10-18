@@ -8,7 +8,7 @@ export type MediaJobSpec =
   | { kind: 'timeline'; project: Project; config: ExportConfig; textAssets?: Record<string, MediaAsset> }
   | { kind: 'convert'; asset: MediaAsset; format: string; width?: number; height?: number; fps?: number; quality?: 'draft' | 'balanced' | 'high'; audioOnly?: boolean; sampleRate?: number; videoBitrate?: number; audioBitrate?: number; trimStart?: number; trimEnd?: number }
   | { kind: 'gif'; asset: MediaAsset; segments: { start: number; end: number }[]; width: number; fps: number; loop?: boolean }
-export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress: number; name: string; outputPath?: string; error?: string }
+export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress: number; name: string; outputPath?: string; error?: string; startedAt?: number; elapsedSeconds?: number; backend?: string; stage?: string; fallbackReason?: string }
 export interface CaptureSize { width: number; height: number }
 export interface CaptureRegion extends CaptureSize { x: number; y: number }
 export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
@@ -17,10 +17,11 @@ export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'win
 export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
 export interface CaptureSelection { sourceId: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; region?: CaptureRegion; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
 export type SpeechVoiceStatus = 'bundled' | 'not-downloaded' | 'downloading' | 'verifying' | 'ready' | 'failed' | 'unsupported'
+export type SpeechRuntimeStatus = Exclude<SpeechVoiceStatus, 'bundled'> | 'upgrade-available' | 'upgrade-downloading' | 'upgrade-verifying' | 'upgrade-failed'
 export interface SpeechVoice {
   id: string; name: string; language: string; gender?: string
   modelId?: string; modelSize?: number; downloadSize?: number; status?: SpeechVoiceStatus; downloadedBytes?: number; error?: string
-  runtimeSize?: number; runtimeStatus?: Exclude<SpeechVoiceStatus, 'bundled'>; runtimeError?: string
+  runtimeSize?: number; runtimeStatus?: SpeechRuntimeStatus; runtimeError?: string; runtimeDownloadId?: string
   license?: string; usageNote?: string
   downloadSources?: string[]; downloadSource?: string
 }
@@ -76,10 +77,12 @@ export async function beginMediaJob(spec: MediaJobSpec): Promise<MediaJob | null
 }
 export async function getMediaJobs(): Promise<MediaJob[]> { return isDesktop() ? call('get_media_jobs') : [] }
 export async function cancelMediaJob(id: string): Promise<void> { return call('cancel_media_job', { id }) }
+export async function revealMediaJobOutput(id: string): Promise<void> { return call('reveal_media_job_output', { id }) }
 export async function getSpeechStatus(): Promise<SpeechStatus> {
   return isDesktop() ? call('get_speech_status') : { ready: false, voices: [], error: '离线文字转语音由桌面端提供，安装包内含语音模型和音色。' }
 }
 export async function beginSpeechModelDownload(modelId: string): Promise<SpeechStatus> { return call('begin_speech_model_download', { modelId }) }
+export async function repairSpeechModel(modelId: string): Promise<SpeechStatus> { return call('repair_speech_model', { modelId }) }
 export async function cancelSpeechModelDownload(modelId: string): Promise<SpeechStatus> { return call('cancel_speech_model_download', { modelId }) }
 async function speechJobAsset(job: SpeechJob): Promise<SpeechJob> { return job.asset ? { ...job, asset: await assetUrl(job.asset) } : job }
 export async function beginSpeechJob(request: SpeechRequest): Promise<SpeechJob> { return speechJobAsset(await call('begin_speech_job', { request })) }

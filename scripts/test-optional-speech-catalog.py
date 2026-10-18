@@ -21,7 +21,8 @@ class CudaCatalogMetadataTests(unittest.TestCase):
                     size=3_000_000_000, unpackedSize=6_000_000_000, sha256='b' * 64,
                     manifestSha256='c' * 64, executable='python/python.exe', script='runner/tts.py',
                     mirrors=['https://ghfast.top/' + BASE + 'speech-runtime-python-cuda-v1-windows-x64.zip'],
-                    parts=[dict(url=BASE + f'archive.zip.part{index:03}', size=1_500_000_000, sha256=char * 64)
+                    parts=[dict(url=BASE + f'archive.zip.part{index:03}', size=1_500_000_000, sha256=char * 64,
+                                mirrors=['https://ghfast.top/' + BASE + f'archive.zip.part{index:03}'])
                            for index, char in enumerate(['d', 'e'])])
 
     def load(self, data):
@@ -74,6 +75,7 @@ class NativeCatalogMetadataTests(CudaCatalogMetadataTests):
         data['mirrors'] = ['https://ghfast.top/' + data['url']]
         for part in data['parts']:
             part['url'] = part['url'].replace(BASE, base)
+            part['mirrors'] = [value.replace(BASE, base) for value in part['mirrors']]
         return data
 
     def load(self, data):
@@ -94,6 +96,14 @@ class NativeCatalogMetadataTests(CudaCatalogMetadataTests):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 self.load(data)
         self.assertEqual(self.load(self.metadata())['windows-x64']['kind'], 'native')
+
+    def test_split_assets_require_mirrors_for_each_real_download(self):
+        data = self.metadata()
+        data.pop('mirrors')
+        self.assertEqual(self.load(data)['windows-x64']['mirrors'], [])
+        data['parts'][1].pop('mirrors')
+        with self.assertRaises(ValueError):
+            self.load(data)
 
 
 if __name__ == '__main__':

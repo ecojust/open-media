@@ -2,7 +2,7 @@
 import { computed, ref, useId, watch } from 'vue'
 import type { SpeechVoice } from '../native'
 import { compactVoiceCatalog, voiceActionName, voiceComputeLabel, voiceModelName, voiceRecommendedMemoryGb, voiceSearchText, voiceStyle, voiceTypeLabel } from '../core/voice-catalog'
-import { voiceReady, voiceDownloading, voiceDownloadProgress, voiceDownloadSize, voiceModelSize, voiceRuntimeLabel, voiceUnsupported } from '../core/voice-downloads'
+import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade, voiceDownloadProgress, voiceDownloadSize, voiceModelSize, voiceRuntimeLabel, voiceUnsupported } from '../core/voice-downloads'
 import { bundledVoicePreviewUrl } from '../core/voice-previews'
 import Icon from './Icon.vue'
 import voicePortraits from '../assets/voices/voice-portraits.png'
@@ -15,7 +15,7 @@ const props = withDefaults(defineProps<{
   previewState?: 'idle' | 'loading' | 'playing'
   pendingModels?: string[]
 }>(), { disabled: false, previewVoiceId: '', previewState: 'idle', pendingModels: () => [] })
-const emit = defineEmits<{ 'update:modelValue': [id: string]; preview: [id: string]; download: [modelId: string]; cancelDownload: [modelId: string] }>()
+const emit = defineEmits<{ 'update:modelValue': [id: string]; preview: [id: string]; download: [modelId: string]; cancelDownload: [modelId: string]; repair: [modelId: string] }>()
 const instanceId = useId(), search = ref('')
 const scroller = ref<HTMLElement | null>(null)
 const catalog = computed(() => compactVoiceCatalog(props.voices, props.modelValue))
@@ -40,7 +40,7 @@ function artwork(voice: SpeechVoice): Record<string, string> {
 }
 function playing(voice: SpeechVoice): boolean { return props.previewVoiceId === voice.id && props.previewState === 'playing' }
 function loading(voice: SpeechVoice): boolean { return props.previewVoiceId === voice.id && props.previewState === 'loading' }
-function modelPending(voice: SpeechVoice): boolean { return !!voice.modelId && props.pendingModels.includes(voice.modelId) }
+function modelPending(voice: SpeechVoice): boolean { return [voiceDownloadId(voice), voiceRepairId(voice)].some(id => !!id && props.pendingModels.includes(id)) }
 function canPreview(voice: SpeechVoice): boolean { return voiceReady(voice) || !!bundledVoicePreviewUrl(voice.id) }
 function licenseLabel(voice: SpeechVoice): string {
   const license = voice.license?.trim()
@@ -72,20 +72,25 @@ function licenseLabel(voice: SpeechVoice): string {
             </div>
             <template v-if="voiceDownloading(voice)">
               <progress :value="voiceDownloadProgress(voice)" max="100" :aria-label="`${voiceActionName(voice)} 模型下载进度`" />
-              <span class="voice-model-state">{{ voice.status === 'verifying' || voice.runtimeStatus === 'verifying' ? '正在校验模型与运行组件…' : `正在下载 ${voiceDownloadProgress(voice)}%` }}</span>
-              <button type="button" class="voice-download-button" :disabled="disabled || modelPending(voice)" :aria-label="`取消下载 ${voiceActionName(voice)}`" @click="voice.modelId && emit('cancelDownload', voice.modelId)"><Icon name="close" :size="12" />{{ modelPending(voice) ? '正在取消…' : '取消下载' }}</button>
+              <span class="voice-model-state">{{ voice.runtimeStatus === 'upgrade-verifying' ? '正在校验 GPU 加速组件…' : voice.status === 'verifying' || voice.runtimeStatus === 'verifying' ? '正在校验模型与运行组件…' : `正在下载 ${voiceDownloadProgress(voice)}%` }}</span>
+              <button type="button" class="voice-download-button" :disabled="disabled || modelPending(voice)" :aria-label="`取消下载 ${voiceActionName(voice)}`" @click="voiceDownloadId(voice) && emit('cancelDownload', voiceDownloadId(voice)!)"><Icon name="close" :size="12" />{{ modelPending(voice) ? '正在取消…' : '取消下载' }}</button>
+            </template>
+            <template v-else-if="voiceReady(voice) && voiceRuntimeUpgrade(voice) && voiceDownloadId(voice)">
+              <span v-if="voice.runtimeStatus === 'upgrade-failed'" class="voice-model-error" :title="voice.runtimeError || voice.error">{{ voice.runtimeError || voice.error || 'GPU 加速组件下载失败，可重试；CPU 仍可使用' }}</span>
+              <button type="button" class="voice-download-button" :disabled="disabled || modelPending(voice)" :aria-label="`${voice.runtimeStatus === 'upgrade-failed' ? '重试下载' : '下载'} GPU 加速组件 ${voiceActionName(voice)}`" @click="emit('download', voiceDownloadId(voice)!)"><Icon :name="modelPending(voice) ? 'refresh' : 'download'" :class="{ 'voice-loading': modelPending(voice) }" :size="12" />{{ modelPending(voice) ? '正在准备…' : voice.runtimeStatus === 'upgrade-failed' ? '重试下载 GPU 加速组件' : '下载 GPU 加速组件' }}<span v-if="!modelPending(voice) && voiceModelSize(voice.runtimeSize)">{{ voiceModelSize(voice.runtimeSize) }}</span></button>
             </template>
             <span v-else-if="voiceUnsupported(voice)" class="voice-model-error" :title="voice.runtimeError || voice.error">{{ voice.runtimeError || voice.error || '当前平台暂不支持此模型' }}</span>
-            <template v-else-if="!voiceReady(voice) && voice.modelId">
+            <template v-else-if="!voiceReady(voice) && voiceDownloadId(voice)">
               <span v-if="voice.status === 'failed' || voice.runtimeStatus === 'failed'" class="voice-model-error" :title="voice.runtimeError || voice.error">{{ voice.runtimeError || voice.error || '下载失败，请重试' }}</span>
-              <button type="button" class="voice-download-button" :disabled="disabled || modelPending(voice)" :aria-label="`${voice.status === 'failed' || voice.runtimeStatus === 'failed' ? '重试下载' : '下载'} ${voiceActionName(voice)}`" @click="emit('download', voice.modelId)"><Icon :name="modelPending(voice) ? 'refresh' : 'download'" :class="{ 'voice-loading': modelPending(voice) }" :size="12" />{{ modelPending(voice) ? '正在准备…' : voice.status === 'failed' || voice.runtimeStatus === 'failed' ? '重试下载' : '下载' }}<span v-if="!modelPending(voice) && voiceModelSize(voiceDownloadSize(voice))">{{ voiceModelSize(voiceDownloadSize(voice)) }}</span></button>
+              <button type="button" class="voice-download-button" :disabled="disabled || modelPending(voice)" :aria-label="`${voice.status === 'failed' || voice.runtimeStatus === 'failed' ? '重试下载' : '下载'} ${voiceActionName(voice)}`" @click="emit('download', voiceDownloadId(voice)!)"><Icon :name="modelPending(voice) ? 'refresh' : 'download'" :class="{ 'voice-loading': modelPending(voice) }" :size="12" />{{ modelPending(voice) ? '正在准备…' : voice.status === 'failed' || voice.runtimeStatus === 'failed' ? '重试下载' : '下载' }}<span v-if="!modelPending(voice) && voiceModelSize(voiceDownloadSize(voice))">{{ voiceModelSize(voiceDownloadSize(voice)) }}</span></button>
             </template>
+            <button v-if="voiceReady(voice) && !voiceDownloading(voice) && voiceRepairId(voice)" type="button" class="voice-download-button voice-repair-button" :disabled="disabled || modelPending(voice)" :aria-label="`检查并修复 ${voiceActionName(voice)}`" title="检查本地模型和运行组件，保留完整文件，补齐缺失或损坏的文件" @click="emit('repair', voiceRepairId(voice)!)"><Icon :name="modelPending(voice) ? 'refresh' : 'check'" :class="{ 'voice-loading': modelPending(voice) }" :size="12" />{{ modelPending(voice) ? '正在处理…' : '检查并修复' }}</button>
           </div>
         </div>
       </div>
       <p v-else class="voice-empty" role="status">{{ voices.length ? '没有找到匹配的声音，试试其他名称、语言或类型。' : '暂时没有可用的声音。' }}</p>
     </div>
-    <p v-if="catalog.some(voice => voiceRecommendedMemoryGb(voice))" class="voice-hardware-note">macOS 自动检测硬件加速，Windows 当前使用 CPU。实际设备见生成进度；内存为整机建议。</p>
+    <p v-if="catalog.some(voice => voiceRecommendedMemoryGb(voice))" class="voice-hardware-note">GPU 组件按硬件下载后启用，不可用时自动回退 CPU。实际设备见生成进度；内存为整机建议。</p>
   </div>
 </template>
 
@@ -111,6 +116,7 @@ function licenseLabel(voice: SpeechVoice): string {
 .voice-model progress::-webkit-progress-bar{background:var(--ed-border)}.voice-model progress::-webkit-progress-value{background:var(--ed-accent)}
 .voice-picker .voice-card .voice-download-button{display:flex;align-items:center;justify-content:center;gap:4px;box-sizing:border-box;width:100%;min-height:28px;padding:4px;border:1px solid var(--ed-border);border-radius:6px;background:var(--ed-panel);color:var(--ed-accent);font:inherit;font-size:9px;cursor:pointer}
 .voice-picker .voice-card .voice-download-button:hover:not(:disabled){border-color:var(--ed-accent)}
+.voice-picker .voice-card .voice-repair-button{color:var(--ed-muted);background:transparent;border-color:transparent}
 .voice-model-error{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:#bc423a;overflow-wrap:anywhere}
 .voice-picker .voice-card .voice-choice{position:relative;box-sizing:border-box;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:0;overflow:hidden;width:100%;min-height:0;padding:0;border:1px solid var(--ed-border);border-radius:9px;background:var(--ed-panel);color:var(--ed-text);font:inherit;text-align:left;line-height:1.4;cursor:pointer}
 .voice-picker .voice-card .voice-choice:hover:not(:disabled){border-color:var(--ed-accent);background:var(--ed-panel);color:var(--ed-text)}

@@ -19,7 +19,8 @@ import { adoptFirstVideoSize } from './core/project-size.ts'
 import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, redoHistory, undoHistory } from './core/timeline.ts'
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
 import { exportProjectFile, importProjectFile } from './core/project-file.ts'
-import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, ProjectSaveLocationError, type BrowserProjectFileHandle } from './core/browser-project-files.ts'
+import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, type BrowserProjectFileHandle } from './core/browser-project-files.ts'
+import { loadProjectSaveTarget, storeProjectSaveTarget, type ProjectSaveTarget } from './core/project-save-targets.ts'
 import { downloadBlob, importMediaFile } from './core/media-import.ts'
 import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, saveProjectFile, type ProjectFileTarget, type MediaJob } from './native.ts'
 
@@ -39,6 +40,7 @@ const draftSeconds = ref(0), lastSaveAt = ref(''), lastSaveKind = ref<'draft' | 
 const DRAFT_DELAY_MS = 3000
 let draftCountdown: ReturnType<typeof setInterval> | undefined, projectGeneration = 0, draftSaveRequest = 0
 let nativeProjectTarget: ProjectFileTarget | undefined, browserProjectTarget: BrowserProjectFileHandle | undefined
+let saveTargetRestoreError = ''
 const recent = ref<ProjectSummary[]>([]), status = ref('本地创作，自由表达'), busy = ref(''), error = ref(''), recording = ref(false), browserExporting = ref(false)
 const exportOpen = ref(false), jobsOpen = ref(false), jobs = ref<MediaJob[]>([])
 const mediaInput = ref<HTMLInputElement>(), projectInput = ref<HTMLInputElement>(), renameInput = ref<HTMLInputElement>(), renaming = ref(false), renameValue = ref(''), search = ref('')
@@ -331,13 +333,40 @@ function releaseUnusedMedia(next: Project) {
     if (![...entry.urls].some(url => retainedUrls.has(url))) { entry.release(); hydratedReleases.splice(index, 1) }
   }
 }
-function adoptProject(next: Project, restored = false, savedAt?: string) {
+function applyProjectSaveTarget(target?: ProjectSaveTarget) {
+  nativeProjectTarget = target?.kind === 'native' ? target.target : undefined
+  browserProjectTarget = target?.kind === 'browser' ? target.handle : undefined
+  lastSaved.value = nativeProjectTarget?.path ?? browserProjectTarget?.name ?? ''
+  saveTargetRestoreError = ''
+}
+async function rememberProjectSaveTarget(projectId: string, target?: ProjectSaveTarget): Promise<string> {
+  applyProjectSaveTarget(target)
+  try { await storeProjectSaveTarget(projectId, target); return '' }
+  catch {
+    if (!target) {
+      saveTargetRestoreError = '项目已打开，但无法清除旧保存位置记录。请使用“另存为”选择保存位置。'
+      return saveTargetRestoreError
+    }
+    return '文件操作已完成，但无法记住保存位置；本次会话仍可直接保存，重新打开应用后请检查保存位置。'
+  }
+}
+async function adoptProject(next: Project, restored = false, savedAt?: string) {
   projectGeneration++; draftGeneration++; cancelDraftCountdown()
   lastSaveAt.value = savedAt || ''; lastSaveKind.value = 'draft'
-  nativeProjectTarget = undefined; browserProjectTarget = undefined
+  applyProjectSaveTarget()
   releaseUnusedMedia(next)
   project.value = next; history.value = createHistory(next); cleanKey.value = contentKey(next); draftState.value = restored ? 'saved' : 'idle'; lastSaved.value = ''; remember()
   view.value = 'edit'; screenshotAssetId.value = ''; error.value = ''; if (!restored) scheduleDraft()
+  if (restored) {
+    try {
+      const target = await loadProjectSaveTarget(next.id)
+      if (target && (target.kind === 'native') !== native) throw new Error('保存位置属于另一运行环境。')
+      applyProjectSaveTarget(target)
+    } catch (cause) {
+      saveTargetRestoreError = `无法恢复项目保存位置，请重新打开本地项目后重试，或使用“另存为”选择位置。${cause instanceof Error ? cause.message : ''}`
+      fail(saveTargetRestoreError)
+    }
+  }
 }
 function mediaIsWorking(): boolean { return screenshotBusy.value || recording.value || pendingMedia.value > 0 || browserExporting.value || runningJobs.value > 0 || imageConverting.value || videoConverting.value || gifConverting.value || speechWorking.value }
 async function changeProject(action: () => Promise<void>): Promise<void> {
@@ -346,7 +375,7 @@ async function changeProject(action: () => Promise<void>): Promise<void> {
   switching.value = true
   try { if (await protectProject()) await action() } catch (cause) { fail(cause) } finally { switching.value = false }
 }
-async function newProject() { await changeProject(async () => { adoptProject(createProject()); announce('已新建项目。') }) }
+async function newProject() { await changeProject(async () => { await adoptProject(createProject()); announce('已新建项目。') }) }
 async function hydrate(imported: ImportedProject) {
   const next = cloneProject(imported.project)
   if (native) {
@@ -383,10 +412,13 @@ async function openProject(file?: File) {
       if (!selected) return
       const imported = await importProjectFile(selected instanceof File ? selected : new Uint8Array(selected.bytes))
       try {
-        adoptProject(await hydrate(imported))
-        if (!(selected instanceof File)) { nativeProjectTarget = { name: selected.name, path: selected.path, token: selected.token }; lastSaved.value = selected.path }
-        else if (browserSelection) { browserProjectTarget = browserSelection.handle; lastSaved.value = browserSelection.handle.name }
-        cleanKey.value = contentKey(project.value); announce('项目与素材已打开。')
+        await adoptProject(await hydrate(imported))
+        const target: ProjectSaveTarget | undefined = !(selected instanceof File)
+          ? { kind: 'native', target: { name: selected.name, path: selected.path, token: selected.token } }
+          : browserSelection ? { kind: 'browser', handle: browserSelection.handle } : undefined
+        const warning = await rememberProjectSaveTarget(project.value.id, target)
+        cleanKey.value = contentKey(project.value); announce(warning || '项目与素材已打开。')
+        if (warning) error.value = warning
       } catch (cause) { imported.revoke(); throw cause }
     } finally { busy.value = '' }
   })
@@ -394,7 +426,7 @@ async function openProject(file?: File) {
 async function openRecent(id: string) {
   await changeProject(async () => {
     busy.value = '正在恢复本地草稿…'
-    try { const imported = await loadProject(id); try { adoptProject(await hydrate(imported), true, imported.savedAt); announce('已恢复本地项目。') } catch (cause) { imported.revoke(); throw cause } } finally { busy.value = '' }
+    try { const imported = await loadProject(id); try { await adoptProject(await hydrate(imported), true, imported.savedAt); if (!saveTargetRestoreError) announce('已恢复本地项目。') } catch (cause) { imported.revoke(); throw cause } } finally { busy.value = '' }
   })
 }
 async function removeRecent(item: ProjectSummary) {
@@ -404,6 +436,7 @@ async function removeRecent(item: ProjectSummary) {
 }
 async function save(saveAs = false, closing = false): Promise<boolean> {
   if (busy.value || switching.value && !closing || booting.value || speechWorking.value) return false
+  if (!saveAs && saveTargetRestoreError) { fail(saveTargetRestoreError); return false }
   busy.value = '正在打包项目与素材…'; error.value = ''
   const snapshot = cloneProject(project.value), key = contentKey(snapshot)
   try {
@@ -411,23 +444,23 @@ async function save(saveAs = false, closing = false): Promise<boolean> {
     const browserTarget = native ? undefined : await prepareBrowserProjectSave(name, saveAs ? undefined : browserProjectTarget)
     if (browserTarget === null) return false
     const blob = await exportProjectFile(snapshot, { blobs, onProgress: (done, total) => { busy.value = `正在打包项目 ${Math.round(done / Math.max(1, total) * 100)}%` } })
-    let downloaded = false
+    let downloaded = false, targetWarning = ''
     if (native) {
       const target = await saveProjectFile(name, new Uint8Array(await blob.arrayBuffer()), saveAs ? undefined : nativeProjectTarget?.token)
       if (!target) return false
-      nativeProjectTarget = target; lastSaved.value = target.path
+      targetWarning = await rememberProjectSaveTarget(snapshot.id, { kind: 'native', target })
     } else if (browserTarget) {
       await writeBrowserProjectFile(browserTarget, blob)
-      browserProjectTarget = browserTarget; lastSaved.value = browserTarget.name
+      targetWarning = await rememberProjectSaveTarget(snapshot.id, { kind: 'browser', handle: browserTarget })
     } else { downloadBlob(blob, name); lastSaved.value = name; downloaded = true }
     const savedAt = new Date().toISOString()
     if (project.value.id === snapshot.id) cleanKey.value = key
     await persist()
     if (project.value.id === snapshot.id) { lastSaveAt.value = savedAt; lastSaveKind.value = 'file' }
-    announce(downloaded ? '已下载项目副本；当前浏览器不支持直接覆盖文件。' : `${saveAs ? '项目已另存为' : '项目已保存'}：${lastSaved.value}`)
+    announce(downloaded ? '已下载项目副本；当前浏览器不支持直接覆盖文件。' : `${saveAs ? '项目已另存为' : '项目已保存'}：${lastSaved.value}${targetWarning ? `；${targetWarning}` : ''}`)
+    if (targetWarning) error.value = targetWarning
     return true
   } catch (cause) {
-    if (!saveAs && cause instanceof ProjectSaveLocationError) browserProjectTarget = undefined
     fail(cause)
     return false
   } finally { busy.value = '' }
@@ -508,7 +541,7 @@ onMounted(async () => {
   mediaQuery = matchMedia('(prefers-color-scheme: dark)'); systemDark.value = mediaQuery.matches; mediaQuery.addEventListener('change', mediaChanged)
   window.addEventListener('keydown', keyboard); window.addEventListener('beforeunload', unload)
   try { autoSave.value = localStorage.getItem('open-media:autosave') !== 'false'; const value = localStorage.getItem('open-media:theme'); if (value === 'light' || value === 'dark' || value === 'system') theme.value = value } catch {}
-  try { await refreshRecent(); const last = localStorage.getItem('open-media:last-project'); if (last && recent.value.some(item => item.id === last)) { const imported = await loadProject(last); const restored = await hydrate(imported); adoptProject(restored, true, imported.savedAt); view.value = 'home' } } catch (cause) { fail(cause) }
+  try { await refreshRecent(); const last = localStorage.getItem('open-media:last-project'); if (last && recent.value.some(item => item.id === last)) { const imported = await loadProject(last); const restored = await hydrate(imported); await adoptProject(restored, true, imported.savedAt); view.value = 'home' } } catch (cause) { fail(cause) }
   booting.value = false
   void initializeScreenshot()
   if (native) {

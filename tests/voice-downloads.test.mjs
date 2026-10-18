@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { voiceReady, voiceDownloading, voiceUnsupported, voiceRuntimeLabel, voiceDownloadProgress, voiceDownloadSize, voiceModelSize, voiceSourceOrigin, voiceDownloadSources } from '../src/core/voice-downloads.ts'
+import { voiceReady, voiceDownloading, voiceDownloadId, voiceRepairId, voiceRuntimeUpgrade, voiceUnsupported, voiceRuntimeLabel, voiceDownloadProgress, voiceDownloadSize, voiceModelSize, voiceSourceOrigin, voiceDownloadSources } from '../src/core/voice-downloads.ts'
 
 const voice = { id: 'f5_zh_female', name: 'F5-TTS v1 Base FP32', language: 'zh-CN', gender: 'female', modelSize: 1_402_816_013, runtimeSize: 800_000_000, downloadSize: 2_202_816_013, status: 'ready' }
 
@@ -41,4 +41,39 @@ test('download source links expose only distinct HTTPS origins and never credent
   assert.equal(voiceSourceOrigin('https://hf-mirror.com/path?token=untrusted'), 'https://hf-mirror.com')
   assert.equal(voiceSourceOrigin(undefined), '')
   assert.deepEqual(voiceDownloadSources(voice), [])
+})
+
+
+test('GPU runtime upgrades preserve a verified CPU voice and poll only active transfers', () => {
+  for (const runtimeStatus of ['upgrade-available', 'upgrade-downloading', 'upgrade-verifying', 'upgrade-failed']) {
+    const upgrading = { ...voice, runtimeStatus }
+    assert.equal(voiceRuntimeUpgrade(upgrading), true)
+    assert.equal(voiceReady(upgrading), true, runtimeStatus)
+    assert.equal(voiceReady({ ...upgrading, status: 'bundled' }), true)
+    assert.equal(voiceReady({ ...upgrading, status: 'not-downloaded' }), false)
+    assert.equal(voiceDownloading(upgrading), ['upgrade-downloading', 'upgrade-verifying'].includes(runtimeStatus))
+    assert.equal(voiceDownloadSize(upgrading), 800_000_000, 'only the runtime is downloaded again')
+    assert.match(voiceRuntimeLabel(upgrading), /GPU 加速组件 · 800 MB · .*CPU 可用/)
+  }
+  assert.equal(voiceRuntimeUpgrade({ ...voice, runtimeStatus: 'ready' }), false)
+})
+
+test('GPU upgrade progress excludes installed model bytes and native runtime download IDs are shared', () => {
+  const upgrade = { ...voice, modelId: 'f5', runtimeStatus: 'upgrade-downloading' }
+  assert.equal(voiceDownloadProgress({ ...upgrade, downloadedBytes: voice.modelSize }), 0)
+  assert.equal(voiceDownloadProgress({ ...upgrade, downloadedBytes: voice.modelSize + 400_000_000 }), 50)
+  assert.equal(voiceDownloadProgress({ ...upgrade, downloadedBytes: voice.modelSize + voice.runtimeSize }), 100)
+  assert.equal(voiceDownloadProgress({ ...upgrade, downloadedBytes: -1 }), 0)
+  assert.equal(voiceDownloadProgress({ ...upgrade, runtimeSize: Number.NaN }), 0)
+  assert.equal(voiceDownloadSize({ ...upgrade, runtimeSize: undefined }), undefined)
+  const native = { ...upgrade, runtimeDownloadId: 'native-gpu-runtime', downloadSize: voice.runtimeSize, downloadedBytes: 400_000_000 }
+  assert.equal(voiceDownloadProgress(native), 50)
+  assert.equal(voiceDownloadId(native), 'native-gpu-runtime')
+  assert.equal(voiceRepairId(native), 'f5', 'repair targets the installed model, not its shared runtime')
+  assert.equal(voiceRepairId({ ...native, modelId: undefined, runtimeStatus: 'upgrade-available' }), undefined, 'a fresh component is a download, not a repair')
+  assert.equal(voiceRepairId({ ...native, modelId: undefined, runtimeStatus: 'ready' }), 'native-gpu-runtime')
+  assert.equal(voiceRepairId({ ...native, modelId: undefined, runtimeStatus: 'upgrade-failed' }), 'native-gpu-runtime')
+  assert.equal(voiceRepairId(voice), undefined)
+  assert.equal(voiceDownloadId(upgrade), 'f5')
+  assert.equal(voiceDownloadId(voice), undefined)
 })

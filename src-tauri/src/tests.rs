@@ -630,6 +630,7 @@ fn cancelling_output_preserves_existing_file() {
     let target = temp.path().join("existing.mp4");
     fs::write(&target, b"original-file").unwrap();
     let plan = RenderPlan {
+        video: None,
         args: vec![
             "-f".into(),
             "lavfi".into(),
@@ -905,6 +906,7 @@ fn shutdown_waits_for_encoder_cancellation_without_replacing_output() {
     let target = temp.path().join("shutdown.mp4");
     fs::write(&target, b"existing-output").unwrap();
     let plan = RenderPlan {
+        video: None,
         args: vec![
             "-f".into(),
             "lavfi".into(),
@@ -931,4 +933,35 @@ fn shutdown_waits_for_encoder_cancellation_without_replacing_output() {
         "shutdown must finish cancellation before returning"
     );
     assert_eq!(fs::read(target).unwrap(), b"existing-output");
+}
+
+#[test]
+fn timeline_split_preserves_every_decoded_frame_across_fractional_boundaries() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let source = temp.path().join("continuous-source.mp4");
+    let created = process(&rt.encoder)
+        .args(["-v", "error", "-y", "-f", "lavfi", "-i", "color=c=0xe04020:s=160x96:r=25:d=3", "-c:v", "libx264", "-pix_fmt", "yuv420p"])
+        .arg(&source).output().unwrap();
+    assert!(created.status.success(), "{}", String::from_utf8_lossy(&created.stderr));
+    let asset = MediaStore::new(temp.path()).unwrap().import(&rt, &source, None).unwrap();
+    for (index, (fps, speed, boundary, gap)) in [(30.0, 1.0, 0.713, 0.0), (30.0, 1.25, 0.713, 0.0), (24.0, 1.3, 0.7, 0.0), (30.0, 1.0, 0.713, 0.3)].into_iter().enumerate() {
+        let cut = 0.137 + boundary * speed;
+        let visual = |id: &str, start: f64, trim_in: f64, trim_out: f64| json!({"id":id,"assetId":asset.id,"start":start,"trimIn":trim_in,"trimOut":trim_out,"speed":speed,"width":160,"height":96,"volume":0,"fadeIn":0,"fadeOut":0});
+        let spec = json!({"kind":"timeline","project":{"width":160,"height":96,"background":"#0000ff","assets":[asset.clone()],"tracks":[{"kind":"video","muted":true,"clips":[visual("left",0.0,0.137,cut),visual("right",boundary+gap,cut,2.537)]}]},"config":{"format":"mp4","width":160,"height":96,"fps":fps,"quality":"high"}});
+        let name = format!("split-{index}.mp4");
+        run(temp.path(), &rt, spec, &name);
+        let decoded = process(&rt.encoder).args(["-v", "error", "-i"]).arg(temp.path().join(name))
+            .args(["-vf", "crop=2:2:80:48,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]).output().unwrap();
+        assert!(decoded.status.success(), "{}", String::from_utf8_lossy(&decoded.stderr));
+        assert!(decoded.stdout.len() / 3 >= (((2.4 / speed + gap) * fps).floor() as usize));
+        for (frame, pixel) in decoded.stdout.chunks_exact(3).enumerate() {
+            let time = frame as f64 / fps;
+            if gap > 0.0 && time >= boundary && time < boundary + gap {
+                assert!(pixel[2] > 150 && pixel[0] < 50, "holding the final decoded frame must not extend the clip across an intentional gap: frame={frame}, pixel={pixel:?}");
+            } else {
+                assert!(pixel[0] > 150 && pixel[1] < 100, "native split background frame {frame} at {time}s, fps={fps}, speed={speed}, split={boundary}, pixel={pixel:?}");
+            }
+        }
+    }
 }

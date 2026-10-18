@@ -1,0 +1,227 @@
+{
+  "schema": 2,
+  "text": "这是一款全程由AI接管并生成的软件",
+  "encoding": "Published comparison MP3 copied byte-for-byte; no additional re-encoding, voice substitution or speed changes.",
+  "previews": [
+    {
+      "voiceId": "zipvoice_zh_female",
+      "modelId": "zipvoice-distill-fp32",
+      "modelName": "ZipVoice Distill FP32 · 官方中文前端",
+      "language": "zh-CN",
+      "file": "zipvoice_zh_female.mp3",
+      "text": "这是一款全程由AI接管并生成的软件",
+      "sampleRate": 24000,
+      "channels": 1,
+      "durationSeconds": 3.687625,
+      "decodedDurationSeconds": 3.687625,
+      "sha256": "32c001eec39269518dd86b00016fdd36b5b361213469dc933be2df6d71bce9d9",
+      "bytes": 75404,
+      "peak": 0.65512085,
+      "decodedPeak": 0.6222628355026245,
+      "wavSha256": "5e097cc7c7d72ad8134986066bfbd13f0a20f3d6bd2929b50d96e94d5cf3f47f",
+      "source": {
+        "manifest": "test/chinese-tts-benchmark/manifests/zipvoice-distill-fp32-zh-frontend.json",
+        "benchmarkModelId": "zipvoice-distill-fp32-zh-frontend",
+        "sampleId": "01",
+        "mp3": "test/chinese-tts-benchmark/audio/zipvoice-distill-fp32-zh-frontend/01.mp3",
+        "wav": "test/chinese-tts-benchmark/wav/zipvoice-distill-fp32-zh-frontend/01.wav"
+      },
+      "settings": {
+        "threads": 1,
+        "provider": "cpu",
+        "speed": 1.0,
+        "silence_scale": 1.0,
+        "max_sentences_per_batch": 1,
+        "mp3_bitrate": 128000,
+        "postprocessing": "MP3 encoding only. Original WAV retained; no pitch, loudness or tempo processing.",
+        "input_preprocessing": "Original corpus text is passed automatically through the unmodified upstream ChineseTextNormalizer.normalize (cn2an.transform an2cn); both original text and actual normalized_text are retained. No hand editing.",
+        "sample_rate": 24000,
+        "num_steps": 8,
+        "guidance_scale": 1.0,
+        "t_shift": 0.5,
+        "feat_scale": 0.1,
+        "target_rms": 0.1,
+        "zipvoice_chunking": {
+          "min_char_in_sentence": 30,
+          "max_char_in_sentence": 200,
+          "note": "Actual defaults in this implementation; generic tts-max-num-sentences is not used by ZipVoice."
+        }
+      },
+      "referenceAudio": {
+        "wav": "reference/matcha-reference.wav",
+        "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec",
+        "text": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
+        "origin": "Previously generated Open Media builtin Matcha-TTS Chinese preview. Synthetic voice, not a real-person recording.",
+        "source_model": "matcha-icefall-zh-en 20251125-steps-3",
+        "source_manifest": "/workspace/open-media/src/assets/voice-previews/manifest.json",
+        "duration_seconds": 5.059625,
+        "sample_rate": 16000
+      },
+      "license": {
+        "name": "CC-BY-NC（模型权重，研究试听）",
+        "text": "licenses/MODEL_README.md",
+        "source": "https://huggingface.co/k2-fsa/ZipVoice/blob/main/README.md",
+        "weights": "Official model README states CC-BY-NC due to Emilia training data; no license version specified. This test is research comparison, not commercial-use clearance.",
+        "code": {
+          "name": "Apache-2.0",
+          "text": "licenses/CODE_LICENSE",
+          "source": "https://github.com/k2-fsa/ZipVoice/blob/master/LICENSE"
+        },
+        "text_frontend_note": "Bundled espeak-ng frontend data retains its original GPL-3.0-or-later license; runtime handled separately."
+      },
+      "licenseFiles": [
+        {
+          "path": "licenses/zipvoice-distill-fp32/CODE_LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        {
+          "path": "licenses/zipvoice-distill-fp32/MODEL_README.md",
+          "sha256": "f70e09af66ce80f5aa439069ba68c9f39136fb99d6b2e09fc64260fa2e85b6c7"
+        }
+      ]
+    },
+    {
+      "voiceId": "f5_zh_female",
+      "modelId": "f5-v1-base-fp32",
+      "modelName": "F5-TTS v1 Base FP32",
+      "language": "zh-CN",
+      "file": "f5_zh_female.mp3",
+      "text": "这是一款全程由AI接管并生成的软件",
+      "sampleRate": 24000,
+      "channels": 1,
+      "durationSeconds": 3.317333,
+      "decodedDurationSeconds": 3.3173333333333335,
+      "sha256": "ab24d98f87aff6293ca0a406fa6f28f8da37d4f4a62112a0af0cc681fa0f47ca",
+      "bytes": 68204,
+      "peak": 0.79534912,
+      "decodedPeak": 0.7555218935012817,
+      "wavSha256": "5e8e111868d80f8d6ba0f3e20c20845924ad4b7c8eb1f48e99a36cefdf6e670f",
+      "source": {
+        "manifest": "test/chinese-tts-benchmark/manifests/f5-v1-base-fp32.json",
+        "benchmarkModelId": "f5-v1-base-fp32",
+        "sampleId": "01",
+        "mp3": "test/chinese-tts-benchmark/audio/f5-v1-base-fp32/01.mp3",
+        "wav": "test/chinese-tts-benchmark/wav/f5-v1-base-fp32/01.wav"
+      },
+      "settings": {
+        "steps": 32,
+        "cfg_strength": 2.0,
+        "sway_sampling_coef": -1.0,
+        "ode_method": "euler",
+        "sample_rate": 24000,
+        "threads": 4,
+        "interop_threads": 1,
+        "speed": "默认1.0；UTF-8字节数小于10的短片段按上游逻辑使用0.3，实际值见samples[].chunks[].speed",
+        "target_rms": 0.1,
+        "chunking": "Unchanged upstream UTF-8 byte-based sentence splitting targeting 22 seconds including reference. Original samples 01–09 run sequential chunks; sample 10 recovers three unchanged chunks in parallel, then combines them in original order.",
+        "crossfade_seconds": 0.15,
+        "random_seed": "20261017 + corpus_number*100 + chunk_number",
+        "text_normalization": "Exact original Chinese input. Upstream rjieba/pypinyin conversion only; numbers, English abbreviations and punctuation were not manually rewritten.",
+        "reference": {
+          "kind": "synthetic-reference",
+          "model": "Matcha icefall zh-en steps-3",
+          "speaker": 0,
+          "text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
+          "wav": "reference.wav",
+          "sampleRate": 24000,
+          "durationSeconds": 8.729375,
+          "sourceSampleRate": 16000,
+          "sourceWavSha256": "a0951947112f1651479c58af99e4c1870fa3fcc5452cb185383a3e16044089b3",
+          "wavSha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+          "conversion": "ffmpeg -ar 24000 -ac 1; no other audio edits",
+          "consent": "Reference generated locally by the application model for this evaluation; no recording of a human person was used."
+        },
+        "postprocessing": "Original upstream crossfade and RMS restoration only. Samples 01–09 retain original PCM16 files; recovered 10 uses FLOAT to preserve finite above-full-scale samples. No additional gain normalization, denoising, pitch or tempo edits. MP3 files are lossy listening derivatives."
+      },
+      "referenceAudio": null,
+      "license": {
+        "weights": "CC-BY-NC-4.0",
+        "inference_code": "MIT",
+        "vocoder": "MIT",
+        "texts": [
+          "licenses/CC-BY-NC-4.0.txt",
+          "licenses/F5-code-MIT.txt",
+          "licenses/Vocos-MIT.txt"
+        ],
+        "restriction": "非商业研究试听；未作为产品内置或可下载模型发布。"
+      },
+      "licenseFiles": [
+        {
+          "path": "licenses/f5-v1-base-fp32/CC-BY-NC-4.0.txt",
+          "sha256": "cc97a2c4ff7723a1f25179dc7c18f676fa84191bbb36ea7d0061acaf3c102559"
+        },
+        {
+          "path": "licenses/f5-v1-base-fp32/F5-code-MIT.txt",
+          "sha256": "c70811d1402134de900e811d3eaa349eb60f4d38a8f635b27b1e378c630facd2"
+        },
+        {
+          "path": "licenses/f5-v1-base-fp32/Vocos-MIT.txt",
+          "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46"
+        }
+      ]
+    },
+    {
+      "voiceId": "qwen3_serena",
+      "modelId": "qwen3-tts-1.7b-serena",
+      "modelName": "Qwen3-TTS 1.7B BF16 · Serena",
+      "language": "zh-CN",
+      "file": "qwen3_serena.mp3",
+      "text": "这是一款全程由AI接管并生成的软件",
+      "sampleRate": 24000,
+      "channels": 1,
+      "durationSeconds": 3.36,
+      "decodedDurationSeconds": 3.36,
+      "sha256": "3e26230f0102c418237582545c7fda0234db2c7eb51170e59c5af15f02d8fa2a",
+      "bytes": 68684,
+      "peak": 0.40625,
+      "decodedPeak": 0.38576048612594604,
+      "wavSha256": "d9399d420961632834515af46b176f6f748cae5cfe744da3d33de33f8347ea7f",
+      "source": {
+        "manifest": "test/chinese-tts-benchmark/manifests/qwen3-tts-1.7b-serena.json",
+        "benchmarkModelId": "qwen3-tts-1.7b-serena",
+        "sampleId": "01",
+        "mp3": "test/chinese-tts-benchmark/audio/qwen3-tts-1.7b-serena/01.mp3",
+        "wav": "test/chinese-tts-benchmark/wav/qwen3-tts-1.7b-serena/01.wav"
+      },
+      "settings": {
+        "device": "cpu",
+        "dtype": "bfloat16",
+        "attention": "sdpa",
+        "threads": 4,
+        "language": "Chinese",
+        "speaker": "Serena",
+        "instruct": "用自然流畅的标准普通话朗读，语气温和，语速适中。",
+        "non_streaming_mode": true,
+        "do_sample": true,
+        "temperature": 0.9,
+        "top_p": 1.0,
+        "top_k": 50,
+        "repetition_penalty": 1.05,
+        "subtalker_dosample": true,
+        "subtalker_temperature": 0.9,
+        "subtalker_top_p": 1.0,
+        "subtalker_top_k": 50,
+        "max_new_tokens": 2048,
+        "seed_base": 20261017,
+        "text_normalization": "none; original corpus text is passed unchanged",
+        "postprocessing": "none; original PCM WAV and MP3 encoding only"
+      },
+      "referenceAudio": null,
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "licenses/LICENSE",
+        "model_card": "licenses/MODEL_CARD.md"
+      },
+      "licenseFiles": [
+        {
+          "path": "licenses/qwen3-tts-1.7b-serena/LICENSE",
+          "sha256": "a44a6081c73ad75f0255bb2bb5cab74ef1829565a895a24e53a4f11290ab7655"
+        },
+        {
+          "path": "licenses/qwen3-tts-1.7b-serena/MODEL_CARD.md",
+          "sha256": "64f65e809b51cc0c35f393fbbfcc2d735c0cb3fdbbc6f3fdc4a5e6ce55e9d088"
+        }
+      ]
+    }
+  ]
+}

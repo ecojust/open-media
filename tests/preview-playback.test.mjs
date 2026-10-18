@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { TimelinePreview } from '../src/core/preview.ts'
 import { createProject, createClip } from '../src/core/project.ts'
-import { addAsset, addClip } from '../src/core/timeline.ts'
+import { addAsset, addClip, splitClip, updateClip } from '../src/core/timeline.ts'
 
 function playbackHarness(t, { pending = false, ready = true, video = false, frameReady = false } = {}) {
   const elements = []
@@ -71,8 +71,59 @@ function playbackHarness(t, { pending = false, ready = true, video = false, fram
   const ctx = { save() {}, restore() {}, setTransform() {}, fillRect() {}, translate() {}, rotate() {}, beginPath() {}, rect() {}, clip() {}, drawImage() { imagesDrawn++ } }
   const errors = []
   const preview = new TimelinePreview({ width: 32, height: 32, getContext: () => ctx }, project, error => errors.push(error))
-  return { preview, media: elements[0], errors, get imagesDrawn() { return imagesDrawn } }
+  return { preview, media: elements[0], project, elements, errors, get imagesDrawn() { return imagesDrawn } }
 }
+
+test('视频分割边界沿用正在解码的画面与音频，不再次定位或启动播放器', t => {
+  const { preview, media, project } = playbackHarness(t, { video: true })
+  const original = project.tracks.find(track => track.kind === 'video').clips[0]
+  const divided = splitClip(project, original.id, 2)
+  const [left, right] = divided.tracks.find(track => track.kind === 'video').clips
+  preview.setProject(divided)
+  preview.render(0, true)
+  media._time = 2.97
+  preview.render(1.98, true)
+  media._time = 2.995
+  preview.render(2.01, true)
+  assert.equal(preview.entries.get(right.id).media, media)
+  assert.notEqual(preview.entries.get(left.id).media, media)
+  assert.deepEqual(media.seeks, [], '切换片段时不应对已连续播放的源重新定位')
+  assert.equal(media.plays, 1)
+  assert.equal(media.pauses, 0, '视频自带音频也应继续播放')
+})
+
+test('暂停时在当前刻度分割立即保留已解码画面', t => {
+  const { preview, media, project } = playbackHarness(t, { video: true })
+  const original = project.tracks.find(track => track.kind === 'video').clips[0]
+  media._time = 3
+  preview.render(2)
+  const divided = splitClip(project, original.id, 2)
+  preview.setProject(divided)
+  const right = divided.tracks.find(track => track.kind === 'video').clips[1]
+  assert.equal(preview.entries.get(right.id).media, media)
+  assert.deepEqual(media.seeks, [])
+})
+
+test('同源重叠视频保留两个播放器，手动跨边界定位仍准确定位目标片段', t => {
+  const { preview, media, project } = playbackHarness(t, { video: true })
+  const original = project.tracks.find(track => track.kind === 'video').clips[0]
+  const divided = splitClip(project, original.id, 2)
+  const [left, right] = divided.tracks.find(track => track.kind === 'video').clips
+  preview.setProject(updateClip(divided, right.id, { start: 1.9 }))
+  preview.render(0, true)
+  media._time = 2.925
+  preview.render(1.95, true)
+  const second = preview.entries.get(right.id).media
+  assert.notEqual(second, media)
+  assert.equal(media.paused, false)
+  assert.equal(second.paused, false, '重叠片段必须能够同时播放')
+  preview.pause()
+  preview.setProject(divided)
+  preview.seek(2.1)
+  assert.equal(preview.entries.get(left.id).media, media)
+  assert.equal(preview.entries.get(right.id).media, second)
+  assert(Math.abs(second.seeks.at(-1) - 3.15) < 1e-8)
+})
 
 test('暂停预览在首帧实际可绘制后重新绘制，移除素材和销毁会取消待处理回调', t => {
   const first = playbackHarness(t, { video: true, ready: false, frameReady: true })

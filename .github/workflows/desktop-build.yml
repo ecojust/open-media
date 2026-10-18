@@ -58,6 +58,9 @@ jobs:
           python3 tests/speech-voice-adapter.test.py
           python3 scripts/test-speech-device-runtime.py
           python3 tests/speech-device-native.test.py
+          python3 tests/speech-runtime-parts.test.py
+          python3 tests/native-speech-gpu-runtime.test.py
+          python3 scripts/test-optional-speech-catalog.py
           python3 -B tests/verify-installed-speech.test.py
       - run: npm run build
       - name: Verify native operations
@@ -195,7 +198,7 @@ jobs:
           path: |
             src-tauri/resources/media
             .media-runtime/downloads
-          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh') }}
+          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/media-runtime-capabilities.mjs', 'scripts/build-media-runtime.sh') }}
           restore-keys: media-runtime-v1-${{ matrix.platform }}-
       - name: Validate restored media runtime against current sources
         id: media-restored
@@ -258,7 +261,7 @@ jobs:
           path: |
             src-tauri/resources/media
             .media-runtime/downloads
-          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh') }}
+          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/media-runtime-capabilities.mjs', 'scripts/build-media-runtime.sh') }}
       - uses: actions/cache/restore@v4
         id: speech-cache
         with:
@@ -404,6 +407,7 @@ jobs:
             .speech-runtime/logs/
             .speech-runtime/verification/**/*.log
             .speech-runtime/verification/**/proof.json
+            .media-runtime/verification/hardware-encoding.json
           if-no-files-found: warn
           retention-days: 30
       - name: Collect installers and provenance

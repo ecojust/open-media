@@ -1,61 +1,102 @@
 {
-  "schema": 2,
-  "text": "这是一款全程由AI接管并生成的软件",
-  "encoding": "Published comparison MP3 copied byte-for-byte; no additional re-encoding, voice substitution or speed changes.",
+  "schema": 3,
+  "text": "欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。",
+  "encoding": "Actual model output encoded to MP3 once; no pitch, tempo, or loudness modification.",
   "previews": [
     {
       "voiceId": "zipvoice_zh_female",
       "modelId": "zipvoice-distill-fp32",
-      "modelName": "ZipVoice Distill FP32 · 官方中文前端",
       "language": "zh-CN",
       "file": "zipvoice_zh_female.mp3",
-      "text": "这是一款全程由AI接管并生成的软件",
+      "text": "欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。",
+      "bytes": 145920,
+      "sha256": "78b9b6ca3a1ce55df3b3779a0091d1d3f6214d1be78eb2e2fcb60e48e845a2c6",
+      "wavSha256": "5a4b4509638ef8e0aee2080b5ff4418ae4f87ba39d70555c836d8bd13df33f25",
+      "wav": "/workspace/open-media-intro-previews-20261018/zipvoice_zh_female/speech.wav",
+      "generationSeconds": 38.79822467099984,
       "sampleRate": 24000,
       "channels": 1,
-      "durationSeconds": 3.687625,
-      "decodedDurationSeconds": 3.687625,
-      "sha256": "32c001eec39269518dd86b00016fdd36b5b361213469dc933be2df6d71bce9d9",
-      "bytes": 75404,
-      "peak": 0.65512085,
-      "decodedPeak": 0.6222628355026245,
-      "wavSha256": "5e097cc7c7d72ad8134986066bfbd13f0a20f3d6bd2929b50d96e94d5cf3f47f",
-      "source": {
-        "manifest": "test/chinese-tts-benchmark/manifests/zipvoice-distill-fp32-zh-frontend.json",
-        "benchmarkModelId": "zipvoice-distill-fp32-zh-frontend",
-        "sampleId": "01",
-        "mp3": "test/chinese-tts-benchmark/audio/zipvoice-distill-fp32-zh-frontend/01.mp3",
-        "wav": "test/chinese-tts-benchmark/wav/zipvoice-distill-fp32-zh-frontend/01.wav"
-      },
-      "settings": {
-        "threads": 1,
-        "provider": "cpu",
-        "speed": 1.0,
-        "silence_scale": 1.0,
-        "max_sentences_per_batch": 1,
-        "mp3_bitrate": 128000,
-        "postprocessing": "MP3 encoding only. Original WAV retained; no pitch, loudness or tempo processing.",
-        "input_preprocessing": "Original corpus text is passed automatically through the unmodified upstream ChineseTextNormalizer.normalize (cn2an.transform an2cn); both original text and actual normalized_text are retained. No hand editing.",
-        "sample_rate": 24000,
-        "num_steps": 8,
-        "guidance_scale": 1.0,
-        "t_shift": 0.5,
-        "feat_scale": 0.1,
-        "target_rms": 0.1,
-        "zipvoice_chunking": {
-          "min_char_in_sentence": 30,
-          "max_char_in_sentence": 200,
-          "note": "Actual defaults in this implementation; generic tts-max-num-sentences is not used by ZipVoice."
+      "durationSeconds": 9.045333333333334,
+      "peak": 0.636810302734375,
+      "rms": 0.11277677750513712,
+      "decodedDurationSeconds": 9.045333333333334,
+      "decodedPeak": 0.6050053238868713,
+      "decodedRms": 0.10714017618589981,
+      "modelFiles": [
+        {
+          "path": "encoder.onnx",
+          "bytes": 17633735,
+          "sha256": "495eca2d5f8a911f5c361bcce5bd55cdd2508ccdd26ce3e9bf1d3c29eb974861"
+        },
+        {
+          "path": "decoder.onnx",
+          "bytes": 477534010,
+          "sha256": "4510d4f5f049f14ef80207fca695e13c820e2cea61635f402954950bc62b1e3c"
+        },
+        {
+          "path": "tokens.txt",
+          "bytes": 2570,
+          "sha256": "ce98c1afc5f7a20c2484dffdd68a1fff0a4a2cc707328833750c4476c37cdbda"
+        },
+        {
+          "path": "vocos_24khz.onnx",
+          "bytes": 54157409,
+          "sha256": "bcb3b970e384161c4d634f0bb9e999ff1c471b34c9bc0b1049a5014065ed3cc0"
+        },
+        {
+          "path": "lexicon.txt",
+          "bytes": 1727147,
+          "sha256": "c94b049d970e971acdc2a7e5e7b23ca594222a9d640e417c711f2ad1e7bb7d46"
+        },
+        {
+          "path": "reference.wav",
+          "bytes": 161952,
+          "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
+        },
+        {
+          "path": "reference.txt",
+          "bytes": 75,
+          "sha256": "3167ae2c4779efd4d7608ce400cb7b4de76c925a9ecab9c32eee0e1cfe391f13"
         }
-      },
+      ],
       "referenceAudio": {
-        "wav": "reference/matcha-reference.wav",
+        "file": "scripts/optional-speech-assets/zipvoice-reference.wav",
         "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec",
         "text": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
-        "origin": "Previously generated Open Media builtin Matcha-TTS Chinese preview. Synthetic voice, not a real-person recording.",
-        "source_model": "matcha-icefall-zh-en 20251125-steps-3",
-        "source_manifest": "/workspace/open-media/src/assets/voice-previews/manifest.json",
-        "duration_seconds": 5.059625,
-        "sample_rate": 16000
+        "synthetic": true
+      },
+      "settings": {
+        "device": "cpu",
+        "dtype": "float32",
+        "speed": 1,
+        "sampleRate": 24000,
+        "channels": 1,
+        "bitrate": 128000,
+        "threads": 1,
+        "steps": 8,
+        "featScale": 0.1,
+        "tShift": 0.5,
+        "targetRms": 0.1,
+        "guidanceScale": 1,
+        "silenceScale": 1
+      },
+      "generator": {
+        "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+        "python": "3.12.14",
+        "generatedAt": "2026-10-18T04:58:28.554217+00:00",
+        "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+        "script": "src/assets/voice-previews/provenance/introduction-20261018/zipvoice_zh_female/generate-optional-voice-previews.py",
+        "scriptSha256": "eb3f2db7153fc47b8f224f4ae3d16d8824b3856fcd43a3d02efab41d2ed65e2a",
+        "helper": "src/assets/voice-previews/provenance/introduction-20261018/zipvoice_zh_female/generate-male-voice-previews.py",
+        "helperSha256": "527419e90e54924b5b4188c4d3d59ad05b50b2a69c8d55131076f7997f7bc45d",
+        "adapter": "src/assets/voice-previews/provenance/introduction-20261018/zipvoice_zh_female/speech-voice-adapter.py",
+        "adapterSha256": "401832ebdcbe43634835e378daa69f3e787ebde2a923669b15a8a171c0bf7f66",
+        "deviceRuntime": "src/assets/voice-previews/provenance/introduction-20261018/zipvoice_zh_female/speech-device-runtime.py",
+        "deviceRuntimeSha256": "f359dc792e649782dde843643ae25a8891efb6d7559c10bbe1c4bfb00479cad6"
+      },
+      "source": {
+        "kind": "actual-model-synthesis",
+        "textId": "open-media-introduction-20261018"
       },
       "license": {
         "name": "CC-BY-NC（模型权重，研究试听）",
@@ -78,62 +119,130 @@
           "path": "licenses/zipvoice-distill-fp32/MODEL_README.md",
           "sha256": "f70e09af66ce80f5aa439069ba68c9f39136fb99d6b2e09fc64260fa2e85b6c7"
         }
+      ],
+      "command": [
+        "/workspace/open-media/src-tauri/resources/speech/runtime/bin/open-media-speech",
+        "--zipvoice-encoder=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/encoder.onnx",
+        "--zipvoice-decoder=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/decoder.onnx",
+        "--zipvoice-tokens=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/tokens.txt",
+        "--zipvoice-vocoder=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/vocos_24khz.onnx",
+        "--zipvoice-lexicon=/workspace/tts-zip-runtime-audit/cross-platform-smoke/中文配音 空格/模型 文件/lexicon.txt",
+        "--zipvoice-data-dir=/workspace/open-media/src-tauri/resources/speech/model/espeak-ng-data",
+        "--reference-audio=/workspace/open-media/scripts/optional-speech-assets/zipvoice-reference.wav",
+        "--reference-text-file=/workspace/open-media/scripts/optional-speech-assets/zipvoice-reference.txt",
+        "--num-steps=8",
+        "--sample-rate=24000",
+        "--sid=0",
+        "--speed=1",
+        "--text-file=/workspace/open-media-intro-previews-20261018/zipvoice_zh_female/text.txt",
+        "--output-filename=/workspace/open-media-intro-previews-20261018/zipvoice_zh_female/speech.wav"
       ]
     },
     {
       "voiceId": "f5_zh_female",
       "modelId": "f5-v1-base-fp32",
-      "modelName": "F5-TTS v1 Base FP32",
       "language": "zh-CN",
       "file": "f5_zh_female.mp3",
-      "text": "这是一款全程由AI接管并生成的软件",
+      "text": "欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。",
+      "bytes": 139392,
+      "sha256": "5b4a4fbe5843a05c143b313504b2887bbf78b467cfb3c992c0057cf7e82bc78e",
+      "wavSha256": "b03639c97d0104835e22db285245adc29d0012485d656869920bd49c5b1a011f",
+      "wav": "/workspace/open-media-intro-previews-20261018/f5_zh_female/speech.wav",
+      "generationSeconds": 572.69130012,
       "sampleRate": 24000,
       "channels": 1,
-      "durationSeconds": 3.317333,
-      "decodedDurationSeconds": 3.3173333333333335,
-      "sha256": "ab24d98f87aff6293ca0a406fa6f28f8da37d4f4a62112a0af0cc681fa0f47ca",
-      "bytes": 68204,
-      "peak": 0.79534912,
-      "decodedPeak": 0.7555218935012817,
-      "wavSha256": "5e8e111868d80f8d6ba0f3e20c20845924ad4b7c8eb1f48e99a36cefdf6e670f",
-      "source": {
-        "manifest": "test/chinese-tts-benchmark/manifests/f5-v1-base-fp32.json",
-        "benchmarkModelId": "f5-v1-base-fp32",
-        "sampleId": "01",
-        "mp3": "test/chinese-tts-benchmark/audio/f5-v1-base-fp32/01.mp3",
-        "wav": "test/chinese-tts-benchmark/wav/f5-v1-base-fp32/01.wav"
+      "durationSeconds": 8.64,
+      "peak": 0.6699737906455994,
+      "rms": 0.11890941964943938,
+      "decodedDurationSeconds": 8.64,
+      "decodedPeak": 0.6365236043930054,
+      "decodedRms": 0.11296263199033636,
+      "modelFiles": [
+        {
+          "path": "model_1250000.safetensors",
+          "bytes": 1348435761,
+          "sha256": "670900fd14e6c458b95da6e9ed317cdb20dbaf7a1c02ac06a05475a9d32b6a38"
+        },
+        {
+          "path": "vocab.txt",
+          "bytes": 13800,
+          "sha256": "2a05f992e00af9b0bd3800a8d23e78d520dbd705284ed2eedb5f4bd29398fa3c"
+        },
+        {
+          "path": "vocos/pytorch_model.bin",
+          "bytes": 54365991,
+          "sha256": "97ec976ad1fd67a33ab2682d29c0ac7df85234fae875aefcc5fb215681a91b2a"
+        },
+        {
+          "path": "vocos/config.yaml",
+          "bytes": 461,
+          "sha256": "da9033922f969a47f0c160010226919e59f27761fd5066f3828d46de6650b0fc"
+        },
+        {
+          "path": "reference.wav",
+          "bytes": 419088,
+          "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+        },
+        {
+          "path": "reference.txt",
+          "bytes": 123,
+          "sha256": "0c8221e15bba82653eee30e99b7c675bfbb7a8e1dbc0f70f40c320e2159ed890"
+        },
+        {
+          "path": "runner-config.json",
+          "bytes": 400,
+          "sha256": "73e3fe772676ab9b1b1df0c426a610abf35713cda88b2c0354c131f30776f619"
+        }
+      ],
+      "referenceAudio": {
+        "file": "scripts/optional-speech-assets/f5-reference.wav",
+        "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+        "text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
+        "synthetic": true
       },
       "settings": {
-        "steps": 32,
-        "cfg_strength": 2.0,
-        "sway_sampling_coef": -1.0,
-        "ode_method": "euler",
-        "sample_rate": 24000,
+        "device": "cpu",
+        "dtype": "float32",
+        "speed": 1,
+        "sampleRate": 24000,
+        "channels": 1,
+        "bitrate": 128000,
         "threads": 4,
-        "interop_threads": 1,
-        "speed": "默认1.0；UTF-8字节数小于10的短片段按上游逻辑使用0.3，实际值见samples[].chunks[].speed",
-        "target_rms": 0.1,
-        "chunking": "Unchanged upstream UTF-8 byte-based sentence splitting targeting 22 seconds including reference. Original samples 01–09 run sequential chunks; sample 10 recovers three unchanged chunks in parallel, then combines them in original order.",
-        "crossfade_seconds": 0.15,
-        "random_seed": "20261017 + corpus_number*100 + chunk_number",
-        "text_normalization": "Exact original Chinese input. Upstream rjieba/pypinyin conversion only; numbers, English abbreviations and punctuation were not manually rewritten.",
-        "reference": {
-          "kind": "synthetic-reference",
-          "model": "Matcha icefall zh-en steps-3",
-          "speaker": 0,
-          "text": "从录制画面到整理素材，再到添加字幕和导出成片，这款软件把常用的创作工具放在了一起。",
-          "wav": "reference.wav",
+        "config": {
+          "schema": 1,
+          "engine": "f5",
+          "dtype": "float32",
+          "model": "models/f5/model_1250000.safetensors",
+          "vocabulary": "models/f5/vocab.txt",
+          "vocoderConfig": "models/vocos/config.yaml",
+          "vocoderModel": "models/vocos/pytorch_model.bin",
+          "referenceAudio": "reference.wav",
+          "referenceText": "runtime-reference.txt",
           "sampleRate": 24000,
-          "durationSeconds": 8.729375,
-          "sourceSampleRate": 16000,
-          "sourceWavSha256": "a0951947112f1651479c58af99e4c1870fa3fcc5452cb185383a3e16044089b3",
-          "wavSha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
-          "conversion": "ffmpeg -ar 24000 -ac 1; no other audio edits",
-          "consent": "Reference generated locally by the application model for this evaluation; no recording of a human person was used."
-        },
-        "postprocessing": "Original upstream crossfade and RMS restoration only. Samples 01–09 retain original PCM16 files; recovered 10 uses FLOAT to preserve finite above-full-scale samples. No additional gain normalization, denoising, pitch or tempo edits. MP3 files are lossy listening derivatives."
+          "steps": 32,
+          "cfgStrength": 2.0,
+          "swaySamplingCoefficient": -1.0,
+          "seed": 20261117
+        }
       },
-      "referenceAudio": null,
+      "generator": {
+        "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+        "python": "3.12.14",
+        "generatedAt": "2026-10-18T04:56:06.380122+00:00",
+        "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+        "script": "src/assets/voice-previews/provenance/introduction-20261018/f5_zh_female/generate-optional-voice-previews.py",
+        "scriptSha256": "eb3f2db7153fc47b8f224f4ae3d16d8824b3856fcd43a3d02efab41d2ed65e2a",
+        "helper": "src/assets/voice-previews/provenance/introduction-20261018/f5_zh_female/generate-male-voice-previews.py",
+        "helperSha256": "527419e90e54924b5b4188c4d3d59ad05b50b2a69c8d55131076f7997f7bc45d",
+        "adapter": "src/assets/voice-previews/provenance/introduction-20261018/f5_zh_female/speech-voice-adapter.py",
+        "adapterSha256": "401832ebdcbe43634835e378daa69f3e787ebde2a923669b15a8a171c0bf7f66",
+        "deviceRuntime": "src/assets/voice-previews/provenance/introduction-20261018/f5_zh_female/speech-device-runtime.py",
+        "deviceRuntimeSha256": "f359dc792e649782dde843643ae25a8891efb6d7559c10bbe1c4bfb00479cad6"
+      },
+      "source": {
+        "kind": "actual-model-synthesis",
+        "textId": "open-media-introduction-20261018"
+      },
       "license": {
         "weights": "CC-BY-NC-4.0",
         "inference_code": "MIT",
@@ -158,55 +267,150 @@
           "path": "licenses/f5-v1-base-fp32/Vocos-MIT.txt",
           "sha256": "8f36ba0c214d4f487ffd7ee0b8528da9b67b459bef2d115de9cd001316589f46"
         }
+      ],
+      "command": [
+        "/workspace/tts-benchmark-20261017/venv/bin/python",
+        "-I",
+        "-B",
+        "/workspace/open-media-intro-previews-20261018/f5_zh_female/speech-voice-adapter.py",
+        "--runtime-script",
+        "/workspace/tts-benchmark-20261017/runtime-runner-test/runner/tts.py",
+        "--voice",
+        "f5_zh_female",
+        "--config",
+        "/workspace/tts-benchmark-20261017/mid/runtime-runner-config.json",
+        "--text-file",
+        "/workspace/open-media-intro-previews-20261018/f5_zh_female/text.txt",
+        "--output-filename",
+        "/workspace/open-media-intro-previews-20261018/f5_zh_female/speech.wav",
+        "--speed",
+        "1",
+        "--threads",
+        "4",
+        "--device",
+        "cpu"
       ]
     },
     {
       "voiceId": "qwen3_serena",
       "modelId": "qwen3-tts-1.7b-serena",
-      "modelName": "Qwen3-TTS 1.7B BF16 · Serena",
       "language": "zh-CN",
       "file": "qwen3_serena.mp3",
-      "text": "这是一款全程由AI接管并生成的软件",
+      "text": "欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。",
+      "bytes": 134400,
+      "sha256": "73c69821772605a73b14f1d92fd311b447363e829b14b7faf6a7021dfd6c63c9",
+      "wavSha256": "564c57495f8b9178dd34598f51b1b5080331efb6450a00bdd41aca04aed4b9d1",
+      "wav": "/workspace/open-media-intro-previews-20261018/qwen3_serena/speech.wav",
+      "generationSeconds": 146.80141202899995,
       "sampleRate": 24000,
       "channels": 1,
-      "durationSeconds": 3.36,
-      "decodedDurationSeconds": 3.36,
-      "sha256": "3e26230f0102c418237582545c7fda0234db2c7eb51170e59c5af15f02d8fa2a",
-      "bytes": 68684,
-      "peak": 0.40625,
-      "decodedPeak": 0.38576048612594604,
-      "wavSha256": "d9399d420961632834515af46b176f6f748cae5cfe744da3d33de33f8347ea7f",
-      "source": {
-        "manifest": "test/chinese-tts-benchmark/manifests/qwen3-tts-1.7b-serena.json",
-        "benchmarkModelId": "qwen3-tts-1.7b-serena",
-        "sampleId": "01",
-        "mp3": "test/chinese-tts-benchmark/audio/qwen3-tts-1.7b-serena/01.mp3",
-        "wav": "test/chinese-tts-benchmark/wav/qwen3-tts-1.7b-serena/01.wav"
-      },
+      "durationSeconds": 8.32,
+      "peak": 0.48046875,
+      "rms": 0.05813473827088085,
+      "decodedDurationSeconds": 8.32,
+      "decodedPeak": 0.45668694376945496,
+      "decodedRms": 0.05522269506740404,
+      "modelFiles": [
+        {
+          "path": "config.json",
+          "bytes": 4908,
+          "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9"
+        },
+        {
+          "path": "generation_config.json",
+          "bytes": 245,
+          "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa"
+        },
+        {
+          "path": "merges.txt",
+          "bytes": 1671839,
+          "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3"
+        },
+        {
+          "path": "model.safetensors",
+          "bytes": 3833402552,
+          "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137"
+        },
+        {
+          "path": "preprocessor_config.json",
+          "bytes": 127,
+          "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119"
+        },
+        {
+          "path": "speech_tokenizer/config.json",
+          "bytes": 2336,
+          "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167"
+        },
+        {
+          "path": "speech_tokenizer/configuration.json",
+          "bytes": 76,
+          "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd"
+        },
+        {
+          "path": "speech_tokenizer/model.safetensors",
+          "bytes": 682293092,
+          "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+        },
+        {
+          "path": "speech_tokenizer/preprocessor_config.json",
+          "bytes": 234,
+          "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 7344,
+          "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670"
+        },
+        {
+          "path": "vocab.json",
+          "bytes": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+        },
+        {
+          "path": "runner-config.json",
+          "bytes": 259,
+          "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28"
+        }
+      ],
+      "referenceAudio": null,
       "settings": {
         "device": "cpu",
         "dtype": "bfloat16",
-        "attention": "sdpa",
+        "speed": 1,
+        "sampleRate": 24000,
+        "channels": 1,
+        "bitrate": 128000,
         "threads": 4,
-        "language": "Chinese",
-        "speaker": "Serena",
-        "instruct": "用自然流畅的标准普通话朗读，语气温和，语速适中。",
-        "non_streaming_mode": true,
-        "do_sample": true,
-        "temperature": 0.9,
-        "top_p": 1.0,
-        "top_k": 50,
-        "repetition_penalty": 1.05,
-        "subtalker_dosample": true,
-        "subtalker_temperature": 0.9,
-        "subtalker_top_p": 1.0,
-        "subtalker_top_k": 50,
-        "max_new_tokens": 2048,
-        "seed_base": 20261017,
-        "text_normalization": "none; original corpus text is passed unchanged",
-        "postprocessing": "none; original PCM WAV and MP3 encoding only"
+        "config": {
+          "schema": 1,
+          "engine": "qwen3",
+          "dtype": "bfloat16",
+          "model": ".",
+          "speaker": "Serena",
+          "language": "Chinese",
+          "instruct": "用自然流畅的标准普通话朗读，语气温和，语速适中。",
+          "sampleRate": 24000,
+          "seed": 20261017
+        }
       },
-      "referenceAudio": null,
+      "generator": {
+        "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+        "python": "3.12.14",
+        "generatedAt": "2026-10-18T05:01:26.265652+00:00",
+        "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+        "script": "src/assets/voice-previews/provenance/introduction-20261018/qwen3_serena/generate-optional-voice-previews.py",
+        "scriptSha256": "eb3f2db7153fc47b8f224f4ae3d16d8824b3856fcd43a3d02efab41d2ed65e2a",
+        "helper": "src/assets/voice-previews/provenance/introduction-20261018/qwen3_serena/generate-male-voice-previews.py",
+        "helperSha256": "527419e90e54924b5b4188c4d3d59ad05b50b2a69c8d55131076f7997f7bc45d",
+        "adapter": "src/assets/voice-previews/provenance/introduction-20261018/qwen3_serena/speech-voice-adapter.py",
+        "adapterSha256": "401832ebdcbe43634835e378daa69f3e787ebde2a923669b15a8a171c0bf7f66",
+        "deviceRuntime": "src/assets/voice-previews/provenance/introduction-20261018/qwen3_serena/speech-device-runtime.py",
+        "deviceRuntimeSha256": "f359dc792e649782dde843643ae25a8891efb6d7559c10bbe1c4bfb00479cad6"
+      },
+      "source": {
+        "kind": "actual-model-synthesis",
+        "textId": "open-media-introduction-20261018"
+      },
       "license": {
         "spdx": "Apache-2.0",
         "path": "licenses/LICENSE",
@@ -221,6 +425,28 @@
           "path": "licenses/qwen3-tts-1.7b-serena/MODEL_CARD.md",
           "sha256": "64f65e809b51cc0c35f393fbbfcc2d735c0cb3fdbbc6f3fdc4a5e6ce55e9d088"
         }
+      ],
+      "command": [
+        "/workspace/tts-benchmark-20261017/venv/bin/python",
+        "-I",
+        "-B",
+        "/workspace/open-media-intro-previews-20261018/qwen3_serena/speech-voice-adapter.py",
+        "--runtime-script",
+        "/workspace/tts-benchmark-20261017/runtime-runner-test/runner/tts.py",
+        "--voice",
+        "qwen3_serena",
+        "--config",
+        "/workspace/tts-benchmark-20261017/large/model/runner-config.json",
+        "--text-file",
+        "/workspace/open-media-intro-previews-20261018/qwen3_serena/text.txt",
+        "--output-filename",
+        "/workspace/open-media-intro-previews-20261018/qwen3_serena/speech.wav",
+        "--speed",
+        "1",
+        "--threads",
+        "4",
+        "--device",
+        "cpu"
       ]
     }
   ]

@@ -9,13 +9,13 @@ async function installNativeContract(page) {
       { id: 'f5_zh_female', modelId: 'f5-v1-base-fp32', name: 'F5-TTS v1 Base FP32', modelSize: 1402816013, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC-4.0', usageNote: '模型限非商业用途' },
       { id: 'qwen3_serena', modelId: 'qwen3-tts-1.7b-serena', name: 'Qwen3-TTS 1.7B BF16 · Serena', modelSize: 4520159586, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'Apache-2.0', usageNote: '中文男声与女声；CPU离线合成，建议至少16GB' },
     ].flatMap((voice, index) => [voice, { ...voice, id: ['zipvoice_zh_male', 'f5_zh_male', 'qwen3_uncle_fu'][index], name: `${voice.name.replace(' · Serena', '')} · 男声`, gender: 'male' }])
-    const state = window.voiceDownloadHarness = { calls: [], deferDownloadDispatch: false, releaseDownloadDispatch: null, deferDownload: false, releaseDownload: null, bundledReady: true, sharedRuntimeReady: false, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
+    const state = window.voiceDownloadHarness = { calls: [], deferDownloadDispatch: false, releaseDownloadDispatch: null, deferDownload: false, releaseDownload: null, bundledReady: true, sharedRuntimeReady: false, nativeUpgrade: null, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
     const catalog = () => ({ ready: state.bundledReady || Object.entries(state.models).some(([id, model]) => model.status === 'ready' && (id === 'zipvoice-distill-fp32' || state.sharedRuntimeReady || model.runtimeStatus === 'ready')), error: state.bundledReady ? undefined : '内置模型完整性校验失败', voices: [
-      { id: 'matcha_zh_en_female', name: '温柔女声（中英）', language: 'zh-CN', gender: 'female', status: state.bundledReady ? 'bundled' : 'failed', modelSize: 149227292 },
+      { id: 'matcha_zh_en_female', name: '温柔女声（中英）', language: 'zh-CN', gender: 'female', status: state.bundledReady ? 'bundled' : 'failed', modelSize: 149227292, ...(state.nativeUpgrade || {}) },
       ...packs.map(voice => {
         const model = state.models[voice.modelId]
         const runtimeStatus = voice.runtimeSize ? model.runtimeStatus || (state.sharedRuntimeReady ? 'ready' : 'not-downloaded') : undefined
-        return { ...voice, downloadSize: voice.modelSize + (voice.runtimeSize || 0), downloadSources: ['https://huggingface.co', 'https://hf-mirror.com'], ...model, runtimeStatus }
+        return { ...voice, downloadSize: voice.modelSize + (voice.runtimeSize || 0), downloadSources: ['https://huggingface.co', 'https://hf-mirror.com'], ...model, runtimeStatus, ...(voice.modelId === 'zipvoice-distill-fp32' && model.status === 'ready' ? state.nativeUpgrade || {} : {}) }
       }),
     ] })
     window.__TAURI_INTERNALS__ = {
@@ -29,14 +29,29 @@ async function installNativeContract(page) {
         if (command === 'plugin:event|unlisten') return null
         if (command === 'get_speech_status') return catalog()
         if (command === 'begin_speech_model_download') {
+          if (args.modelId === 'native-gpu-runtime') {
+            if (state.deferDownload) await new Promise(resolve => { state.releaseDownload = resolve })
+            Object.assign(state.nativeUpgrade, { runtimeStatus: 'upgrade-downloading', downloadedBytes: 0, runtimeError: '' })
+            return catalog()
+          }
           const model = state.models[args.modelId]
           if (!model) throw new Error('未知模型')
           if (state.deferDownload) await new Promise(resolve => { state.releaseDownload = resolve })
-          Object.assign(model, { status: 'downloading', downloadedBytes: 0, error: '', downloadSource: 'https://huggingface.co' })
+          if (model.runtimeStatus?.startsWith('upgrade-')) Object.assign(model, { runtimeStatus: 'upgrade-downloading', downloadedBytes: packs.find(voice => voice.modelId === args.modelId).modelSize, runtimeError: '', error: '' })
+          else Object.assign(model, { status: 'downloading', downloadedBytes: 0, error: '', downloadSource: 'https://huggingface.co' })
+          return catalog()
+        }
+        if (command === 'repair_speech_model') {
+          if (state.deferRepair) await new Promise(resolve => { state.releaseRepair = resolve })
+          const model = state.models[args.modelId]
+          if (!model) throw new Error('未知修复模型')
+          Object.assign(model, { status: 'verifying', runtimeStatus: 'ready', downloadedBytes: packs.find(voice => voice.modelId === args.modelId).modelSize + 780000000 })
           return catalog()
         }
         if (command === 'cancel_speech_model_download') {
-          Object.assign(state.models[args.modelId], { status: 'not-downloaded', downloadedBytes: 0, runtimeStatus: undefined })
+          if (args.modelId === 'native-gpu-runtime') Object.assign(state.nativeUpgrade, { runtimeStatus: 'upgrade-available', downloadedBytes: 0 })
+          else if (state.models[args.modelId]?.runtimeStatus?.startsWith('upgrade-')) Object.assign(state.models[args.modelId], { runtimeStatus: 'upgrade-available', downloadedBytes: 0 })
+          else Object.assign(state.models[args.modelId], { status: 'not-downloaded', downloadedBytes: 0, runtimeStatus: undefined })
           return catalog()
         }
         throw new Error(`未预期的原生命令：${command}`)
@@ -107,9 +122,9 @@ async function main() {
     for (const [id, memoryGb, gpuAuto] of [['matcha_zh_en_female', 4, false], ['zipvoice_zh_female', 8, false], ['zipvoice_zh_male', 8, false], ['f5_zh_female', 8, true], ['f5_zh_male', 8, true], ['qwen3_serena', 16, true], ['qwen3_uncle_fu', 16, true]]) {
       const hardware = dialog.locator(`[data-voice-id="${id}"] .voice-hardware`)
       await expect(hardware).toContainText(`建议系统内存 ${memoryGb} GB`)
-      await expect(hardware).toContainText(gpuAuto ? '优先可用 GPU · CPU 自动回退' : '优先 CoreML · CPU 自动回退')
+      await expect(hardware).toContainText('优先可用 GPU · CPU 自动回退')
     }
-    await expect(dialog.locator('.voice-hardware-note')).toHaveText('macOS 自动检测硬件加速，Windows 当前使用 CPU。实际设备见生成进度；内存为整机建议。')
+    await expect(dialog.locator('.voice-hardware-note')).toHaveText('GPU 组件按硬件下载后启用，不可用时自动回退 CPU。实际设备见生成进度；内存为整机建议。')
     await expect(dialog.locator('.voice-download-sources, .voice-current-source, .voice-download-help')).toHaveCount(0)
     for (const button of await dialog.locator('.voice-download-button').all()) {
       await button.scrollIntoViewIfNeeded()
@@ -254,6 +269,84 @@ async function main() {
     await expect(dialog.getByRole('button', { name: '选择 Matcha 中英', exact: true })).toBeDisabled()
     assert.deepEqual(errors, [])
     console.log('PASS 内置模型损坏时仍可试听与下载独立模型，未就绪禁止生成，下载验证后正常解锁')
+
+    await close.click()
+    await page.evaluate(() => {
+      const state = window.voiceDownloadHarness
+      state.bundledReady = true
+      state.nativeUpgrade = { runtimeStatus: 'upgrade-available', runtimeDownloadId: 'native-gpu-runtime', runtimeSize: 240000000, downloadSize: 240000000, downloadedBytes: 0 }
+      Object.assign(state.models['zipvoice-distill-fp32'], { status: 'ready' })
+      Object.assign(state.models['f5-v1-base-fp32'], { runtimeStatus: 'upgrade-available' })
+    })
+    await open.click()
+    const bundled = dialog.locator('[data-voice-id="matcha_zh_en_female"]')
+    const nativeCards = [[bundled, 'Matcha 中英'], [zip, 'ZipVoice Distill FP32'], [zipMale, 'ZipVoice Distill FP32 · 男声']]
+    for (const [card, name] of nativeCards) {
+      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
+      await expect(card.getByRole('button', { name: `下载 GPU 加速组件 ${name}`, exact: true })).toContainText('240 MB')
+      await expect(card.locator('.voice-runtime-size')).toContainText('CPU 可用')
+    }
+    await expect(f5.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32', exact: true })).toContainText('780 MB')
+    const nativeStarts = await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download' && call.args.modelId === 'native-gpu-runtime').length)
+    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = true })
+    await zipMale.getByRole('button', { name: '下载 GPU 加速组件 ZipVoice Distill FP32 · 男声', exact: true }).click()
+    for (const [card, name] of nativeCards) {
+      await expect(card.getByRole('button', { name: `下载 GPU 加速组件 ${name}`, exact: true })).toBeDisabled()
+      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
+    }
+    await expect.poll(() => page.evaluate(() => typeof window.voiceDownloadHarness.releaseDownloadDispatch)).toBe('function')
+    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = false; window.voiceDownloadHarness.releaseDownloadDispatch() })
+    await expect(bundled.getByRole('progressbar')).toHaveAttribute('value', '0')
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download' && call.args.modelId === 'native-gpu-runtime').length), nativeStarts + 1)
+    await page.evaluate(() => { window.voiceDownloadHarness.nativeUpgrade.downloadedBytes = 120000000 })
+    for (const [card, name] of nativeCards) {
+      await expect(card.getByRole('progressbar')).toHaveAttribute('value', '50')
+      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
+    }
+    await bundled.getByRole('button', { name: '取消下载 Matcha 中英', exact: true }).click()
+    for (const [card, name] of nativeCards) await expect(card.getByRole('button', { name: `下载 GPU 加速组件 ${name}`, exact: true })).toBeEnabled()
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'cancel_speech_model_download').at(-1).args.modelId), 'native-gpu-runtime')
+    await bundled.getByRole('button', { name: '下载 GPU 加速组件 Matcha 中英', exact: true }).click()
+    await expect(bundled.getByRole('progressbar')).toHaveAttribute('value', '0')
+    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.nativeUpgrade, { runtimeStatus: 'upgrade-verifying', downloadedBytes: 240000000 }))
+    for (const [card, name] of nativeCards) {
+      await expect(card.locator('.voice-model-state')).toHaveText('正在校验 GPU 加速组件…')
+      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
+    }
+    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.nativeUpgrade, { runtimeStatus: 'upgrade-failed', runtimeError: '组件下载中断，CPU 仍可使用' }))
+    await expect(zipMale.getByRole('button', { name: '重试下载 GPU 加速组件 ZipVoice Distill FP32 · 男声', exact: true })).toBeEnabled()
+    await expect(bundled.getByRole('button', { name: '选择 Matcha 中英', exact: true })).toBeEnabled()
+    await zipMale.getByRole('button', { name: '重试下载 GPU 加速组件 ZipVoice Distill FP32 · 男声', exact: true }).click()
+    await expect(bundled.getByRole('progressbar')).toHaveAttribute('value', '0')
+    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.nativeUpgrade, { runtimeStatus: 'ready', downloadedBytes: 240000000 }))
+    await expect(bundled.locator('.voice-runtime-size')).toHaveText('运行组件 · 240 MB · 已就绪')
+    await expect(bundled.locator('.voice-download-button:not(.voice-repair-button)')).toHaveCount(0)
+    await f5Male.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
+    await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '0')
+    await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].downloadedBytes = 1402816013 + 390000000 })
+    await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '50')
+    await expect(f5Male.getByRole('progressbar')).toHaveAttribute('value', '50')
+    await expect(f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
+    await f5.getByRole('button', { name: '取消下载 F5-TTS v1 Base FP32', exact: true }).click()
+    await expect(f5Male.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
+    await page.screenshot({ path: '/tmp/open-media-voice-gpu-upgrade.png', animations: 'disabled' })
+    assert.deepEqual(errors, [])
+    console.log('PASS GPU 组件独立大小与进度，共享待处理/取消/失败重试同步，现有 CPU 音色持续可用')
+    await page.evaluate(() => { window.voiceDownloadHarness.deferRepair = true })
+    await f5Male.getByRole('button', { name: '检查并修复 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
+    await expect(f5.getByRole('button', { name: '检查并修复 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
+    await expect(f5Male.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeDisabled()
+    await expect.poll(() => page.evaluate(() => typeof window.voiceDownloadHarness.releaseRepair)).toBe('function')
+    assert.deepEqual(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'repair_speech_model').map(call => call.args.modelId)), ['f5-v1-base-fp32'])
+    await page.evaluate(() => { window.voiceDownloadHarness.deferRepair = false; window.voiceDownloadHarness.releaseRepair() })
+    await expect(f5.locator('.voice-model-state')).toHaveText('正在校验模型与运行组件…')
+    await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].status = 'ready' })
+    await expect(f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
+    await expect(f5.getByRole('button', { name: '检查并修复 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
+    assert.deepEqual(errors, [])
+    console.log('PASS 已下载声音提供独立检查修复入口，男女声共享待处理，校验后恢复可选')
+
+
   } catch (error) {
     await page?.screenshot({ path: '/tmp/open-media-voice-downloads-failure.png', animations: 'disabled' }).catch(() => {})
     throw error

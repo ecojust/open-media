@@ -6,7 +6,7 @@ interface BrowserProjectWritable {
 
 export class ProjectSaveLocationError extends Error {
   constructor(cause: unknown) {
-    super('原保存位置已失效，文件或所在目录可能已移动、删除。请再次点击“保存”或使用“另存为”重新选择位置；当前项目仍保留。', { cause })
+    super('原保存位置已失效，文件或所在目录可能已移动、删除。请恢复原文件后重试，或使用“另存为”重新选择位置；当前项目仍保留。', { cause })
     this.name = 'ProjectSaveLocationError'
   }
 }

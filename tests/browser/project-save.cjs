@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const { existsSync } = require('node:fs')
 const path = require('node:path')
+const { createHash } = require('node:crypto')
 const { chromium, expect } = require('@playwright/test')
 const { unzipSync, strFromU8 } = require('fflate')
 
@@ -38,6 +39,13 @@ async function createProject(page) {
   await page.getByTestId('create-project').click()
   await expect(page.getByTestId('save-project')).toBeEnabled()
   await expect(page.locator('.project-title')).toHaveText('未命名项目')
+}
+
+async function openRecent(page, title) {
+  await page.locator('.brand').click()
+  await page.locator('.recent-item > button').filter({ hasText: title }).click()
+  await expect(page.getByTestId('save-project')).toBeEnabled()
+  await expect(page.locator('.project-title')).toHaveText(title)
 }
 
 async function save(page, { saveAs = false, key, result = true } = {}) {
@@ -77,7 +85,7 @@ async function createPage(browser) {
 async function nativeChecks(browser, url) {
   const { page, context, errors } = await createPage(browser)
   const state = { calls: [], mode: 'ready', nextName: 'native-a.omedia', openName: 'native-a.omedia', targets: new Map() }
-  const target = name => ({ name, path: path.join(artifacts, name), token: `test-target-${name}` })
+  const target = name => ({ name, path: path.join(artifacts, name), token: createHash('sha256').update(name).digest('hex') })
   try {
     await page.exposeBinding('projectNativeInvoke', async (_, command, args) => {
       if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
@@ -169,6 +177,10 @@ async function nativeChecks(browser, url) {
     const fresh = inspectArchive(await fs.readFile(target('native-new.omedia').path), '未命名项目')
     assert.notEqual(fresh.id, first.id)
     assert.deepEqual(await fs.readFile(target('native-b.omedia').path), protectedBytes)
+    await openRecent(page, '覆盖重试成功')
+    await save(page)
+    assert.equal(state.calls.at(-1).token, target('native-b.omedia').token, '切换回来必须恢复本项目的保存目标')
+    inspectArchive(await fs.readFile(target('native-new.omedia').path), '未命名项目')
     await page.keyboard.press('Control+o')
     await expect(page.locator('.project-title')).toHaveText('直接覆盖')
     await rename(page, '打开后保存原文件')
@@ -180,10 +192,12 @@ async function nativeChecks(browser, url) {
     await page.getByTestId('nav-edit').click()
     await expect(page.locator('.project-title')).toHaveText('打开后保存原文件')
     state.nextName = 'native-restored.omedia'
+    await rename(page, '恢复后覆盖原文件')
     await save(page)
-    assert.equal(state.calls.at(-1).token, null)
-    inspectArchive(await fs.readFile(target('native-restored.omedia').path), '打开后保存原文件', media)
-    console.log('PASS 原生桥契约：新项目和恢复草稿清除旧目标；打开项目后的保存直接回写所选文件')
+    assert.equal(state.calls.at(-1).token, target('native-a.omedia').token)
+    inspectArchive(await fs.readFile(target('native-a.omedia').path), '恢复后覆盖原文件', media)
+    assert.equal(existsSync(target('native-restored.omedia').path), false)
+    console.log('PASS 原生桥契约：新项目独立；切换和重载恢复已选目标，打开项目后的保存直接回写原文件')
     assert.deepEqual(errors, [])
   } finally { await context.close() }
 }
@@ -265,6 +279,12 @@ async function browserChecks(browser, url) {
     assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 5)
     inspectArchive(await readBrowserFile(page, 'browser-new.omedia'), '未命名项目')
     assert.deepEqual(await readBrowserFile(page, 'browser-a.omedia'), old)
+    await openRecent(page, '网页打开后回写')
+    await rename(page, '网页切换后覆盖')
+    await save(page)
+    assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 5)
+    inspectArchive(await readBrowserFile(page, 'browser-a.omedia'), '网页切换后覆盖', media)
+    inspectArchive(await readBrowserFile(page, 'browser-new.omedia'), '未命名项目')
     const activation = await page.evaluate(() => [...window.projectFileHarness.saves, ...window.projectFileHarness.opens])
     assert(activation.every(call => call.active), '选择器必须在用户点击或按键激活期间打开')
     assert(activation.every(call => call.options.excludeAcceptAllOption), '项目选择器应限定项目文件格式')
@@ -290,10 +310,11 @@ async function browserChecks(browser, url) {
     await expect(page.getByTestId('home-workspace')).toBeVisible()
     await page.getByTestId('nav-edit').click()
     await page.evaluate(() => { window.projectFileHarness.nextName = 'browser-restored.omedia' })
+    await rename(page, '网页恢复后覆盖')
     await save(page)
-    assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 1)
-    inspectArchive(await readBrowserFile(page, 'browser-restored.omedia'), '未命名项目')
-    console.log('PASS 320/768/1440px 保存和另存为按钮均可达；恢复本地草稿重新选择文件目标')
+    assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 0)
+    inspectArchive(await readBrowserFile(page, 'browser-a.omedia'), '网页恢复后覆盖', media)
+    console.log('PASS 320/768/1440px 保存和另存为按钮均可达；真实文件句柄经 IndexedDB 恢复后仍直接覆盖')
     assert.deepEqual(errors, [])
   } finally { await context.close() }
 }
@@ -349,6 +370,9 @@ async function missingBrowserTargetChecks(browser, url) {
       catch (error) { if (error.name === 'NotFoundError') return false; throw error }
     }), false, '失效句柄保存失败时不能假称成功或自动重建旧文件')
     assert.deepEqual(await readBrowserFile(page, 'protected.omedia'), protectedBytes)
+    await save(page, { result: false })
+    await expect(page.getByRole('alert')).toContainText('保存位置')
+    assert.equal(await page.evaluate(() => window.projectFileHarness.saves.length), 1, '重复保存失效目标仍应报错，不能悄悄改成另存为')
     await page.evaluate(() => { window.projectFileHarness.nextName = 'browser-recovered.omedia' })
     await save(page, { saveAs: true })
     inspectArchive(await readBrowserFile(page, 'browser-recovered.omedia'), '移除目标后的未保存修改', media)

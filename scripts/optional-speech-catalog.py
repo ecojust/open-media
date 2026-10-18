@@ -120,8 +120,9 @@ def runtime_platforms(source, *, identity="python-cpu-v1", required=None, releas
             commits.add(commit)
             archive = {key: data[key] for key in
                        ['url', 'size', 'unpackedSize', 'sha256', 'manifestSha256', 'executable', 'script']}
-            mirrors = data.get('mirrors')
-            if not isinstance(mirrors, list) or not mirrors or len(set(mirrors)) != len(mirrors):
+            parts = data.get('parts', [])
+            mirrors = data.get('mirrors', [])
+            if not isinstance(mirrors, list) or (not mirrors and not parts) or len(set(mirrors)) != len(mirrors):
                 raise ValueError(f'Runtime metadata must include independently verified alternate sources: {file}.')
             archive['mirrors'] = mirrors
             if data.get('kind', 'python') != kind:
@@ -140,7 +141,6 @@ def runtime_platforms(source, *, identity="python-cpu-v1", required=None, releas
                 raise ValueError(f'Invalid runtime byte sizes: {file}.')
             if any(not re.fullmatch('[a-f0-9]{64}', archive[key]) for key in ['sha256', 'manifestSha256']):
                 raise ValueError(f'Invalid runtime integrity digest: {file}.')
-            parts = data.get('parts', [])
             if parts:
                 if not isinstance(parts, list) or len(parts) > 16:
                     raise ValueError(f'Runtime archive has too many parts: {file}.')
@@ -153,6 +153,12 @@ def runtime_platforms(source, *, identity="python-cpu-v1", required=None, releas
                             or part.get('url') in urls
                             or not part.get('url', '').startswith(release)):
                         raise ValueError(f'Invalid runtime archive part in {file}.')
+                    # Split archives are not published as a single asset. Each
+                    # actual download therefore needs its own measured routes.
+                    part_mirrors = part.get('mirrors', [])
+                    if (not isinstance(part_mirrors, list) or not part_mirrors or len(part_mirrors) > 8
+                            or len(set(part_mirrors)) != len(part_mirrors)):
+                        raise ValueError(f'Runtime archive part is missing verified alternate sources: {file}.')
                     urls.add(part['url'])
                     for url in [part['url'], *part.get('mirrors', [])]:
                         parsed = urlsplit(url)

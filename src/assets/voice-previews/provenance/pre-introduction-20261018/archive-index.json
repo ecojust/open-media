@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "reason": "Original auditions preserved byte-for-byte before the introduction text replacement.",
+  "files": [
+    {
+      "original": "src/assets/voice-previews/qwen3_uncle_fu.mp3",
+      "file": "qwen3_uncle_fu.mp3",
+      "bytes": 65280,
+      "sha256": "2094763426238c2d5630845fbb43f716a1c10440a5a14dac948e7d2f66114840"
+    },
+    {
+      "original": "src/assets/voice-previews/f5_zh_male.mp3",
+      "file": "f5_zh_male.mp3",
+      "bytes": 68736,
+      "sha256": "d629ef68cb66c3186eeffe6d66187f337b0323b3943a8b10d0d1c336a990374c"
+    },
+    {
+      "original": "src/assets/voice-previews/matcha_zh_en_female.mp3",
+      "file": "matcha_zh_en_female.mp3",
+      "bytes": 29664,
+      "sha256": "b81a2eaede638d17c3d6e1199b922eb2931b6812a2de82ce001034c3d4fde253"
+    },
+    {
+      "original": "src/assets/voice-previews/zipvoice_zh_male.mp3",
+      "file": "zipvoice_zh_male.mp3",
+      "bytes": 85632,
+      "sha256": "7f188ceea216749ae06e4229e5615d24022f735f355b9bf20958831d1bc7d0be"
+    },
+    {
+      "original": "src/assets/voice-previews/zipvoice_zh_female.mp3",
+      "file": "zipvoice_zh_female.mp3",
+      "bytes": 75404,
+      "sha256": "32c001eec39269518dd86b00016fdd36b5b361213469dc933be2df6d71bce9d9"
+    },
+    {
+      "original": "src/assets/voice-previews/qwen3_serena.mp3",
+      "file": "qwen3_serena.mp3",
+      "bytes": 68684,
+      "sha256": "3e26230f0102c418237582545c7fda0234db2c7eb51170e59c5af15f02d8fa2a"
+    },
+    {
+      "original": "src/assets/voice-previews/f5_zh_female.mp3",
+      "file": "f5_zh_female.mp3",
+      "bytes": 68204,
+      "sha256": "ab24d98f87aff6293ca0a406fa6f28f8da37d4f4a62112a0af0cc681fa0f47ca"
+    },
+    {
+      "original": "src/assets/voice-previews/manifest.json",
+      "file": "manifest.json",
+      "bytes": 1639,
+      "sha256": "7ebc411073144ef0e7c442793791c28f0497bb55bd049159b893a858a8fc7e8f"
+    },
+    {
+      "original": "src/assets/voice-previews/optional-manifest.json",
+      "file": "optional-manifest.json",
+      "bytes": 10296,
+      "sha256": "163619e0f3623ee65d45d9f6711e4e90fb5de542e7907d17e5d5ea9dcf1b61c6"
+    },
+    {
+      "original": "src/assets/voice-previews/male-manifest.json",
+      "file": "male-manifest.json",
+      "bytes": 13886,
+      "sha256": "5c576b03d16c709a6fd1289b362942a435d9820f881013ea4f552c0f153937bf"
+    },
+    {
+      "original": "src/assets/voice-previews/README.md",
+      "file": "README.md",
+      "bytes": 6194,
+      "sha256": "05b5c97a6a700f035c6fcc6882dc9a086c80386e38e6eeeadf35196eb1c8ead3"
+    },
+    {
+      "original": "scripts/generate-voice-previews.py",
+      "file": "generate-voice-previews.py",
+      "bytes": 12285,
+      "sha256": "a6b8fddffab9e206c0f5d12879f08f797f3e86bf83f913b474dc72059ef5a500"
+    },
+    {
+      "original": "scripts/generate-male-voice-previews.py",
+      "file": "generate-male-voice-previews.py",
+      "bytes": 16031,
+      "sha256": "868cfecf87c1912925c159a7797ff35aa3c03195b54949d8f76423a9c3386bb1"
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "id": "native-cuda-v1",
+  "version": 1,
+  "kind": "native",
+  "platform": "windows-x64",
+  "filename": "open-media-native-cuda-v1-windows-x64.zip",
+  "size": 1859481904,
+  "sha256": "895a3e3bf3c33a24275014008a49530f40ef9025bdd3ec53bd00f5b31d8b3802",
+  "unpackedSize": 2772606107,
+  "manifestSha256": "352ebb5fa7ed38be45934d28ef32571c47eeae3c39c362f3d64e6233645dac11",
+  "executable": "bin/open-media-speech.exe",
+  "script": "bin/open-media-speech.exe",
+  "validated": true,
+  "validatedModels": [
+    "matcha-icefall-zh-en",
+    "zipvoice-distill-fp32"
+  ],
+  "validatedVoices": [
+    "matcha_zh_en_female",
+    "zipvoice_zh_female",
+    "zipvoice_zh_male"
+  ],
+  "gpuInferenceVerified": false,
+  "validation": {
+    "schema": 1,
+    "status": "passed",
+    "text": "这是一款全程由AI接管并生成的软件",
+    "voices": [
+      {
+        "voiceId": "matcha_zh_en_female",
+        "sampleRate": 16000,
+        "sampleCount": 57632,
+        "rms": 0.13529108496324738,
+        "sha256": "343535209f1bc3bdee21129a5e744895b5a12dcd843e02882b17cbe50f053958",
+        "bytes": 115308,
+        "actualDevice": "cpu",
+        "attempts": [
+          {
+            "backend": "cuda",
+            "exitCode": 3221226505,
+            "elapsedSeconds": 0.5310000000000059
+          },
+          {
+            "backend": "cpu",
+            "exitCode": 0,
+            "elapsedSeconds": 2.281000000000006
+          }
+        ],
+        "fallback": true,
+        "gpuInferenceVerified": false,
+        "gpuEvidence": "Provider selection only; operator placement was not profiled"
+      },
+      {
+        "voiceId": "zipvoice_zh_female",
+        "sampleRate": 24000,
+        "sampleCount": 95488,
+        "rms": 0.1341181902105938,
+        "sha256": "612b37ce3c2bfa212b953cc6089f7004a5925dbd959d3285f5d850d41dfe1c5a",
+        "bytes": 191020,
+        "actualDevice": "cpu",
+        "attempts": [
+          {
+            "backend": "cuda",
+            "exitCode": 3221226505,
+            "elapsedSeconds": 0.2189999999999941
+          },
+          {
+            "backend": "cpu",
+            "exitCode": 0,
+            "elapsedSeconds": 17.343999999999994
+          }
+        ],
+        "fallback": true,
+        "gpuInferenceVerified": false,
+        "gpuEvidence": "Provider selection only; operator placement was not profiled"
+      },
+      {
+        "voiceId": "zipvoice_zh_male",
+        "sampleRate": 24000,
+        "sampleCount": 126464,
+        "rms": 0.08713221598381404,
+        "sha256": "8c14952ab6f3d43b1f008e6a8a6e6078ecc233b5e3f717117f17b677a2b397db",
+        "bytes": 252972,
+        "actualDevice": "cpu",
+        "attempts": [
+          {
+            "backend": "cuda",
+            "exitCode": 3221226505,
+            "elapsedSeconds": 0.23399999999998045
+          },
+          {
+            "backend": "cpu",
+            "exitCode": 0,
+            "elapsedSeconds": 25.89100000000002
+          }
+        ],
+        "fallback": true,
+        "gpuInferenceVerified": false,
+        "gpuEvidence": "Provider selection only; operator placement was not profiled"
+      }
+    ],
+    "gpuInferenceVerified": false,
+    "pathCoverage": "relocated non-ASCII and spaces",
+    "meaning": "Real native synthesis and CPU fallback; no claim of GPU hardware validation"
+  },
+  "sourceCommit": "5a2ddd3cb4454032569f478927c5c5495404e425",
+  "runnerSourceSha256": "876789bd4bd063d7f5b441f1fcd95dee4463aed0f282e4896daf546448f683c2",
+  "builderSourceSha256": "79a2c394e15913589a289c8c40ccc0a0c3aa6286a104d861a491f7259a8fd9b6",
+  "sourceLockSha256": "fca566a02a24e77e87092f862dc192e7b9d80290cd78fb5e4bb0e7a780808954",
+  "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip",
+  "parts": [
+    {
+      "filename": "open-media-native-cuda-v1-windows-x64.zip.part001",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+      "size": 1800000000,
+      "sha256": "5a25cbd05028e190c8f7fbf56b4c32fb8bd3d13bb1d11282b82b3aeb3671b2a3",
+      "mirrors": [
+        "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+        "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+        "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001"
+      ]
+    },
+    {
+      "filename": "open-media-native-cuda-v1-windows-x64.zip.part002",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+      "size": 59481904,
+      "sha256": "cdba56b3e6f15155e10c34e19d9e920872fc8337dff721d10e3b8cc21b258886",
+      "mirrors": [
+        "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+        "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+        "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002"
+      ]
+    }
+  ],
+  "mirrorAudit": {
+    "checkedAt": "2026-10-18T05:37:13.865898+00:00",
+    "publishedMetadataSha256": "aaff2388f83818fd38dfd1d65cffa2d4ffacfecb749b8099bc2928dfeb042473",
+    "scope": "Availability and identical prefix samples measured from the development workspace. Mainland China carrier connectivity is not directly tested. Full SHA-256 and byte size remain mandatory when installing every part and the combined archive.",
+    "samples": [
+      {
+        "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+        "original": {
+          "status": 206,
+          "sampleBytes": 65536,
+          "sampleSha256": "68d7f2ba2f5a65412106f975f04f500431175c9ba7ae1126a8edce61af1b8dac",
+          "totalBytes": 1800000000
+        },
+        "attempts": [
+          {
+            "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+            "matched": true,
+            "status": 206,
+            "sampleBytes": 65536,
+            "sampleSha256": "68d7f2ba2f5a65412106f975f04f500431175c9ba7ae1126a8edce61af1b8dac",
+            "totalBytes": 1800000000
+          },
+          {
+            "url": "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+            "matched": true,
+            "status": 206,
+            "sampleBytes": 65536,
+            "sampleSha256": "68d7f2ba2f5a65412106f975f04f500431175c9ba7ae1126a8edce61af1b8dac",
+            "totalBytes": 1800000000
+          },
+          {
+            "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+            "matched": true,
+            "status": 206,
+            "sampleBytes": 65536,
+            "sampleSha256": "68d7f2ba2f5a65412106f975f04f500431175c9ba7ae1126a8edce61af1b8dac",
+            "totalBytes": 1800000000
+          }
+        ]
+      },
+      {
+        "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+        "original": {
+          "status": 206,
+          "sampleBytes": 65536,
+          "sampleSha256": "e08f6e1345ab602a48e4d4f2076a249a12e0559810c278b514a7f67ce5536ad9",
+          "totalBytes": 59481904
+        },
+        "attempts": [
+          {
+            "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+            "matched": true,
+            "status": 206,
+            "sampleBytes": 65536,
+            "sampleSha256": "e08f6e1345ab602a48e4d4f2076a249a12e0559810c278b514a7f67ce5536ad9",
+            "totalBytes": 59481904
+          },
+          {
+            "url": "https://ghproxy.net/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+            "matched": true,
+            "status": 206,
+            "sampleBytes": 65536,
+            "sampleSha256": "e08f6e1345ab602a48e4d4f2076a249a12e0559810c278b514a7f67ce5536ad9",
+            "totalBytes": 59481904
+          },
+          {
+            "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+            "matched": true,
+            "status": 206,
+            "sampleBytes": 65536,
+            "sampleSha256": "e08f6e1345ab602a48e4d4f2076a249a12e0559810c278b514a7f67ce5536ad9",
+            "totalBytes": 59481904
+          }
+        ]
+      }
+    ]
+  }
+}

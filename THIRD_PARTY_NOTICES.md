@@ -15,6 +15,8 @@ The bundled `ffmpeg` and `ffprobe` are built from the exact source archives and 
 | libwebp | 1.5.0 | BSD-3-Clause and patent grant | https://developers.google.com/speed/webp |
 | LAME | 3.100 | LGPL-2.0-or-later | https://lame.sourceforge.io/ |
 | zlib | 1.3.1 | Zlib | https://zlib.net/ |
+| nv-codec-headers (Windows interface headers) | 12.1.14.0, commit 1889e62e2d35ff7aa9baca2bceb14f053785e6f1 | MIT; original notices retained in each header | https://github.com/FFmpeg/nv-codec-headers |
+| AMF (Windows interface headers) | 1.4.36, commit 16f7d73e0b45c473e903e46981ed0b91efc4c091 | MIT and original standards/patent notice | https://github.com/GPUOpen-LibrariesAndSDKs/AMF |
 
 The installation's `media/licenses` directory includes upstream license, copyright, author, and patent notices. The complete corresponding source archive provided beside every installer contains **all** of the above source archives, including their original notices, plus this project's exact build scripts and instructions. See [docs/MEDIA_RUNTIME.md](docs/MEDIA_RUNTIME.md). The application source archive alone is not a replacement for this media source archive.
 

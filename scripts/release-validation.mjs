@@ -27,6 +27,12 @@ export function verifyMetadata(meta, platform, commit, version) {
   if (meta.commit !== commit || meta.platform !== platform || meta.version !== version) throw new Error(`Installer metadata mismatch: ${platform}`)
 }
 const validSha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+export const mediaRuntimeSourceFiles = ['scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/media-runtime-capabilities.mjs', 'scripts/build-media-runtime.sh', 'docs/MEDIA_RUNTIME.md', 'THIRD_PARTY_NOTICES.md']
+export function verifyMediaMetadata(runtime, platform, expected) {
+  for (const field of ['sourceLockSha256', 'buildScriptSha256', 'capabilitiesScriptSha256']) {
+    if (!validSha256(expected[field]) || runtime?.[field] !== expected[field]) throw new Error(`Installer contains a stale media runtime: ${platform} (${field})`)
+  }
+}
 const safeRelativePath = value => typeof value === 'string' && value.length > 0 && !/[\\\0:]/.test(value) && !value.startsWith('/') && !value.split('/').some(part => !part || part === '.' || part === '..')
 export const installedSpeechVoiceIds = ['matcha_zh_en_female', 'zipvoice_zh_female', 'zipvoice_zh_male', 'f5_zh_female', 'f5_zh_male', 'qwen3_serena', 'qwen3_uncle_fu']
 const speechVerificationText = '这是一款全程由AI接管并生成的软件'

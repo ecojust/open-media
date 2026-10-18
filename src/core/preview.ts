@@ -264,10 +264,40 @@ export class TimelinePreview {
     this.render(time, playing, true)
   }
 
+  private continueSplitVideo(time: number, now: number): void {
+    for (const track of this.project.tracks) {
+      if (track.kind !== 'video') continue
+      for (const clip of track.clips) {
+        if (time < clip.start || time >= clip.start + previewClipDuration(clip)) continue
+        const waiting = this.entries.get(clip.id)
+        if (!waiting || waiting.active || !(waiting.media instanceof HTMLVideoElement)) continue
+        const previous = track.clips.find(candidate => {
+          if (candidate.id === clip.id || candidate.assetId !== clip.assetId || candidate.speed !== clip.speed) return false
+          if (Math.abs(candidate.start + previewClipDuration(candidate) - clip.start) > 1e-8 || Math.abs(candidate.trimOut - clip.trimIn) > 1e-8) return false
+          const entry = this.entries.get(candidate.id)
+          return entry?.active && entry.key === waiting.key && entry.media instanceof HTMLVideoElement
+            && !entry.media.seeking && entry.media.readyState >= 2
+        })
+        if (!previous) continue
+        // Adjacent slices still describe one continuous decoder timeline. Keep
+        // its already-presented frame and audio instead of seeking a new element
+        // on the first frame after the cut. Overlapping clips remain independent.
+        const continuing = this.entries.get(previous.id)!
+        this.entries.set(clip.id, continuing)
+        this.entries.set(previous.id, waiting)
+        waiting.active = false
+        continuing.timing = `${clip.start}:${clip.trimIn}:${clip.trimOut}:${clip.speed}`
+        continuing.needsSeek = false
+        continuing.lastSync = now
+      }
+    }
+  }
+
   render(time: number, playing = false, forceSeek = false): void {
     if (this.disposed) return
     const wasPlaying = this.playing
     const now = performance.now()
+    if (!forceSeek && time >= this.lastTime) this.continueSplitVideo(time, now)
     this.lastTime = Math.max(0, time)
     this.playing = playing
     const active = new Set<string>()

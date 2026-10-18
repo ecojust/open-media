@@ -73,6 +73,8 @@ pub struct SpeechVoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_download_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage_note: Option<String>,
@@ -170,10 +172,18 @@ struct Manifest {
 }
 
 #[derive(Clone)]
+pub(crate) struct PythonCpuFallback {
+    pub executable: PathBuf,
+    pub script: PathBuf,
+}
+
+#[derive(Clone)]
 pub(crate) struct SpeechRuntime {
     pub root: PathBuf,
     pub executable: PathBuf,
     pub script: Option<PathBuf>,
+    pub native_cpu_fallback: Option<PathBuf>,
+    pub python_cpu_fallback: Option<PythonCpuFallback>,
     pub model: Model,
     pub voices: Vec<SpeechVoice>,
 }
@@ -262,6 +272,19 @@ fn python_process_path(path: &Path) -> PathBuf {
 }
 
 impl SpeechRuntime {
+    fn cpu_fallback_executable(&self) -> Option<&Path> {
+        self.python_cpu_fallback
+            .as_ref()
+            .map(|runtime| runtime.executable.as_path())
+            .or(self.native_cpu_fallback.as_deref())
+    }
+
+    fn cpu_fallback_script(&self) -> Option<&Path> {
+        self.python_cpu_fallback
+            .as_ref()
+            .map(|runtime| runtime.script.as_path())
+    }
+
     fn discover(resource: &Path) -> Result<Self> {
         let mut roots = Vec::new();
         #[cfg(debug_assertions)]
@@ -346,6 +369,8 @@ impl SpeechRuntime {
             root,
             executable,
             script: None,
+            native_cpu_fallback: None,
+            python_cpu_fallback: None,
             model,
             voices: manifest.voices,
         })
@@ -595,6 +620,7 @@ impl SpeechManager {
         }
         if let Ok(models) = &self.models {
             voices.extend(models.voices());
+            models.decorate_native_acceleration(&mut voices);
         }
         SpeechStatus {
             ready: voices
@@ -610,6 +636,14 @@ impl SpeechManager {
             .as_ref()
             .map_err(Clone::clone)?
             .begin(model_id)?;
+        Ok(self.status())
+    }
+
+    pub fn repair_model(&self, model_id: &str) -> Result<SpeechStatus> {
+        self.models
+            .as_ref()
+            .map_err(Clone::clone)?
+            .repair(model_id)?;
         Ok(self.status())
     }
 
@@ -653,6 +687,10 @@ impl SpeechManager {
                 .map_err(Clone::clone)?
                 .runtime_for_voice(&request.voice_id)?
         };
+        let speech = self.models.as_ref().map_or_else(
+            |_| speech.clone(),
+            |models| models.native_runtime_for(&speech),
+        );
         let id = request.request_id.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let job = {
@@ -935,14 +973,38 @@ fn update_job(jobs: &Mutex<Jobs>, id: &str, stage: &str, progress: Option<f64>) 
     }
 }
 
-fn cpu_retry_command(original: &Command, kind: ModelKind, log_path: &Path) -> Result<Command> {
+fn cpu_retry_command(
+    original: &Command,
+    kind: ModelKind,
+    log_path: &Path,
+    fallback: Option<&Path>,
+    fallback_script: Option<&Path>,
+) -> Result<Command> {
     let python = matches!(kind, ModelKind::F5 | ModelKind::Qwen3);
     let option = if python { "--device" } else { "--provider" };
     let mut arguments = original.get_args();
-    let mut command = Command::new(original.get_program());
+    let executable = fallback.map(|path| {
+        if python {
+            python_process_path(path)
+        } else {
+            path.to_owned()
+        }
+    });
+    let mut command = Command::new(
+        executable
+            .as_deref()
+            .map_or(original.get_program(), Path::as_os_str),
+    );
     while let Some(argument) = arguments.next() {
-        if argument == option {
+        if argument == option
+            || (python && fallback_script.is_some() && argument == "--runtime-script")
+        {
             arguments.next();
+        } else if python
+            && fallback_script.is_some()
+            && argument.to_string_lossy().starts_with("--runtime-script=")
+        {
+            continue;
         } else if !argument
             .to_string_lossy()
             .starts_with(&format!("{option}="))
@@ -952,6 +1014,11 @@ fn cpu_retry_command(original: &Command, kind: ModelKind, log_path: &Path) -> Re
     }
     if python {
         command.args(["--device", "cpu"]);
+        if let Some(script) = fallback_script {
+            command
+                .arg("--runtime-script")
+                .arg(python_process_path(script));
+        }
     } else {
         command.arg("--provider=cpu");
     }
@@ -1007,14 +1074,38 @@ fn generate_wave(
     let mut command = speech.command(request, &text_file, &output)?;
     command.stdout(stdout).stderr(log);
     check_cancelled(cancelled)?;
-    let mut child = RunningChild(
-        command
+    let mut retried_cpu = false;
+    let initial = match command.spawn() {
+        Ok(child) => child,
+        Err(error) if speech.cpu_fallback_executable().is_some() => {
+            check_cancelled(cancelled)?;
+            let mut retry_log = OpenOptions::new()
+                .append(true)
+                .open(&log_path)
+                .map_err(|error| error.to_string())?;
+            writeln!(
+                retry_log,
+                "stage=fallback,from=cuda,device=cpu,reason=加速组件无法启动"
+            )
+            .map_err(|error| error.to_string())?;
+            writeln!(retry_log, "Acceleration runtime startup: {error}")
+                .map_err(|error| error.to_string())?;
+            retried_cpu = true;
+            cpu_retry_command(
+                &command,
+                speech.model.kind,
+                &log_path,
+                speech.cpu_fallback_executable(),
+                speech.cpu_fallback_script(),
+            )?
             .spawn()
-            .map_err(|e| format!("无法启动内置语音引擎：{e}。请确认安装包完整。"))?,
-    );
+            .map_err(|error| format!("无法启动 CPU 配音重试：{error}"))?
+        }
+        Err(error) => return Err(format!("无法启动内置语音引擎：{error}。请确认安装包完整。")),
+    };
+    let mut child = RunningChild(initial);
     let mut log_reader = File::open(&log_path).map_err(|e| e.to_string())?;
     let mut log_text = String::new();
-    let mut retried_cpu = false;
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     loop {
         check_cancelled(cancelled)?;
@@ -1052,7 +1143,15 @@ fn generate_wave(
                         .take(MAX_LOG_BYTES)
                         .read_to_end(&mut remaining);
                     log_text.push_str(&String::from_utf8_lossy(&remaining));
-                    if should_retry_cpu(speech.model.kind, &log_text, retried_cpu) {
+                    let runtime_startup_failed = speech.cpu_fallback_executable().is_some()
+                        && !retried_cpu
+                        && last_generation_device(&log_text).is_none()
+                        && !log_text.lines().any(|line| {
+                            line.starts_with("stage=writing") || line.starts_with("stage=complete")
+                        });
+                    if should_retry_cpu(speech.model.kind, &log_text, retried_cpu)
+                        || runtime_startup_failed
+                    {
                         check_cancelled(cancelled)?;
                         if Instant::now() >= deadline {
                             return Err(
@@ -1060,7 +1159,7 @@ fn generate_wave(
                             );
                         }
                         retried_cpu = true;
-                        let failed_device = last_generation_device(&log_text).unwrap_or("gpu");
+                        let failed_device = last_generation_device(&log_text).unwrap_or("cuda");
                         match fs::remove_file(&output) {
                             Ok(()) => (),
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
@@ -1079,8 +1178,13 @@ fn generate_wave(
                             None,
                         );
                         check_cancelled(cancelled)?;
-                        let mut retry_command =
-                            cpu_retry_command(&command, speech.model.kind, &log_path)?;
+                        let mut retry_command = cpu_retry_command(
+                            &command,
+                            speech.model.kind,
+                            &log_path,
+                            speech.cpu_fallback_executable(),
+                            speech.cpu_fallback_script(),
+                        )?;
                         child = RunningChild(
                             retry_command
                                 .spawn()
@@ -1213,7 +1317,7 @@ fn should_retry_cpu(kind: ModelKind, log: &str, retried: bool) -> bool {
             ModelKind::F5 | ModelKind::Qwen3 => {
                 matches!(last_generation_device(log), Some("mps" | "cuda"))
             }
-            _ => last_generation_device(log) == Some("coreml"),
+            _ => matches!(last_generation_device(log), Some("coreml" | "cuda")),
         }
         && !log
             .lines()
@@ -1568,7 +1672,7 @@ mod tests {
                 .current_dir("模型 目录")
                 .env("HF_HUB_OFFLINE", "1")
                 .env_remove("OPEN_MEDIA_TEST_UNUSED_ENV");
-            let retry = cpu_retry_command(&original, kind, log.path()).unwrap();
+            let retry = cpu_retry_command(&original, kind, log.path(), None, None).unwrap();
             assert_eq!(retry.get_program(), original.get_program());
             assert_eq!(retry.get_current_dir(), original.get_current_dir());
             assert_eq!(
@@ -1584,6 +1688,216 @@ mod tests {
                 .chain(expected)
                 .collect();
             assert_eq!(args, expected);
+        }
+        let original = Command::new("gpu-helper.exe");
+        let cpu = Path::new("bundled/cpu-helper.exe");
+        let retry =
+            cpu_retry_command(&original, ModelKind::Matcha, log.path(), Some(cpu), None).unwrap();
+        assert_eq!(retry.get_program(), cpu);
+    }
+
+    #[test]
+    fn python_cpu_retry_switches_interpreter_and_verified_runner_without_rewriting_job_resources() {
+        let log = tempfile::NamedTempFile::new().unwrap();
+        let mut original = Command::new("GPU runtime/python.exe");
+        original.args([
+            "-I",
+            "-B",
+            "任务/speech-voice-adapter.py",
+            "--runtime-script",
+            "GPU runtime/runner.py",
+            "--config",
+            "模型/runner-config.json",
+            "--device",
+            "auto",
+            "--voice",
+            "qwen3_uncle_fu",
+        ]);
+        for runtime_option in [None, Some("--runtime-script=ignored/runner.py")] {
+            if let Some(option) = runtime_option {
+                original.arg(option);
+            }
+            let retry = cpu_retry_command(
+                &original,
+                ModelKind::Qwen3,
+                log.path(),
+                Some(Path::new("CPU runtime/python.exe")),
+                Some(Path::new("CPU runtime/runner.py")),
+            )
+            .unwrap();
+            assert_eq!(retry.get_program(), "CPU runtime/python.exe");
+            let args = retry
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| arg.as_str() == "--runtime-script")
+                    .count(),
+                1
+            );
+            let runner_index = args
+                .iter()
+                .position(|arg| arg == "--runtime-script")
+                .unwrap();
+            assert_eq!(args[runner_index + 1], "CPU runtime/runner.py");
+            assert!(args.contains(&"任务/speech-voice-adapter.py".into()));
+            assert!(args.contains(&"模型/runner-config.json".into()));
+            assert!(!args
+                .iter()
+                .any(|arg| arg.contains("GPU runtime/runner") || arg.contains("ignored/runner")));
+        }
+    }
+
+    #[test]
+    fn python_loader_failure_uses_a_verified_cpu_interpreter_and_runner_once() {
+        let cases = [
+            "missing",
+            "exit",
+            "writing",
+            "cpu-error",
+            "fallback-error",
+            #[cfg(unix)]
+            "abort",
+        ];
+        for failure in cases {
+            let (root, mut speech, input) = process_failure_fixture(
+                ModelKind::Qwen3,
+                "cuda",
+                if failure == "fallback-error" {
+                    "cpu-fails"
+                } else {
+                    "exit"
+                },
+            );
+            let cpu = speech.executable.clone();
+            let cpu_runner = root.path().join("CPU runtime/runner.py");
+            fs::create_dir_all(cpu_runner.parent().unwrap()).unwrap();
+            fs::write(&cpu_runner, b"verified CPU runner fixture").unwrap();
+            let gpu = root.path().join(if cfg!(windows) {
+                "gpu-engine.cmd"
+            } else {
+                "gpu-engine"
+            });
+            if failure != "missing" {
+                let stage = match failure {
+                    "writing" => "stage=writing",
+                    "cpu-error" => "stage=device,device=cpu",
+                    _ => "CUDA dependency loader failed",
+                };
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::write(
+                        &gpu,
+                        format!(
+                            "#!/bin/sh\nulimit -c 0\nprintf '%s\\n' '{stage}'\n{}\nexit 127\n",
+                            if failure == "abort" {
+                                "kill -ABRT \"$$\""
+                            } else {
+                                ":"
+                            }
+                        ),
+                    )
+                    .unwrap();
+                    fs::set_permissions(&gpu, fs::Permissions::from_mode(0o755)).unwrap();
+                }
+                #[cfg(windows)]
+                fs::write(
+                    &gpu,
+                    format!("@echo off\r\necho {stage}\r\nexit /b 127\r\n"),
+                )
+                .unwrap();
+            }
+            speech.executable = gpu;
+            speech.script = Some(root.path().join("GPU runtime/runner.py"));
+            speech.python_cpu_fallback = Some(PythonCpuFallback {
+                executable: cpu.clone(),
+                script: cpu_runner.clone(),
+            });
+            let work = tempfile::tempdir().unwrap();
+            let result = generate_wave(
+                &speech,
+                work.path(),
+                &input,
+                &AtomicBool::new(false),
+                &Mutex::new(Jobs::default()),
+            );
+            let log = fs::read_to_string(work.path().join("generation.log")).unwrap();
+            if matches!(failure, "writing" | "cpu-error") {
+                assert!(result.is_err(), "{failure}");
+                assert!(!cpu.with_file_name("engine.calls").exists());
+                assert!(!log.contains("stage=fallback,"));
+                continue;
+            }
+            assert_eq!(
+                log.matches("stage=fallback,").count(),
+                1,
+                "{failure}: {log}"
+            );
+            assert_eq!(
+                fs::read_to_string(cpu.with_file_name("engine.calls"))
+                    .unwrap()
+                    .trim(),
+                "cpu"
+            );
+            assert_eq!(
+                fs::read_to_string(cpu.with_file_name("engine.runner"))
+                    .unwrap()
+                    .trim(),
+                python_process_path(&cpu_runner).to_string_lossy()
+            );
+            if failure == "fallback-error" {
+                assert!(result.is_err());
+            } else {
+                result.unwrap();
+                validate_wave(&work.path().join("speech.wav"), 24000).unwrap();
+                assert_eq!(last_generation_device(&log), Some("cpu"));
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_acceleration_loader_failure_uses_the_separate_bundled_cpu_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        for missing in [false, true] {
+            let root = fixture();
+            let mut speech = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+            let cpu = speech.executable.clone();
+            fs::write(cpu.with_extension("wav"), wave(&[0, 500, -500, 0])).unwrap();
+            fs::write(
+                &cpu,
+                r#"#!/bin/sh
+printf 'stage=device,device=cpu\n'
+for arg do case "$arg" in --output-filename=*) output="${arg#*=}" ;; esac; done
+printf 'stage=writing\n'
+cp "${0}.wav" "$output"
+printf 'stage=complete\n'
+"#,
+            )
+            .unwrap();
+            fs::set_permissions(&cpu, fs::Permissions::from_mode(0o755)).unwrap();
+            let gpu = root.path().join("gpu-helper");
+            if !missing {
+                fs::write(&gpu, "#!/bin/sh\nexit 127\n").unwrap();
+                fs::set_permissions(&gpu, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            speech.executable = gpu;
+            speech.native_cpu_fallback = Some(cpu);
+            let work = tempfile::tempdir().unwrap();
+            generate_wave(
+                &speech,
+                work.path(),
+                &request("测试本地回退"),
+                &AtomicBool::new(false),
+                &Mutex::new(Jobs::default()),
+            )
+            .unwrap();
+            let log = fs::read_to_string(work.path().join("generation.log")).unwrap();
+            assert_eq!(log.matches("stage=fallback,").count(), 1);
+            assert_eq!(last_generation_device(&log), Some("cpu"));
+            validate_wave(&work.path().join("speech.wav"), 16000).unwrap();
         }
     }
 
@@ -1627,6 +1941,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --device) mode="$2"; shift ;;
     --output-filename) output="$2"; shift ;;
+    --runtime-script) printf '%s' "$2" > "$0.runner"; shift ;;
   esac
   shift
 done
@@ -1664,6 +1979,7 @@ set "output="
 if "%~1"=="" goto run
 if "%~1"=="--device" goto device
 if "%~1"=="--output-filename" goto output
+if "%~1"=="--runtime-script" goto runner
 shift
 goto arguments
 :device
@@ -1673,6 +1989,11 @@ shift
 goto arguments
 :output
 set "output=%~2"
+shift
+shift
+goto arguments
+:runner
+>"%~dpn0.runner" echo %~2
 shift
 shift
 goto arguments
@@ -2738,6 +3059,8 @@ exit 1
             root: model_root,
             executable,
             script: Some(script),
+            native_cpu_fallback: None,
+            python_cpu_fallback: None,
             model,
             voices: vec![voice],
         };

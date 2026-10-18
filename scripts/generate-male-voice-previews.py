@@ -23,7 +23,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "scripts/optional-speech-assets"
 PREVIEWS = ROOT / "src/assets/voice-previews"
-TEXT = "这是一款全程由AI接管并生成的软件"
+TEXT = "欢迎使用 Open Media。你可以录制屏幕、剪辑视频、编辑图片，还能生成配音，让创作更轻松。"
 REFERENCE_TEXT = "清晨的阳光照进房间，翻开今天的计划，让每一个想法慢慢变成现实。"
 MODEL_IDS = {"qwen3_uncle_fu": "qwen3-tts-1.7b-serena", "f5_zh_male": "f5-v1-base-fp32",
              "zipvoice_zh_male": "zipvoice-distill-fp32"}
@@ -133,7 +133,7 @@ def generate_python(args, voice, text, name):
     if voice == "f5_zh_male":
         for filename in ("male-reference.wav", "male-reference.txt"):
             shutil.copyfile(ASSETS / filename, job / filename)
-    config = args.f5_config if voice == "f5_zh_male" else args.qwen_model / "runner-config.json"
+    config = args.f5_config if voice.startswith("f5_") else args.qwen_model / "runner-config.json"
     command = [args.python, "-I", "-B", job / "speech-voice-adapter.py",
                "--runtime-script", args.runtime_script, "--voice", voice,
                "--config", config, "--text-file", job / "text.txt",
@@ -143,8 +143,8 @@ def generate_python(args, voice, text, name):
     return job / "speech.wav", elapsed, command
 
 
-def generate_zipvoice(args):
-    job = job_directory(args, "zipvoice_zh_male", TEXT)
+def generate_zipvoice(args, voice="zipvoice_zh_male"):
+    job = job_directory(args, voice, TEXT)
     installed = json.loads((args.speech_root / "runtime.json").read_text())
     if installed["runnerSourceSha256"] != digest(ROOT / "scripts/speech-runtime-runner.c"):
         raise ValueError("Prepared native runner does not match the current source")
@@ -153,6 +153,7 @@ def generate_zipvoice(args):
         if digest(args.speech_root / item["path"]) != item["sha256"]:
             raise ValueError(f"Native runtime integrity failed: {item['path']}")
     model = args.zip_model
+    reference_name = "male-reference" if voice == "zipvoice_zh_male" else "zipvoice-reference"
     command = [args.speech_root / runtime["executable"],
                f"--zipvoice-encoder={model / 'encoder.onnx'}",
                f"--zipvoice-decoder={model / 'decoder.onnx'}",
@@ -160,8 +161,8 @@ def generate_zipvoice(args):
                f"--zipvoice-vocoder={model / 'vocos_24khz.onnx'}",
                f"--zipvoice-lexicon={model / 'lexicon.txt'}",
                f"--zipvoice-data-dir={args.speech_root / 'model/espeak-ng-data'}",
-               f"--reference-audio={ASSETS / 'male-reference.wav'}",
-               f"--reference-text-file={ASSETS / 'male-reference.txt'}",
+               f"--reference-audio={ASSETS / (reference_name + '.wav')}",
+               f"--reference-text-file={ASSETS / (reference_name + '.txt')}",
                "--num-steps=8", "--sample-rate=24000", "--sid=0", "--speed=1",
                f"--text-file={job / 'text.txt'}", f"--output-filename={job / 'speech.wav'}"]
     elapsed = run(command, job / "generation.log")
@@ -227,6 +228,7 @@ def main():
         return
     manifest_path = PREVIEWS / "male-manifest.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else dict(schema=1, text=TEXT, previews=[])
+    manifest["text"] = TEXT
     manifest["generator"] = generator
     reference_record = json.loads((ASSETS / "male-reference.json").read_text())
     if digest(ASSETS / "male-reference.wav") != reference_record["sha256"]:

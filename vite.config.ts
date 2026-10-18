@@ -12,6 +12,9 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(packageInfo.version),
     __APP_BUILD_TIME__: JSON.stringify(buildTime),
   },
-  server: { strictPort: true },
+  server: {
+    strictPort: true,
+    watch: { ignored: ['**/.media-runtime/**', '**/.speech-runtime/**', '**/src-tauri/target/**'] },
+  },
   build: { target: 'es2022' },
 })

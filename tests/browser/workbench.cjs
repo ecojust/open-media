@@ -269,9 +269,16 @@ async function main() {
   })
 
   await check('真实导出弹窗生成可解码WebM文件', async () => {
+    await page.getByRole('button', { name: '项目设置', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: '项目设置', exact: true })
+    await settings.getByLabel('画面比例', { exact: true }).selectOption('custom')
+    await settings.getByLabel('项目宽度', { exact: true }).fill('320')
+    await settings.getByLabel('项目高度', { exact: true }).fill('180')
+    await settings.getByRole('button', { name: '完成', exact: true }).click()
     await page.getByTestId('export-project').click()
-    await page.getByLabel('导出宽度', { exact: true }).fill('320')
-    await page.getByLabel('导出高度', { exact: true }).fill('180')
+    await expect(page.getByLabel('导出宽度', { exact: true })).toHaveValue('320')
+    await expect(page.getByLabel('导出宽度', { exact: true })).toHaveAttribute('readonly', '')
+    await expect(page.getByLabel('导出高度', { exact: true })).toHaveValue('180')
     const download = page.waitForEvent('download', { timeout: 30000 })
     await page.getByTestId('start-export').click()
     const bytes = await readDownload(await download)

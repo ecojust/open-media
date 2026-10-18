@@ -45,10 +45,10 @@ onBeforeUnmount(() => { dialog.value?.close() })
 </template>
 
 <style scoped>
-.editor-dialog{box-sizing:border-box;width:min(480px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 24px);margin:auto;padding:0;overflow:hidden;border:1px solid var(--ed-border);border-radius:12px;background:var(--ed-panel);color:var(--ed-text);box-shadow:0 20px 80px #0004;font:inherit;line-height:1.5}
+.editor-dialog{box-sizing:border-box;width:min(480px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 24px);margin:auto;padding:0;overflow:hidden;border:1px solid var(--ui-modal-border,var(--ed-border));border-radius:12px;background:var(--ui-modal-surface,var(--ed-panel));color:var(--ui-modal-text,var(--ed-text));-webkit-backdrop-filter:var(--ui-modal-panel-blur,blur(18px) saturate(130%));backdrop-filter:var(--ui-modal-panel-blur,blur(18px) saturate(130%));box-shadow:0 20px 80px #0004;font:inherit;line-height:1.5}
 .editor-dialog[open]{display:flex;flex-direction:column}
 .editor-dialog.wide{width:min(680px,calc(100vw - 24px))}
-.editor-dialog::backdrop{background:#10162670}
+.editor-dialog::backdrop{background:var(--ui-modal-backdrop,rgba(24,40,61,.28));-webkit-backdrop-filter:var(--ui-modal-blur,blur(10px) saturate(115%));backdrop-filter:var(--ui-modal-blur,blur(10px) saturate(115%))}
 .editor-dialog-heading{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--ed-border);flex-shrink:0}
 .editor-dialog-heading>svg{color:var(--ed-accent);flex-shrink:0}
 .editor-dialog-heading h2{font-size:14px;font-weight:600;margin:0;flex:1}

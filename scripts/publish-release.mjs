@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { verifySourceContents } from './release-source.mjs'
 import { join, resolve } from 'node:path'
-import { digest, validateBuild, verifyDigest, verifyMetadata, validateAssetMetadata, verifySpeechMetadata, verifySpeechSynthesis, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
+import { digest, validateBuild, verifyDigest, verifyMetadata, validateAssetMetadata, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
 
 const repository = process.env.RELEASE_REPOSITORY
 const runId = process.env.RELEASE_BUILD_RUN
@@ -32,6 +32,7 @@ const [run, jobs, artifacts] = await Promise.all([
 ])
 const selected = validateBuild(run, jobs, artifacts, commit)
 const sourceFile = path => execFileSync('git', ['show', `${commit}:${path}`], { maxBuffer: 5 * 1024 * 1024 })
+const expectedMedia = { sourceLockSha256: digest(sourceFile('scripts/media-runtime.lock.json')), buildScriptSha256: digest(sourceFile('scripts/build-media-runtime.sh')), capabilitiesScriptSha256: digest(sourceFile('scripts/media-runtime-capabilities.mjs')) }
 const speechLockBytes = sourceFile('scripts/speech-runtime.lock.json')
 const speechLock = JSON.parse(speechLockBytes)
 const expectedSpeech = { sourceLockSha256: digest(speechLockBytes), prepareScriptSha256: digest(sourceFile('scripts/speech-runtime.mjs')), runnerSourceSha256: digest(sourceFile('scripts/speech-runtime-runner.c')), runnerManifestSha256: digest(sourceFile('scripts/speech-runtime-runner.manifest')), model: speechLock.model }
@@ -88,7 +89,7 @@ with zipfile.ZipFile(archive) as z:
     if (meta.commit !== commit || meta.kind !== 'corresponding-source') throw new Error('Corresponding source commit mismatch.')
   } else {
     verifyMetadata(meta, platform, commit, version)
-    if (meta.runtime?.sourceLockSha256 !== digest(sourceFile('scripts/media-runtime.lock.json')) || meta.runtime?.buildScriptSha256 !== digest(sourceFile('scripts/build-media-runtime.sh'))) throw new Error(`Installer contains a stale media runtime: ${platform}`)
+    verifyMediaMetadata(meta.runtime, platform, expectedMedia)
     verifySpeechMetadata(meta.speechRuntime, platform, expectedSpeech)
     const evidenceBytes = await readFile(join(directory, 'speech-verification.json'))
     if (meta.speechVerification?.file !== 'speech-verification.json' || meta.speechVerification.bytes !== evidenceBytes.length) throw new Error(`Missing installed speech verification metadata: ${platform}`)
@@ -109,7 +110,11 @@ with zipfile.ZipFile(archive) as z:
     const mediaLock = JSON.parse(sourceFile('scripts/media-runtime.lock.json'))
     const archivedFile = path => execFileSync('tar', ['-xOf', join(directory, mediaFile), `media-runtime-source/${path}`], { maxBuffer: 64 * 1024 * 1024 })
     for (const component of mediaLock.sources) verifyDigest(archivedFile(`.media-runtime/downloads/${component.archive}`), `sha256:${component.sha256}`)
-    for (const file of ['scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/build-media-runtime.sh', 'docs/MEDIA_RUNTIME.md', 'THIRD_PARTY_NOTICES.md']) verifyDigest(archivedFile(file), `sha256:${digest(sourceFile(file))}`)
+    for (const file of mediaRuntimeSourceFiles) verifyDigest(archivedFile(file), `sha256:${digest(sourceFile(file))}`)
+    for (const notice of mediaLock.sources.flatMap(component => component.additionalNotices || [])) {
+      verifyDigest(sourceFile(notice.file), `sha256:${notice.sha256}`)
+      verifyDigest(archivedFile(notice.file), `sha256:${notice.sha256}`)
+    }
     const sourceName = `Open-Media_${version}_media-runtime-source.tar.gz`
     payloads.set(sourceName, source)
     verification.mediaSource = { artifactId: artifact.id, artifactDigest: artifact.digest, file: sourceName, sha256: digest(source), size: source.length }
@@ -135,7 +140,7 @@ with zipfile.ZipFile(archive) as z:
   if (!installer.length) throw new Error('Empty installer.')
   const name = `Open-Media_${version}_${platform}${platform === 'windows-x64' ? '-setup.exe' : '.dmg'}`
   payloads.set(name, installer)
-  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, speechRuntime: meta.speechRuntime, speechVerification })
+  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, mediaRuntime: meta.runtime, speechRuntime: meta.speechRuntime, speechVerification })
   console.log(`Verified ${platform}: source, artifact archive, installer, seven installed voices and notices.`)
 }
 
