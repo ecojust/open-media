@@ -115,11 +115,9 @@ defineExpose({ setSourceSize })
 .size-title{display:flex;align-items:center;gap:5px;flex:none;color:var(--ed-muted)}
 .size-dimensions{display:flex;align-items:center;gap:5px;min-width:0}
 .size-dimensions label{display:flex;align-items:center;gap:4px;color:var(--ed-muted)}
-.project-size-controls select,.project-size-controls input{height:28px;min-height:28px;box-sizing:border-box;border:1px solid var(--ed-border);border-radius:5px;background:var(--ed-bg);color:var(--ed-text);font:inherit;outline:none}
-.project-size-controls select{width:116px;padding:2px 5px}
-.project-size-controls input{width:75px;min-width:0;padding:3px 5px;font-variant-numeric:tabular-nums}
-.project-size-controls :is(select,input):focus-visible{border-color:var(--ed-accent);outline:2px solid color-mix(in srgb,var(--ed-accent) 25%,transparent);outline-offset:1px}
-.project-size-controls :is(select,input):disabled{opacity:.5;cursor:not-allowed}
+.project-size-controls select{width:116px}
+.project-size-controls input{width:75px;min-width:0;height:var(--ui-control-height,32px);min-height:var(--ui-control-height,32px);box-sizing:border-box;padding:0 9px;border:1px solid var(--ui-line,var(--ed-border));border-radius:6px;background:var(--ui-surface,var(--ed-panel));color:var(--ui-text,var(--ed-text));font:inherit;font-size:var(--ui-control-font-size,12px);font-variant-numeric:tabular-nums}
+.project-size-controls input:disabled{opacity:.6;cursor:not-allowed}
 .project-size-controls input[aria-invalid=true]{border-color:var(--ed-danger,#d55454)}
 .size-cross,.size-unit{color:var(--ed-muted)}
 .size-error{flex-basis:100%;color:var(--ed-danger,#d55454);font-size:11px}

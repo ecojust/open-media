@@ -13,6 +13,7 @@ async function main() {
     await page.route('**/size-controls-test', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body style="margin:0"><div id="app"></div></body></html>' }))
     await page.goto(`${server.resolvedUrls.local[0]}size-controls-test`)
     await page.evaluate(async () => {
+      await import('/src/style.css')
       const source = await (await fetch('/src/components/ProjectSizeControls.vue')).text()
       const { createApp, h, shallowRef, ref, nextTick } = await import(source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1])
       const Controls = (await import('/src/components/ProjectSizeControls.vue')).default
@@ -41,6 +42,10 @@ async function main() {
       app.mount('#app'); await nextTick()
     })
     const width = page.getByLabel('项目宽度', { exact: true }), height = page.getByLabel('项目高度', { exact: true }), preset = page.getByLabel('画面比例', { exact: true })
+    const styles = await preset.evaluate(element => { const css = getComputedStyle(element); return { height: element.getBoundingClientRect().height, font: css.fontSize, arrow: css.backgroundImage } })
+    assert.equal(styles.height, 32); assert.equal(styles.font, '12px'); assert.match(styles.arrow, /data:image\/svg\+xml/)
+    assert.equal(await width.evaluate(element => element.getBoundingClientRect().height), 32)
+    assert.equal(await height.evaluate(element => element.getBoundingClientRect().height), 32)
     const state = () => page.evaluate(() => {
       const project = window.sizeFixture.state.value
       return { width: project.width, height: project.height, fontSize: project.tracks[0].clips[0]?.fontSize, past: window.sizeFixture.historyLength() }
