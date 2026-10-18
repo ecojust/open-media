@@ -52,6 +52,7 @@ async function installNativeContract(page) {
         if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null }
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_media_jobs') return []
+        if (command === 'mcp_pending') return []
         if (command === 'configure_screenshot_shortcut') {
           if (args.shortcut && args.shortcut === state.rejectShortcut) throw new Error('此快捷键已被占用，请选择其他组合。')
           state.shortcut = args.shortcut
@@ -100,6 +101,8 @@ async function main() {
       assert.deepEqual((await calls(page, 'configure_screenshot_shortcut'))[0].args, { shortcut: defaultShortcut })
       const trace = await page.evaluate(() => window.screenshotHarness.calls)
       assert(trace.findIndex(call => call.command === 'plugin:event|listen' && call.args.event === 'screenshot-requested') < trace.findIndex(call => call.command === 'configure_screenshot_shortcut'))
+      await expect.poll(async () => (await calls(page, 'mcp_pending')).length).toBe(1)
+      assert.equal((await calls(page, 'mcp_start')).length, 0, '启动时查询待处理请求不能自动启动 MCP 服务')
       for (const command of ['pick_capture_source', 'capture_screenshot', 'start_capture', 'list_capture_devices', 'show_main_window']) assert.equal((await calls(page, command)).length, 0)
       await page.getByTestId('nav-record').click()
       await page.getByTestId('screenshot-settings-open').click()

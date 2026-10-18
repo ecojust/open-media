@@ -114,10 +114,32 @@ mod desktop {
         blocking(move || {
             let tools: Vec<Value> = serde_json::from_str(include_str!("../../src/mcp-tools.json"))
                 .map_err(|_| "MCP 工具清单无法读取。")?;
+            let request_manager = state.clone();
             let dispatch = Arc::new(move |request: McpRequest| {
-                let window = app.get_webview_window("main").ok_or("主窗口已关闭。")?;
-                require_mcp_window(&window)?;
-                window.emit("mcp-request", request).map_err(|error| format!("无法发送 MCP 编辑请求：{error}"))
+                let handle = app.clone();
+                let manager = request_manager.clone();
+                // The HTTP runtime must never wait on a webview getter: application exit
+                // joins that runtime on the main thread. Queue the entire UI operation.
+                app.run_on_main_thread(move || {
+                    // A stop or an earlier renderer replay may already have consumed it.
+                    // Do not claim here; successful delivery is claimed by the renderer.
+                    if !manager.pending().iter().any(|pending| pending.id == request.id) {
+                        return;
+                    }
+                    let request_id = request.id.clone();
+                    let result = (|| -> engine::Result<()> {
+                        let window = handle.get_webview_window("main").ok_or("主窗口已关闭。")?;
+                        require_mcp_window(&window)?;
+                        window.emit("mcp-request", request).map_err(|error| format!("无法发送 MCP 编辑请求：{error}"))
+                    })();
+                    if let Err(error) = result {
+                        // Only a failed delivery is completed here; completion requires
+                        // a claim, and both operations reject stopped/expired requests.
+                        if manager.claim(&request_id) {
+                            manager.complete(&request_id, serde_json::json!({ "error": error }), true);
+                        }
+                    }
+                }).map_err(|error| format!("无法排队 MCP 编辑请求：{error}"))
             });
             state.start(state.config(), tools, dispatch)
         }).await
@@ -880,3 +902,65 @@ mod desktop {
 }
 #[cfg(feature = "desktop")]
 pub use desktop::run;
+
+#[cfg(test)]
+mod mcp_dispatch_thread_tests {
+    use crate::mcp::{McpManager, McpRequest};
+    use serde_json::json;
+    use std::{
+        io::{Read, Write},
+        net::TcpStream,
+        sync::{atomic::{AtomicUsize, Ordering}, mpsc, Arc},
+        thread,
+        time::{Duration, Instant},
+    };
+
+    #[test]
+    fn stop_does_not_wait_for_queued_ui_work_and_late_delivery_is_discarded() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = McpManager::new(directory.path().join("mcp.json")).unwrap();
+        let mut config = manager.config();
+        config.port = 0;
+        let tools = vec![json!({"name":"open_media_echo","inputSchema":{"type":"object"}})];
+        let (queue, ui) = mpsc::channel::<Box<dyn FnOnce() + Send>>();
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let events = delivered.clone();
+        let pending = manager.clone();
+        let status = manager.start(config.clone(), tools.clone(), Arc::new(move |request: McpRequest| {
+            let manager = pending.clone();
+            let events = events.clone();
+            // Model a main-thread queue that cannot run until shutdown has returned.
+            queue.send(Box::new(move || {
+                if manager.pending().iter().any(|item| item.id == request.id) {
+                    events.fetch_add(1, Ordering::SeqCst);
+                }
+            })).map_err(|error| error.to_string())
+        })).unwrap();
+        let token = config.token.clone();
+        let client = thread::spawn(move || {
+            let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"open_media_echo","arguments":{}}}).to_string();
+            let mut stream = TcpStream::connect(("127.0.0.1", status.port)).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+            write!(stream, "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", status.port, body.len()).unwrap();
+            let mut response = Vec::new();
+            if let Err(error) = stream.read_to_end(&mut response) {
+                assert!(matches!(error.kind(), std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted));
+            }
+        });
+        let late_ui_work = ui.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(manager.pending().len(), 1);
+        let request_id = manager.pending()[0].id.clone();
+        let began = Instant::now();
+        manager.stop();
+        assert!(began.elapsed() < Duration::from_secs(2), "Shutdown waited for the undrained UI queue");
+        assert!(manager.pending().is_empty());
+        assert!(!manager.claim(&request_id));
+        client.join().unwrap();
+        // Even restarting the service cannot make a queued request from its previous
+        // lifetime eligible for dispatch into the editor.
+        manager.start(config, tools, Arc::new(|_| Ok(()))).unwrap();
+        late_ui_work();
+        assert_eq!(delivered.load(Ordering::SeqCst), 0);
+        manager.stop();
+    }
+}
