@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "id": "python-cuda-v1",
+  "version": 1,
+  "pythonVersion": "3.11.14",
+  "pythonRelease": "20251014",
+  "f5Source": {
+    "repository": "https://github.com/SWivid/F5-TTS.git",
+    "revision": "2f866649b779881af8bd644e76b9a6d95053da29"
+  },
+  "platforms": {
+    "windows-x64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "size": 25648990,
+      "sha256": "c2a7b0bb86eb9f1cc094a01bdabef7ddc77f89f8e45161fa7819f2b4a7ba7bc1",
+      "executable": "python/python.exe",
+      "torch": "2.9.1+cu128",
+      "torchIndex": "https://download.pytorch.org/whl/cu128",
+      "cudaVersion": "12.8",
+      "torchWheel": {
+        "url": "https://download-r2.pytorch.org/whl/cu128/torch-2.9.1%2Bcu128-cp311-cp311-win_amd64.whl",
+        "size": 2862053760,
+        "sha256": "633005a3700e81b5be0df2a7d3c1d48aced23ed927653797a3bd2b144a3aeeb6"
+      },
+      "torchaudioWheel": {
+        "url": "https://download-r2.pytorch.org/whl/cu128/torchaudio-2.9.1%2Bcu128-cp311-cp311-win_amd64.whl",
+        "size": 2215246,
+        "sha256": "c91eea923573e7b02611a324232e4adb7aad5f828aa875b1f48241c228980899"
+      }
+    }
+  },
+  "releaseTag": "speech-runtime-cuda-v1"
+}

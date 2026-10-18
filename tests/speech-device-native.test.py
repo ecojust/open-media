@@ -55,6 +55,18 @@ int SherpaOnnxWriteWave(const float *, int32_t, int32_t, const char *);
 const SherpaOnnxWave *SherpaOnnxReadWave(const char *);
 void SherpaOnnxFreeWave(const SherpaOnnxWave *);
 """
+ORT_HEADER = r"""
+#define ORT_API_VERSION 28
+typedef struct { int value; } OrtStatus;
+typedef struct {
+  OrtStatus *(*GetAvailableProviders)(char ***, int *);
+  const char *(*GetErrorMessage)(const OrtStatus *);
+  void (*ReleaseStatus)(OrtStatus *);
+  OrtStatus *(*ReleaseAvailableProviders)(char **, int);
+} OrtApi;
+typedef struct { const OrtApi *(*GetApi)(int); } OrtApiBase;
+const OrtApiBase *OrtGetApiBase(void);
+"""
 STUB = r"""
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,6 +115,24 @@ int SherpaOnnxWriteWave(const float *values, int32_t count, int32_t rate, const 
 }
 const SherpaOnnxWave *SherpaOnnxReadWave(const char *path) { (void)path; return &wave; }
 void SherpaOnnxFreeWave(const SherpaOnnxWave *value) { (void)value; }
+#if defined(OPEN_MEDIA_ORT_PROVIDER_QUERY)
+#include "onnxruntime_c_api.h"
+static OrtStatus error = {1};
+static char *provider_names[] = {"CPUExecutionProvider", "CUDAExecutionProvider"};
+static OrtStatus *available(char ***names, int *count) {
+  if (failure("providers")) return &error;
+  *names = provider_names;
+  *count = getenv("TEST_NATIVE_CUDA") ? 2 : 1;
+  return NULL;
+}
+static const char *message(const OrtStatus *value) { (void)value; return "provider query failed"; }
+static void release_status(OrtStatus *value) { (void)value; }
+static OrtStatus *release_providers(char **names, int count) { (void)names; (void)count; return NULL; }
+static const OrtApi api = {available, message, release_status, release_providers};
+static const OrtApi *get_api(int version) { (void)version; return failure("api-version") ? NULL : &api; }
+static const OrtApiBase base = {get_api};
+const OrtApiBase *OrtGetApiBase(void) { return &base; }
+#endif
 """
 
 
@@ -116,21 +146,23 @@ class NativeSpeechDeviceTests(unittest.TestCase):
         header = cls.directory / "sherpa-onnx/c-api/c-api.h"
         header.parent.mkdir(parents=True)
         header.write_text(HEADER)
+        (cls.directory / "onnxruntime_c_api.h").write_text(ORT_HEADER)
         stub = cls.directory / "stub.c"
         stub.write_text(STUB)
         cls.programs = {}
-        for apple in (False, True):
-            program = cls.directory / ("apple-helper" if apple else "cpu-helper")
+        for apple in (False, True, "gpu"):
+            program = cls.directory / ("gpu-helper" if apple == "gpu" else "apple-helper" if apple else "cpu-helper")
             subprocess.run([
                 "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-                *( ["-D__APPLE__=1"] if apple else ["-U__APPLE__"] ),
+                *( ["-D__APPLE__=1"] if apple is True else ["-U__APPLE__"] ),
+                *( ["-DOPEN_MEDIA_ORT_PROVIDER_QUERY=1"] if apple == "gpu" else [] ),
                 "-I", str(cls.directory), str(ROOT / "scripts/speech-runtime-runner.c"),
                 str(stub), "-o", str(program),
             ], check=True, capture_output=True, text=True)
             cls.programs[apple] = program
         (cls.directory / "text.txt").write_text("这是一段测试文本。", encoding="utf-8")
 
-    def run_helper(self, *, apple=False, provider=None, engine="matcha", failure=None):
+    def run_helper(self, *, apple=False, provider=None, engine="matcha", failure=None, cuda=False):
         if engine == "matcha":
             model = ["--matcha-acoustic-model=model", "--matcha-vocoder=vocoder", "--matcha-tokens=tokens", "--matcha-data-dir=data", "--matcha-lexicon=lexicon"]
         elif engine == "zipvoice":
@@ -139,6 +171,9 @@ class NativeSpeechDeviceTests(unittest.TestCase):
             model = ["--kokoro-model=model", "--kokoro-voices=voices", "--kokoro-tokens=tokens", "--kokoro-data-dir=data", "--kokoro-lexicon=lexicon", "--sample-rate=24000"]
         env = dict(os.environ)
         env.pop("TEST_NATIVE_FAILURE", None)
+        env.pop("TEST_NATIVE_CUDA", None)
+        if cuda:
+            env["TEST_NATIVE_CUDA"] = "1"
         if failure:
             env["TEST_NATIVE_FAILURE"] = failure
         return subprocess.run([
@@ -167,15 +202,40 @@ class NativeSpeechDeviceTests(unittest.TestCase):
             self.assertNotIn("provider=coreml", result.stdout)
 
     def test_cpu_runtime_does_not_claim_a_missing_gpu_provider(self):
-        for provider in (None, "auto", "coreml"):
+        for provider in (None, "auto", "coreml", "cuda"):
             result = self.run_helper(provider=provider)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("stage=device,device=cpu", result.stdout)
             self.assertNotIn("stage=device,device=coreml", result.stdout)
-            self.assertEqual("stage=fallback,from=coreml,device=cpu,reason=unsupported_platform" in result.stdout, provider == "coreml")
+            self.assertEqual("stage=fallback," in result.stdout, provider in ("coreml", "cuda"))
+            if provider in ("coreml", "cuda"):
+                self.assertIn(f"from={provider},device=cpu,reason=runtime_provider_unavailable", result.stdout)
+
+    def test_optional_runtime_queries_real_provider_inventory(self):
+        for engine in ("matcha", "zipvoice", "kokoro"):
+            for provider in (None, "auto", "cuda"):
+                result = self.run_helper(apple="gpu", provider=provider, cuda=True, engine=engine)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"stage=device,device=cuda,engine={engine}", result.stdout)
+                self.assertIn("test=create,provider=cuda", result.stdout)
+        for cuda, failure, expected in [(False, None, "cpu"), (True, "providers", "cpu"), (True, "api-version", "cpu")]:
+            result = self.run_helper(apple="gpu", provider="cuda", cuda=cuda, failure=failure)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"stage=device,device={expected}", result.stdout)
+            self.assertIn("runtime_provider_unavailable", result.stdout)
+        cpu = self.run_helper(apple="gpu", provider="cpu", cuda=True)
+        self.assertIn("test=create,provider=cpu", cpu.stdout)
+
+    def test_self_test_checks_runtime_without_claiming_gpu_inference(self):
+        result = subprocess.run([self.programs["gpu"], "--self-test"], capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout.splitlines()[-1])
+        self.assertEqual(report["selfTest"], "runtime-load-and-capabilities")
+        self.assertFalse(report["gpuInferenceVerified"])
+        self.assertNotIn("test=create", result.stdout)
 
     def test_invalid_provider_fails_before_loading_a_model(self):
-        for provider in ("cuda", "coreml:arbitrary.conf", "", "cpu\ninvalid"):
+        for provider in ("directml", "coreml:arbitrary.conf", "", "cpu\ninvalid"):
             result = self.run_helper(apple=True, provider=provider)
             self.assertEqual(result.returncode, 2)
             self.assertNotIn("test=create", result.stdout)

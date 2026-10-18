@@ -1,0 +1,201 @@
+name: Optional accelerated speech runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the verified immutable runtime components
+        type: boolean
+        default: false
+      require_cuda:
+        description: Require real GPU inference on a self-hosted Windows X64 cuda runner
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optional-speech-cuda-runtime
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    name: Build and verify accelerated Windows speech
+    runs-on: ${{ fromJSON(inputs.require_cuda && '["self-hosted","Windows","X64","cuda"]' || '["windows-2022"]') }}
+    timeout-minutes: 240
+    env:
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+      PYTHONIOENCODING: utf-8
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PIP_NO_CACHE_DIR: '1'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      REQUIRE_CUDA: ${{ inputs.require_cuda }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Select temporary storage and report the disk budget
+        shell: python
+        run: |
+          import json, os, shutil
+          from pathlib import Path
+          candidates = [Path(os.environ['RUNNER_TEMP']), Path.home() / 'AppData/Local/Temp']
+          available = []
+          for path in candidates:
+              try:
+                  path.mkdir(parents=True, exist_ok=True)
+                  available.append((shutil.disk_usage(path).free, path))
+              except OSError:
+                  continue
+          if not available:
+              raise RuntimeError('No writable temporary storage is available')
+          print(json.dumps([dict(path=str(path), freeBytes=free) for free, path in available]))
+          free, base = max(available, key=lambda item: item[0])
+          if free < 20 * 1024**3:
+              raise RuntimeError('The accelerated runtime build needs at least 20 GiB of free temporary storage')
+          work = base / ('open-media-cuda-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'])
+          work.mkdir()
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
+              out.write(f'MEDIA_CUDA_WORK={work}\n')
+      - name: Select the native Windows linker
+        shell: python
+        run: |
+          import os, shutil
+          from pathlib import Path
+          compiler = shutil.which('cl.exe')
+          if not compiler:
+              raise RuntimeError('The native Windows compiler is unavailable')
+          linker = Path(compiler).with_name('link.exe')
+          if not linker.is_file():
+              raise RuntimeError('The native Windows linker is unavailable')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as out:
+              out.write(f'CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER={linker}\n')
+      - name: Check runtime packaging guardrails
+        shell: bash
+        run: python tests/speech-runtime-parts.test.py
+      - name: Build the self-contained accelerated runtime
+        shell: bash
+        run: |
+          extra=()
+          if [[ "$REQUIRE_CUDA" == true ]]; then extra+=(--require-cuda); fi
+          python scripts/optional-speech-runtime-build.py \
+            --lock scripts/optional-speech-runtime-cuda.lock.json --platform windows-x64 \
+            --work "$MEDIA_CUDA_WORK" \
+            --output artifacts/optional-speech-cuda-runtime --phase build "${extra[@]}"
+      - name: Verify real models, relocation, offline CPU fallback and runtime integrity
+        shell: bash
+        run: |
+          python scripts/optional-speech-runtime-build.py \
+            --lock scripts/optional-speech-runtime-cuda.lock.json --platform windows-x64 \
+            --work "$MEDIA_CUDA_WORK" \
+            --output artifacts/optional-speech-cuda-runtime --phase validate
+      - name: Verify all four production voices and actual execution devices
+        shell: bash
+        run: |
+          set -o pipefail
+          export OPEN_MEDIA_TEST_RUNTIME_ROOT="$MEDIA_CUDA_WORK/移动验证 中文 空格/runtime"
+          export OPEN_MEDIA_TEST_RUNTIME_METADATA="$GITHUB_WORKSPACE/artifacts/optional-speech-cuda-runtime/runtime-metadata.json"
+          export OPEN_MEDIA_TEST_EVIDENCE_DIR="$GITHUB_WORKSPACE/artifacts/optional-speech-cuda-runtime/validation/application"
+          for voice in f5_zh_female f5_zh_male qwen3_serena qwen3_uncle_fu; do
+            if [[ "$voice" == f5_* ]]; then engine=f5; model=f5-v1-base-fp32; else engine=qwen3; model=qwen3-tts-1.7b-serena; fi
+            export OPEN_MEDIA_TEST_ENGINE="$engine" OPEN_MEDIA_TEST_VOICE_ID="$voice"
+            export OPEN_MEDIA_TEST_MODEL_ROOT="$MEDIA_CUDA_WORK/移动验证 中文 空格/models/$model"
+            cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib \
+              speech::tests::real_portable_runtime_command_and_audio_round_trip -- --ignored --exact \
+              --nocapture --test-threads=1 2>&1 | tee "artifacts/optional-speech-cuda-runtime/logs/application-$voice.log"
+          done
+          extra=()
+          if [[ "$REQUIRE_CUDA" == true ]]; then extra+=(--require-cuda); fi
+          python scripts/verify-cuda-runtime-artifact.py --phase application \
+            --directory artifacts/optional-speech-cuda-runtime --source-commit "$GITHUB_SHA" "${extra[@]}"
+      - name: Verify no installed runtime files changed
+        shell: bash
+        run: |
+          python scripts/optional-speech-runtime-build.py \
+            --lock scripts/optional-speech-runtime-cuda.lock.json --platform windows-x64 \
+            --work "$MEDIA_CUDA_WORK" \
+            --output artifacts/optional-speech-cuda-runtime --phase integrity
+          cp artifacts/optional-speech-cuda-runtime/validation/post-application-integrity.json artifacts/optional-speech-cuda-runtime/
+          extra=()
+          if [[ "$REQUIRE_CUDA" == true ]]; then extra+=(--require-cuda); fi
+          python scripts/verify-cuda-runtime-artifact.py --phase release \
+            --directory artifacts/optional-speech-cuda-runtime --source-commit "$GITHUB_SHA" "${extra[@]}"
+      - name: Preserve real inference and build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-runtime-cuda-evidence-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            artifacts/optional-speech-cuda-runtime/logs/
+            artifacts/optional-speech-cuda-runtime/validation/
+            artifacts/optional-speech-cuda-runtime/*validation.json
+            artifacts/optional-speech-cuda-runtime/*integrity.json
+      - name: Preserve verified runtime parts
+        uses: actions/upload-artifact@v4
+        with:
+          name: speech-runtime-python-cuda-v1-windows-x64
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            artifacts/optional-speech-cuda-runtime/*.part*
+            artifacts/optional-speech-cuda-runtime/runtime-metadata.json
+            artifacts/optional-speech-cuda-runtime/SHA256SUMS.txt
+            artifacts/optional-speech-cuda-runtime/application-validation.json
+            artifacts/optional-speech-cuda-runtime/post-application-integrity.json
+
+  publish:
+    name: Publish immutable accelerated runtime components
+    needs: runtime
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REQUIRE_CUDA: ${{ inputs.require_cuda }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: speech-runtime-python-cuda-v1-windows-x64
+          path: runtime-artifacts
+      - name: Recheck component hashes and real inference evidence
+        shell: bash
+        run: |
+          extra=()
+          if [[ "$REQUIRE_CUDA" == true ]]; then extra+=(--require-cuda); fi
+          python3 scripts/verify-cuda-runtime-artifact.py --phase release \
+            --directory runtime-artifacts --source-commit "$GITHUB_SHA" "${extra[@]}"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          metadata = json.loads(Path('runtime-artifacts/runtime-metadata.json').read_text(encoding='utf-8'))
+          status = ('已完成显卡上的真实配音验证。' if metadata['gpuInferenceValidated']
+                    else '已完成真实配音及处理器回退验证；此构建环境没有可验证的显卡，未将回退结果计作显卡合成成功。')
+          Path('runtime-artifacts/notes.md').write_text(
+              '这是按需下载的独立配音加速运行组件，不是应用安装包。\n\n'
+              '保留原有模型及普通运行组件；包含完整文件校验、中文路径和断网运行验证。\n\n' + status + '\n', encoding='utf-8')
+          PY
+      - name: Publish a new immutable component release
+        shell: bash
+        run: |
+          if gh release view speech-runtime-cuda-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'The component release already exists; refusing to replace its bytes.' >&2
+            exit 1
+          fi
+          gh release create speech-runtime-cuda-v1 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title '可选配音加速运行组件 v1' \
+            --notes-file runtime-artifacts/notes.md runtime-artifacts/*.part* \
+            runtime-artifacts/runtime-metadata.json runtime-artifacts/SHA256SUMS.txt \
+            runtime-artifacts/application-validation.json runtime-artifacts/post-application-integrity.json

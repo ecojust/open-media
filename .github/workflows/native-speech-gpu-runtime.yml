@@ -1,0 +1,206 @@
+name: Native speech GPU runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a verified immutable native acceleration component
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-speech-gpu-runtime-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Select a work disk with sufficient space
+        shell: python
+        run: |
+          import os,shutil
+          from pathlib import Path
+          candidates=[Path(os.environ['RUNNER_TEMP']),Path.home()/'AppData/Local/Temp']
+          for path in candidates:path.mkdir(parents=True,exist_ok=True)
+          selected=max(candidates,key=lambda path:shutil.disk_usage(path).free)
+          free=shutil.disk_usage(selected).free
+          print(f'Native component work disk: {selected}; free bytes: {free}')
+          if free<20*1024**3:raise RuntimeError('Native GPU build requires at least 20 GiB free work space')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf-8') as output:
+              output.write(f'OPEN_MEDIA_NATIVE_GPU_WORK={selected / "open-media-native-gpu"}\n')
+      - name: Verify component fallback and reporting contracts
+        run: python -B tests/native-speech-gpu-runtime.test.py
+      - name: Build and verify the complete native acceleration component
+        shell: bash
+        run: |
+          python -c 'import shutil; print("Runner disk:", shutil.disk_usage("."))'
+          python -B scripts/native-speech-gpu-runtime.py \
+            --work "$OPEN_MEDIA_NATIVE_GPU_WORK" \
+            --output artifacts/native-speech-gpu
+      - name: Report native component diagnostics
+        if: failure()
+        shell: python
+        run: |
+          import re
+          from pathlib import Path
+          for path in sorted(Path('artifacts/native-speech-gpu').rglob('*.log')):
+              value = path.read_text(encoding='utf-8', errors='replace')[-5000:]
+              value = re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', value)
+              print(f'--- {path.name} ---\n{value}')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-speech-gpu-evidence-${{ github.run_id }}
+          retention-days: 14
+          path: |
+            artifacts/native-speech-gpu/logs/
+            artifacts/native-speech-gpu/validation/
+            artifacts/native-speech-gpu/validation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-speech-cuda-v1-windows-x64
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            artifacts/native-speech-gpu/*.part*
+            artifacts/native-speech-gpu/runtime-metadata.json
+            artifacts/native-speech-gpu/SHA256SUMS.txt
+
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Preserve corresponding source and exact build inputs
+        run: |
+          python3 -B scripts/native-speech-gpu-runtime.py \
+            --phase sources --work "$RUNNER_TEMP/native-gpu-source" \
+            --output artifacts/native-gpu-source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-speech-cuda-v1-source
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts/native-gpu-source/
+
+  publish:
+    needs: [runtime, source]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-speech-cuda-v1-*
+          path: artifacts
+      - name: Verify every release byte and validation record
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,math,tarfile
+          from pathlib import Path
+          root=Path('artifacts/native-speech-cuda-v1-windows-x64')
+          m=json.loads((root/'runtime-metadata.json').read_text())
+          assert m['kind']=='native' and m['id']=='native-cuda-v1' and m['platform']=='windows-x64'
+          assert m['version']==1
+          assert m['validated'] is True and m['validation']['status']=='passed'
+          voices={'matcha_zh_en_female','zipvoice_zh_female','zipvoice_zh_male'}
+          assert len(m['validatedVoices'])==3 and set(m['validatedVoices'])==voices
+          records=m['validation']['voices']
+          assert len(records)==3 and {v['voiceId'] for v in records}==voices
+          for voice in records:
+              rate=16000 if voice['voiceId'].startswith('matcha') else 24000
+              assert voice['sampleRate']==rate and voice['sampleCount']>=rate/10
+              assert math.isfinite(voice['rms']) and voice['rms']>=1e-5
+              assert voice['bytes']>44 and len(voice['sha256'])==64
+              attempts=voice['attempts'];assert len(attempts) in (1,2)
+              assert attempts[-1]['exitCode']==0 and attempts[-1]['backend']==voice['actualDevice']
+              assert voice['actualDevice'] in ('cpu','cuda') and voice['gpuInferenceVerified'] is False
+              assert voice['fallback']==(len(attempts)==2)
+              if len(attempts)==2:
+                  assert attempts[0]['backend']=='cuda' and attempts[0]['exitCode']!=0
+                  assert attempts[-1]['backend']=='cpu'
+          assert m['gpuInferenceVerified'] is False
+          assert m['sourceCommit']==os.environ['GITHUB_SHA']
+          assert m['runnerSourceSha256']==hashlib.sha256(Path('scripts/speech-runtime-runner.c').read_bytes()).hexdigest()
+          assert m['builderSourceSha256']==hashlib.sha256(Path('scripts/native-speech-gpu-runtime.py').read_bytes()).hexdigest()
+          assert m['sourceLockSha256']==hashlib.sha256(Path('scripts/native-speech-gpu-runtime.lock.json').read_bytes()).hexdigest()
+          digest=hashlib.sha256();size=0
+          assert 1<=len(m['parts'])<=64
+          for index,part in enumerate(m['parts'],1):
+              assert part['filename']==m['filename']+f'.part{index:03d}'
+              assert part['url']=='https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/'+part['filename']
+              assert 0<part['size']<=1_800_000_000
+              path=root/part['filename'];assert path.stat().st_size==part['size']
+              check=hashlib.sha256()
+              with path.open('rb') as stream:
+                  while chunk:=stream.read(4*1024**2):check.update(chunk);digest.update(chunk);size+=len(chunk)
+              assert check.hexdigest()==part['sha256']
+          assert digest.hexdigest()==m['sha256'] and size==m['size']
+          source=Path('artifacts/native-speech-cuda-v1-source')
+          s=json.loads((source/'source-metadata.json').read_text());path=source/s['filename']
+          for key in ('sourceCommit','runnerSourceSha256','builderSourceSha256','sourceLockSha256'):assert s[key]==m[key]
+          assert path.stat().st_size==s['size']
+          with path.open('rb') as stream:assert hashlib.file_digest(stream,'sha256').hexdigest()==s['sha256']
+          expected={}
+          for name in ['native-speech-gpu-runtime.py','native-speech-gpu-runtime.lock.json',
+                       'optional-speech-runtime-build.py','optional-speech-zip-smoke.py','speech-runtime.mjs',
+                       'speech-runtime.lock.json','speech-runtime-runner.c','speech-runtime-runner.manifest']:
+              expected['scripts/'+name]=hashlib.sha256(Path('scripts',name).read_bytes()).hexdigest()
+          workflow='.github/workflows/native-speech-gpu-runtime.yml'
+          expected[workflow]=hashlib.sha256(Path(workflow).read_bytes()).hexdigest()
+          expected['LICENSE']=hashlib.sha256(Path('LICENSE').read_bytes()).hexdigest()
+          catalog='src-tauri/resources/speech-models.json'
+          expected[catalog]=hashlib.sha256(Path(catalog).read_bytes()).hexdigest()
+          for asset in Path('scripts/optional-speech-assets').rglob('*'):
+              if asset.is_file():expected[asset.as_posix()]=hashlib.sha256(asset.read_bytes()).hexdigest()
+          for item in json.loads(Path('scripts/speech-runtime.lock.json').read_text())['sources']:
+              if item['kind']=='source':expected['downloads/'+item['archive']]=item['sha256']
+          seen=set()
+          with tarfile.open(path,mode='r|gz') as packed:
+              for member in packed:
+                  if member.isdir():continue
+                  assert member.isfile() and member.name.startswith('native-gpu-corresponding-source/')
+                  name=member.name.split('/',1)[1]
+                  assert name not in seen;seen.add(name)
+                  if name in expected:
+                      with packed.extractfile(member) as stream:assert hashlib.file_digest(stream,'sha256').hexdigest()==expected[name]
+          assert set(expected)<=seen
+          Path('artifacts/notes.md').write_text('可选原生配音加速组件，独立于应用和模型按需下载。\n\n已验证依赖完整性、中文路径、真实语音与 CPU 回退。托管验证环境不代表真实显卡实测；实际执行后端会明确显示。\n',encoding='utf-8')
+          PY
+      - name: Publish an immutable component prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view speech-native-cuda-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'The component tag already exists; refusing to overwrite it.' >&2
+            exit 1
+          fi
+          gh release create speech-native-cuda-v1 --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title '原生配音加速组件 v1' --notes-file artifacts/notes.md \
+            artifacts/native-speech-cuda-v1-windows-x64/* \
+            artifacts/native-speech-cuda-v1-source/*

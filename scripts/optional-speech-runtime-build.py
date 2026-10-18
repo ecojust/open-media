@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and validate a relocatable, separately downloaded CPU speech runtime.
+"""Build and validate a relocatable, separately downloaded speech runtime.
 
 This builds runtime components only. It never builds or publishes the application.
 Model weights are temporary test inputs and are never included in the runtime ZIP.
@@ -29,6 +29,7 @@ SCRIPT = REPO / "scripts"
 MODEL_IDS = ("f5-v1-base-fp32", "qwen3-tts-1.7b-serena")
 SMOKE_TEXT = "这是一款全程由AI接管并生成的软件。"
 MAX_ARCHIVE_BYTES = 5 * 1024**3
+RELEASE_PART_BYTES = 1_800_000_000
 
 
 def sha256(path: Path) -> str:
@@ -59,6 +60,34 @@ def checked_file(path: Path, size: int, digest: str) -> bool:
 
 def download(spec: dict, destination: Path) -> None:
     size, digest = int(spec["size"]), spec["sha256"]
+    if spec.get("parts") is not None:
+        parts = spec["parts"]
+        if (not isinstance(parts, list) or not 1 <= len(parts) <= 64 or
+                not 0 < size <= MAX_ARCHIVE_BYTES or
+                sum(int(part["size"]) for part in parts) != size or
+                any("parts" in part or not 0 < int(part["size"]) <= RELEASE_PART_BYTES for part in parts)):
+            raise ValueError("Invalid split runtime archive")
+        if checked_file(destination, size, digest):
+            return
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        combined = destination.with_name(destination.name + ".part")
+        try:
+            with combined.open("wb") as target:
+                for index, part in enumerate(parts):
+                    chunk = destination.with_name(destination.name + f".chunk{index:03d}")
+                    try:
+                        download(part, chunk)
+                        with chunk.open("rb") as source:
+                            shutil.copyfileobj(source, target, 4 * 1024**2)
+                    finally:
+                        chunk.unlink(missing_ok=True)
+            if not checked_file(combined, size, digest):
+                raise ValueError("Combined runtime size or SHA-256 mismatch")
+            combined.replace(destination)
+        except BaseException:
+            combined.unlink(missing_ok=True)
+            raise
+        return
     urls = list(dict.fromkeys([spec["url"], *spec.get("mirrors", [])]))
     # Hosted validation runs outside China. Prefer the original source here;
     # the application keeps the regional ordering declared by its catalog.
@@ -241,7 +270,7 @@ def audit_macos(root: Path, report: Path) -> None:
             raise ValueError(f"Runtime library has an invalid existing signature: {entry['path']}")
 
 
-def complete_windows_runtime(root: Path, report: Path) -> None:
+def complete_windows_runtime(root: Path, report: Path, *, executable_directory: str = "python") -> None:
     """Ensure native inference does not borrow an installed C++ redistributable."""
     if os.name != "nt":
         return
@@ -281,7 +310,8 @@ def complete_windows_runtime(root: Path, report: Path) -> None:
     completed = set()
     while missing := required - completed:
         for name in sorted(missing):
-            target = root / "python" / name
+            target = root / relative(executable_directory) / name
+            target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_file():
                 origin = {"kind": "bundled", "path": target.relative_to(root).as_posix()}
             elif name in bundled:
@@ -326,9 +356,21 @@ def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
     run([executable, "-I", "-B", "-c", "import sys; print(sys.executable, sys.version, sys.prefix)"], logs / "python.log", env=env)
     run([executable, "-I", "-m", "pip", "install", "--no-cache-dir", "pip==25.3", "wheel==0.45.1", "setuptools==80.9.0"],
         logs / "bootstrap.log", env=env)
-    run([executable, "-I", "-m", "pip", "install", "--no-cache-dir", "--no-deps",
-         f"torch=={spec['torch']}", f"torchaudio=={spec['torch']}", "--index-url", spec["torchIndex"]],
-        logs / "torch-install.log", env=env)
+    if "torchWheel" in spec:
+        wheels = []
+        for package_name in ("torch", "torchaudio"):
+            wheel = spec[package_name + "Wheel"]
+            filename = Path(urllib.parse.unquote(urllib.parse.urlparse(wheel["url"]).path)).name
+            path = args.work / "downloads" / filename
+            download(wheel, path)
+            wheels.append(path)
+        run([executable, "-I", "-m", "pip", "install", "--no-cache-dir", "--no-deps", *wheels], logs / "torch-install.log", env=env)
+        for wheel in wheels:
+            wheel.unlink()
+    else:
+        run([executable, "-I", "-m", "pip", "install", "--no-cache-dir", "--no-deps",
+             f"torch=={spec['torch']}", f"torchaudio=={spec['torch']}", "--index-url", spec["torchIndex"]],
+            logs / "torch-install.log", env=env)
     run([executable, "-I", "-m", "pip", "install", "--no-cache-dir", "--no-deps", "--report", logs / "package-install.json",
          "--no-build-isolation", "--only-binary=:all:", "--no-binary=encodec,sox",
          "-r", SCRIPT / "optional-speech-runtime-requirements.txt"], logs / "packages-install.log", env=env)
@@ -350,10 +392,27 @@ def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
     shutil.copytree(source / "src/f5_tts", root / "runner/vendor/f5_tts", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (root / "licenses").mkdir(exist_ok=True)
     shutil.copy2(source / "LICENSE", root / "licenses/F5-TTS-LICENSE")
-    shutil.copy2(SCRIPT / "optional-speech-runtime.lock.json", root / "licenses/runtime-source-lock.json")
+    shutil.copy2(args.lock, root / "licenses/runtime-source-lock.json")
     shutil.copy2(SCRIPT / "optional-speech-runtime-requirements.txt", root / "licenses/runtime-requirements.txt")
     run([executable, "-I", "-m", "pip", "freeze", "--all"], root / "licenses/installed-packages.txt", env=env)
     shutil.copy2(logs / "package-install.json", root / "licenses/package-install.json")
+    if spec.get("cudaVersion"):
+        probe = r'''import json,sys,torch,torchaudio
+assert torch.__version__ == sys.argv[1], (torch.__version__,sys.argv[1])
+assert torch.version.cuda == sys.argv[2], (torch.version.cuda,sys.argv[2])
+available = torch.cuda.is_available()
+count = torch.cuda.device_count()
+assert available or sys.argv[3] != 'true', 'A real CUDA device is required for this validation'
+assert torch.isfinite(torch.ones(4).mul(2)).all().item()
+if available:
+    value = torch.ones((4,4),device='cuda',dtype=torch.bfloat16)
+    assert torch.isfinite(value @ value).all().item()
+    torch.cuda.synchronize()
+print(json.dumps(dict(torchVersion=torch.__version__,cudaVersion=torch.version.cuda,cudaAvailable=available,
+                     cudaDeviceCount=count,cudaTensorProbePassed=available,cpuTensorProbePassed=True)))
+'''
+        run([executable, "-I", "-B", "-c", probe, spec["torch"], spec["cudaVersion"],
+             str(args.require_cuda).lower()], logs / "cuda-runtime-probe.json", env=env)
     for path in sorted(root.rglob("__pycache__"), reverse=True):
         if path.is_dir():
             shutil.rmtree(path)
@@ -364,7 +423,7 @@ def build(args, lock: dict, spec: dict, root: Path, logs: Path) -> None:
         shutil.copy2(logs / "macos-native-audit.json", root / "licenses/macos-native-audit.json")
     write_json(root / "runtime-info.json", {"schema": 1, "id": lock["id"], "version": lock["version"],
                "platform": args.platform, "pythonVersion": lock["pythonVersion"], "torchVersion": spec["torch"],
-               "f5Source": lock["f5Source"], "qwenPackage": "qwen-tts==0.1.1", "device": "cpu",
+               "f5Source": lock["f5Source"], "qwenPackage": "qwen-tts==0.1.1", "device": "cuda-capable" if spec.get("cudaVersion") else "cpu",
                "f5Precision": "float32", "qwenPrecision": "bfloat16", "sourceCommit": os.environ.get("GITHUB_SHA"),
                "createdAt": dt.datetime.now(dt.timezone.utc).isoformat()})
     run([executable, "-I", "-B", root / "runner/tts.py", "--self-test"], logs / "self-test.log", env=env)
@@ -467,6 +526,35 @@ def package(root: Path, archive: Path, spec: dict, platform_id: str) -> dict:
             "manifestSha256": sha256(root / "manifest.json"), "executable": spec["executable"], "script": "runner/tts.py"}
 
 
+def split_archive(archive: Path, metadata: dict, release_tag: str, *, part_bytes: int = RELEASE_PART_BYTES) -> dict:
+    """Keep each release asset below the host limit; the full ZIP hash stays authoritative."""
+    if (not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]+", release_tag) or
+            not 0 < part_bytes <= RELEASE_PART_BYTES or not 0 < metadata["size"] <= MAX_ARCHIVE_BYTES or
+            (metadata["size"] + part_bytes - 1) // part_bytes > 64 or
+            not checked_file(archive, metadata["size"], metadata["sha256"])):
+        raise ValueError("Cannot split unverified runtime bytes or invalid release coordinates")
+    base = f"https://github.com/ecojust/open-media/releases/download/{release_tag}/"
+    result = dict(metadata, url=base + archive.name, parts=[])
+    with archive.open("rb") as source:
+        index = 1
+        while True:
+            path = archive.with_name(archive.name + f".part{index:03d}")
+            remaining, count = part_bytes, 0
+            with path.open("xb") as target:
+                while remaining and (chunk := source.read(min(4 * 1024**2, remaining))):
+                    target.write(chunk)
+                    remaining -= len(chunk)
+                    count += len(chunk)
+            if not count:
+                path.unlink()
+                break
+            result["parts"].append(dict(filename=path.name, url=base + path.name, size=count, sha256=sha256(path)))
+            index += 1
+    if sum(part["size"] for part in result["parts"]) != metadata["size"]:
+        raise ValueError("Split runtime size differs from the verified archive")
+    return result
+
+
 def verify_archive(archive: Path, destination: Path, metadata: dict) -> None:
     if not checked_file(archive, metadata["size"], metadata["sha256"]):
         raise ValueError("Runtime archive changed after packaging")
@@ -482,6 +570,38 @@ def verify_archive(archive: Path, destination: Path, metadata: dict) -> None:
             with source.open(member) as src, target.open("wb") as dst:
                 shutil.copyfileobj(src, dst)
     verify_tree(destination, metadata, restore_modes=True)
+
+
+def verify_archive_payload(archive: Path, metadata: dict) -> None:
+    """Read every packaged byte without allocating a second multi-gigabyte tree."""
+    if not checked_file(archive, metadata["size"], metadata["sha256"]):
+        raise ValueError("Runtime archive changed after packaging")
+    with zipfile.ZipFile(archive) as source:
+        entries = source.infolist()
+        names = [entry.filename for entry in entries]
+        if len(names) != len(set(names)):
+            raise ValueError("Duplicate ZIP members")
+        for entry in entries:
+            relative(entry.filename)
+            if entry.is_dir() or stat.S_ISLNK(entry.external_attr >> 16):
+                raise ValueError("Runtime ZIP must contain regular files only")
+        raw = source.read("manifest.json")
+        if hashlib.sha256(raw).hexdigest() != metadata["manifestSha256"]:
+            raise ValueError("Packaged runtime manifest changed")
+        manifest = json.loads(raw)
+        files = manifest.get("files", [])
+        if (manifest.get("schema") != 1 or len(files) != len({file["path"] for file in files}) or
+                set(names) != {"manifest.json", *(file["path"] for file in files)} or
+                sum(file["size"] for file in files) + len(raw) != metadata["unpackedSize"]):
+            raise ValueError("Packaged runtime inventory differs from its manifest")
+        for file in files:
+            digest, size = hashlib.sha256(), 0
+            with source.open(file["path"]) as stream:
+                while chunk := stream.read(4 * 1024**2):
+                    digest.update(chunk)
+                    size += len(chunk)
+            if size != file["size"] or digest.hexdigest() != file["sha256"]:
+                raise ValueError("Packaged runtime member size or SHA-256 changed")
 
 
 def verify_tree(destination: Path, metadata: dict, *, restore_modes: bool = False) -> dict:
@@ -518,6 +638,8 @@ def main() -> None:
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--catalog", type=Path, default=REPO / "src-tauri/resources/speech-models.json")
+    parser.add_argument("--lock", type=Path, default=SCRIPT / "optional-speech-runtime.lock.json")
+    parser.add_argument("--require-cuda", action="store_true", help="Fail unless a real CUDA device executes the runtime probe")
     parser.add_argument("--models", nargs="+", default=list(MODEL_IDS))
     parser.add_argument("--phase", choices=("build", "validate", "integrity", "all"), default="all")
     args = parser.parse_args()
@@ -525,8 +647,11 @@ def main() -> None:
     expected = {"macos-arm64": ("Darwin", "arm64"), "macos-x64": ("Darwin", "x86_64"), "windows-x64": ("Windows", "AMD64")}[args.platform]
     if (platform.system(), platform.machine()) != expected:
         raise ValueError(f"Build must run on its actual target platform: expected {expected}, got {(platform.system(), platform.machine())}")
-    lock = json.loads((SCRIPT / "optional-speech-runtime.lock.json").read_text(encoding="utf-8"))
+    args.lock = args.lock.resolve()
+    lock = json.loads(args.lock.read_text(encoding="utf-8"))
     spec = lock["platforms"][args.platform]
+    if args.require_cuda and not spec.get("cudaVersion"):
+        raise ValueError("The selected runtime does not contain CUDA support")
     root = args.work / "runtime"
     logs = args.output / "logs"
     args.output.mkdir(parents=True, exist_ok=True)
@@ -545,12 +670,19 @@ def main() -> None:
     catalog = json.loads(args.catalog.read_text(encoding="utf-8"))
     models = prepare_models(args, catalog)
     initial = smoke(root, spec, models, args.output / "validation/original", offline=False)
-    archive = args.output / f"speech-runtime-python-cpu-v1-{args.platform}.zip"
+    archive = args.output / f"speech-runtime-{lock['id']}-{args.platform}.zip"
     metadata = package(root, archive, spec, args.platform)
     moved = args.work / "移动验证 中文 空格" / "runtime"
     if moved.exists():
         raise ValueError("Relocation test directory already exists")
-    verify_archive(archive, moved, metadata)
+    if spec.get("cudaVersion"):
+        verify_archive_payload(archive, metadata)
+        verify_tree(root, metadata)
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(root), str(moved))
+        verify_tree(moved, metadata)
+    else:
+        verify_archive(archive, moved, metadata)
     # Move model paths too; no original absolute path may be embedded in a model config.
     moved_models = args.work / "移动验证 中文 空格" / "models"
     shutil.move(str(args.work / "models"), str(moved_models))
@@ -559,11 +691,16 @@ def main() -> None:
     integrity = verify_tree(moved, metadata)
     metadata.update(id=lock["id"], version=lock["version"], validatedModels=list(models),
                     validated=True, sourceCommit=os.environ.get("GITHUB_SHA"),
-                    url="https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/" + archive.name)
+                    url=f"https://github.com/ecojust/open-media/releases/download/{lock.get('releaseTag', 'speech-runtime-v1')}/" + archive.name)
+    if spec.get("cudaVersion"):
+        lines = (logs / "cuda-runtime-probe.json").read_text(encoding="utf-8").splitlines()
+        metadata["cudaProbe"] = json.loads(next(line for line in reversed(lines) if line.startswith("{")))
+        metadata = split_archive(archive, metadata, lock["releaseTag"])
     write_json(args.output / "runtime-metadata.json", metadata)
     write_json(args.output / "validation.json", {"schema": 1, "platform": args.platform, "original": initial, "relocatedOffline": second,
                                                 "postInferenceIntegrity": integrity})
-    (args.output / "SHA256SUMS.txt").write_text(f"{metadata['sha256']}  {archive.name}\n", encoding="utf-8")
+    checksums = [(metadata["sha256"], archive.name), *((part["sha256"], part["filename"]) for part in metadata.get("parts", []))]
+    (args.output / "SHA256SUMS.txt").write_text("".join(f"{digest}  {name}\n" for digest, name in checksums), encoding="utf-8")
     print(json.dumps(metadata, ensure_ascii=False, indent=2), flush=True)
 
 

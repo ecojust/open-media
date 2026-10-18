@@ -8,6 +8,60 @@
 #include <string.h>
 #include <math.h>
 #include "sherpa-onnx/c-api/c-api.h"
+#if defined(OPEN_MEDIA_ORT_PROVIDER_QUERY)
+/* GPU component builds supply these headers from the pinned runtime source. */
+#include "onnxruntime_c_api.h"
+#endif
+
+static int has_flag(int argc, char **argv, const char *flag) {
+  for (int i = 1; i < argc; ++i)
+    if (!strcmp(argv[i], flag)) return 1;
+  return 0;
+}
+
+static int has_provider(const char *name) {
+#if defined(OPEN_MEDIA_ORT_PROVIDER_QUERY)
+  const OrtApi *api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+  if (!api) return 0;
+  char **providers = NULL;
+  int count = 0;
+  OrtStatus *status = api->GetAvailableProviders(&providers, &count);
+  if (status) {
+    fprintf(stderr, "Cannot inspect execution providers: %s\n", api->GetErrorMessage(status));
+    api->ReleaseStatus(status);
+    return 0;
+  }
+  int found = 0;
+  for (int i = 0; i < count; ++i)
+    if (!strcmp(providers[i], name)) found = 1;
+  status = api->ReleaseAvailableProviders(providers, count);
+  if (status) api->ReleaseStatus(status);
+  return found;
+#else
+  /* The existing immutable packages have audited build capabilities. Never
+   * advertise CUDA merely because an option or a driver exists on the host. */
+#if defined(__APPLE__)
+  return !strcmp(name, "CPUExecutionProvider") || !strcmp(name, "CoreMLExecutionProvider");
+#else
+  return !strcmp(name, "CPUExecutionProvider");
+#endif
+#endif
+}
+
+static const char *select_provider(const char *requested) {
+  if (requested && !strcmp(requested, "cpu")) return "cpu";
+  if (requested && strcmp(requested, "auto")) {
+    const char *name = !strcmp(requested, "cuda") ? "CUDAExecutionProvider" : "CoreMLExecutionProvider";
+    if (has_provider(name)) return requested;
+    printf("stage=fallback,from=%s,device=cpu,reason=runtime_provider_unavailable\n", requested);
+    return "cpu";
+  }
+#if defined(__APPLE__)
+  if (has_provider("CoreMLExecutionProvider")) return "coreml";
+#endif
+  if (has_provider("CUDAExecutionProvider")) return "cuda";
+  return "cpu";
+}
 
 static const char *option(int argc, char **argv, const char *name) {
   size_t n = strlen(name);
@@ -62,8 +116,15 @@ int main(int argc, char **argv) {
   const char *zipvoice_encoder = option(argc, argv, "--zipvoice-encoder");
   const char *requested_provider = option(argc, argv, "--provider");
   if (requested_provider && strcmp(requested_provider, "auto") &&
-      strcmp(requested_provider, "cpu") && strcmp(requested_provider, "coreml")) {
+      strcmp(requested_provider, "cpu") && strcmp(requested_provider, "coreml") &&
+      strcmp(requested_provider, "cuda")) {
     fprintf(stderr, "Unsupported speech execution provider.\n"); return 2;
+  }
+  if (has_flag(argc, argv, "--self-test")) {
+    const char *provider = select_provider(requested_provider);
+    printf("stage=device,device=%s,engine=native\n", provider);
+    printf("{\"provider\":\"%s\",\"gpuInferenceVerified\":false,\"selfTest\":\"runtime-load-and-capabilities\"}\n", provider);
+    return 0;
   }
   if ((!!matcha_model + !!kokoro_model + !!zipvoice_encoder) != 1) {
     fprintf(stderr, "Select exactly one speech model.\n"); return 2;
@@ -93,18 +154,6 @@ int main(int argc, char **argv) {
   cfg.model.zipvoice.target_rms = 0.1f;
   cfg.model.zipvoice.guidance_scale = 1.0f;
   cfg.model.num_threads = zipvoice_encoder ? 1 : 2;
-  /* The pinned Apple runtime includes CoreML. Other bundled native runtimes
-   * are CPU builds; selecting a GPU by name cannot add a missing provider.
-   * CoreML may keep unsupported operators on CPU. The parent process retries
-   * once with --provider=cpu if native provider initialization or execution
-   * fails, because exceptions in the external C API can terminate this helper.
-   */
-#if defined(__APPLE__)
-  cfg.model.provider = requested_provider && !strcmp(requested_provider, "cpu")
-      ? "cpu" : "coreml";
-#else
-  cfg.model.provider = "cpu";
-#endif
   cfg.max_num_sentences = 1;
   /* Keep the synthesis parameters used by the evaluated single-voice model. */
   cfg.silence_scale = matcha_model ? 0.2f : 1.0f;
@@ -157,11 +206,10 @@ int main(int argc, char **argv) {
     generation.reference_audio_len = reference_wave->num_samples;
     generation.reference_sample_rate = reference_wave->sample_rate;
   }
-#if !defined(__APPLE__)
-  if (requested_provider && !strcmp(requested_provider, "coreml")) {
-    puts("stage=fallback,from=coreml,device=cpu,reason=unsupported_platform");
-  }
-#endif
+  /* The optional GPU component enumerates its actual compiled providers.
+   * Availability is not proof of hardware execution: initialization/generation
+   * can still fail, and the parent must retry with the independent CPU runtime. */
+  cfg.model.provider = select_provider(requested_provider);
   printf("stage=device,device=%s,engine=%s\n", cfg.model.provider,
       zipvoice_encoder ? "zipvoice" : matcha_model ? "matcha" : "kokoro");
   puts("stage=loading"); fflush(stdout);
