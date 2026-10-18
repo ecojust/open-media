@@ -3,11 +3,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { VIDEO_SEGMENTS, type VideoSegmentCaption, type VideoSegmentItem, type VideoSegmentPlacement } from '../core/video-segment-catalog'
 import Icon from './Icon.vue'
 
-const props = withDefaults(defineProps<{ busy?: boolean; error?: string }>(), { busy: false, error: '' })
+const props = withDefaults(defineProps<{ placement?: VideoSegmentPlacement; busy?: boolean; error?: string }>(), { placement: 'prepend', busy: false, error: '' })
 const emit = defineEmits<{ select: [item: VideoSegmentItem, placement: VideoSegmentPlacement, caption: VideoSegmentCaption]; 'import-local': [placement: VideoSegmentPlacement] }>()
-const selectedId = ref(VIDEO_SEGMENTS[0]!.id)
-const placement = ref<VideoSegmentPlacement>('prepend')
-const selected = computed(() => VIDEO_SEGMENTS.find(item => item.id === selectedId.value)!)
+const items = computed(() => VIDEO_SEGMENTS.filter(item => item.placement === props.placement))
+const segmentTitle = computed(() => props.placement === 'prepend' ? '片头' : '片尾')
+const selectedId = ref(items.value[0]!.id)
+const selected = computed(() => items.value.find(item => item.id === selectedId.value) ?? items.value[0]!)
 const heading = ref(selected.value.heading), subheading = ref(selected.value.subheading)
 const preview = ref<HTMLVideoElement | null>(null), playing = ref(false), previewError = ref('')
 let playbackToken = 0
@@ -18,10 +19,9 @@ function stopPreview(): void {
   playing.value = false
 }
 function choose(item: VideoSegmentItem): void {
-  if (props.busy) return
+  if (props.busy || item.placement !== props.placement) return
   stopPreview()
   selectedId.value = item.id
-  placement.value = item.placement
   heading.value = item.heading
   subheading.value = item.subheading
   previewError.value = ''
@@ -45,13 +45,20 @@ async function togglePreview(): Promise<void> {
 function add(): void {
   if (props.busy) return
   stopPreview()
-  emit('select', selected.value, placement.value, { heading: heading.value.trim(), subheading: subheading.value.trim(), textColor: selected.value.textColor })
+  emit('select', selected.value, props.placement, { heading: heading.value.trim(), subheading: subheading.value.trim(), textColor: selected.value.textColor })
 }
 function importLocal(): void {
   if (props.busy) return
   stopPreview()
-  emit('import-local', placement.value)
+  emit('import-local', props.placement)
 }
+watch(() => props.placement, () => {
+  stopPreview()
+  selectedId.value = items.value[0]!.id
+  heading.value = selected.value.heading
+  subheading.value = selected.value.subheading
+  previewError.value = ''
+})
 watch(() => props.busy, busy => { if (busy) stopPreview() })
 function visibilityChanged(): void { if (document.hidden) stopPreview() }
 onMounted(() => document.addEventListener('visibilitychange', visibilityChanged))
@@ -63,14 +70,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="segment-library" data-testid="video-segment-library" :aria-busy="busy" aria-label="视频片段素材库">
+  <section class="segment-library" data-testid="video-segment-library" :data-placement="placement" :aria-busy="busy" :aria-label="`${segmentTitle}素材库`">
     <div class="segment-toolbar">
-      <div><strong>给故事一个完整的开场与结尾</strong><span>10 款原创动态模板 · 离线可用 · 标题可编辑</span></div>
+      <div><strong>{{ placement === 'prepend' ? '用精彩开场开启故事' : '为故事留下动人余韵' }}</strong><span>{{ items.length }} 款原创{{ segmentTitle }}模板 · 离线可用 · 标题可编辑</span></div>
       <button type="button" class="segment-import" :disabled="busy" data-testid="video-segment-import-local" @click="importLocal"><Icon name="upload" :size="15" />导入视频</button>
     </div>
     <div class="segment-body">
-      <div class="segment-grid" role="group" aria-label="选择片头或片尾模板">
-        <button v-for="item in VIDEO_SEGMENTS" :key="item.id" type="button" class="segment-card" :class="{ selected: item.id === selectedId }" :aria-pressed="item.id === selectedId" :disabled="busy" :data-segment-id="item.id" data-testid="video-segment-item" @click="choose(item)">
+      <div class="segment-grid" role="group" :aria-label="`选择${segmentTitle}模板`">
+        <button v-for="item in items" :key="item.id" type="button" class="segment-card" :class="{ selected: item.id === selectedId }" :aria-pressed="item.id === selectedId" :disabled="busy" :data-segment-id="item.id" data-testid="video-segment-item" @click="choose(item)">
           <span class="segment-thumbnail" :style="{ color: item.textColor }"><img :src="item.posterUrl" alt="" loading="lazy" /><span>{{ item.heading }}</span><small>{{ item.placement === 'prepend' ? '片头' : '片尾' }} · {{ item.duration }} 秒</small></span>
           <span class="segment-card-label"><strong>{{ item.title }}</strong><span>{{ item.style }}</span><Icon v-if="item.id === selectedId" name="check" :size="13" /></span>
         </button>
@@ -87,8 +94,8 @@ onBeforeUnmount(() => {
         <p class="segment-caption-note"><Icon name="text" :size="13" />加入后可在时间线中继续编辑文字与位置。</p>
       </div>
     </div>
-    <fieldset class="segment-placement" :disabled="busy"><legend>插入位置</legend><label :class="{ active: placement === 'prepend' }"><input v-model="placement" type="radio" name="video-segment-placement" value="prepend" data-testid="video-segment-prepend" /><Icon name="skip-back" :size="15" /><span><strong>向前添加</strong><small>放在项目开头，原片段整体后移</small></span></label><label :class="{ active: placement === 'append' }"><input v-model="placement" type="radio" name="video-segment-placement" value="append" data-testid="video-segment-append" /><Icon name="skip-forward" :size="15" /><span><strong>向后添加</strong><small>放在全部轨道的末尾</small></span></label></fieldset>
-    <p class="segment-message" :class="{ error: error || previewError }" role="status" aria-live="polite" data-testid="video-segment-error"><template v-if="error || previewError"><Icon name="alert" :size="13" />{{ error || previewError }}</template><template v-else>视频保持项目画面尺寸；本地视频按所选位置插入，不附加模板标题。</template></p>
+    <p class="segment-placement-note"><Icon :name="placement === 'prepend' ? 'skip-back' : 'skip-forward'" :size="14" /><span>{{ placement === 'prepend' ? '片头放在项目开头，现有轨道片段整体后移。' : '片尾放在全部轨道的末尾，现有片段位置保持不变。' }}</span></p>
+    <p class="segment-message" :class="{ error: error || previewError }" role="status" aria-live="polite" data-testid="video-segment-error"><template v-if="error || previewError"><Icon name="alert" :size="13" />{{ error || previewError }}</template><template v-else>视频保持项目画面尺寸；本地视频作为{{ segmentTitle }}插入，不附加模板标题。</template></p>
     <footer class="segment-footer"><span>{{ selected.title }} · {{ selected.duration }} 秒</span><button type="button" class="segment-add" :disabled="busy" data-testid="video-segment-add" @click="add"><Icon :name="busy ? 'clock' : 'plus'" :size="15" />{{ busy ? '正在添加…' : placement === 'prepend' ? '添加到项目开头' : '添加到项目结尾' }}</button></footer>
   </section>
 </template>
@@ -119,15 +126,11 @@ onBeforeUnmount(() => {
 .segment-field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;font-size:11px;color:var(--ed-muted)}
 .segment-field input{width:100%;min-width:0;height:34px;padding:7px 9px;border:1px solid var(--ed-border);border-radius:7px;background:var(--ed-bg);color:var(--ed-text);outline:none}
 .segment-field input:focus{border-color:var(--ed-accent)}.segment-caption-note{display:flex;align-items:flex-start;gap:5px;color:var(--ed-muted);font-size:10px;line-height:1.6}.segment-caption-note svg{flex-shrink:0;margin-top:2px}
-.segment-placement{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:0;margin:16px 0 0;border:0}.segment-placement legend{font-size:11px;font-weight:600;margin-bottom:8px}
-.segment-placement label{position:relative;display:flex;align-items:center;gap:8px;min-height:50px;padding:8px 10px;border:1px solid var(--ed-border);border-radius:8px;cursor:pointer;background:var(--ed-panel)}
-.segment-placement label.active{border-color:var(--ed-accent);background:color-mix(in srgb,var(--ed-accent) 5%,var(--ed-panel))}.segment-placement input{position:absolute;opacity:0;width:1px;height:1px}
-.segment-placement label:has(input:focus-visible){outline:2px solid var(--ed-accent);outline-offset:2px}.segment-placement svg{flex-shrink:0;color:var(--ed-muted)}
-.segment-placement span{display:flex;flex-direction:column;gap:3px;min-width:0}.segment-placement strong{font-size:11px;font-weight:500}.segment-placement small{font-size:10px;color:var(--ed-muted)}
+.segment-placement-note{display:flex;align-items:center;gap:7px;margin:16px 0 0;padding:9px 10px;border:1px solid var(--ed-border);border-radius:8px;background:var(--ed-bg);font-size:11px;line-height:1.6;color:var(--ed-text)}.segment-placement-note svg{flex-shrink:0;color:var(--ed-muted)}
 .segment-message{display:flex;align-items:flex-start;gap:5px;min-height:18px;margin:10px 0;color:var(--ed-muted);font-size:10px;line-height:18px}.segment-message.error{color:var(--ed-danger,#e16b75)}.segment-message svg{flex-shrink:0;margin-top:2px}
 .segment-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:12px;border-top:1px solid var(--ed-border)}.segment-footer>span{font-size:11px;color:var(--ed-muted)}
 .segment-add{display:flex;align-items:center;justify-content:center;gap:6px;min-height:35px;padding:7px 12px;border:1px solid var(--ed-accent);border-radius:8px;background:var(--ed-accent);color:white;font-weight:600;cursor:pointer}
 .segment-library button:disabled{cursor:default;opacity:.5}.segment-library button:focus-visible{outline:2px solid var(--ed-accent);outline-offset:2px}.segment-import:hover:not(:disabled){border-color:var(--ed-accent)}
 @container(max-width:600px){.segment-body{grid-template-columns:1fr}.segment-grid{max-height:220px;min-height:150px;grid-template-columns:repeat(3,minmax(0,1fr))}.segment-customize{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 12px}.segment-preview{grid-row:span 3}.segment-description{display:none}.segment-caption-note{grid-column:1/-1;margin:0}.segment-field{margin:0}.segment-preview-titles strong{font-size:12px}.segment-preview-titles span{font-size:7px}}
-@container(max-width:380px){.segment-toolbar{align-items:flex-start;flex-direction:column}.segment-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.segment-customize{grid-template-columns:1fr}.segment-placement{grid-template-columns:1fr}.segment-preview{grid-row:auto}.segment-footer{align-items:stretch;flex-direction:column}.segment-preview-titles strong{font-size:17px}.segment-preview-titles span{font-size:8px}}
+@container(max-width:380px){.segment-toolbar{align-items:flex-start;flex-direction:column}.segment-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.segment-customize{grid-template-columns:1fr}.segment-preview{grid-row:auto}.segment-footer{align-items:stretch;flex-direction:column}.segment-preview-titles strong{font-size:17px}.segment-preview-titles span{font-size:8px}}
 </style>

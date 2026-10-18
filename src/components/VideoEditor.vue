@@ -81,7 +81,8 @@ const musicAssets = new Map<string, string>()
 let musicAbort: AbortController | undefined
 const segmentError = ref(''), segmentFile = ref<HTMLInputElement>()
 const segmentAssets = new Map<string, string>()
-let segmentPlacement: VideoSegmentPlacement = 'prepend'
+const segmentPlacement = ref<VideoSegmentPlacement>('prepend')
+const segmentTitle = computed(() => segmentPlacement.value === 'prepend' ? '片头' : '片尾')
 let segmentAbort: AbortController | undefined
 const transitionError = ref(''), transitionTime = ref(0), transitionTrackId = ref<string>()
 const transitionCut = computed(() => findTransitionCut(props.project, transitionTime.value, transitionTrackId.value))
@@ -303,23 +304,23 @@ function openBackgroundMusic(): void {
   musicError.value = ''
   openEditorDialog('music')
 }
-function openVideoSegments(): void {
+function openVideoSegments(placement: VideoSegmentPlacement): void {
   if (editingBusy.value || props.exportDisabled) return
+  segmentPlacement.value = placement
   segmentError.value = ''
   openEditorDialog('segment')
 }
 function importLocalSegment(placement: VideoSegmentPlacement): void {
-  if (editingBusy.value || editorDialog.value !== 'segment') return
-  segmentPlacement = placement
+  if (editingBusy.value || props.exportDisabled || editorDialog.value !== 'segment' || placement !== segmentPlacement.value) return
   segmentFile.value?.click()
 }
 function localSegmentChosen(event: Event): void {
   const input = event.target as HTMLInputElement, file = input.files?.[0]
   input.value = ''
-  if (file) void insertSegment(file, segmentPlacement)
+  if (file) void insertSegment(file, segmentPlacement.value)
 }
 async function insertSegment(source: VideoSegmentItem | File, placement: VideoSegmentPlacement, caption?: VideoSegmentCaption): Promise<void> {
-  if (editingBusy.value || props.exportDisabled || editorDialog.value !== 'segment') return
+  if (editingBusy.value || props.exportDisabled || editorDialog.value !== 'segment' || placement !== segmentPlacement.value) return
   const original = props.project, projectId = original.id
   const abort = new AbortController()
   segmentAbort = abort
@@ -1388,7 +1389,8 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
           <button title="添加字幕" @click="addText"><Icon name="text" :size="15" /><span>字幕</span></button>
           <button title="从当前刻度添加水印" aria-label="添加水印" aria-haspopup="dialog" data-testid="watermark-open" :disabled="editingBusy || !!exportDisabled" @click="openWatermarks"><Icon name="sticker" :size="15" /><span>水印</span></button>
           <button title="从当前刻度加入背景音乐" aria-label="背景音乐" aria-haspopup="dialog" data-testid="background-music-open" :disabled="editingBusy || !!exportDisabled" @click="openBackgroundMusic"><Icon name="audio" :size="15" /><span>背景音乐</span></button>
-          <button title="添加片头或片尾" aria-label="视频片段" aria-haspopup="dialog" data-testid="video-segment-open" :disabled="editingBusy || !!exportDisabled" @click="openVideoSegments"><Icon name="video" :size="15" /><span>视频片段</span></button>
+          <button title="添加到项目开头，现有片段整体后移" aria-label="片头" aria-haspopup="dialog" data-testid="video-segment-intro-open" :disabled="editingBusy || !!exportDisabled" @click="openVideoSegments('prepend')"><Icon name="skip-back" :size="15" /><span>片头</span></button>
+          <button title="添加到项目结尾" aria-label="片尾" aria-haspopup="dialog" data-testid="video-segment-outro-open" :disabled="editingBusy || !!exportDisabled" @click="openVideoSegments('append')"><Icon name="skip-forward" :size="15" /><span>片尾</span></button>
           <button title="在相邻视频切点应用转场" aria-label="转场" aria-haspopup="dialog" data-testid="transition-open" :disabled="editingBusy || !!exportDisabled" @click="openTransitions"><Icon name="transition" :size="15" /><span>转场</span></button>
           <button :disabled="!canSplit" title="在播放头处分割（S）" @click="splitSelected"><Icon name="scissors" :size="15" /><span>分割</span></button>
           <button :disabled="!canTrimStart" title="裁掉播放头左侧（Q）" aria-label="裁掉播放头左侧（Q）" @click="trimSelected('start')"><Icon name="mark-in" :size="15" /></button>
@@ -1428,8 +1430,8 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
     <input ref="watermarkFile" type="file" accept="image/*,video/*,.mp4,.mov,.webm,.png,.webp,.svg" hidden data-testid="watermark-file" @change="localWatermarkChosen" />
     <input ref="musicFile" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus,.aiff,.aif,.wma" hidden data-testid="background-music-file" @change="localMusicChosen" />
     <input ref="segmentFile" type="file" accept="video/*,.mp4,.mov,.webm,.mkv,.avi,.m4v" hidden data-testid="video-segment-file" @change="localSegmentChosen" />
-    <EditorDialog :open="editorDialog === 'segment'" title="视频片段" icon="video" wide :busy="segmentBusy" busy-message="正在准备视频片段…" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
-      <VideoSegmentLibrary v-if="editorDialog === 'segment'" :busy="segmentBusy" :error="segmentError" @select="insertSegment" @import-local="importLocalSegment" />
+    <EditorDialog :open="editorDialog === 'segment'" :title="segmentTitle" :icon="segmentPlacement === 'prepend' ? 'skip-back' : 'skip-forward'" wide :busy="segmentBusy" :busy-message="`正在准备${segmentTitle}…`" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+      <VideoSegmentLibrary v-if="editorDialog === 'segment'" :placement="segmentPlacement" :busy="segmentBusy" :error="segmentError" @select="insertSegment" @import-local="importLocalSegment" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'transition'" title="转场" icon="transition" wide :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <TransitionLibrary v-if="editorDialog === 'transition'" :cut="transitionCut" :fps="project.fps" :from-name="transitionCut && findClip(project, transitionCut.fromClipId)?.clip.name" :to-name="transitionCut && findClip(project, transitionCut.toClipId)?.clip.name" :error="transitionError" @select="insertTransition" />
