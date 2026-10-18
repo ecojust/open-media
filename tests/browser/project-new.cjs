@@ -83,7 +83,7 @@ async function main() {
     await page.evaluate(() => { window.newProjectIO.failDraft = true })
     await page.getByTestId('new-project').click()
     await confirmation(page).getByRole('button', { name: '保存草稿', exact: true }).click()
-    await expect(page.getByRole('alert')).toContainText('本地存储空间不足，项目未覆盖')
+    await expect(page.getByRole('alert')).toContainText(/本地草稿存储空间不足.*当前编辑仍在内存中.*保存项目文件.*重试/)
     await expect(page.getByTestId('new-project')).toBeEnabled()
     assert.equal(await currentId(page), originalId)
     await expect(page.getByLabel('字幕内容')).toHaveValue('新建前编辑的字幕不能丢失')
