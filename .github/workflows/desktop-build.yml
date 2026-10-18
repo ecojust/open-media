@@ -393,35 +393,36 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
           node scripts/speech-runtime.mjs verify --directory "$destination/speech" --packaged 2>&1 | Tee-Object .speech-runtime/logs/package.log
           if ($LASTEXITCODE -ne 0) { throw 'Packaged speech verification failed.' }
-      - name: Verify every installed speech voice
-        id: all-speech-voices
-        shell: python
-        env:
-          MEDIA_PLATFORM: ${{ matrix.platform }}
-          MEDIA_TARGET: ${{ matrix.target }}
-          PYTHONUTF8: '1'
-          PYTHONUNBUFFERED: '1'
-          OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
-          OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
-        run: |
-          import os, subprocess, sys
-          from pathlib import Path
-          workspace = Path(os.environ['GITHUB_WORKSPACE'])
-          target = os.environ['MEDIA_TARGET']
-          if sys.platform == 'darwin':
-              application = workspace / 'src-tauri/target' / target / 'release/bundle/macos/Open Media.app/Contents'
-              speech = application / 'Resources/speech'
-              executables = application / 'Helpers/speech'
-          else:
-              speech = Path(os.environ['RUNNER_TEMP']) / 'Open Media 语音验证/speech'
-              executables = speech
-          subprocess.run([
-              sys.executable, 'scripts/verify-installed-speech.py',
-              '--platform', os.environ['MEDIA_PLATFORM'], '--target', target,
-              '--speech-directory', str(speech), '--speech-executable-directory', str(executables),
-              '--work', str(Path(os.environ['RUNNER_TEMP']) / '完整配音 验证'),
-              '--output', str(workspace / '.speech-runtime/installed-voice-validation'),
-          ], check=True, cwd=workspace)
+      # 暂停逐音色模型验证；恢复时取消下方注释，并启用 scripts/release-policy.json 中的对应检查。
+      # - name: Verify every installed speech voice
+      #   id: all-speech-voices
+      #   shell: python
+      #   env:
+      #     MEDIA_PLATFORM: ${{ matrix.platform }}
+      #     MEDIA_TARGET: ${{ matrix.target }}
+      #     PYTHONUTF8: '1'
+      #     PYTHONUNBUFFERED: '1'
+      #     OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
+      #     OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
+      #   run: |
+      #     import os, subprocess, sys
+      #     from pathlib import Path
+      #     workspace = Path(os.environ['GITHUB_WORKSPACE'])
+      #     target = os.environ['MEDIA_TARGET']
+      #     if sys.platform == 'darwin':
+      #         application = workspace / 'src-tauri/target' / target / 'release/bundle/macos/Open Media.app/Contents'
+      #         speech = application / 'Resources/speech'
+      #         executables = application / 'Helpers/speech'
+      #     else:
+      #         speech = Path(os.environ['RUNNER_TEMP']) / 'Open Media 语音验证/speech'
+      #         executables = speech
+      #     subprocess.run([
+      #         sys.executable, 'scripts/verify-installed-speech.py',
+      #         '--platform', os.environ['MEDIA_PLATFORM'], '--target', target,
+      #         '--speech-directory', str(speech), '--speech-executable-directory', str(executables),
+      #         '--work', str(Path(os.environ['RUNNER_TEMP']) / '完整配音 验证'),
+      #         '--output', str(workspace / '.speech-runtime/installed-voice-validation'),
+      #     ], check=True, cwd=workspace)
       - name: Preserve actual voice results and inference device evidence
         if: always()
         uses: actions/upload-artifact@v4

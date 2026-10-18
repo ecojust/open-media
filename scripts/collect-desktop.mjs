@@ -30,14 +30,17 @@ const speechRuntime = verifySpeechMetadata(JSON.parse(readFileSync(join(speechRo
 for (const file of speechRuntime.files) verifyDigest(readFileSync(join(speechRoot, file.path)), `sha256:${file.sha256}`);
 const speechEvidenceRoot = '.speech-runtime/installed-voice-validation';
 const speechEvidencePath = join(speechEvidenceRoot, 'summary.json');
-const speechEvidenceBytes = readFileSync(speechEvidencePath);
-const speechEvidence = verifySpeechSynthesis(JSON.parse(speechEvidenceBytes), process.env.MEDIA_PLATFORM, process.env.MEDIA_COMMIT);
+const releasePolicy = JSON.parse(readFileSync('scripts/release-policy.json', 'utf8'));
+const speechEvidenceBytes = releasePolicy.installedSpeechVerification.enabled === false
+  ? Buffer.from(JSON.stringify({ schema: 1, platform: process.env.MEDIA_PLATFORM, sourceCommit: process.env.MEDIA_COMMIT, status: 'skipped', reason: releasePolicy.installedSpeechVerification.reason, voices: [] }, null, 2) + '\n')
+  : readFileSync(speechEvidencePath);
+const speechEvidence = verifySpeechSynthesis(JSON.parse(speechEvidenceBytes), process.env.MEDIA_PLATFORM, process.env.MEDIA_COMMIT, releasePolicy);
 for (const voice of speechEvidence.voices) {
   const audioBytes = readFileSync(join(speechEvidenceRoot, voice.audio.path));
   if (audioBytes.length !== voice.audio.bytes) throw new Error(`Generated speech size changed: ${voice.voiceId}`);
   verifyDigest(audioBytes, `sha256:${voice.audio.sha256}`);
 }
-copyFileSync(speechEvidencePath, 'desktop-artifacts/speech-verification.json');
+writeFileSync('desktop-artifacts/speech-verification.json', speechEvidenceBytes);
 const speechVerification = { file: 'speech-verification.json', sha256: digest(speechEvidenceBytes), bytes: speechEvidenceBytes.length };
 writeFileSync('desktop-artifacts/build.json', JSON.stringify({ commit: process.env.MEDIA_COMMIT, platform: process.env.MEDIA_PLATFORM, version: JSON.parse(readFileSync('package.json', 'utf8')).version, runtime: JSON.parse(readFileSync('src-tauri/resources/media/runtime.json', 'utf8')), speechRuntime, speechVerification }, null, 2) + '\n');
 copyFileSync('LICENSE', 'desktop-artifacts/LICENSE');

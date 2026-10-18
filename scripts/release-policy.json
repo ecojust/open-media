@@ -1,0 +1,6 @@
+{
+  "installedSpeechVerification": {
+    "enabled": false,
+    "reason": "按维护者要求，暂时停用逐音色模型验证以缩短发布时间。"
+  }
+}

@@ -30,8 +30,11 @@ async function list(path, field) {
 const [run, jobs, artifacts] = await Promise.all([
   api(`/actions/runs/${runId}`), list(`/actions/runs/${runId}/jobs`, 'jobs'), list(`/actions/runs/${runId}/artifacts`, 'artifacts'),
 ])
-const selected = validateBuild(run, jobs, artifacts, commit)
 const sourceFile = path => execFileSync('git', ['show', `${commit}:${path}`], { maxBuffer: 5 * 1024 * 1024 })
+const releasePolicyPath = 'scripts/release-policy.json'
+const releasePolicyBytes = sourceFile(releasePolicyPath)
+const releasePolicy = JSON.parse(releasePolicyBytes)
+const selected = validateBuild(run, jobs, artifacts, commit, releasePolicy)
 const expectedMedia = { sourceLockSha256: digest(sourceFile('scripts/media-runtime.lock.json')), buildScriptSha256: digest(sourceFile('scripts/build-media-runtime.sh')), capabilitiesScriptSha256: digest(sourceFile('scripts/media-runtime-capabilities.mjs')) }
 const speechLockBytes = sourceFile('scripts/speech-runtime.lock.json')
 const speechLock = JSON.parse(speechLockBytes)
@@ -53,7 +56,7 @@ if (!notes.trim()) throw new Error('Reviewed release notes are required.')
 const output = resolve('release-output'), temporary = resolve('.release-staging')
 await mkdir(output, { recursive: true }); await mkdir(temporary, { recursive: true })
 const payloads = new Map()
-const verification = { version, commit, sourceRunId: run.id, sourceRunUrl: run.html_url, platforms: [] }
+const verification = { version, commit, sourceRunId: run.id, sourceRunUrl: run.html_url, releasePolicy: { ...releasePolicy, sourcePath: releasePolicyPath, sha256: digest(releasePolicyBytes) }, platforms: [] }
 
 for (const { platform, artifact } of selected) {
   // Read the redirect explicitly: the repository token is never sent to blob storage.
@@ -94,7 +97,7 @@ with zipfile.ZipFile(archive) as z:
     const evidenceBytes = await readFile(join(directory, 'speech-verification.json'))
     if (meta.speechVerification?.file !== 'speech-verification.json' || meta.speechVerification.bytes !== evidenceBytes.length) throw new Error(`Missing installed speech verification metadata: ${platform}`)
     verifyDigest(evidenceBytes, `sha256:${meta.speechVerification.sha256}`)
-    speechVerification = verifySpeechSynthesis(JSON.parse(evidenceBytes), platform, commit)
+    speechVerification = verifySpeechSynthesis(JSON.parse(evidenceBytes), platform, commit, releasePolicy)
   }
   for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     const content = await readFile(join(directory, file))
@@ -141,7 +144,7 @@ with zipfile.ZipFile(archive) as z:
   const name = `Open-Media_${version}_${platform}${platform === 'windows-x64' ? '-setup.exe' : '.dmg'}`
   payloads.set(name, installer)
   verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, mediaRuntime: meta.runtime, speechRuntime: meta.speechRuntime, speechVerification })
-  console.log(`Verified ${platform}: source, artifact archive, installer, seven installed voices and notices.`)
+  console.log(`Verified ${platform}: source, artifact archive, installer and notices. Installed speech verification: ${speechVerification.status}${speechVerification.status === 'skipped' ? ` (${speechVerification.reason})` : ' (seven voices)'}.`)
 }
 
 const sourceName = `Open-Media_${version}_source.zip`
@@ -185,6 +188,6 @@ let tagged = reference.object
 while (tagged.type === 'tag') tagged = (await api(`/git/tags/${tagged.sha}`)).object
 if (tagged.type !== 'commit' || tagged.sha !== commit) throw new Error('Release tag does not match the verified source commit.')
 await writeFile(join(output, 'verification.json'), `${JSON.stringify({ release: release.html_url, version, commit, assets: uploaded.map(asset => ({ name: asset.name, size: asset.size, digest: asset.digest })) }, null, 2)}\n`)
-if (process.env.GITHUB_STEP_SUMMARY) await writeFile(process.env.GITHUB_STEP_SUMMARY, `Published [Open Media ${tag}](${release.html_url}) after verifying all three installers, application source, and complete corresponding media and speech sources.\n`)
+if (process.env.GITHUB_STEP_SUMMARY) await writeFile(process.env.GITHUB_STEP_SUMMARY, `Published [Open Media ${tag}](${release.html_url}) after verifying all three installers, application source, and complete corresponding media and speech sources.\n\nInstalled speech verification: ${releasePolicy.installedSpeechVerification.enabled ? 'passed for all seven voices on each platform' : `skipped — ${releasePolicy.installedSpeechVerification.reason}`}\n`)
 await rm(temporary, { recursive: true, force: true })
 console.log(`Published ${release.html_url}`)

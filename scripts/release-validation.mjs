@@ -2,7 +2,15 @@ import { createHash } from 'node:crypto'
 
 export const platforms = ['windows-x64', 'macos-arm64', 'macos-x64']
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-export function validateBuild(run, jobs, artifacts, expectedCommit) {
+function installedSpeechPolicy(releasePolicy) {
+  if (releasePolicy === undefined) return { enabled: true }
+  const policy = releasePolicy?.installedSpeechVerification
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy) || typeof policy.enabled !== 'boolean') throw new Error('Installed speech verification policy must explicitly enable or disable verification.')
+  if (!policy.enabled && (typeof policy.reason !== 'string' || !policy.reason.trim() || policy.reason !== policy.reason.trim() || policy.reason.length > 1000 || /[\r\n\0]/.test(policy.reason))) throw new Error('Disabled installed speech verification requires a nonempty reason.')
+  return policy
+}
+export function validateBuild(run, jobs, artifacts, expectedCommit, releasePolicy) {
+  const speechPolicy = installedSpeechPolicy(releasePolicy)
   if (!/^[a-f0-9]{40}$/.test(expectedCommit)) throw new Error('Expected commit must be a full SHA.')
   if (run.head_sha !== expectedCommit || run.status !== 'completed' || run.conclusion !== 'success') throw new Error('The requested build is not a successful build of the expected commit.')
   if (run.path !== '.github/workflows/desktop-build.yml') throw new Error('Unexpected source workflow.')
@@ -11,7 +19,11 @@ export function validateBuild(run, jobs, artifacts, expectedCommit) {
     if (matching.length !== 1 || matching[0].status !== 'completed' || matching[0].conclusion !== 'success') throw new Error(`Required job did not pass: ${name}`)
     if (platforms.includes(name)) {
       const speechChecks = (matching[0].steps || []).filter(step => step.name === 'Verify every installed speech voice')
-      if (speechChecks.length !== 1 || speechChecks[0].status !== 'completed' || speechChecks[0].conclusion !== 'success') throw new Error(`Installed speech verification did not pass: ${name}`)
+      if (speechPolicy.enabled) {
+        if (speechChecks.length !== 1 || speechChecks[0].status !== 'completed' || speechChecks[0].conclusion !== 'success') throw new Error(`Installed speech verification did not pass: ${name}`)
+      } else if (speechChecks.length > 1 || speechChecks.some(step => step.status !== 'completed' || step.conclusion !== 'skipped')) {
+        throw new Error(`Installed speech verification step contradicts the disabled release policy: ${name}`)
+      }
     }
   }
   return [...platforms, 'runtime-source'].map(platform => {
@@ -36,8 +48,15 @@ export function verifyMediaMetadata(runtime, platform, expected) {
 const safeRelativePath = value => typeof value === 'string' && value.length > 0 && !/[\\\0:]/.test(value) && !value.startsWith('/') && !value.split('/').some(part => !part || part === '.' || part === '..')
 export const installedSpeechVoiceIds = ['matcha_zh_en_female', 'zipvoice_zh_female', 'zipvoice_zh_male', 'f5_zh_female', 'f5_zh_male', 'qwen3_serena', 'qwen3_uncle_fu']
 const speechVerificationText = '这是一款全程由AI接管并生成的软件'
-export function verifySpeechSynthesis(summary, platform, commit) {
-  if (!platforms.includes(platform) || !/^[a-f0-9]{40}$/.test(commit) || summary?.schema !== 1 || summary.platform !== platform || summary.sourceCommit !== commit || summary.status !== 'passed') throw new Error(`Installed speech evidence provenance mismatch: ${platform}`)
+export function verifySpeechSynthesis(summary, platform, commit, releasePolicy) {
+  const speechPolicy = installedSpeechPolicy(releasePolicy)
+  if (!platforms.includes(platform) || !/^[a-f0-9]{40}$/.test(commit) || summary?.schema !== 1 || summary.platform !== platform || summary.sourceCommit !== commit) throw new Error(`Installed speech evidence provenance mismatch: ${platform}`)
+  if (!speechPolicy.enabled) {
+    const allowed = new Set(['schema', 'platform', 'sourceCommit', 'status', 'reason', 'voices'])
+    if (summary.status !== 'skipped' || summary.reason !== speechPolicy.reason || !Array.isArray(summary.voices) || summary.voices.length !== 0 || Object.keys(summary).some(key => !allowed.has(key))) throw new Error(`Disabled installed speech verification requires explicit skipped evidence without execution claims: ${platform}`)
+    return summary
+  }
+  if (summary.status !== 'passed') throw new Error(`Installed speech evidence provenance mismatch: ${platform}`)
   if (summary.text !== speechVerificationText) throw new Error('Installed speech verification must use the common test text.')
   if (summary.runtimeIntegrity?.unchanged !== true || summary.installationIntegrity?.unchanged !== true) throw new Error('Installed speech verification must preserve the model, runtime and installation.')
   const availability = summary.availability?.python

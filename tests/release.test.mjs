@@ -9,6 +9,8 @@ import { validateBuild, verifyDigest, verifyMetadata, digest, verifyMediaMetadat
 import { verifySourceContents } from '../scripts/release-source.mjs';
 
 const commit = 'a'.repeat(40);
+const disabledSpeechPolicy = { installedSpeechVerification: { enabled: false, reason: '按维护者要求，暂时停用逐音色模型验证以缩短发布时间。' } };
+const enabledSpeechPolicy = { installedSpeechVerification: { enabled: true } };
 function fixture() {
   return {
     run: { id: 7, head_sha: commit, status: 'completed', conclusion: 'success', path: '.github/workflows/desktop-build.yml' },
@@ -38,6 +40,44 @@ test('every desktop platform must actually finish its installed speech verificat
     }
     const passed = jobs.find(job => job.name === platform).steps[0];
     assert.throws(() => validateBuild(run, jobs.map(job => job.name === platform ? { ...job, steps: [passed, passed] } : job), artifacts, commit), /Installed speech verification did not pass/);
+  }
+});
+test('explicit disabled voice policy permits only omitted or skipped verification steps', () => {
+  const { run, jobs, artifacts } = fixture();
+  const omitted = jobs.map(job => ({ ...job, steps: [] }));
+  assert.equal(validateBuild(run, omitted, artifacts, commit, disabledSpeechPolicy).length, 4);
+  const skipped = jobs.map(job => ({ ...job, steps: [{ name: 'Verify every installed speech voice', status: 'completed', conclusion: 'skipped' }] }));
+  assert.equal(validateBuild(run, skipped, artifacts, commit, disabledSpeechPolicy).length, 4);
+  assert.throws(() => validateBuild(run, omitted, artifacts, commit), /did not pass/);
+  assert.throws(() => validateBuild(run, skipped, artifacts, commit, enabledSpeechPolicy), /did not pass/);
+  for (const platform of ['windows-x64', 'macos-arm64', 'macos-x64']) {
+    for (const step of [{ status: 'completed', conclusion: 'success' }, { status: 'completed', conclusion: 'failure' }, { status: 'in_progress', conclusion: null }]) {
+      const changed = omitted.map(job => job.name === platform ? { ...job, steps: [{ name: 'Verify every installed speech voice', ...step }] } : job);
+      assert.throws(() => validateBuild(run, changed, artifacts, commit, disabledSpeechPolicy), /contradicts/);
+    }
+    const duplicate = skipped.map(job => job.name === platform ? { ...job, steps: [...job.steps, ...job.steps] } : job);
+    assert.throws(() => validateBuild(run, duplicate, artifacts, commit, disabledSpeechPolicy), /contradicts/);
+  }
+});
+test('disabled voice policy preserves source, platform job and artifact release gates', () => {
+  const { run, artifacts, jobs: original } = fixture();
+  const jobs = original.map(job => ({ ...job, steps: [] }));
+  assert.throws(() => validateBuild({ ...run, head_sha: 'b'.repeat(40) }, jobs, artifacts, commit, disabledSpeechPolicy));
+  assert.throws(() => validateBuild({ ...run, conclusion: 'failure' }, jobs, artifacts, commit, disabledSpeechPolicy));
+  for (const job of jobs) {
+    assert.throws(() => validateBuild(run, jobs.filter(item => item !== job), artifacts, commit, disabledSpeechPolicy));
+    assert.throws(() => validateBuild(run, jobs.map(item => item === job ? { ...item, conclusion: 'failure' } : item), artifacts, commit, disabledSpeechPolicy));
+  }
+  for (const artifact of artifacts) {
+    assert.throws(() => validateBuild(run, jobs, artifacts.filter(item => item !== artifact), commit, disabledSpeechPolicy));
+    assert.throws(() => validateBuild(run, jobs, artifacts.map(item => item === artifact ? { ...item, expired: true } : item), commit, disabledSpeechPolicy));
+  }
+});
+test('malformed voice policies cannot weaken release verification', () => {
+  const { run, jobs, artifacts } = fixture();
+  for (const policy of [null, false, {}, { installedSpeechVerification: false }, { installedSpeechVerification: { enabled: 'false', reason: 'disabled' } }, { installedSpeechVerification: { enabled: false } }, ...['', ' ', ' reason ', 'reason\n', 'a'.repeat(1001)].map(reason => ({ installedSpeechVerification: { enabled: false, reason } }))]) {
+    assert.throws(() => validateBuild(run, jobs, artifacts, commit, policy), /policy|requires a nonempty reason/);
+    assert.throws(() => verifySpeechSynthesis(synthesisFixture(), 'macos-arm64', commit, policy), /policy|requires a nonempty reason/);
   }
 });
 test('installer digest and provenance must match before publishing', () => {
@@ -111,6 +151,20 @@ function synthesisFixture(platform = 'macos-arm64') {
     })),
   };
 }
+test('disabled voice evidence must truthfully report its source-bound skip reason', () => {
+  for (const platform of ['windows-x64', 'macos-arm64', 'macos-x64']) {
+    const evidence = { schema: 1, platform, sourceCommit: commit, status: 'skipped', reason: disabledSpeechPolicy.installedSpeechVerification.reason, voices: [] };
+    assert.equal(verifySpeechSynthesis(evidence, platform, commit, disabledSpeechPolicy), evidence);
+    assert.throws(() => verifySpeechSynthesis(evidence, platform, commit));
+    assert.throws(() => verifySpeechSynthesis(evidence, platform, commit, enabledSpeechPolicy));
+    assert.throws(() => verifySpeechSynthesis(synthesisFixture(platform), platform, commit, disabledSpeechPolicy), /explicit skipped evidence/);
+    for (const patch of [{ schema: 2 }, { platform: 'linux-x64' }, { sourceCommit: 'b'.repeat(40) }, { status: 'passed' }, { status: 'failed' }, { reason: 'different reason' }, { reason: undefined }, { voices: undefined }, { voices: synthesisFixture(platform).voices }, { availability: { python: { mpsAvailable: true } } }, { runtimeIntegrity: { unchanged: true } }, { installationIntegrity: { unchanged: true } }, { gpuInferenceVerified: true }]) {
+      assert.throws(() => verifySpeechSynthesis({ ...evidence, ...patch }, platform, commit, disabledSpeechPolicy));
+    }
+    const passed = synthesisFixture(platform);
+    assert.equal(verifySpeechSynthesis(passed, platform, commit, enabledSpeechPolicy), passed);
+  }
+});
 test('installed speech proof is bound to every voice, platform and source commit', () => {
   for (const platform of ['windows-x64', 'macos-arm64', 'macos-x64']) {
     const evidence = synthesisFixture(platform);
