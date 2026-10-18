@@ -15,6 +15,13 @@
           "language": "zh-CN",
           "gender": "female",
           "speakerId": 0
+        },
+        {
+          "id": "zipvoice_zh_male",
+          "name": "ZipVoice Distill FP32 · 男声",
+          "language": "zh-CN",
+          "gender": "male",
+          "speakerId": 0
         }
       ],
       "files": [
@@ -110,6 +117,13 @@
           "language": "zh-CN",
           "gender": "female",
           "speakerId": 0
+        },
+        {
+          "id": "f5_zh_male",
+          "name": "F5-TTS v1 Base FP32 · 男声",
+          "language": "zh-CN",
+          "gender": "male",
+          "speakerId": 0
         }
       ],
       "files": [
@@ -186,7 +200,7 @@
       "id": "qwen3-tts-1.7b-serena",
       "version": 1,
       "license": "Apache-2.0",
-      "usageNote": "中文 Serena；CPU 离线合成，建议至少 16 GB 内存。",
+      "usageNote": "中文男声与女声；本地离线合成，建议至少 16 GB 内存。",
       "modelSize": 4520159845,
       "downloadSize": 4520159586,
       "voices": [
@@ -195,6 +209,13 @@
           "name": "Qwen3-TTS 1.7B BF16 · Serena",
           "language": "zh-CN",
           "gender": "female",
+          "speakerId": 0
+        },
+        {
+          "id": "qwen3_uncle_fu",
+          "name": "Qwen3-TTS 1.7B BF16 · 男声",
+          "language": "zh-CN",
+          "gender": "male",
           "speakerId": 0
         }
       ],

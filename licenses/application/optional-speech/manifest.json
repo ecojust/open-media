@@ -105,7 +105,7 @@
     },
     {
       "modelId": "qwen3-tts-1.7b-serena",
-      "name": "Qwen3-TTS 1.7B BF16 · Serena",
+      "name": "Qwen3-TTS 1.7B BF16",
       "weightLicense": "Apache-2.0",
       "implementationLicense": "Apache-2.0",
       "sources": [
@@ -182,5 +182,10 @@
     "source": "test/chinese-tts-benchmark/manifest.json",
     "notes": "Three exact published benchmark recordings copied byte-for-byte; independent model voices, not substituted or synthesized at preview time."
   },
-  "notes": "Weights and platform-specific execution dependencies are downloaded only on explicit request. Original license files are unmodified; inventory documentation does not replace their terms."
+  "notes": "Weights and platform-specific execution dependencies are downloaded only on explicit request. Original license files are unmodified; inventory documentation does not replace their terms.",
+  "maleAuditions": {
+    "manifest": "src/assets/voice-previews/male-manifest.json",
+    "reference": "scripts/optional-speech-assets/male-reference.json",
+    "notes": "Qwen uses its built-in Uncle_Fu speaker. The other two models use an independently generated synthetic male reference. Each audition is synthesized by its own model; original publisher notices and weight licenses remain unchanged."
+  }
 }

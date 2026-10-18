@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { verifySourceContents } from './release-source.mjs'
 import { join, resolve } from 'node:path'
-import { digest, validateBuild, verifyDigest, verifyMetadata, validateAssetMetadata, verifySpeechMetadata, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
+import { digest, validateBuild, verifyDigest, verifyMetadata, validateAssetMetadata, verifySpeechMetadata, verifySpeechSynthesis, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
 
 const repository = process.env.RELEASE_REPOSITORY
 const runId = process.env.RELEASE_BUILD_RUN
@@ -83,12 +83,17 @@ with zipfile.ZipFile(archive) as z:
     z.extractall(target)
 `, archive, directory, String((platform === 'runtime-source' ? 2048 : 512) * 1024 * 1024)], { stdio: 'pipe' })
   const meta = JSON.parse(await readFile(join(directory, 'build.json'), 'utf8'))
+  let speechVerification
   if (platform === 'runtime-source') {
     if (meta.commit !== commit || meta.kind !== 'corresponding-source') throw new Error('Corresponding source commit mismatch.')
   } else {
     verifyMetadata(meta, platform, commit, version)
     if (meta.runtime?.sourceLockSha256 !== digest(sourceFile('scripts/media-runtime.lock.json')) || meta.runtime?.buildScriptSha256 !== digest(sourceFile('scripts/build-media-runtime.sh'))) throw new Error(`Installer contains a stale media runtime: ${platform}`)
     verifySpeechMetadata(meta.speechRuntime, platform, expectedSpeech)
+    const evidenceBytes = await readFile(join(directory, 'speech-verification.json'))
+    if (meta.speechVerification?.file !== 'speech-verification.json' || meta.speechVerification.bytes !== evidenceBytes.length) throw new Error(`Missing installed speech verification metadata: ${platform}`)
+    verifyDigest(evidenceBytes, `sha256:${meta.speechVerification.sha256}`)
+    speechVerification = verifySpeechSynthesis(JSON.parse(evidenceBytes), platform, commit)
   }
   for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
     const content = await readFile(join(directory, file))
@@ -130,8 +135,8 @@ with zipfile.ZipFile(archive) as z:
   if (!installer.length) throw new Error('Empty installer.')
   const name = `Open-Media_${version}_${platform}${platform === 'windows-x64' ? '-setup.exe' : '.dmg'}`
   payloads.set(name, installer)
-  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, speechRuntime: meta.speechRuntime })
-  console.log(`Verified ${platform}: source, artifact archive, installer and notices.`)
+  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, speechRuntime: meta.speechRuntime, speechVerification })
+  console.log(`Verified ${platform}: source, artifact archive, installer, seven installed voices and notices.`)
 }
 
 const sourceName = `Open-Media_${version}_source.zip`

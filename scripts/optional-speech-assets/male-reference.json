@@ -1,0 +1,133 @@
+{
+  "schema": 1,
+  "text": "清晨的阳光照进房间，翻开今天的计划，让每一个想法慢慢变成现实。",
+  "synthetic": true,
+  "modelId": "qwen3-tts-1.7b-serena",
+  "speaker": "Uncle_Fu",
+  "license": "Apache-2.0",
+  "source": "https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice/tree/0c0e3051f131929182e2c023b9537f8b1c68adfe",
+  "sha256": "ff4553534d67e418faec606f472fdec58cad4bed613e6bafff16762609c29cdf",
+  "bytes": 403278,
+  "originalWavSha256": "fff152283314a42b68d190e894433311bb4dce4ad045f572243ce37618160296",
+  "originalWav": "/workspace/male-voice-previews-20261018/reference/speech.wav",
+  "generationSeconds": 64.07959344601841,
+  "audio": {
+    "sampleRate": 24000,
+    "channels": 1,
+    "durationSeconds": 8.4,
+    "peak": 0.5703125,
+    "rms": 0.07643827549528015
+  },
+  "settings": {
+    "device": "cpu",
+    "dtype": "bfloat16",
+    "threads": 4,
+    "speed": 1,
+    "seed": 20261017,
+    "speaker": "Uncle_Fu",
+    "config": {
+      "schema": 1,
+      "engine": "qwen3",
+      "dtype": "bfloat16",
+      "model": ".",
+      "speaker": "Uncle_Fu",
+      "language": "Chinese",
+      "instruct": "用自然流畅的标准普通话朗读，语气温和，语速适中。",
+      "sampleRate": 24000,
+      "seed": 20261017
+    }
+  },
+  "modelFiles": [
+    {
+      "path": "config.json",
+      "bytes": 4908,
+      "sha256": "17a07f527a1c25ea30b4e023a184482a23d3e279d697b1dc81b1bde498d29cf9"
+    },
+    {
+      "path": "generation_config.json",
+      "bytes": 245,
+      "sha256": "f1b90b4513f3b34c62851049e2492d7b4c5940daf1276f89c82b8ef04127f3aa"
+    },
+    {
+      "path": "merges.txt",
+      "bytes": 1671839,
+      "sha256": "599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3"
+    },
+    {
+      "path": "model.safetensors",
+      "bytes": 3833402552,
+      "sha256": "38b1d5971bdbd982b561cccec982669a53b0537c3cf5e9bd4778ed07bb2f5137"
+    },
+    {
+      "path": "preprocessor_config.json",
+      "bytes": 127,
+      "sha256": "efdde1022ea9d76928bf7a9cd53139138f5ba2e466e837f08f6105ab1af1c119"
+    },
+    {
+      "path": "speech_tokenizer/config.json",
+      "bytes": 2336,
+      "sha256": "ee65bb901c876664ab8707c487157aa1a6ee57c65969b28fb5ec9dc211e68167"
+    },
+    {
+      "path": "speech_tokenizer/configuration.json",
+      "bytes": 76,
+      "sha256": "6bc26d64eb5024b4d1dab5a52371958b429256d6c9d59787f1f5294a54e0cebd"
+    },
+    {
+      "path": "speech_tokenizer/model.safetensors",
+      "bytes": 682293092,
+      "sha256": "836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258"
+    },
+    {
+      "path": "speech_tokenizer/preprocessor_config.json",
+      "bytes": 234,
+      "sha256": "fcb3805e597e786d4067706e602f6688524640f8d3396790e2e09b5942fcbdfb"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "bytes": 7344,
+      "sha256": "dc3c31c3bdaedd5016382bb3cbe07323026775ad51f5a4fb564505992ae4a670"
+    },
+    {
+      "path": "vocab.json",
+      "bytes": 2776833,
+      "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"
+    },
+    {
+      "path": "runner-config.json",
+      "bytes": 259,
+      "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28"
+    }
+  ],
+  "conversion": "24 kHz mono FLOAT WAV converted to PCM16; no pitch or tempo change",
+  "generator": {
+    "script": "src/assets/voice-previews/provenance/male-20261018/generate-male-voice-previews.py",
+    "scriptSha256": "2abbc125fd9a6e1de52a63ffa9cd691c08babbd052082c34be93930904eb3c82",
+    "adapterSha256": "2c427a8d6ec370e27d60e6976b91ee54a962ebd881682c4ae0783c1578185df3",
+    "runtimeScriptSha256": "c10a79b2057136c21c9e4f39b5fc99c38164fd4643342085b7d3df22331dad7a",
+    "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+    "python": "3.12.14",
+    "generatedAt": "2026-10-18T02:23:29.220888+00:00",
+    "adapter": "src/assets/voice-previews/provenance/male-20261018/speech-voice-adapter.py"
+  },
+  "command": [
+    "/workspace/tts-benchmark-20261017/venv/bin/python",
+    "-I",
+    "-B",
+    "/workspace/male-voice-previews-20261018/reference/speech-voice-adapter.py",
+    "--runtime-script",
+    "/workspace/tts-benchmark-20261017/runtime-runner-test/runner/tts.py",
+    "--voice",
+    "qwen3_uncle_fu",
+    "--config",
+    "/workspace/tts-benchmark-20261017/large/model/runner-config.json",
+    "--text-file",
+    "/workspace/male-voice-previews-20261018/reference/text.txt",
+    "--output-filename",
+    "/workspace/male-voice-previews-20261018/reference/speech.wav",
+    "--speed",
+    "1",
+    "--threads",
+    "4"
+  ]
+}

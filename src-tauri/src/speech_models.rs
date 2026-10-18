@@ -309,6 +309,8 @@ fn load_catalog(text: &str) -> Result<Vec<Package>> {
                 || voice.language.len() > 32
                 || voice.speaker_id > 1024
                 || (package.model.kind == ModelKind::Matcha && voice.speaker_id != 0)
+                || crate::speech::additional_voice_kind(&voice.id)
+                    .is_some_and(|kind| kind != package.model.kind)
             {
                 return Err("可下载音色列表无效。".into());
             }
@@ -1510,10 +1512,35 @@ fn download_package(
     Ok((runtime, stamps))
 }
 
+/// Verify an actual installed model and its shared runtime using the application catalog.
+#[cfg(test)]
+pub(crate) fn verify_installed_voice_for_integration(
+    model_root: &Path,
+    voice_id: &str,
+    bundled: &SpeechRuntime,
+) -> Result<SpeechRuntime> {
+    let catalog = load_catalog(include_str!("../resources/speech-models.json"))?;
+    let package = catalog
+        .iter()
+        .find(|package| package.voices.iter().any(|voice| voice.id == voice_id))
+        .ok_or("集成验证音色不在应用清单内。")?;
+    let cancelled = AtomicBool::new(false);
+    let (runtime, stamps) = verify_package(package, model_root, Some(bundled), &cancelled)?;
+    if !stamps_unchanged(&stamps) {
+        return Err("已安装模型或运行包在校验期间发生变化。".into());
+    }
+    eprintln!(
+        "application installed voice verification: {} files verified for {}",
+        stamps.len(),
+        voice_id
+    );
+    Ok(runtime)
+}
+
+#[cfg(test)]
 /// Exercise the application's strict runtime validator against real CI artifacts.
 /// The expected checksums come from the builder's artifact metadata, never from
 /// a newly computed hash of the tree being tested.
-#[cfg(test)]
 pub(crate) fn verify_portable_runtime_for_integration(
     runtime_root: &Path,
     metadata_path: &Path,
@@ -2054,10 +2081,16 @@ mod tests {
     }
 
     #[test]
-    fn real_catalog_has_three_requested_models_and_one_voice_each() {
+    fn real_catalog_shares_three_models_between_male_and_female_voices() {
         let catalog = load_catalog(include_str!("../resources/speech-models.json")).unwrap();
         assert_eq!(catalog.len(), 3);
-        assert!(catalog.iter().all(|package| package.voices.len() == 1));
+        assert!(catalog.iter().all(|package| package.voices.len() == 2));
+        for package in &catalog {
+            assert_eq!(package.voices[0].gender.as_deref(), Some("female"));
+            assert_eq!(package.voices[1].gender.as_deref(), Some("male"));
+            assert!(crate::speech::additional_voice_kind(&package.voices[1].id)
+                .is_some_and(|kind| kind == package.model.kind));
+        }
         for kind in [ModelKind::Zipvoice, ModelKind::F5, ModelKind::Qwen3] {
             assert_eq!(
                 catalog

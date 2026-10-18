@@ -8,7 +8,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const catalog = JSON.parse(read('src-tauri/resources/speech-models.json'))
 const bundled = JSON.parse(read('scripts/speech-runtime.lock.json'))
 const expectedModels = ['zipvoice-distill-fp32', 'f5-v1-base-fp32', 'qwen3-tts-1.7b-serena']
-const expectedVoices = ['zipvoice_zh_female', 'f5_zh_female', 'qwen3_serena']
+const expectedVoices = ['zipvoice_zh_female', 'zipvoice_zh_male', 'f5_zh_female', 'f5_zh_male', 'qwen3_serena', 'qwen3_uncle_fu']
 const safeRelative = path => assert.doesNotMatch(path, /(^\/|[\\,:]|(^|\/)\.\.(\/|$))/)
 const httpsSource = source => {
   const url = new URL(source)
@@ -41,7 +41,8 @@ test('optional downloads pin independent Chinese models, reference audio and pla
         assert.equal(digest(bytes), file.sha256)
       }
     }
-    assert.equal(pack.voices.length, 1)
+    assert.equal(pack.voices.length, 2)
+    assert.deepEqual(pack.voices.map(voice => voice.gender), ['female', 'male'], 'both voices share one model download')
     for (const voice of pack.voices) {
       assert.ok(!voiceIds.has(voice.id), 'Optional voices cannot override a bundled voice')
       voiceIds.add(voice.id)

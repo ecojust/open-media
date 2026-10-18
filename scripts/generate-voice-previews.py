@@ -18,8 +18,8 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 TEXTS = {
-    "zh": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
-    "en": "Hello, this is a voice preview. Let your story come to life with a clear and natural voice.",
+    "zh": "这是一款全程由AI接管并生成的软件",
+    "en": "这是一款全程由AI接管并生成的软件",
 }
 SETTINGS = {"speed": 1, "silenceScale": 0.2, "sampleRate": 16000, "noiseScale": 1,
             "channels": 1, "bitrate": 64000, "threads": 2}

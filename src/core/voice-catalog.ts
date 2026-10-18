@@ -2,6 +2,36 @@ import type { SpeechVoice } from '../native'
 import { VOICE_PROFILES } from './voice-profiles.ts'
 import { VOICE_GROUPS } from './voice-groups.ts'
 
+// System memory recommendations leave room for the editor and operating system.
+// The optional models' measured process memory is recorded in test/chinese-tts-benchmark.
+// These are configuration suggestions, not measured minimum requirements.
+const VOICE_MODELS: Readonly<Record<string, { name: string; memoryGb: number; acceleration: 'coreml' | 'gpu' }>> = {
+  matcha_zh_en_female: { name: 'Matcha 中英', memoryGb: 4, acceleration: 'coreml' },
+  zipvoice_zh_female: { name: 'ZipVoice Distill FP32', memoryGb: 8, acceleration: 'coreml' },
+  zipvoice_zh_male: { name: 'ZipVoice Distill FP32', memoryGb: 8, acceleration: 'coreml' },
+  f5_zh_female: { name: 'F5-TTS v1 Base FP32', memoryGb: 8, acceleration: 'gpu' },
+  f5_zh_male: { name: 'F5-TTS v1 Base FP32', memoryGb: 8, acceleration: 'gpu' },
+  qwen3_serena: { name: 'Qwen3-TTS 1.7B BF16', memoryGb: 16, acceleration: 'gpu' },
+  qwen3_uncle_fu: { name: 'Qwen3-TTS 1.7B BF16', memoryGb: 16, acceleration: 'gpu' },
+}
+
+export function voiceModelName(voice: Pick<SpeechVoice, 'id' | 'name'>): string {
+  return Object.hasOwn(VOICE_MODELS, voice.id) ? VOICE_MODELS[voice.id]!.name : voice.name
+}
+
+export function voiceRecommendedMemoryGb(voice: Pick<SpeechVoice, 'id'>): number | undefined {
+  return Object.hasOwn(VOICE_MODELS, voice.id) ? VOICE_MODELS[voice.id]!.memoryGb : undefined
+}
+
+export function voiceComputeLabel(voice: Pick<SpeechVoice, 'id'>): string | undefined {
+  if (!Object.hasOwn(VOICE_MODELS, voice.id)) return undefined
+  return VOICE_MODELS[voice.id]!.acceleration === 'gpu' ? '优先可用 GPU · CPU 自动回退' : '优先 CoreML · CPU 自动回退'
+}
+
+export function voiceActionName(voice: SpeechVoice): string {
+  return `${voiceModelName(voice)}${voice.gender?.toLowerCase() === 'male' ? ' · 男声' : ''}`
+}
+
 export type VoiceCategoryId = 'zh-en-female' | 'zh-male' | 'zh-female' | 'en-female' | 'other'
 
 export const VOICE_CATEGORIES: ReadonlyArray<{ id: VoiceCategoryId; label: string }> = [
@@ -75,6 +105,9 @@ export function voiceStyle(voice: SpeechVoice): VoiceStyle {
   const id = profile && profile.category === category ? profile.style : 'natural'
   if (category === 'zh-en-female') return { id: 'gentle', label: '温柔', portrait: 7 }
   if (category === 'zh-male') {
+    if (voice.id === 'zipvoice_zh_male') return { id: 'natural', label: '自然', portrait: 0 }
+    if (voice.id === 'f5_zh_male') return { id: 'natural', label: '自然', portrait: 2 }
+    if (voice.id === 'qwen3_uncle_fu') return { id: 'mature', label: '成熟', portrait: 1 }
     if (id === 'deep') return { id, label: '低沉', portrait: 1 }
     if (id === 'bright') return { id, label: '明亮', portrait: 2 }
     if (id === 'relaxed') return { id, label: '舒缓', portrait: 3 }
@@ -95,5 +128,5 @@ export function voiceStyle(voice: SpeechVoice): VoiceStyle {
 }
 
 export function voiceSearchText(voice: SpeechVoice): string {
-  return `${voice.name} ${voiceTypeLabel(voice)} ${voiceStyle(voice).label} ${voice.id}`.toLocaleLowerCase()
+  return `${voiceModelName(voice)} ${voice.name} ${voiceTypeLabel(voice)} ${voiceStyle(voice).label} ${voice.id}`.toLocaleLowerCase()
 }

@@ -5,14 +5,14 @@ import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateBuild, verifyDigest, verifyMetadata, digest, verifySpeechMetadata, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
+import { validateBuild, verifyDigest, verifyMetadata, digest, verifySpeechMetadata, verifySpeechSynthesis, installedSpeechVoiceIds, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
 import { verifySourceContents } from '../scripts/release-source.mjs';
 
 const commit = 'a'.repeat(40);
 function fixture() {
   return {
     run: { id: 7, head_sha: commit, status: 'completed', conclusion: 'success', path: '.github/workflows/desktop-build.yml' },
-    jobs: ['Application checks', 'Corresponding media source', 'windows-x64', 'macos-arm64', 'macos-x64'].map(name => ({ name, status: 'completed', conclusion: 'success' })),
+    jobs: ['Application checks', 'Corresponding media source', 'windows-x64', 'macos-arm64', 'macos-x64'].map(name => ({ name, status: 'completed', conclusion: 'success', steps: [{ name: 'Verify every installed speech voice', status: 'completed', conclusion: 'success' }] })),
     artifacts: ['windows-x64', 'macos-arm64', 'macos-x64', 'runtime-source'].map(platform => ({ name: `open-media-${platform}-7`, expired: false, size_in_bytes: 1, digest: `sha256:${'a'.repeat(64)}` })),
   };
 }
@@ -28,6 +28,16 @@ test('media binaries cannot be released without the complete corresponding sourc
   assert.throws(() => validateBuild(run, jobs, artifacts.filter(artifact => !artifact.name.includes('runtime-source')), commit));
   assert.throws(() => validateBuild(run, jobs.filter(job => job.name !== 'Corresponding media source'), artifacts, commit));
   assert.throws(() => validateBuild(run, jobs, artifacts.map(artifact => ({ ...artifact, expired: true })), commit));
+});
+test('every desktop platform must actually finish its installed speech verification step', () => {
+  const { run, jobs, artifacts } = fixture();
+  for (const platform of ['windows-x64', 'macos-arm64', 'macos-x64']) {
+    for (const steps of [undefined, [], [{ name: 'Verify every installed speech voice', status: 'completed', conclusion: 'skipped' }], [{ name: 'Verify every installed speech voice', status: 'completed', conclusion: 'failure' }], [{ name: 'Verify every installed speech voice', status: 'in_progress', conclusion: null }]]) {
+      assert.throws(() => validateBuild(run, jobs.map(job => job.name === platform ? { ...job, steps } : job), artifacts, commit), /Installed speech verification did not pass/);
+    }
+    const passed = jobs.find(job => job.name === platform).steps[0];
+    assert.throws(() => validateBuild(run, jobs.map(job => job.name === platform ? { ...job, steps: [passed, passed] } : job), artifacts, commit), /Installed speech verification did not pass/);
+  }
 });
 test('installer digest and provenance must match before publishing', () => {
   const bytes = Buffer.from('installer');
@@ -53,6 +63,85 @@ test('offline speech release requires the exact platform, runner, model and orig
   assert.throws(() => verifySpeechMetadata({ ...runtime, files: runtime.files.filter(file => !file.path.startsWith('model/')) }, 'macos-arm64', expected));
   assert.throws(() => verifySpeechMetadata({ ...runtime, files: [...runtime.files, { path: '../outside', sha256: 'a'.repeat(64) }] }, 'macos-arm64', expected));
   assert.throws(() => verifySpeechMetadata({ ...runtime, licenses: [{ path: 'licenses/NOTICE', sha256: 'e'.repeat(64) }] }, 'macos-arm64', expected));
+});
+function synthesisFixture(platform = 'macos-arm64') {
+  return {
+    schema: 1, platform, sourceCommit: commit, status: 'passed', text: '这是一款全程由AI接管并生成的软件',
+    runtimeIntegrity: { unchanged: true }, installationIntegrity: { unchanged: true },
+    availability: { python: { mpsAvailable: false, cudaAvailable: false, cudaDeviceCount: 0 }, native: { operatorPlacementMeasured: false } },
+    voices: installedSpeechVoiceIds.map(voiceId => ({
+      voiceId, status: 'passed', backend: 'cpu', events: ['stage=device,device=cpu', 'stage=complete'], partial: [], fallback: [],
+      requestedDevice: 'auto', gpuInferenceVerified: false,
+      text: '这是一款全程由AI接管并生成的软件', productionPath: 'SpeechRuntime::command + generate_wave', completionVerified: true, eosVerified: voiceId.startsWith('qwen3_'),
+      audio: { path: `${voiceId}/speech.wav`, sha256: digest(Buffer.from(voiceId)), bytes: 192044, sampleRate: voiceId === 'matcha_zh_en_female' ? 16000 : 24000, channels: 1, durationSeconds: 4, peak: 0.8, rms: 0.1, finite: true },
+    })),
+  };
+}
+test('installed speech proof is bound to every voice, platform and source commit', () => {
+  for (const platform of ['windows-x64', 'macos-arm64', 'macos-x64']) {
+    const evidence = synthesisFixture(platform);
+    assert.equal(verifySpeechSynthesis(evidence, platform, commit), evidence);
+    for (const patch of [{ sourceCommit: 'b'.repeat(40) }, { platform: 'linux-x64' }, { status: 'failed' }, { voices: evidence.voices.slice(1) }, { voices: [...evidence.voices.slice(1), evidence.voices[1]] }, { runtimeIntegrity: { unchanged: false } }, { installationIntegrity: undefined }]) {
+      assert.throws(() => verifySpeechSynthesis({ ...evidence, ...patch }, platform, commit));
+    }
+    for (const patch of [{ voiceId: 'unknown' }, { status: 'failed' }, { events: [] }, { backend: 'mps' }, { text: 'unrelated' }, { productionPath: 'mock' }, { completionVerified: false }, { requestedDevice: 'cpu' }, { gpuInferenceVerified: true }, { events: ['stage=device,device=cpu', 'stage=writing'] }]) {
+      assert.throws(() => verifySpeechSynthesis({ ...evidence, voices: evidence.voices.map((voice, i) => i === 0 ? { ...voice, ...patch } : voice) }, platform, commit));
+    }
+  }
+});
+test('generated speech evidence rejects silence, corrupt measurements and reused output', () => {
+  const evidence = synthesisFixture();
+  for (const patch of [{ finite: false }, { peak: 0 }, { rms: 0 }, { rms: NaN }, { peak: Infinity }, { durationSeconds: 0 }, { durationSeconds: 121 }, { sampleRate: 0 }, { sampleRate: 24000 }, { channels: 2 }, { bytes: 44 }, { sha256: 'bad' }, { path: '../speech.wav' }, { sha256: evidence.voices[1].audio.sha256 }, { path: evidence.voices[1].audio.path }]) {
+    const changed = { ...evidence, voices: evidence.voices.map((voice, i) => i === 0 ? { ...voice, audio: { ...voice.audio, ...patch } } : voice) };
+    assert.throws(() => verifySpeechSynthesis(changed, 'macos-arm64', commit), /speech audio|audible samples/);
+  }
+  const optional = evidence.voices.find(voice => voice.voiceId === 'f5_zh_female');
+  optional.audio.peak = 1.2;
+  verifySpeechSynthesis(evidence, 'macos-arm64', commit);
+  optional.audio.sampleRate = 16000;
+  assert.throws(() => verifySpeechSynthesis(evidence, 'macos-arm64', commit), /audible samples/);
+});
+test('autoregressive voice verification requires a normal end-of-speech marker', () => {
+  const evidence = synthesisFixture();
+  for (const voiceId of ['qwen3_serena', 'qwen3_uncle_fu']) {
+    const changed = { ...evidence, voices: evidence.voices.map(voice => voice.voiceId === voiceId ? { ...voice, eosVerified: false } : voice) };
+    assert.throws(() => verifySpeechSynthesis(changed, 'macos-arm64', commit), /production path/);
+  }
+});
+test('GPU claims require the actual final device event and available hardware', () => {
+  const evidence = synthesisFixture();
+  const qwen = evidence.voices.find(voice => voice.voiceId === 'qwen3_serena');
+  qwen.backend = 'mps'; qwen.gpuInferenceVerified = true;
+  qwen.events = ['stage=device,device=mps,engine=qwen3,partial=audio-cpu', 'stage=complete'];
+  qwen.partial = [qwen.events[0]];
+  assert.throws(() => verifySpeechSynthesis(evidence, 'macos-arm64', commit), /availability evidence/);
+  evidence.availability.python.mpsAvailable = true;
+  verifySpeechSynthesis(evidence, 'macos-arm64', commit);
+  qwen.events.splice(-1, 0, 'stage=device,device=cpu,engine=qwen3');
+  assert.throws(() => verifySpeechSynthesis(evidence, 'macos-arm64', commit), /production event/);
+  qwen.backend = 'cpu'; qwen.gpuInferenceVerified = false;
+  qwen.fallback = ['stage=fallback,from=mps,device=cpu,reason=unsupported_operation'];
+  verifySpeechSynthesis(evidence, 'macos-arm64', commit);
+  const windows = synthesisFixture('windows-x64');
+  const voice = windows.voices.find(voice => voice.voiceId === 'f5_zh_male');
+  voice.backend = 'cuda'; voice.gpuInferenceVerified = true; voice.events = ['stage=device,device=cuda,engine=f5', 'stage=complete'];
+  assert.throws(() => verifySpeechSynthesis(windows, 'windows-x64', commit), /availability evidence/);
+  windows.availability.python.cudaAvailable = true;
+  windows.availability.python.cudaDeviceCount = 1;
+  verifySpeechSynthesis(windows, 'windows-x64', commit);
+});
+test('CoreML provider evidence preserves the unmeasured operator placement limitation', () => {
+  const evidence = synthesisFixture();
+  const voice = evidence.voices[0];
+  voice.backend = 'coreml'; voice.gpuInferenceVerified = null; voice.events = ['stage=device,device=coreml,engine=matcha', 'stage=complete'];
+  assert.throws(() => verifySpeechSynthesis(evidence, 'macos-arm64', commit), /operator placement/);
+  voice.backendNote = 'CoreML execution provider completed; individual operator placement is not measured.';
+  verifySpeechSynthesis(evidence, 'macos-arm64', commit);
+  evidence.availability.native.operatorPlacementMeasured = true;
+  assert.throws(() => verifySpeechSynthesis(evidence, 'macos-arm64', commit), /operator placement/);
+  evidence.availability.native.operatorPlacementMeasured = false;
+  evidence.platform = 'windows-x64';
+  assert.throws(() => verifySpeechSynthesis(evidence, 'windows-x64', commit), /operator placement/);
 });
 test('corresponding source checksums require both media and speech archives exactly once', () => {
   const media = `${'a'.repeat(64)}  open-media-runtime-source.tar.gz`;

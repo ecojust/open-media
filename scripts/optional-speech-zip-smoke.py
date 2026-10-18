@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -85,6 +86,71 @@ def run(command, log, timeout=1800):
                                 cwd=ROOT, timeout=timeout)
     if result.returncode:
         raise RuntimeError(f'Command failed ({result.returncode}): {command[0]}; see {log}')
+
+
+def native_device_state(log):
+    backend, writing = None, False
+    for line in log.splitlines():
+        if line.startswith(('stage=device,', 'stage=fallback,')):
+            selected = next((field[len('device='):] for field in line.split(',') if field.startswith('device=')), None)
+            backend = selected if selected in ('cpu', 'coreml', 'mps', 'cuda') else None
+            if line.startswith('stage=device,'):
+                writing = False
+        elif re.match(r'^stage=(writing|complete)(,|$)', line):
+            writing = True
+    return dict(backend=backend, writing=writing)
+
+
+def should_retry_native_cpu(result, retried=False):
+    state = native_device_state(result.stdout or '')
+    # Python uses negative POSIX signal numbers for terminated subprocesses.
+    # Never turn cancellation/termination into a new synthesis job.
+    return (not retried and result.returncode != 0 and state['backend'] == 'coreml'
+            and not state['writing'] and result.returncode not in (-1, -2, -9, -15))
+
+
+def run_native_speech(command, log, output, timeout=1800):
+    started = time.monotonic()
+    attempts = []
+    full_log = ''
+
+    def execute(values, remaining):
+        nonlocal full_log
+        try:
+            result = subprocess.run([str(arg) for arg in values], capture_output=True,
+                                    encoding='utf-8', errors='replace', cwd=ROOT, timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            # Keep the failed attempt's evidence, and propagate without retry.
+            def decoded(value):
+                return value.decode('utf-8', errors='replace') if isinstance(value, bytes) else value or ''
+            full_log += decoded(error.stdout) + decoded(error.stderr)
+            log.write_text(full_log + '\nNative speech timed out; no CPU retry.\n', encoding='utf-8')
+            output.unlink(missing_ok=True)
+            raise
+        full_log += (result.stdout or '') + (result.stderr or '')
+        log.write_text(full_log, encoding='utf-8')
+        attempts.append(dict(**native_device_state(result.stdout or ''), returnCode=result.returncode,
+                             error=(result.stderr or '').strip()[-4000:]))
+        return result
+
+    output.unlink(missing_ok=True)
+    result = execute(command, timeout)
+    fallback_from = None
+    remaining = timeout - (time.monotonic() - started)
+    if remaining > 0 and should_retry_native_cpu(result):
+        fallback_from = 'coreml'
+        print(f'CoreML attempt failed ({result.returncode}); retrying once on CPU. Original output: {log}', flush=True)
+        full_log += '\nstage=fallback,from=coreml,device=cpu,reason=native_process_failed\n'
+        output.unlink(missing_ok=True)
+        result = execute([value for value in command if not str(value).startswith('--provider=')]
+                         + ['--provider=cpu'], remaining)
+    if result.returncode:
+        output.unlink(missing_ok=True)
+        raise RuntimeError(f'Native speech failed ({result.returncode}): {command[0]}; see {log}')
+    backend = native_device_state(result.stdout or '')['backend']
+    if not backend or (fallback_from and backend != 'cpu'):
+        raise RuntimeError('Native speech did not report the expected execution device')
+    return dict(backend=backend, fallbackFrom=fallback_from, attempts=attempts)
 
 
 def inspect_audio(path):
@@ -201,12 +267,15 @@ def main():
         if actual_text != sample['normalized_text']:
             raise ValueError(f'Native normalization differs from evaluated original: {sample_id}')
         started = time.monotonic()
-        run([*command, f'--text-file={normalized}', f'--output-filename={audio}'], args.output / f'{sample_id}.log')
+        execution = run_native_speech([*command, f'--text-file={normalized}', f'--output-filename={audio}'],
+                                     args.output / f'{sample_id}.log', audio)
         result = dict(id=sample_id, text=sample['text'], normalizedText=actual_text,
                       generationSeconds=time.monotonic() - started, audio=str(audio.relative_to(args.output)),
-                      **inspect_audio(audio))
+                      execution=execution, **inspect_audio(audio))
         proof['samples'].append(result)
-        print(f'Generated {sample_id}: {result["seconds"]:.3f} seconds of valid audio', flush=True)
+        note = (' (CoreML failed; CPU fallback succeeded, GPU inference was not verified)' if execution['fallbackFrom']
+                else ' (CoreML may execute unsupported operators on CPU)' if execution['backend'] == 'coreml' else '')
+        print(f'Generated {sample_id}: {result["seconds"]:.3f} seconds of valid audio; backend: {execution["backend"]}{note}', flush=True)
     proof['status'] = 'passed'
     (args.output / 'proof.json').write_text(json.dumps(proof, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 

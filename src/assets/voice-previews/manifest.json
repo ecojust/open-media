@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "texts": {
-    "zh": "你好，这是一段语音试听。让文字拥有清晰自然的声音。",
-    "en": "Hello, this is a voice preview. Let your story come to life with a clear and natural voice."
+    "zh": "这是一款全程由AI接管并生成的软件",
+    "en": "这是一款全程由AI接管并生成的软件"
   },
   "settings": {
     "speed": 1,
@@ -26,7 +26,7 @@
   },
   "generator": {
     "mode": "existing-c-api",
-    "scriptSha256": "0ca3f9bd1f84caaa1e609ffbcac77afb2820de544fb1bc35eba5839ab94bbdda",
+    "scriptSha256": "a6b8fddffab9e206c0f5d12879f08f797f3e86bf83f913b474dc72059ef5a500",
     "headerSha256": "2a1b95084be8fd1deb3228fcad2fd3f7f0258b64582f7402281ec174c7b7f4ce",
     "voiceGroupsSha256": "49c91fb6a026929685f1edecc636f0b6c74adc747c2a6d7a31d9c7dbd62a55ca",
     "encoder": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers"
@@ -37,13 +37,13 @@
       "speakerId": 0,
       "language": "zh-CN",
       "file": "matcha_zh_en_female.mp3",
-      "durationSeconds": 5.059625,
-      "decodedDurationSeconds": 5.059625,
-      "sha256": "96f9247054ec5ec278f86ef11b4f1fc0fcf787495ce1793ff5c819909454a14b",
-      "bytes": 41472,
-      "peak": 0.785809,
-      "decodedPeak": 0.747261,
-      "wavSha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
+      "durationSeconds": 3.599438,
+      "decodedDurationSeconds": 3.599438,
+      "sha256": "b81a2eaede638d17c3d6e1199b922eb2931b6812a2de82ce001034c3d4fde253",
+      "bytes": 29664,
+      "peak": 0.692398,
+      "decodedPeak": 0.656959,
+      "wavSha256": "946723a241a9bd08bb0425aab586320e9b3146974369bdd944a758af0ff2b2bf"
     }
   ]
 }

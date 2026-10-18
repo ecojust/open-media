@@ -1,8 +1,8 @@
 const files = import.meta.glob<string>('../assets/voice-previews/*.mp3', { eager: true, query: '?url', import: 'default' })
 
 export const VOICE_PREVIEW_TEXT = {
-  zh: '你好，这是一段语音试听。让文字拥有清晰自然的声音。',
-  en: 'Hello, this is a voice preview. Let your story come to life with a clear and natural voice.',
+  zh: '这是一款全程由AI接管并生成的软件',
+  en: '这是一款全程由AI接管并生成的软件',
 } as const
 
 /** Each bundled sample belongs to its exact model voice; never substitute a similar voice. */

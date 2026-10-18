@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
@@ -20,6 +20,35 @@ const MAX_JOBS: usize = 2048;
 const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_AUDIO_BYTES: u64 = 512 * 1024 * 1024;
 const CANCELLED: &str = "语音生成已取消。";
+
+pub(crate) fn additional_voice_kind(id: &str) -> Option<ModelKind> {
+    match id {
+        "zipvoice_zh_male" => Some(ModelKind::Zipvoice),
+        "f5_zh_male" => Some(ModelKind::F5),
+        "qwen3_uncle_fu" => Some(ModelKind::Qwen3),
+        _ => None,
+    }
+}
+
+fn python_voice_kind(id: &str) -> Option<ModelKind> {
+    match id {
+        "f5_zh_female" | "f5_zh_male" => Some(ModelKind::F5),
+        "qwen3_serena" | "qwen3_uncle_fu" => Some(ModelKind::Qwen3),
+        _ => None,
+    }
+}
+
+fn write_voice_resource(job: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf> {
+    let path = job.join(name);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| format!("无法准备本次配音资源：{error}"))?;
+    file.write_all(bytes)
+        .map_err(|error| format!("无法写入本次配音资源：{error}"))?;
+    Ok(path)
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -328,7 +357,64 @@ impl SpeechRuntime {
             .iter()
             .find(|voice| voice.id == request.voice_id)
             .ok_or("所选音色不可用，请重新选择。")?;
+        let additional = additional_voice_kind(&voice.id);
         let python = matches!(self.model.kind, ModelKind::F5 | ModelKind::Qwen3);
+        if additional.is_some_and(|kind| kind != self.model.kind)
+            || (python && python_voice_kind(&voice.id) != Some(self.model.kind))
+        {
+            return Err("所选音色与模型不一致，请重新选择。".into());
+        }
+        let mut reference = None;
+        let mut adapter = None;
+        if additional.is_some() || python {
+            let job = output
+                .parent()
+                .ok_or("配音任务目录无效。")?
+                .canonicalize()
+                .map_err(|_| "配音任务目录不存在。")?;
+            let text_parent = text_file
+                .parent()
+                .ok_or("配音文字目录无效。")?
+                .canonicalize()
+                .map_err(|_| "配音文字目录不存在。")?;
+            if job != text_parent
+                || job.starts_with(&self.root)
+                || self
+                    .script
+                    .as_ref()
+                    .and_then(|path| path.parent())
+                    .and_then(|path| path.parent())
+                    .is_some_and(|root| job.starts_with(root))
+            {
+                return Err("配音任务必须使用独立临时目录。".into());
+            }
+            if matches!(additional, Some(ModelKind::Zipvoice | ModelKind::F5)) {
+                reference = Some((
+                    write_voice_resource(
+                        &job,
+                        "male-reference.wav",
+                        include_bytes!("../../scripts/optional-speech-assets/male-reference.wav"),
+                    )?,
+                    write_voice_resource(
+                        &job,
+                        "male-reference.txt",
+                        include_bytes!("../../scripts/optional-speech-assets/male-reference.txt"),
+                    )?,
+                ));
+            }
+            if python {
+                adapter = Some(write_voice_resource(
+                    &job,
+                    "speech-voice-adapter.py",
+                    include_str!("../../scripts/speech-voice-adapter.py").as_bytes(),
+                )?);
+                write_voice_resource(
+                    &job,
+                    "speech-device-runtime.py",
+                    include_str!("../../scripts/speech-device-runtime.py").as_bytes(),
+                )?;
+            }
+        }
         let mut command = Command::new(if python {
             python_process_path(&self.executable)
         } else {
@@ -352,7 +438,15 @@ impl SpeechRuntime {
             command
                 .arg("-I")
                 .arg("-B")
-                .arg(python_process_path(script))
+                .arg(python_process_path(adapter.as_deref().unwrap_or(script)));
+            if adapter.is_some() {
+                command
+                    .arg("--runtime-script")
+                    .arg(python_process_path(script))
+                    .arg("--voice")
+                    .arg(&voice.id);
+            }
+            command
                 .arg("--config")
                 .arg(python_process_path(&self.root.join(&self.model.config)))
                 .arg("--text-file")
@@ -361,6 +455,8 @@ impl SpeechRuntime {
                 .arg(python_process_path(output))
                 .arg("--speed")
                 .arg(request.speed.to_string())
+                .arg("--device")
+                .arg("auto")
                 .env("HF_HUB_OFFLINE", "1")
                 .env("TRANSFORMERS_OFFLINE", "1")
                 .env("PYTHONNOUSERSITE", "1")
@@ -390,8 +486,20 @@ impl SpeechRuntime {
                 format!("--zipvoice-tokens={}", self.model.tokens),
                 format!("--zipvoice-data-dir={}", self.model.data_dir),
                 format!("--zipvoice-lexicon={}", self.model.lexicons.join(",")),
-                format!("--reference-audio={}", self.model.reference_audio),
-                format!("--reference-text-file={}", self.model.reference_text),
+                format!(
+                    "--reference-audio={}",
+                    reference.as_ref().map_or_else(
+                        || self.model.reference_audio.clone(),
+                        |(audio, _)| python_process_path(audio).to_string_lossy().into_owned()
+                    )
+                ),
+                format!(
+                    "--reference-text-file={}",
+                    reference.as_ref().map_or_else(
+                        || self.model.reference_text.clone(),
+                        |(_, text)| python_process_path(text).to_string_lossy().into_owned()
+                    )
+                ),
                 "--num-steps=8".into(),
             ]),
             ModelKind::F5 | ModelKind::Qwen3 => unreachable!(),
@@ -827,29 +935,23 @@ fn update_job(jobs: &Mutex<Jobs>, id: &str, stage: &str, progress: Option<f64>) 
     }
 }
 
-fn synthesize(
+fn generate_wave(
     speech: &SpeechRuntime,
-    runtime: &Runtime,
-    store: &MediaStore,
     workspace: &Path,
     request: &SpeechRequest,
     cancelled: &AtomicBool,
     jobs: &Mutex<Jobs>,
-) -> Result<Asset> {
+) -> Result<()> {
     check_cancelled(cancelled)?;
-    let workspace = tempfile::Builder::new()
-        .prefix("voice-")
-        .tempdir_in(workspace)
-        .map_err(|e| format!("无法创建配音临时目录：{e}"))?;
-    let output = workspace.path().join("speech.wav");
-    let text_file = workspace.path().join("text.txt");
+    let output = workspace.join("speech.wav");
+    let text_file = workspace.join("text.txt");
     let text = if speech.model.kind == ModelKind::Zipvoice {
         crate::speech_chinese::normalize_chinese(&request.text)
     } else {
         request.text.clone()
     };
     fs::write(&text_file, text.as_bytes()).map_err(|e| format!("无法保存待朗读文字：{e}"))?;
-    let log_path = workspace.path().join("generation.log");
+    let log_path = workspace.join("generation.log");
     let log = OpenOptions::new()
         .create_new(true)
         .append(true)
@@ -866,6 +968,7 @@ fn synthesize(
     );
     let mut log_reader = File::open(&log_path).map_err(|e| e.to_string())?;
     let mut log_text = String::new();
+    let mut retried_native_cpu = false;
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     loop {
         check_cancelled(cancelled)?;
@@ -881,18 +984,8 @@ fn synthesize(
             .map_err(|e| e.to_string())?;
         if !bytes.is_empty() {
             log_text.push_str(&String::from_utf8_lossy(&bytes));
-            if let Some(progress) = parse_progress(&log_text) {
-                update_job(
-                    jobs,
-                    &request.request_id,
-                    "正在合成语音",
-                    Some(progress.min(0.99)),
-                );
-            } else if log_text
-                .lines()
-                .any(|line| line.starts_with("stage=generating,"))
-            {
-                update_job(jobs, &request.request_id, "正在合成语音", None);
+            if let Some((stage, progress)) = parse_generation_status(&log_text) {
+                update_job(jobs, &request.request_id, &stage, progress);
             }
         }
         if fs::metadata(&output).is_ok_and(|metadata| metadata.len() > MAX_AUDIO_BYTES) {
@@ -906,8 +999,42 @@ fn synthesize(
             Some(status) => {
                 if !status.success() {
                     let mut remaining = Vec::new();
-                    let _ = log_reader.take(4096).read_to_end(&mut remaining);
+                    if log_reader.metadata().map_err(|e| e.to_string())?.len() > MAX_LOG_BYTES {
+                        return Err("语音引擎输出异常，已停止本次生成。".into());
+                    }
+                    let _ = Read::by_ref(&mut log_reader)
+                        .take(MAX_LOG_BYTES)
+                        .read_to_end(&mut remaining);
                     log_text.push_str(&String::from_utf8_lossy(&remaining));
+                    if should_retry_native_cpu(speech.model.kind, &log_text, retried_native_cpu) {
+                        check_cancelled(cancelled)?;
+                        retried_native_cpu = true;
+                        match fs::remove_file(&output) {
+                            Ok(()) => (),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                            Err(error) => return Err(format!("无法清理未完成的配音：{error}")),
+                        }
+                        let mut retry_log = OpenOptions::new()
+                            .append(true)
+                            .open(&log_path)
+                            .map_err(|error| format!("无法记录配音回退状态：{error}"))?;
+                        writeln!(retry_log, "\nstage=fallback,from=coreml,device=cpu,reason=加速引擎初始化或合成失败")
+                            .map_err(|error| format!("无法记录配音回退状态：{error}"))?;
+                        update_job(
+                            jobs,
+                            &request.request_id,
+                            "正在加载语音模型 · CPU（加速失败，已回退）",
+                            None,
+                        );
+                        check_cancelled(cancelled)?;
+                        command.arg("--provider=cpu");
+                        child = RunningChild(
+                            command
+                                .spawn()
+                                .map_err(|error| format!("无法启动 CPU 配音重试：{error}"))?,
+                        );
+                        continue;
+                    }
                     let detail: String = log_text
                         .chars()
                         .rev()
@@ -934,6 +1061,25 @@ fn synthesize(
     update_job(jobs, &request.request_id, "正在检查音频", None);
     validate_wave(&output, speech.model.sample_rate)?;
     check_cancelled(cancelled)?;
+    Ok(())
+}
+
+fn synthesize(
+    speech: &SpeechRuntime,
+    runtime: &Runtime,
+    store: &MediaStore,
+    workspace: &Path,
+    request: &SpeechRequest,
+    cancelled: &AtomicBool,
+    jobs: &Mutex<Jobs>,
+) -> Result<Asset> {
+    check_cancelled(cancelled)?;
+    let workspace = tempfile::Builder::new()
+        .prefix("voice-")
+        .tempdir_in(workspace)
+        .map_err(|e| format!("无法创建配音临时目录：{e}"))?;
+    generate_wave(speech, workspace.path(), request, cancelled, jobs)?;
+    let output = workspace.path().join("speech.wav");
     let title = request
         .text
         .chars()
@@ -988,6 +1134,105 @@ fn parse_progress(log: &str) -> Option<f64> {
         let value = progress.trim().parse::<f64>().ok()?;
         (value.is_finite() && (0.0..=1.0).contains(&value)).then_some(value)
     })
+}
+
+fn log_field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split(',').find_map(|field| field.strip_prefix(key))
+}
+
+fn known_device(value: &str) -> Option<&str> {
+    matches!(value, "cpu" | "mps" | "cuda" | "coreml").then_some(value)
+}
+
+fn last_generation_device(log: &str) -> Option<&str> {
+    log.lines().rev().find_map(|line| {
+        if line.starts_with("stage=device,") || line.starts_with("stage=fallback,") {
+            log_field(line, "device=").and_then(known_device)
+        } else {
+            None
+        }
+    })
+}
+
+fn should_retry_native_cpu(kind: ModelKind, log: &str, retried: bool) -> bool {
+    !retried
+        && !matches!(kind, ModelKind::F5 | ModelKind::Qwen3)
+        && last_generation_device(log) == Some("coreml")
+        && !log
+            .lines()
+            .rev()
+            .take_while(|line| !line.starts_with("stage=device,"))
+            .any(|line| {
+                line == "stage=writing"
+                    || line.starts_with("stage=writing,")
+                    || line == "stage=complete"
+                    || line.starts_with("stage=complete,")
+            })
+}
+
+fn parse_generation_status(log: &str) -> Option<(String, Option<f64>)> {
+    let mut device = None;
+    let mut partial = false;
+    let mut fallback = None;
+    let mut phase = None;
+    let mut progress = None;
+    for line in log.lines() {
+        if line.starts_with("stage=device,") {
+            if let Some(selected) = log_field(line, "device=").and_then(known_device) {
+                device = Some(selected);
+                partial = matches!(selected, "mps" | "cuda")
+                    && log_field(line, "partial=") == Some("audio-cpu");
+                phase = Some("正在加载语音模型");
+                progress = None;
+            }
+        } else if line.starts_with("stage=fallback,") {
+            if log_field(line, "device=") == Some("cpu") {
+                device = Some("cpu");
+                partial = false;
+                let reason = log_field(line, "reason=").unwrap_or("加速不可用");
+                let reason: String = reason
+                    .chars()
+                    .filter(|ch| !ch.is_control())
+                    .take(60)
+                    .collect();
+                fallback = Some(if reason.is_empty() {
+                    "加速不可用".into()
+                } else {
+                    reason
+                });
+                phase = Some("正在加载语音模型");
+                progress = None;
+            }
+        } else if line == "stage=loading" || line.starts_with("stage=loading,") {
+            phase = Some("正在加载语音模型");
+            progress = None;
+        } else if line == "stage=generating" || line.starts_with("stage=generating,") {
+            phase = Some("正在合成语音");
+            progress = None;
+        } else if line == "stage=writing" || line.starts_with("stage=writing,") {
+            phase = Some("正在写入音频");
+            progress = None;
+        } else if let Some(value) = parse_progress(line) {
+            phase = Some("正在合成语音");
+            progress = Some(value.min(0.99));
+        }
+    }
+    let mut stage = phase?.to_owned();
+    if let Some(device) = device {
+        stage.push_str(match device {
+            "mps" => " · GPU（MPS）",
+            "cuda" => " · GPU（CUDA）",
+            "coreml" => " · CoreML 加速",
+            _ => " · CPU",
+        });
+    }
+    if partial {
+        stage.push_str(" + CPU 音频处理");
+    }
+    if let Some(reason) = fallback {
+        stage.push_str(&format!("（已回退：{reason}）"));
+    }
+    Some((stage, progress))
 }
 
 fn remove_asset(root: &Path, asset: &Asset) {
@@ -1143,6 +1388,190 @@ mod tests {
         ] {
             assert_eq!(parse_progress(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn generation_status_reports_the_selected_device_and_resets_after_fallback() {
+        for (device, label) in [
+            ("mps", "GPU（MPS）"),
+            ("cuda", "GPU（CUDA）"),
+            ("coreml", "CoreML 加速"),
+            ("cpu", "CPU"),
+        ] {
+            let log = format!("stage=device,device={device},engine=f5\nstage=generating,chunks=2\nsample=10, progress=0.75\n");
+            let (stage, progress) = parse_generation_status(&log).unwrap();
+            assert!(stage.contains(label));
+            assert_eq!(progress, Some(0.75));
+            let retry = format!("{log}stage=fallback,from={device},device=cpu,reason=显存不足\n");
+            let (stage, progress) = parse_generation_status(&retry).unwrap();
+            assert!(stage.contains("CPU（已回退：显存不足）"));
+            assert!(!stage.contains("GPU（"));
+            assert_eq!(progress, None);
+            let cpu = format!("{retry}stage=device,device=cpu\nstage=generating,chunks=2\nsample=2, progress=0.1\n");
+            assert_eq!(parse_generation_status(&cpu).unwrap().1, Some(0.1));
+        }
+        assert_eq!(parse_generation_status("arbitrary GPU available\n"), None);
+        assert_eq!(
+            parse_generation_status("stage=device,device=imaginary\n"),
+            None
+        );
+        assert_eq!(
+            parse_generation_status("sample=2, progress=1\n").unwrap().1,
+            Some(0.99)
+        );
+        let partial = "stage=device,device=mps,partial=audio-cpu\nstage=generating,chunks=1\n";
+        assert_eq!(
+            parse_generation_status(partial).unwrap().0,
+            "正在合成语音 · GPU（MPS） + CPU 音频处理"
+        );
+        for next in [
+            "stage=device,device=mps\n",
+            "stage=device,device=cpu\n",
+            "stage=fallback,from=mps,device=cpu,reason=GPU不可用\n",
+        ] {
+            assert!(!parse_generation_status(&format!("{partial}{next}"))
+                .unwrap()
+                .0
+                .contains("音频处理"));
+        }
+    }
+
+    #[test]
+    fn native_retry_is_limited_to_one_failed_coreml_attempt() {
+        let coreml = "stage=device,device=coreml\n";
+        for kind in [ModelKind::Matcha, ModelKind::Zipvoice, ModelKind::Kokoro] {
+            assert!(should_retry_native_cpu(kind, coreml, false));
+            assert!(!should_retry_native_cpu(kind, coreml, true));
+            assert!(!should_retry_native_cpu(kind,
+                "stage=device,device=coreml\nstage=fallback,from=coreml,device=cpu,reason=unsupported\n", false));
+            for phase in ["writing", "complete"] {
+                assert!(!should_retry_native_cpu(
+                    kind,
+                    &format!("{coreml}stage={phase}\n"),
+                    false
+                ));
+            }
+        }
+        for kind in [ModelKind::F5, ModelKind::Qwen3] {
+            assert!(!should_retry_native_cpu(kind, coreml, false));
+        }
+        assert!(!should_retry_native_cpu(
+            ModelKind::Matcha,
+            "stage=device,device=cpu\n",
+            false
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_native_acceleration_relaunches_once_on_cpu_and_cleans_the_job() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = fixture();
+        let speech = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        fs::write(
+            &speech.executable,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$0.calls"
+case "$*" in
+  *--provider=cpu*) printf 'stage=device,device=cpu\n'; exit 1 ;;
+  *) printf 'stage=device,device=coreml\nsample=10, progress=0.8\n'; exit 1 ;;
+esac
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&speech.executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let store = MediaStore::new(root.path()).unwrap();
+        let error = synthesize(
+            &speech,
+            &stub_runtime(),
+            &store,
+            root.path(),
+            &request("测试回退"),
+            &AtomicBool::new(false),
+            &Mutex::new(Jobs::default()),
+        )
+        .unwrap_err();
+        assert!(error.contains("语音生成失败"));
+        let calls = fs::read_to_string(speech.executable.with_file_name("engine.calls")).unwrap();
+        let calls: Vec<_> = calls.lines().collect();
+        assert_eq!(calls.len(), 2);
+        assert!(!calls[0].contains("--provider="));
+        assert_eq!(calls[1].matches("--provider=cpu").count(), 1);
+        assert!(!fs::read_dir(root.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("voice-")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_write_failure_does_not_repeat_inference() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = fixture();
+        let speech = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        fs::write(&speech.executable, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$0.calls\"\nprintf 'stage=device,device=coreml\\nstage=writing\\n'\nexit 4\n").unwrap();
+        fs::set_permissions(&speech.executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let store = MediaStore::new(root.path()).unwrap();
+        assert!(synthesize(
+            &speech,
+            &stub_runtime(),
+            &store,
+            root.path(),
+            &request("写盘失败"),
+            &AtomicBool::new(false),
+            &Mutex::new(Jobs::default())
+        )
+        .is_err());
+        let calls = fs::read_to_string(speech.executable.with_file_name("engine.calls")).unwrap();
+        assert_eq!(calls.lines().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_native_acceleration_never_starts_a_cpu_retry() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = fixture();
+        let speech = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        fs::write(
+            &speech.executable,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$0.calls"
+printf 'stage=device,device=coreml\n'
+while [ ! -f "$0.cancel" ]; do sleep 0.01; done
+exit 1
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&speech.executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let signal = cancelled.clone();
+        let executable = speech.executable.clone();
+        let watcher = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !executable.with_file_name("engine.calls").is_file() && Instant::now() < deadline
+            {
+                thread::sleep(Duration::from_millis(5));
+            }
+            signal.store(true, Ordering::SeqCst);
+            fs::write(executable.with_file_name("engine.cancel"), b"cancel").unwrap();
+        });
+        let store = MediaStore::new(root.path()).unwrap();
+        let error = synthesize(
+            &speech,
+            &stub_runtime(),
+            &store,
+            root.path(),
+            &request("取消测试"),
+            &cancelled,
+            &Mutex::new(Jobs::default()),
+        )
+        .unwrap_err();
+        watcher.join().unwrap();
+        assert_eq!(error, CANCELLED);
+        let calls = fs::read_to_string(speech.executable.with_file_name("engine.calls")).unwrap();
+        assert_eq!(calls.lines().count(), 1);
+        assert!(!calls.contains("--provider=cpu"));
     }
 
     fn fixture() -> tempfile::TempDir {
@@ -1351,18 +1780,18 @@ mod tests {
         let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
         runtime.model.kind = ModelKind::Qwen3;
         runtime.model.config = "runner-config.json".into();
+        runtime.voices[0].id = "qwen3_serena".into();
         runtime.root = PathBuf::from(r"\\?\C:\Users\测试 用户\models\qwen3");
         runtime.executable = PathBuf::from(r"\\?\C:\Users\测试 用户\runtime\python\python.exe");
         runtime.script = Some(PathBuf::from(
             r"\\?\C:\Users\测试 用户\runtime\runner\tts.py",
         ));
-        let command = runtime
-            .command(
-                &request("测试路径"),
-                Path::new(r"\\?\UNC\server\share\字幕 文本.txt"),
-                Path::new(r"\\?\C:\Users\测试 用户\生成 音频.wav"),
-            )
-            .unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let text = work.path().join("字幕 文本.txt");
+        let output = work.path().join("生成 音频.wav");
+        let mut input = request("测试路径");
+        input.voice_id = "qwen3_serena".into();
+        let command = runtime.command(&input, &text, &output).unwrap();
         assert_eq!(
             command.get_program(),
             r"C:\Users\测试 用户\runtime\python\python.exe"
@@ -1375,13 +1804,13 @@ mod tests {
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(args[2], r"C:\Users\测试 用户\runtime\runner\tts.py");
+        assert_eq!(args[4], r"C:\Users\测试 用户\runtime\runner\tts.py");
         assert_eq!(
-            args[4],
+            args[8],
             r"C:\Users\测试 用户\models\qwen3\runner-config.json"
         );
-        assert_eq!(args[6], r"\\server\share\字幕 文本.txt");
-        assert_eq!(args[8], r"C:\Users\测试 用户\生成 音频.wav");
+        assert_eq!(args[10], python_process_path(&text).to_string_lossy());
+        assert_eq!(args[12], python_process_path(&output).to_string_lossy());
     }
 
     #[test]
@@ -1392,39 +1821,46 @@ mod tests {
         let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
         runtime.model.kind = ModelKind::Qwen3;
         runtime.model.config = "runner-config.json".into();
+        runtime.voices[0].id = "qwen3_serena".into();
         runtime.script = Some(root.path().join("运行 环境/runner/tts.py"));
-        let input = request("需要保留原始文字。");
-        let command = runtime
-            .command(
-                &input,
-                Path::new("字幕 文本.txt"),
-                Path::new("配音 音频.wav"),
-            )
-            .unwrap();
+        let mut input = request("需要保留原始文字。");
+        input.voice_id = "qwen3_serena".into();
+        let work = tempfile::tempdir().unwrap();
+        let text = work.path().join("字幕 文本.txt");
+        let output = work.path().join("配音 音频.wav");
+        let command = runtime.command(&input, &text, &output).unwrap();
         let args: Vec<_> = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
         assert_eq!(&args[..2], &["-I", "-B"]);
-        assert_eq!(args[2], runtime.script.as_ref().unwrap().to_string_lossy());
-        assert_eq!(args[3], "--config");
+        assert_eq!(args[3], "--runtime-script");
+        assert_eq!(
+            args[4],
+            python_process_path(runtime.script.as_ref().unwrap()).to_string_lossy()
+        );
+        assert_eq!(&args[5..8], &["--voice", "qwen3_serena", "--config"]);
         // Temporary directories can use an 8.3 alias on Windows while the
         // validated runtime uses its canonical long name. Compare identity.
         assert_eq!(
-            Path::new(&args[4]).canonicalize().unwrap(),
+            Path::new(&args[8]).canonicalize().unwrap(),
             config.canonicalize().unwrap()
         );
         assert_eq!(
-            &args[5..],
+            &args[9..],
             &[
                 "--text-file",
-                "字幕 文本.txt",
+                &python_process_path(&text).to_string_lossy(),
                 "--output-filename",
-                "配音 音频.wav",
+                &python_process_path(&output).to_string_lossy(),
                 "--speed",
-                "1"
+                "1",
+                "--device",
+                "auto"
             ]
         );
+        assert!(work.path().join("speech-device-runtime.py").is_file());
+        assert!(!work.path().join("male-reference.wav").exists());
         assert!(command
             .get_envs()
             .any(|(name, value)| name == "HF_HUB_OFFLINE"
@@ -1467,6 +1903,117 @@ mod tests {
         ] {
             assert!(args.iter().any(|arg| arg == expected));
         }
+    }
+
+    #[test]
+    fn male_voices_use_private_resources_and_the_existing_verified_runtime() {
+        for (id, kind) in [
+            ("zipvoice_zh_male", ModelKind::Zipvoice),
+            ("f5_zh_male", ModelKind::F5),
+            ("qwen3_uncle_fu", ModelKind::Qwen3),
+        ] {
+            let root = fixture();
+            let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+            runtime.model.kind = kind;
+            runtime.model.config = "runner-config.json".into();
+            runtime.model.reference_audio = "original-reference.wav".into();
+            runtime.model.reference_text = "original-reference.txt".into();
+            runtime.voices[0].id = id.into();
+            runtime.script = Some(root.path().join("verified/runner/tts.py"));
+            let work = tempfile::Builder::new()
+                .prefix("男声 路径,")
+                .tempdir()
+                .unwrap();
+            let work_path = work.path().canonicalize().unwrap();
+            let text = work_path.join("text.txt");
+            let output = work_path.join("speech.wav");
+            fs::write(&text, "字幕文字").unwrap();
+            let mut input = request("字幕文字");
+            input.voice_id = id.into();
+            let command = runtime.command(&input, &text, &output).unwrap();
+            let args: Vec<_> = command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            if kind == ModelKind::Zipvoice {
+                assert!(args.iter().any(|arg| arg
+                    == &format!(
+                        "--reference-audio={}",
+                        python_process_path(&work_path.join("male-reference.wav")).display()
+                    )));
+                assert!(args.iter().any(|arg| arg
+                    == &format!(
+                        "--reference-text-file={}",
+                        python_process_path(&work_path.join("male-reference.txt")).display()
+                    )));
+                assert!(!work_path.join("speech-voice-adapter.py").exists());
+            } else {
+                assert_eq!(&args[..2], &["-I", "-B"]);
+                assert_eq!(
+                    args[2],
+                    python_process_path(&work_path.join("speech-voice-adapter.py"))
+                        .to_string_lossy()
+                );
+                assert_eq!(args[3], "--runtime-script");
+                assert_eq!(
+                    args[4],
+                    python_process_path(runtime.script.as_ref().unwrap()).to_string_lossy()
+                );
+                assert_eq!(&args[5..7], &["--voice", id]);
+                assert_eq!(
+                    fs::read_to_string(work_path.join("speech-voice-adapter.py")).unwrap(),
+                    include_str!("../../scripts/speech-voice-adapter.py")
+                );
+            }
+            if kind != ModelKind::Qwen3 {
+                assert_eq!(
+                    fs::read(work_path.join("male-reference.wav")).unwrap(),
+                    include_bytes!("../../scripts/optional-speech-assets/male-reference.wav")
+                );
+                assert_eq!(
+                    fs::read(work_path.join("male-reference.txt")).unwrap(),
+                    include_bytes!("../../scripts/optional-speech-assets/male-reference.txt")
+                );
+            } else {
+                assert!(!work_path.join("male-reference.wav").exists());
+            }
+            assert!(!root.path().join("male-reference.wav").exists());
+            assert!(!root.path().join("speech-voice-adapter.py").exists());
+            drop(work);
+            assert!(
+                !work_path.exists(),
+                "job resources must be removed together"
+            );
+        }
+    }
+
+    #[test]
+    fn male_voice_resources_reject_wrong_models_installed_paths_and_overwrites() {
+        let root = fixture();
+        let mut runtime = SpeechRuntime::from_root(root.path(), root.path()).unwrap();
+        runtime.voices[0].id = "f5_zh_male".into();
+        let mut input = request("字幕");
+        input.voice_id = "f5_zh_male".into();
+        let work = tempfile::tempdir().unwrap();
+        let text = work.path().join("text.txt");
+        let output = work.path().join("speech.wav");
+        assert!(runtime.command(&input, &text, &output).is_err());
+        runtime.model.kind = ModelKind::F5;
+        runtime.script = Some(root.path().join("verified/runner/tts.py"));
+        assert!(runtime
+            .command(
+                &input,
+                &root.path().join("text.txt"),
+                &root.path().join("speech.wav")
+            )
+            .is_err());
+        assert!(runtime
+            .command(&input, &root.path().join("text.txt"), &output)
+            .is_err());
+        let existing = work.path().join("male-reference.wav");
+        fs::write(&existing, b"preserve existing file").unwrap();
+        assert!(runtime.command(&input, &text, &output).is_err());
+        assert_eq!(fs::read(existing).unwrap(), b"preserve existing file");
     }
 
     #[cfg(unix)]
@@ -1808,8 +2355,19 @@ mod tests {
             json!({"kind":engine,"config":"runner-config.json","sampleRate":24000}),
         )
         .unwrap();
+        let voice_id = std::env::var("OPEN_MEDIA_TEST_VOICE_ID").unwrap_or_else(|_| {
+            if engine == "f5" {
+                "f5_zh_female".into()
+            } else {
+                "qwen3_serena".into()
+            }
+        });
+        assert!(
+            python_voice_kind(&voice_id) == Some(model.kind),
+            "voice must belong to the selected model"
+        );
         let voice: SpeechVoice = serde_json::from_value(
-            json!({"id":"integration_voice","name":"集成验证","language":"zh-CN","speakerId":0}),
+            json!({"id":voice_id,"name":"集成验证","language":"zh-CN","speakerId":0}),
         )
         .unwrap();
         let speech = SpeechRuntime {
@@ -1819,49 +2377,146 @@ mod tests {
             model,
             voices: vec![voice],
         };
-        let work = tempfile::Builder::new()
-            .prefix("配音 路径, 兼容-")
-            .tempdir()
-            .unwrap();
-        let text = work.path().join("字幕 文本.txt");
-        let output = work.path().join("生成 音频.wav");
-        let log_path = work.path().join("generation.log");
-        let mut input = request("这是一款全程由AI接管并生成的软件。");
-        input.voice_id = "integration_voice".into();
-        fs::write(&text, &input.text).unwrap();
-        let log = OpenOptions::new()
-            .create_new(true)
-            .append(true)
-            .open(&log_path)
-            .unwrap();
-        let mut command = speech.command(&input, &text, &output).unwrap();
-        command.stdout(log.try_clone().unwrap()).stderr(log);
+        record_real_generation(&speech, &voice_id);
+    }
+
+    /// Persist the exact production command path, including native process fallback.
+    /// Evidence remains on disk after both success and failure for CI artifact upload.
+    fn record_real_generation(speech: &SpeechRuntime, voice_id: &str) {
+        use sha2::{Digest, Sha256};
+        let evidence_root = std::env::var_os("OPEN_MEDIA_TEST_EVIDENCE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("target/speech-integration-evidence")
+                    .join(crate::engine::new_id())
+            });
+        fs::create_dir_all(&evidence_root).expect("persistent speech evidence directory");
+        let evidence = evidence_root.join(voice_id);
+        fs::create_dir(&evidence)
+            .expect("voice evidence directory must be new; preserve earlier evidence");
+        let evidence = evidence.canonicalize().unwrap();
+        let mut input = request(
+            &std::env::var("OPEN_MEDIA_TEST_TEXT")
+                .unwrap_or_else(|_| "这是一款全程由AI接管并生成的软件".into()),
+        );
+        input.voice_id = voice_id.into();
+        input.speed = std::env::var("OPEN_MEDIA_TEST_SPEED")
+            .map(|value| value.parse::<f64>().unwrap())
+            .unwrap_or(1.0);
+        validate_request(&input).expect("valid real integration request");
         let started = Instant::now();
-        let mut child = RunningChild(command.spawn().expect("portable runner must launch"));
-        let status = loop {
-            if let Some(status) = child.0.try_wait().unwrap() {
-                break status;
-            }
-            assert!(
-                started.elapsed() < Duration::from_secs(1800),
-                "portable synthesis exceeded 30 minutes"
-            );
-            thread::sleep(Duration::from_millis(100));
+        let result = generate_wave(
+            speech,
+            &evidence,
+            &input,
+            &AtomicBool::new(false),
+            &Mutex::new(Jobs::default()),
+        );
+        let elapsed = started.elapsed().as_secs_f64();
+        let log = fs::read_to_string(evidence.join("generation.log")).unwrap_or_default();
+        let bytes = fs::read(evidence.join("speech.wav")).unwrap_or_default();
+        let audio_valid =
+            validate_wave(&evidence.join("speech.wav"), speech.model.sample_rate).is_ok();
+        let devices: Vec<_> = log
+            .lines()
+            .filter(|line| line.starts_with("stage=device,"))
+            .collect();
+        let events: Vec<_> = log
+            .lines()
+            .filter(|line| line.starts_with("stage="))
+            .collect();
+        let fallbacks: Vec<_> = log
+            .lines()
+            .filter(|line| line.starts_with("stage=fallback,"))
+            .collect();
+        let partial = devices.last().and_then(|line| log_field(line, "partial="));
+        let verified_success = result.is_ok()
+            && audio_valid
+            && bytes.len() > speech.model.sample_rate as usize
+            && last_generation_device(&log).is_some();
+        let engine = match speech.model.kind {
+            ModelKind::Matcha => "matcha",
+            ModelKind::Kokoro => "kokoro",
+            ModelKind::Zipvoice => "zipvoice",
+            ModelKind::F5 => "f5",
+            ModelKind::Qwen3 => "qwen3",
         };
-        let details = fs::read_to_string(&log_path).unwrap_or_default();
-        assert!(status.success(), "portable runtime failed: {details}");
-        validate_wave(&output, 24000).expect("real portable output must be finite audible WAV");
-        let bytes = fs::read(&output).unwrap();
+        let proof = json!({
+            "schema": 1, "voiceId": voice_id, "engine": engine,
+            "os": std::env::consts::OS, "architecture": std::env::consts::ARCH,
+            "productionPath": "SpeechRuntime::command + generate_wave",
+            "text": input.text, "speed": input.speed, "elapsedSeconds": elapsed,
+            "sampleRate": speech.model.sample_rate, "audioBytes": bytes.len(),
+            "audioSha256": format!("{:x}", Sha256::digest(&bytes)),
+            "audioFile": "speech.wav", "logFile": "generation.log", "textFile": "text.txt",
+            "audio": "speech.wav", "backend": last_generation_device(&log),
+            "fallback": !fallbacks.is_empty(), "events": events,
+            "success": verified_success, "audioValidated": audio_valid,
+            "error": result.as_ref().err(), "actualDevice": last_generation_device(&log),
+            "partial": partial, "deviceEvents": devices, "fallbackEvents": fallbacks,
+            "status": parse_generation_status(&log).map(|(stage, _)| stage),
+            "modelRoot": speech.root, "executable": speech.executable,
+            "runtimeScript": speech.script,
+        });
+        fs::write(
+            evidence.join("result.json"),
+            serde_json::to_vec_pretty(&proof).unwrap(),
+        )
+        .unwrap();
+        eprintln!("speech evidence: {}", evidence.display());
+        eprintln!("{}", serde_json::to_string(&proof).unwrap());
         assert!(
-            bytes.len() > 24000,
-            "spoken sentence must contain substantial audio"
+            result.is_ok(),
+            "real production generation failed: {:?}\n{}",
+            result.err(),
+            log
         );
-        eprintln!(
-            "portable {engine}: {} real WAV bytes in {:.2}s; {}",
-            bytes.len(),
-            started.elapsed().as_secs_f64(),
-            details
+        assert!(
+            audio_valid && bytes.len() > speech.model.sample_rate as usize,
+            "real output must contain substantial finite audible WAV"
         );
+        assert!(
+            last_generation_device(&log).is_some(),
+            "generation must report the actual execution device"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires verified installed model/runtime packages and the native speech bundle"]
+    fn real_installed_voice_production_round_trip() {
+        let voice_id = std::env::var("OPEN_MEDIA_TEST_VOICE_ID").expect("real installed voice ID");
+        let bundled_root = PathBuf::from(
+            std::env::var_os("OPEN_MEDIA_SPEECH_ROOT").expect("native speech bundle"),
+        )
+        .canonicalize()
+        .unwrap();
+        let bundled = SpeechRuntime::from_root(&bundled_root, bundled_root.parent().unwrap())
+            .expect("native bundle must pass the application's resource checks");
+        if let Some(directory) = std::env::var_os("OPEN_MEDIA_SPEECH_EXECUTABLE_ROOT") {
+            let helpers = PathBuf::from(directory)
+                .canonicalize()
+                .expect("installed helper directory");
+            assert!(
+                bundled.executable.starts_with(&helpers),
+                "production discovery must use the installed helper directory: {}",
+                bundled.executable.display()
+            );
+        }
+        let speech = if bundled.voices.iter().any(|voice| voice.id == voice_id) {
+            bundled
+        } else {
+            let model_root = PathBuf::from(
+                std::env::var_os("OPEN_MEDIA_TEST_MODEL_ROOT").expect("installed model directory"),
+            );
+            crate::speech_models::verify_installed_voice_for_integration(
+                &model_root,
+                &voice_id,
+                &bundled,
+            )
+            .expect("installed weights and immutable runtime must pass application verification")
+        };
+        record_real_generation(&speech, &voice_id);
     }
 
     #[test]

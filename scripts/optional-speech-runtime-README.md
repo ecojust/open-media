@@ -8,6 +8,8 @@ macOS 兼容性依据每个实际 Mach-O 文件的最低系统要求检查，不
 
 运行包固定保留 F5 的 FP32 和 Qwen 的 BF16 推理，禁止静默降低或替换精度。CPU 是必要的跨平台基线，不要求显卡。声音模型权重独立下载，不放入运行包。
 
+应用通过 `speech-voice-adapter.py` 和 `speech-device-runtime.py` 在私有任务目录中选择声音与推理设备，保持已发布运行包不可变。优先使用实际可用且通过必需算子检测的 CUDA / MPS，音频处理部分不兼容时显式使用 CPU 并报告混合路径，主模型 GPU 初始化或合成失败时清理并重试 CPU 一次。macOS ARM64 的现有依赖含 MPS，Qwen 还需满足 BF16 算子支持；Windows 当前固定 CPU wheel，不能因有显卡就声称支持 CUDA。设备、回退原因及真实生成进度通过标准输出传回应用，详见 `docs/SPEECH_RUNTIME.md`。
+
 ZIP 根目录为：
 
 ```text

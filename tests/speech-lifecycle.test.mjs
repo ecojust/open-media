@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import * as vue from 'vue'
-import { createProject, createTextClip } from '../src/core/project.ts'
+import { createProject, createTextClip, validateProject } from '../src/core/project.ts'
 import { addClip, clipDuration } from '../src/core/timeline.ts'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity } from '../src/core/speech.ts'
 import { compactVoiceCatalog } from '../src/core/voice-catalog.ts'
@@ -31,7 +31,7 @@ function panel(overrides = {}, options = {}) {
     defineEmits: () => (...event) => { events.push(event); if (event[0] === 'change' && options.applyChanges !== false) props.project = event[1] }, defineExpose: () => {},
     planSpeech, applySpeechResults, alignTextToSpeech, validateSpeechPlanCapacity, compactVoiceCatalog, voiceReady, voiceDownloading, isDesktop: () => true,
     bundledVoicePreviewUrl: () => undefined,
-    VOICE_PREVIEW_TEXT: { zh: '你好，这是一段语音试听。让文字拥有清晰自然的声音。', en: 'Hello, this is a voice preview. Let your story come to life with a clear and natural voice.' },
+    VOICE_PREVIEW_TEXT: { zh: '这是一款全程由AI接管并生成的软件', en: '这是一款全程由AI接管并生成的软件' },
     getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'voice-1', name: '声音一', language: 'zh-CN' }, { id: 'voice-2', name: '声音二', language: 'zh-CN' }] }),
     beginSpeechModelDownload: async modelId => { throw new Error(`unexpected model download ${modelId}`) },
     cancelSpeechModelDownload: async modelId => { throw new Error(`unexpected model cancellation ${modelId}`) },
@@ -294,6 +294,27 @@ test('batch synthesis inserts real returned assets in one undoable project chang
   } finally { harness.dispose() }
 })
 
+test('male voice selection reaches synthesis and survives the project document round trip', async () => {
+  const catalog = JSON.parse(readFileSync(new URL('../src-tauri/resources/speech-models.json', import.meta.url), 'utf8'))
+  const voices = catalog.models.flatMap(model => model.voices.map(voice => ({ ...voice, modelId: model.id, status: 'ready', runtimeStatus: 'ready' })))
+  for (const voice of voices.filter(voice => voice.gender === 'male')) {
+    const harness = panel({ getSpeechStatus: async () => ({ ready: true, voices }) })
+    try {
+      await settle()
+      harness.state.voiceId.value = voice.id
+      await harness.state.generate()
+      const requests = harness.calls.filter(call => call[0] === 'begin')
+      assert.equal(requests.length, 2)
+      assert.ok(requests.every(call => call[1].voiceId === voice.id), 'male selection must not fall back to the female voice sharing its model')
+      const restored = validateProject(JSON.parse(JSON.stringify(harness.props.project)))
+      const audio = restored.tracks.flatMap(track => track.clips).filter(clip => clip.speech)
+      assert.equal(audio.length, 2)
+      assert.ok(audio.every(clip => clip.speech.voiceId === voice.id))
+      assert.equal(harness.events.filter(event => event[0] === 'change').length, 1)
+    } finally { harness.dispose() }
+  }
+})
+
 test('batch failure discards earlier outputs and leaves the project unchanged', async () => {
   let count = 0
   const discarded = []
@@ -385,7 +406,7 @@ test('Chinese card preview uses fixed sample text without adding timeline clips 
     await settle()
     await harness.state.previewVoice('voice-1')
     const request = harness.calls.find(call => call[0] === 'begin')[1]
-    assert.equal(request.text, '你好，这是一段语音试听。让文字拥有清晰自然的声音。')
+    assert.equal(request.text, '这是一款全程由AI接管并生成的软件')
     assert.equal(harness.state.operationKind.value, 'preview')
     assert.match(harness.state.previewUrl.value, /^data:audio/)
     assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)
@@ -412,7 +433,7 @@ test('disabling alignment preserves text duration and forwards the chosen voice 
   } finally { harness.dispose() }
 })
 
-test('card audition uses the requested voice and language without selecting it or changing the timeline', async () => {
+test('card audition uses the requested voice and shared corpus without selecting it or changing the timeline', async () => {
   const harness = panel({ getSpeechStatus: async () => ({ ready: true, voices: [
     { id: 'chinese-selected', name: '中文女声', language: 'zh-CN', gender: 'female' },
     { id: 'english-audition', name: '英文女声', language: 'en-US', gender: 'female' },
@@ -425,7 +446,7 @@ test('card audition uses the requested voice and language without selecting it o
     const request = harness.calls.find(call => call[0] === 'begin')[1]
     assert.equal(request.voiceId, 'english-audition')
     assert.equal(request.speed, 1.25)
-    assert.equal(request.text, 'Hello, this is a voice preview. Let your story come to life with a clear and natural voice.')
+    assert.equal(request.text, '这是一款全程由AI接管并生成的软件')
     assert.equal(harness.state.voiceId.value, 'chinese-selected')
     assert.equal(harness.state.previewVoiceId.value, 'english-audition')
     assert.equal(harness.events.filter(event => event[0] === 'change').length, 0)

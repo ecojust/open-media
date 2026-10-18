@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, statSync, mkdirSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { digest, verifySpeechMetadata, verifyDigest } from './release-validation.mjs';
+import { digest, verifySpeechMetadata, verifyDigest, verifySpeechSynthesis } from './release-validation.mjs';
 
 const directory = `src-tauri/target/${process.env.MEDIA_TARGET}/release/bundle`;
 const collect = (root) => readdirSync(root).flatMap(name => {
@@ -28,6 +28,17 @@ const speechRuntime = verifySpeechMetadata(JSON.parse(readFileSync(join(speechRo
   model: speechLock.model,
 });
 for (const file of speechRuntime.files) verifyDigest(readFileSync(join(speechRoot, file.path)), `sha256:${file.sha256}`);
-writeFileSync('desktop-artifacts/build.json', JSON.stringify({ commit: process.env.MEDIA_COMMIT, platform: process.env.MEDIA_PLATFORM, version: JSON.parse(readFileSync('package.json', 'utf8')).version, runtime: JSON.parse(readFileSync('src-tauri/resources/media/runtime.json', 'utf8')), speechRuntime }, null, 2) + '\n');
+const speechEvidenceRoot = '.speech-runtime/installed-voice-validation';
+const speechEvidencePath = join(speechEvidenceRoot, 'summary.json');
+const speechEvidenceBytes = readFileSync(speechEvidencePath);
+const speechEvidence = verifySpeechSynthesis(JSON.parse(speechEvidenceBytes), process.env.MEDIA_PLATFORM, process.env.MEDIA_COMMIT);
+for (const voice of speechEvidence.voices) {
+  const audioBytes = readFileSync(join(speechEvidenceRoot, voice.audio.path));
+  if (audioBytes.length !== voice.audio.bytes) throw new Error(`Generated speech size changed: ${voice.voiceId}`);
+  verifyDigest(audioBytes, `sha256:${voice.audio.sha256}`);
+}
+copyFileSync(speechEvidencePath, 'desktop-artifacts/speech-verification.json');
+const speechVerification = { file: 'speech-verification.json', sha256: digest(speechEvidenceBytes), bytes: speechEvidenceBytes.length };
+writeFileSync('desktop-artifacts/build.json', JSON.stringify({ commit: process.env.MEDIA_COMMIT, platform: process.env.MEDIA_PLATFORM, version: JSON.parse(readFileSync('package.json', 'utf8')).version, runtime: JSON.parse(readFileSync('src-tauri/resources/media/runtime.json', 'utf8')), speechRuntime, speechVerification }, null, 2) + '\n');
 copyFileSync('LICENSE', 'desktop-artifacts/LICENSE');
 copyFileSync('THIRD_PARTY_NOTICES.md', 'desktop-artifacts/THIRD_PARTY_NOTICES.md');

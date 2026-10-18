@@ -22,14 +22,39 @@ const previewVoiceId = ref(''), previewPlaying = ref(false), previewLoading = re
 const previewState = computed(() => previewLoading.value ? 'loading' : previewPlaying.value ? 'playing' : 'idle')
 const operationKind = ref<'all' | 'selected' | 'preview'>('all')
 const generationLabel = computed(() => cancelling.value ? '正在取消…' : finalizing.value ? '正在加入时间线…' : '正在生成…')
+const generationProgress = ref<{ total: number; completed: number; current: number | null; stage: string } | null>(null)
+const elapsedSeconds = ref(0)
+const elapsedLabel = computed(() => `${Math.floor(elapsedSeconds.value / 60).toString().padStart(2, '0')}:${(elapsedSeconds.value % 60).toString().padStart(2, '0')}`)
+const progressPercent = computed(() => {
+  const progress = generationProgress.value
+  if (!progress || progress.completed === progress.total || (!progress.completed && progress.current === null)) return undefined
+  // Segments have equal weight; this is reported work, never an elapsed-time estimate.
+  // Completion is only committed after every audio result has been added to the project.
+  return Math.min(99, Math.floor((progress.completed + (progress.current ?? 0)) / progress.total * 100))
+})
+const progressDescription = computed(() => {
+  const progress = generationProgress.value
+  if (!progress) return ''
+  if (progress.completed === progress.total || finalizing.value) return '正在加入时间线…'
+  return `正在生成第 ${progress.completed + 1} / ${progress.total} 段${progress.stage ? ` · ${progress.stage}` : ''}`
+})
 const allPlan = computed(() => planSpeech(props.project))
 let statusPromise: Promise<void> | undefined
 let statusTimer: ReturnType<typeof setTimeout> | undefined, statusRevision = 0
+let generationTimer: ReturnType<typeof setInterval> | undefined
 let disposed = false, previewJobId = ''
 let previewRevision = 0, previewIsBundled = false
 interface Operation { project: Project; controller: AbortController; jobs: Set<string>; current: string; applying: boolean; reason: string }
 let operation: Operation | undefined
 
+function stopGenerationTimer(): void {
+  clearInterval(generationTimer); generationTimer = undefined; elapsedSeconds.value = 0
+}
+function startGenerationTimer(): void {
+  stopGenerationTimer()
+  const started = performance.now()
+  generationTimer = setInterval(() => { elapsedSeconds.value = Math.floor((performance.now() - started) / 1000) }, 1000)
+}
 function errorText(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause) }
 function applyStatus(result: SpeechStatus): void {
   status.value = result
@@ -157,6 +182,7 @@ async function previewVoice(id: string): Promise<void> {
 }
 async function synthesize(active: Operation, text: string, voice: string, rate: number): Promise<NonNullable<SpeechJob['asset']>> {
   checkOperation(active)
+  if (generationProgress.value) { generationProgress.value.current = null; generationProgress.value.stage = '正在准备声音' }
   const requestId = crypto.randomUUID()
   active.current = requestId; active.jobs.add(requestId)
   let job = await beginSpeechJob({ requestId, text, voiceId: voice, speed: rate })
@@ -171,6 +197,11 @@ async function synthesize(active: Operation, text: string, voice: string, rate: 
       active.current = ''
       return job.asset
     }
+    if (generationProgress.value) {
+      const reported = job.progress
+      generationProgress.value.current = typeof reported === 'number' && Number.isFinite(reported) && reported >= 0 && reported <= 1 ? reported : null
+      generationProgress.value.stage = job.stage || '处理中'
+    }
     await waitForPoll(active)
     job = await getSpeechJob(job.id)
   }
@@ -178,6 +209,8 @@ async function synthesize(active: Operation, text: string, voice: string, rate: 
 async function cancel(reason = '已取消语音生成，时间线保持原样。'): Promise<void> {
   const active = operation
   if (!active || active.controller.signal.aborted || active.applying) return
+  stopGenerationTimer()
+  generationProgress.value = null
   cancelling.value = true; active.reason = reason; active.controller.abort()
   if (active.current) await cancelSpeechJob(active.current).catch(() => {})
 }
@@ -188,6 +221,8 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
   const active: Operation = { project: props.project, controller: new AbortController(), jobs: new Set(), current: '', applying: false, reason: '' }
   operation = active; busy.value = true; emit('busy', true)
   operationKind.value = sources ? target : 'preview'
+  generationProgress.value = sources ? { total: sources.length, completed: 0, current: null, stage: '正在准备声音' } : null
+  if (sources) startGenerationTimer()
   try {
     clearPreview()
     if (!status.value.ready) await loadStatus()
@@ -211,6 +246,7 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
         const asset = await synthesize(active, source.text, chosenVoice, rate)
         results.push({ source, asset, voiceId: chosenVoice, rate })
         validateSpeechPlanCapacity(active.project, { sources, skipped: [] }, new Map(results.map(item => [item.source.clipId, item.asset.duration])))
+        if (generationProgress.value) { generationProgress.value.completed = results.length; generationProgress.value.current = null }
       }
       checkOperation(active)
       const result = applySpeechResults(props.project, results, { alignText: shouldAlign })
@@ -225,6 +261,8 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
       emit('status', notice.value)
     }
   } catch (cause) {
+    stopGenerationTimer()
+    generationProgress.value = null
     if (!sources) clearPreview()
     if (!disposed) {
       if (active.controller.signal.aborted) notice.value = active.reason
@@ -233,7 +271,7 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
     if (active.current) await cancelSpeechJob(active.current).catch(() => {})
   } finally {
     await discardJobs(active.jobs)
-    if (operation === active) { operation = undefined; busy.value = false; cancelling.value = false; finalizing.value = false; previewLoading.value = false; emit('busy', false) }
+    if (operation === active) { stopGenerationTimer(); operation = undefined; generationProgress.value = null; busy.value = false; cancelling.value = false; finalizing.value = false; previewLoading.value = false; emit('busy', false) }
   }
 }
 async function generate(clipIds?: string[]): Promise<void> {
@@ -255,7 +293,7 @@ function align(clipIds?: string[]): void {
 }
 watch(() => props.active, active => {
   if (active) void loadStatus(!status.value.voices.length)
-  if (!active) { stopStatusPoll(); clearPreview(); if (operation) void cancel('配音面板已关闭，语音生成已取消。') }
+  if (!active) { stopStatusPoll(); stopGenerationTimer(); clearPreview(); if (operation) void cancel('配音面板已关闭，语音生成已取消。') }
 }, { immediate: true })
 watch(() => props.project, value => { if (operation && !operation.applying && value !== operation.project) void cancel('项目已经变化，本次语音未写入时间线，请重新生成。') }, { flush: 'sync' })
 watch(voiceId, clearPreview)
@@ -263,8 +301,8 @@ watch(speed, value => {
   if (previewIsBundled && player.value) player.value.playbackRate = value
   else clearPreview()
 })
-onBeforeUnmount(() => { disposed = true; stopStatusPoll(); clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
-defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel, error, notice })
+onBeforeUnmount(() => { disposed = true; stopStatusPoll(); stopGenerationTimer(); clearPreview(); void cancel('已离开剪辑页面，语音生成已取消。') })
+defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel, generationProgress, progressPercent, progressDescription, elapsedLabel, error, notice })
 </script>
 
 <template>
@@ -283,6 +321,12 @@ defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel,
       </fieldset>
       <div class="speech-actions" aria-live="polite">
         <button class="speech-primary" :disabled="busy || !status.ready || !selectedVoiceReady || !allPlan.sources.length" :aria-busy="busy && operationKind === 'all'" data-testid="speech-generate-all" @click="generate()"><template v-if="busy && operationKind === 'all'"><span class="speech-spinner" />{{ generationLabel }}</template><template v-else><Icon name="audio" :size="14" />全部文字转语音 <span class="speech-count">{{ allPlan.sources.length }}</span></template></button>
+        <div v-if="busy && generationProgress" class="speech-progress" data-testid="speech-progress">
+          <div class="speech-progress-heading"><span>{{ generationProgress.completed }} / {{ generationProgress.total }} 段已生成</span><span v-if="progressPercent !== undefined">{{ progressPercent }}%</span></div>
+          <progress :value="progressPercent" max="100" aria-label="字幕转语音进度" :aria-valuetext="`${generationProgress.completed} / ${generationProgress.total} 段已生成，${progressDescription}`" />
+          <span class="speech-progress-stage">{{ progressDescription }}</span>
+          <span class="speech-progress-elapsed" role="timer" aria-live="off">已用时 {{ elapsedLabel }}</span>
+        </div>
         <div v-if="busy" class="speech-cancel-row"><span v-if="operationKind === 'preview'" role="status"><span class="speech-spinner" />{{ cancelling ? '正在取消…' : '正在准备试听…' }}</span><button :disabled="cancelling || finalizing" @click="cancel()"><Icon name="close" :size="13" />取消生成</button></div>
       </div>
       <audio v-if="previewUrl" ref="player" :src="previewUrl" hidden preload="auto" aria-label="声音试听音频" @playing="previewPlaying = true; previewLoading = false" @waiting="previewLoading = !player?.paused" @pause="previewPlaying = false; previewLoading = false" @ended="previewPlaying = false; previewLoading = false" @error="previewFailed" />
@@ -294,5 +338,7 @@ defineExpose({ generate, align, cancel, cancelling, finalizing, generationLabel,
 </template>
 
 <style scoped>
+.speech-progress-elapsed{font-variant-numeric:tabular-nums;color:var(--ed-muted)}
+.speech-progress{display:grid;gap:5px;padding:9px 10px;border:1px solid var(--ed-border);border-radius:7px;background:var(--ed-panel);font-size:10px}.speech-progress-heading{display:flex;justify-content:space-between;gap:8px;color:var(--ed-text);font-variant-numeric:tabular-nums}.speech-progress progress{display:block;appearance:none;-webkit-appearance:none;width:100%;height:6px;border:0;border-radius:99px;overflow:hidden;background:var(--ed-border);accent-color:var(--ed-accent)}.speech-progress progress::-webkit-progress-bar{background:var(--ed-border);border-radius:99px}.speech-progress progress::-webkit-progress-value{background:var(--ed-accent);border-radius:99px}.speech-progress progress::-moz-progress-bar{background:var(--ed-accent);border-radius:99px}.speech-progress progress:indeterminate{background:linear-gradient(90deg,var(--ed-border) 0 30%,var(--ed-accent) 50%,var(--ed-border) 70% 100%);background-size:200% 100%;animation:speech-progress-pulse 1.5s ease-in-out infinite}.speech-progress progress:indeterminate::-webkit-progress-bar{background:transparent}.speech-progress-stage{color:var(--ed-muted);overflow-wrap:anywhere}@keyframes speech-progress-pulse{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){.speech-progress progress:indeterminate{animation:none}}
 .speech-panel{font-size:11px;overflow:auto;padding:13px 14px;min-height:0;line-height:1.55}.speech-panel header{display:flex;align-items:center;gap:7px;margin-bottom:15px}.speech-panel header>span{font-size:9px;margin-left:auto;color:var(--ed-muted)}.speech-panel fieldset{border:0;padding:0;margin:0;min-width:0}.speech-panel label{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;position:relative;color:var(--ed-muted)}.speech-panel output{position:absolute;right:0;color:var(--ed-text)}.speech-panel input[type=range]{width:100%;accent-color:var(--ed-accent)}.speech-panel button{font:inherit;display:flex;align-items:center;justify-content:center;gap:5px;width:100%;min-height:31px;border:1px solid var(--ed-border);border-radius:6px;padding:5px 7px;background:var(--ed-panel);color:var(--ed-text);cursor:pointer;white-space:normal;line-height:1.4}.speech-panel button:disabled,.speech-panel fieldset:disabled{opacity:.5;cursor:not-allowed}.speech-panel button:hover:not(:disabled){color:var(--ed-accent);border-color:var(--ed-accent)}.speech-panel select{width:100%}.speech-panel button:focus-visible,.speech-panel select:focus-visible,.speech-panel summary:focus-visible{outline:2px solid var(--ed-accent);outline-offset:2px}.speech-panel .speech-primary{background:var(--ed-accent);border-color:var(--ed-accent);color:#fff!important}.speech-actions{display:grid;gap:7px}.speech-primary>.speech-count{font-size:10px;border-radius:4px;background:#ffffff25;padding:0 5px}.speech-panel label.speech-check{flex-direction:row;align-items:flex-start;gap:7px;color:var(--ed-text);margin-bottom:5px}.speech-check input{margin:3px 0 0;accent-color:var(--ed-accent);flex-shrink:0}.speech-note{font-size:10px;color:var(--ed-muted);margin:7px 0 12px;overflow-wrap:anywhere}.speech-align{border-top:1px solid var(--ed-border);margin-top:15px;padding-top:12px;display:grid;gap:7px}.speech-align>button:last-child{border-color:transparent;font-size:10px;color:var(--ed-muted)}.speech-cancel-row{display:flex;align-items:center;justify-content:flex-end;gap:8px;font-size:10px}.speech-cancel-row>span{display:flex;align-items:center;gap:5px;margin-right:auto;color:var(--ed-muted)}.speech-panel .speech-cancel-row>button{width:auto;min-height:26px;padding:3px 8px}.speech-spinner{display:inline-block;width:11px;height:11px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:speech-spin .8s linear infinite;vertical-align:-1px;flex-shrink:0}.speech-error,.speech-notice{font-size:10px;padding:9px;border-radius:6px;overflow-wrap:anywhere;white-space:pre-line}.speech-error{background:color-mix(in srgb,#e15b53 10%,var(--ed-panel));color:#bc423a}.speech-error p{margin:0 0 8px}.speech-notice{background:color-mix(in srgb,var(--ed-accent) 7%,var(--ed-panel));color:var(--ed-text)}.speech-skipped{font-size:10px;margin:12px 0;color:var(--ed-muted)}.speech-skipped summary{cursor:pointer}.speech-skipped ul{padding-left:16px;overflow-wrap:anywhere}.speech-skipped li{margin:5px 0}@keyframes speech-spin{to{transform:rotate(360deg)}}
 </style>

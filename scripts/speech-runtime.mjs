@@ -26,6 +26,57 @@ function run(command, args, options = {}) {
   if (result.error || result.status !== 0) throw new Error(`${command} failed (${result.status}): ${result.error?.message ?? ''}\n${result.stderr ?? ''}\n${result.stdout ?? ''}`);
   return `${result.stdout ?? ''}${result.stderr ?? ''}`;
 }
+
+export function nativeDeviceState(log) {
+  let backend = null, writing = false;
+  for (const line of log.split(/\r?\n/)) {
+    if (line.startsWith('stage=device,') || line.startsWith('stage=fallback,')) {
+      const selected = line.split(',').find(field => field.startsWith('device='))?.slice(7);
+      backend = ['cpu', 'coreml', 'mps', 'cuda'].includes(selected) ? selected : null;
+      if (line.startsWith('stage=device,')) writing = false;
+    } else if (/^stage=(writing|complete)(,|$)/.test(line)) writing = true;
+  }
+  return { backend, writing };
+}
+
+export function shouldRetryNativeCpu(result, retried = false) {
+  const state = nativeDeviceState(result.stdout ?? '');
+  return !retried && !result.error && result.status !== 0 && state.backend === 'coreml' && !state.writing
+    && !['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGKILL'].includes(result.signal);
+}
+
+export async function runNativeSpeech(command, args, waveFile, logFile, options = {}) {
+  const started = Date.now(), timeout = options.timeout ?? 300000, attempts = [];
+  const describe = result => ({ ...nativeDeviceState(result.stdout ?? ''), status: result.status,
+    signal: result.signal ?? null, error: result.error?.message ?? (result.stderr ?? '').trim().slice(-4000) });
+  const execute = (values, remaining) => spawnSync(command, values, {
+    encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, ...options, timeout: remaining,
+  });
+  await rm(waveFile, { force: true });
+  let result = execute(args, timeout);
+  attempts.push(describe(result));
+  let fullLog = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  await writeFile(logFile, fullLog);
+  let fallbackFrom = null;
+  const remaining = timeout - (Date.now() - started);
+  if (remaining > 0 && shouldRetryNativeCpu(result)) {
+    fallbackFrom = 'coreml';
+    const marker = '\nstage=fallback,from=coreml,device=cpu,reason=native_process_failed\n';
+    console.warn(`CoreML attempt failed (${result.status ?? result.signal}); retrying once on CPU. Original output: ${logFile}`);
+    await rm(waveFile, { force: true });
+    result = execute([...args.filter(value => !value.startsWith('--provider=')), '--provider=cpu'], remaining);
+    attempts.push(describe(result));
+    fullLog += marker + `${result.stdout ?? ''}${result.stderr ?? ''}`;
+    await writeFile(logFile, fullLog);
+  }
+  if (result.error || result.status !== 0) {
+    await rm(waveFile, { force: true });
+    throw new Error(`Native speech failed (${result.status ?? result.signal}): ${result.error?.message ?? ''}\n${result.stderr ?? ''}\nSee ${logFile}`);
+  }
+  const backend = nativeDeviceState(result.stdout ?? '').backend;
+  if (!backend || (fallbackFrom && backend !== 'cpu')) throw new Error('Native speech did not report the expected execution device.');
+  return { log: `${result.stdout ?? ''}${result.stderr ?? ''}`, execution: { backend, fallbackFrom, attempts } };
+}
 let archiveTool;
 function archive(args) {
   const options = { timeout: 600000 };
@@ -250,17 +301,18 @@ async function verify() {
   for (const { id, text, speed } of cases) {
     const textFile = join(directory, `文字-${id}.txt`), waveFile = join(directory, `声音-${id}.wav`);
     await writeFile(textFile, text, 'utf8');
-    const log = run(executable, [`--matcha-acoustic-model=${model.file}`, `--matcha-vocoder=${model.vocoder}`, `--matcha-tokens=${model.tokens}`, `--matcha-data-dir=${model.dataDir}`, `--matcha-lexicon=${model.lexicons.join(',')}`, `--tts-rule-fsts=${model.ruleFsts.join(',')}`, '--sid=0', `--speed=${speed}`, `--output-filename=${waveFile}`, `--text-file=${textFile}`, '--debug=true'], { cwd: output });
+    const { log, execution } = await runNativeSpeech(executable, [`--matcha-acoustic-model=${model.file}`, `--matcha-vocoder=${model.vocoder}`, `--matcha-tokens=${model.tokens}`, `--matcha-data-dir=${model.dataDir}`, `--matcha-lexicon=${model.lexicons.join(',')}`, `--tts-rule-fsts=${model.ruleFsts.join(',')}`, '--sid=0', `--speed=${speed}`, `--output-filename=${waveFile}`, `--text-file=${textFile}`, '--debug=true'], waveFile, join(directory, `${id}-generation.log`), { cwd: output });
     if (!log.includes(`speakers=${lock.voices.length}, text_bytes=${Buffer.byteLength(text)}`) || !/progress=1\.000000/.test(log) || !log.includes('stage=complete')) throw new Error('Speech process did not confirm complete text and model processing.');
     // Verify the model's own tokenization received Chinese characters unchanged,
     // including on hosts whose default system code page is not UTF-8.
     if (text.startsWith('你好') && !log.includes('你好')) throw new Error('Chinese text did not reach the speech model intact.');
     const result = inspectWave(await readFile(waveFile));
-    results.push(result);
-    console.log(`Verified voice 0 (${id}, ${speed}x): ${result.duration.toFixed(3)} s, audible PCM, UTF-8 input intact.`);
+    results.push({ ...result, id, speed, execution });
+    console.log(`Verified voice 0 (${id}, ${speed}x): ${result.duration.toFixed(3)} s, audible PCM, UTF-8 input intact. Backend: ${execution.backend}${execution.fallbackFrom ? ' (CoreML failed; CPU fallback succeeded, GPU inference was not verified)' : execution.backend === 'coreml' ? ' (CoreML may execute unsupported operators on CPU)' : ''}.`);
   }
   if (new Set(results.slice(0, 3).map(result => result.sha256)).size !== 3) throw new Error('Different speech texts produced identical audio.');
   if (!(results[3].duration > results[0].duration && results[0].duration > results[4].duration)) throw new Error('Speech rate did not change the generated duration in the expected direction.');
+  await writeFile(join(directory, 'proof.json'), JSON.stringify({ schema: 1, status: 'passed', platform: process.platform, arch: process.arch, samples: results }, null, 2) + '\n');
   console.log(`Offline speech verified on ${process.platform}/${process.arch}.`);
 }
 async function sources() {
@@ -282,9 +334,11 @@ async function sources() {
   console.log(`Speech corresponding source: ${destination}\nSHA256 ${await sha256(destination)}`);
 }
 
-const command = process.argv[2] ?? 'prepare';
-if (command === 'prepare') await prepare();
-else if (command === 'verify') await verify();
-else if (command === 'sources') await sources();
-else if (command === 'licenses') await verifyLicenses();
-else throw new Error(`Unknown speech runtime command: ${command}`);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const command = process.argv[2] ?? 'prepare';
+  if (command === 'prepare') await prepare();
+  else if (command === 'verify') await verify();
+  else if (command === 'sources') await sources();
+  else if (command === 'licenses') await verifyLicenses();
+  else throw new Error(`Unknown speech runtime command: ${command}`);
+}

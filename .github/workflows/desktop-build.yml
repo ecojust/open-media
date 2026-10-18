@@ -53,6 +53,12 @@ jobs:
           key: speech-runtime-v1-linux-x64-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'licenses/speech-runtime/manifest.json') }}
       - run: npm ci
       - run: npm test
+      - name: Verify offline voice selection and inference devices
+        run: |
+          python3 tests/speech-voice-adapter.test.py
+          python3 scripts/test-speech-device-runtime.py
+          python3 tests/speech-device-native.test.py
+          python3 -B tests/verify-installed-speech.test.py
       - run: npm run build
       - name: Verify native operations
         id: native-checks
@@ -95,6 +101,8 @@ jobs:
             test-results/browser/
             .media-runtime/logs/native-checks.log
             .speech-runtime/logs/
+            .speech-runtime/verification/**/*.log
+            .speech-runtime/verification/**/proof.json
           if-no-files-found: warn
           retention-days: 14
   runtime-source:
@@ -157,7 +165,7 @@ jobs:
             target: x86_64-apple-darwin
             bundles: app,dmg
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 100
+    timeout-minutes: 210
     defaults:
       run:
         shell: bash
@@ -170,6 +178,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify voice adapter and device fallback on the desktop platform
+        run: |
+          python tests/speech-voice-adapter.test.py
+          python scripts/test-speech-device-runtime.py
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
@@ -350,6 +365,47 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
           node scripts/speech-runtime.mjs verify --directory "$destination/speech" --packaged 2>&1 | Tee-Object .speech-runtime/logs/package.log
           if ($LASTEXITCODE -ne 0) { throw 'Packaged speech verification failed.' }
+      - name: Verify every installed speech voice
+        id: all-speech-voices
+        shell: python
+        env:
+          MEDIA_PLATFORM: ${{ matrix.platform }}
+          MEDIA_TARGET: ${{ matrix.target }}
+          PYTHONUTF8: '1'
+          PYTHONUNBUFFERED: '1'
+          OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ runner.os == 'Windows' && '.exe' || '' }}
+          OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          target = os.environ['MEDIA_TARGET']
+          if sys.platform == 'darwin':
+              application = workspace / 'src-tauri/target' / target / 'release/bundle/macos/Open Media.app/Contents'
+              speech = application / 'Resources/speech'
+              executables = application / 'Helpers/speech'
+          else:
+              speech = Path(os.environ['RUNNER_TEMP']) / 'Open Media 语音验证/speech'
+              executables = speech
+          subprocess.run([
+              sys.executable, 'scripts/verify-installed-speech.py',
+              '--platform', os.environ['MEDIA_PLATFORM'], '--target', target,
+              '--speech-directory', str(speech), '--speech-executable-directory', str(executables),
+              '--work', str(Path(os.environ['RUNNER_TEMP']) / '完整配音 验证'),
+              '--output', str(workspace / '.speech-runtime/installed-voice-validation'),
+          ], check=True, cwd=workspace)
+      - name: Preserve actual voice results and inference device evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-media-speech-validation-${{ matrix.platform }}-${{ github.run_id }}
+          path: |
+            .speech-runtime/installed-voice-validation/
+            .speech-runtime/logs/
+            .speech-runtime/verification/**/*.log
+            .speech-runtime/verification/**/proof.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Collect installers and provenance
         env:
           MEDIA_TARGET: ${{ matrix.target }}

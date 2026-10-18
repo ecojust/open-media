@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
-import { compactVoiceCatalog, voiceCategory, voiceSearchText, voiceStyle, voiceTypeLabel } from '../src/core/voice-catalog.ts'
+import { compactVoiceCatalog, voiceActionName, voiceCategory, voiceComputeLabel, voiceModelName, voiceRecommendedMemoryGb, voiceSearchText, voiceStyle, voiceTypeLabel } from '../src/core/voice-catalog.ts'
 import { VOICE_PROFILES, VOICE_PROFILE_SOURCE } from '../src/core/voice-profiles.ts'
 import { VOICE_GROUPS } from '../src/core/voice-groups.ts'
 
@@ -74,5 +74,65 @@ test('three optional Chinese models keep distinct cards, voice IDs and portraits
     assert.equal(voiceTypeLabel(voice), '中文 · 女声')
     assert.ok(voiceSearchText(voice).includes(voice.name.toLowerCase()))
     assert.equal(voiceStyle({ ...voice, gender: 'male' }).id, 'natural', 'do not assign female profiles to a different voice')
+  }
+})
+
+
+test('model labels replace legacy voice names while retaining searchable aliases', () => {
+  const cases = [
+    [voices[0], 'Matcha 中英', 4],
+    [{ id: 'zipvoice_zh_female', name: '自然女声', language: 'zh-CN', gender: 'female' }, 'ZipVoice Distill FP32', 8],
+    [{ id: 'f5_zh_female', name: '自然女声', language: 'zh-CN', gender: 'female' }, 'F5-TTS v1 Base FP32', 8],
+    [{ id: 'qwen3_serena', name: 'Qwen3-TTS 1.7B BF16 · Serena', language: 'zh-CN', gender: 'female' }, 'Qwen3-TTS 1.7B BF16', 16],
+    [{ id: 'zipvoice_zh_male', name: 'ZipVoice 中文男声', language: 'zh-CN', gender: 'male' }, 'ZipVoice Distill FP32', 8],
+    [{ id: 'f5_zh_male', name: 'F5 中文男声', language: 'zh-CN', gender: 'male' }, 'F5-TTS v1 Base FP32', 8],
+    [{ id: 'qwen3_uncle_fu', name: 'Qwen3-TTS 1.7B BF16 · Uncle_Fu', language: 'zh-CN', gender: 'male' }, 'Qwen3-TTS 1.7B BF16', 16],
+  ]
+  for (const [voice, name, memoryGb] of cases) {
+    assert.equal(voiceModelName(voice), name)
+    assert.ok(voiceSearchText(voice).includes(name.toLowerCase()))
+    assert.ok(voiceSearchText(voice).includes(voice.name.toLowerCase()))
+    assert.equal(voiceRecommendedMemoryGb(voice), memoryGb)
+  }
+  const custom = { id: 'custom', name: '自定义模型' }
+  assert.equal(voiceModelName(custom), '自定义模型')
+  assert.equal(voiceRecommendedMemoryGb(custom), undefined, 'unknown engines have no invented hardware recommendation')
+  assert.equal(voiceComputeLabel(custom), undefined, 'unknown engines have no invented device support')
+})
+
+test('运行设备说明区分CoreML与GPU优先策略，均说明CPU回退且不承诺固定显存', () => {
+  for (const id of ['matcha_zh_en_female', 'zipvoice_zh_female', 'zipvoice_zh_male']) {
+    assert.equal(voiceComputeLabel({ id }), '优先 CoreML · CPU 自动回退')
+  }
+  for (const id of ['f5_zh_female', 'f5_zh_male', 'qwen3_serena', 'qwen3_uncle_fu']) {
+    assert.equal(voiceComputeLabel({ id }), '优先可用 GPU · CPU 自动回退')
+  }
+})
+
+test('男声保留独立音色和男性头像，不与同模型女声合并', () => {
+  const pairs = [
+    ['zipvoice_zh_female', 'zipvoice_zh_male', 'zipvoice-distill-fp32', 0],
+    ['f5_zh_female', 'f5_zh_male', 'f5-v1-base-fp32', 2],
+    ['qwen3_serena', 'qwen3_uncle_fu', 'qwen3-tts-1.7b-serena', 1],
+  ]
+  const optional = pairs.flatMap(([female, male, modelId]) => [
+    { id: female, name: female, language: 'zh-CN', gender: 'female', modelId },
+    { id: male, name: male, language: 'zh-CN', gender: 'male', modelId },
+  ])
+  const catalog = [...voices, ...optional]
+  assert.equal(catalog.length, 7)
+  assert.deepEqual(compactVoiceCatalog(catalog, 'qwen3_uncle_fu'), catalog)
+  assert.equal(new Set(catalog.map(voice => voiceStyle(voice).portrait)).size, 7)
+  for (const [femaleId, maleId, , portrait] of pairs) {
+    const female = optional.find(voice => voice.id === femaleId), male = optional.find(voice => voice.id === maleId)
+    assert.equal(voiceCategory(male), 'zh-male')
+    assert.equal(voiceTypeLabel(male), '中文 · 男声')
+    assert.equal(voiceStyle(male).portrait, portrait)
+    assert.ok(voiceSearchText(male).includes('男声'))
+    assert.equal(voiceModelName(male), voiceModelName(female))
+    assert.equal(voiceActionName(female), voiceModelName(female), '女声原操作名称保持兼容')
+    assert.equal(voiceActionName(male), `${voiceModelName(male)} · 男声`)
+    assert.notEqual(voiceActionName(male), voiceActionName(female))
+    assert.ok(voiceStyle({ ...male, gender: 'female' }).portrait >= 4, '不可把男声头像分配给其他性别')
   }
 })

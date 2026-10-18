@@ -41,12 +41,30 @@ static char *read_text(const char *path) {
   return text;
 }
 
+static int valid_audio(const SherpaOnnxGeneratedAudio *audio, int sample_rate) {
+  if (!audio || !audio->samples || audio->n <= 0 || audio->sample_rate != sample_rate)
+    return 0;
+  double squared_sum = 0.0;
+  for (int32_t i = 0; i < audio->n; ++i) {
+    double sample = audio->samples[i];
+    if (!isfinite(sample)) return 0;
+    squared_sum += sample * sample;
+  }
+  /* Validate before PCM conversion can hide invalid or silent GPU output. */
+  return squared_sum / audio->n >= 1e-10;
+}
+
 int main(int argc, char **argv) {
   SherpaOnnxOfflineTtsConfig cfg = {0};
   SherpaOnnxGenerationConfig generation = {0};
   const char *matcha_model = option(argc, argv, "--matcha-acoustic-model");
   const char *kokoro_model = option(argc, argv, "--kokoro-model");
   const char *zipvoice_encoder = option(argc, argv, "--zipvoice-encoder");
+  const char *requested_provider = option(argc, argv, "--provider");
+  if (requested_provider && strcmp(requested_provider, "auto") &&
+      strcmp(requested_provider, "cpu") && strcmp(requested_provider, "coreml")) {
+    fprintf(stderr, "Unsupported speech execution provider.\n"); return 2;
+  }
   if ((!!matcha_model + !!kokoro_model + !!zipvoice_encoder) != 1) {
     fprintf(stderr, "Select exactly one speech model.\n"); return 2;
   }
@@ -75,7 +93,18 @@ int main(int argc, char **argv) {
   cfg.model.zipvoice.target_rms = 0.1f;
   cfg.model.zipvoice.guidance_scale = 1.0f;
   cfg.model.num_threads = zipvoice_encoder ? 1 : 2;
+  /* The pinned Apple runtime includes CoreML. Other bundled native runtimes
+   * are CPU builds; selecting a GPU by name cannot add a missing provider.
+   * CoreML may keep unsupported operators on CPU. The parent process retries
+   * once with --provider=cpu if native provider initialization or execution
+   * fails, because exceptions in the external C API can terminate this helper.
+   */
+#if defined(__APPLE__)
+  cfg.model.provider = requested_provider && !strcmp(requested_provider, "cpu")
+      ? "cpu" : "coreml";
+#else
   cfg.model.provider = "cpu";
+#endif
   cfg.max_num_sentences = 1;
   /* Keep the synthesis parameters used by the evaluated single-voice model. */
   cfg.silence_scale = matcha_model ? 0.2f : 1.0f;
@@ -128,6 +157,13 @@ int main(int argc, char **argv) {
     generation.reference_audio_len = reference_wave->num_samples;
     generation.reference_sample_rate = reference_wave->sample_rate;
   }
+#if !defined(__APPLE__)
+  if (requested_provider && !strcmp(requested_provider, "coreml")) {
+    puts("stage=fallback,from=coreml,device=cpu,reason=unsupported_platform");
+  }
+#endif
+  printf("stage=device,device=%s,engine=%s\n", cfg.model.provider,
+      zipvoice_encoder ? "zipvoice" : matcha_model ? "matcha" : "kokoro");
   puts("stage=loading"); fflush(stdout);
   const SherpaOnnxOfflineTts *tts = SherpaOnnxCreateOfflineTts(&cfg);
   if (!tts) {
@@ -149,8 +185,12 @@ int main(int argc, char **argv) {
   free(text);
   free(reference_text);
   if (reference_wave) SherpaOnnxFreeWave(reference_wave);
-  int ok = audio && audio->n > 0 && audio->sample_rate == expected_sample_rate &&
-      SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, output);
+  int ok = valid_audio(audio, expected_sample_rate);
+  if (ok) {
+    /* A write failure must not trigger an expensive CPU synthesis retry. */
+    puts("stage=writing"); fflush(stdout);
+    ok = SherpaOnnxWriteWave(audio->samples, audio->n, audio->sample_rate, output);
+  }
   if (audio) SherpaOnnxDestroyOfflineTtsGeneratedAudio(audio);
   SherpaOnnxDestroyOfflineTts(tts);
   if (!ok) { fprintf(stderr, "Speech generation produced no valid audio.\n"); return 4; }

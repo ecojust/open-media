@@ -75,8 +75,16 @@ def build_models():
     files.append(local_file('qwen3-runner-config.json', 'runner-config.json'))
     qwen_model = package('qwen3-tts-1.7b-serena', 'Qwen3-TTS 1.7B BF16 · Serena', 'qwen3_serena', files,
                         dict(kind='qwen3', config='runner-config.json', sampleRate=24000),
-                        'Apache-2.0', '中文 Serena；CPU 离线合成，建议至少 16 GB 内存。', 'python-cpu-v1')
+                        'Apache-2.0', '中文男声与女声；本地离线合成，建议至少 16 GB 内存。', 'python-cpu-v1')
     models = [zip_model, f5_model, qwen_model]
+    # Both voices use the same verified weights and runtime download. Male
+    # reference audio and speaker selection belong to the application adapter.
+    for model, voice_id, name in [
+        (zip_model, 'zipvoice_zh_male', 'ZipVoice Distill FP32 · 男声'),
+        (f5_model, 'f5_zh_male', 'F5-TTS v1 Base FP32 · 男声'),
+        (qwen_model, 'qwen3_uncle_fu', 'Qwen3-TTS 1.7B BF16 · 男声'),
+    ]:
+        model['voices'].append(dict(id=voice_id, name=name, language='zh-CN', gender='male', speakerId=0))
     audit = json.loads((ROOT / 'scripts/optional-speech-mirror-audit.json').read_text())
     for model in models:
         for file in model['files']:

@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "cab0d1c27eb02cf46eebe42d30966f0591fbd097379487c8d2a573229210a10c",
-      "reviewMethod": "Application version updated to 0.1.13 with editor and voice download regression coverage. Dependency versions and original license texts are unchanged; type checking, unit tests and the production frontend build passed."
+      "sha256": "8779ef8c8589568e762ed07d6236e05de27fae5a4d55d2ac6bafc08fc8edbe9f",
+      "reviewMethod": "Application version updated to 0.1.14; browser regression coverage includes speech generation progress. Dependency versions, locked dependency records and original license texts are unchanged. Only the application metadata and these input hashes were refreshed."
     },
     {
       "path": "package-lock.json",
-      "sha256": "5291ec078030f3555f9774f953c550e70a2ef41bacfd8c4976c58712f2e7bba1",
-      "reviewMethod": "Application version updated to 0.1.13 with editor and voice download regression coverage. Dependency versions and original license texts are unchanged; type checking, unit tests and the production frontend build passed."
+      "sha256": "6b66eb3797dd5c93128b6ae69117437634619a1b398ea16e509bc87295ac916d",
+      "reviewMethod": "Application version updated to 0.1.14; browser regression coverage includes speech generation progress. Dependency versions, locked dependency records and original license texts are unchanged. Only the application metadata and these input hashes were refreshed."
     },
     {
       "path": "vite.config.ts",

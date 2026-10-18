@@ -1147,6 +1147,11 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
           <div v-if="selected.track.kind === 'text'" class="clip-speech-actions">
             <button class="selected-speech" :disabled="editingBusy || !selectedSpeechPlan.sources.length" :title="selectedSpeechPlan.skipped[0]?.reason" :aria-busy="selectedSpeechBusy" data-testid="speech-generate-selected" @click="generateTextSpeech(selected.clip.id)"><template v-if="selectedSpeechBusy"><span class="clip-speech-spinner" />{{ speechPanel?.generationLabel || '正在生成…' }}</template><template v-else><Icon name="audio" :size="13" />文字转语音</template></button>
             <button :disabled="editingBusy || !!selectedSpeechAlignmentError" :title="selectedSpeechAlignmentError || '按关联语音的起点和时长对齐文字'" data-testid="speech-align-selected" @click="alignTextSpeech(selected.clip.id)"><Icon name="clock" :size="13" />对齐语音</button>
+            <div v-if="selectedSpeechBusy && speechPanel?.generationProgress" class="clip-speech-progress" data-testid="clip-speech-progress">
+              <span role="status">{{ speechPanel.progressDescription }}</span>
+              <progress :value="speechPanel.progressPercent" max="100" aria-label="当前字幕转语音进度" :aria-valuetext="speechPanel.progressPercent === undefined ? speechPanel.progressDescription : `${speechPanel.progressPercent}%，${speechPanel.progressDescription}`" />
+              <div class="clip-speech-progress-meta"><span role="timer" aria-live="off">已用时 {{ speechPanel.elapsedLabel }}</span><span v-if="speechPanel.progressPercent !== undefined">{{ speechPanel.progressPercent }}%</span></div>
+            </div>
             <button v-if="selectedSpeechBusy" class="clip-speech-cancel" :disabled="speechPanel?.cancelling || speechPanel?.finalizing" @click="speechPanel?.cancel()"><Icon name="close" :size="13" />取消生成</button>
             <p v-if="clipSpeechError" class="clip-speech-error" role="alert">{{ clipSpeechError }}</p><p v-else-if="clipSpeechNotice" class="clip-speech-notice" role="status">{{ clipSpeechNotice }}</p>
           </div>
@@ -1255,6 +1260,8 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek })
 </template>
 
 <style scoped>
+.clip-speech-progress{grid-column:1/-1;display:grid;gap:3px;color:var(--ed-muted);font-size:10px;line-height:1.6;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.clip-speech-progress-meta{display:flex;justify-content:space-between;gap:8px}.clip-speech-progress progress{display:block;appearance:none;-webkit-appearance:none;width:100%;height:6px;margin:3px 0;border:0;border-radius:99px;overflow:hidden;background:var(--ed-border);accent-color:var(--ed-accent)}.clip-speech-progress progress::-webkit-progress-bar{background:var(--ed-border);border-radius:99px}.clip-speech-progress progress::-webkit-progress-value{background:var(--ed-accent);border-radius:99px}.clip-speech-progress progress::-moz-progress-bar{background:var(--ed-accent);border-radius:99px}.clip-speech-progress progress:indeterminate{background:linear-gradient(90deg,var(--ed-border) 0 30%,var(--ed-accent) 50%,var(--ed-border) 70% 100%);background-size:200% 100%;animation:clip-speech-progress-pulse 1.5s ease-in-out infinite}.clip-speech-progress progress:indeterminate::-webkit-progress-bar{background:transparent}@keyframes clip-speech-progress-pulse{to{background-position:-200% 0}}@media(prefers-reduced-motion:reduce){.clip-speech-progress progress:indeterminate{animation:none}}
 .clip-detail-row{display:flex;align-items:center;gap:6px;min-width:0;width:100%;margin-top:auto}
 .clip-detail-row .clip-detail{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clip-generated-time{flex:0 1 auto;min-width:0;margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:8px/10px ui-monospace,monospace;opacity:.8}
