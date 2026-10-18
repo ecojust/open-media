@@ -1971,8 +1971,10 @@ if [ @BEHAVIOR@ = abort ]; then kill -ABRT "$$"; fi
 exit 1
 "#;
         #[cfg(windows)]
+        // SHIFT also changes %0, so capture the fixture path before parsing arguments.
         let script = r#"@echo off
 setlocal
+set "fixture_base=%~dpn0"
 set "mode=auto"
 set "output="
 :arguments
@@ -1993,12 +1995,12 @@ shift
 shift
 goto arguments
 :runner
->"%~dpn0.runner" echo %~2
+>"%fixture_base%.runner" echo %~2
 shift
 shift
 goto arguments
 :run
-echo %mode%>>"%~dpn0.calls"
+echo %mode%>>"%fixture_base%.calls"
 if "%mode%"=="cpu" goto cpu
 if "@BEHAVIOR@"=="unknown-device" (
   echo stage=loading
@@ -2019,14 +2021,14 @@ if "@BEHAVIOR@"=="writing" (
 if "@BEHAVIOR@"=="cancel" goto cancelled
 exit /b 1
 :cancelled
-if not exist "%~dpn0.cancel" goto cancelled
+if not exist "%fixture_base%.cancel" goto cancelled
 exit /b 1
 :cpu
 echo stage=device,device=cpu
 echo stage=generating,chunks=1
 if "@BEHAVIOR@"=="cpu-fails" exit /b 6
 echo stage=writing
-copy /b "%~dpn0.expected.wav" "%output%" >nul
+copy /b "%fixture_base%.expected.wav" "%output%" >nul
 if errorlevel 1 exit /b 4
 echo stage=complete
 exit /b 0

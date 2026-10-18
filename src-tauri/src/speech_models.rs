@@ -2705,7 +2705,10 @@ mod tests {
         let changed = installed.join("model.onnx");
         let modified = fs::metadata(&changed).unwrap().modified().unwrap();
         fs::write(&changed, vec![b'x'; bytes.len()]).unwrap();
-        File::open(&changed)
+        // Windows requires a write-capable handle to restore file timestamps.
+        OpenOptions::new()
+            .write(true)
+            .open(&changed)
             .unwrap()
             .set_modified(modified)
             .unwrap();
