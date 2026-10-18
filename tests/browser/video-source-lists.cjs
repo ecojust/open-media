@@ -111,6 +111,44 @@ async function main() {
       await keyboardRow.focus(); await page.keyboard.press('Shift+F10')
       await expect(menu).toBeVisible(); await page.keyboard.press('Escape')
       await expect(keyboardRow).toBeFocused()
+
+      // Close after insertion but before open() resumes from nextTick: stale focus must not win.
+      await page.evaluate(() => {
+        window.menuEscapeDuringOpen = 0
+        const observer = new MutationObserver(() => {
+          if (!document.querySelector('[role="menu"][aria-label="视频素材操作"]')) return
+          observer.disconnect()
+          window.menuEscapeDuringOpen++
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+        })
+        observer.observe(document.querySelector('#app'), { childList: true, subtree: true })
+      })
+      await page.keyboard.press('Shift+F10')
+      await expect.poll(() => page.evaluate(() => window.menuEscapeDuringOpen)).toBe(1)
+      await expect(menu).toHaveCount(0)
+      await expect(keyboardRow).toBeFocused()
+
+      // A delayed scroll from focusing a source must not strand focus on a removed menu.
+      await page.keyboard.press('Shift+F10'); await expect(menu).toBeVisible()
+      await expect.poll(() => menu.evaluate(element => element.contains(document.activeElement))).toBe(true)
+      await page.evaluate(() => window.dispatchEvent(new Event('scroll')))
+      await expect(menu).toHaveCount(0)
+      await expect(keyboardRow).toBeFocused()
+
+      // Clicking another focusable control still gives that control focus, never the old source.
+      await page.evaluate(() => {
+        const button = document.createElement('button')
+        button.dataset.testid = 'menu-outside-control'
+        button.textContent = '外部操作'
+        button.style.cssText = 'position:fixed;right:8px;bottom:8px;z-index:2000'
+        document.body.append(button)
+      })
+      await page.keyboard.press('Shift+F10'); await expect(menu).toBeVisible()
+      const outsideControl = page.getByTestId('menu-outside-control')
+      await outsideControl.click(); await expect(menu).toHaveCount(0)
+      await expect(outsideControl).toBeFocused()
+      await outsideControl.evaluate(element => element.remove())
+
       await keyboardRow.focus(); await page.keyboard.press('Shift+F10')
       await page.evaluate(() => window.listHarness.show(false))
       await expect(menu).toHaveCount(0)

@@ -13,16 +13,21 @@ const position = ref({ x: 0, y: 0 })
 const enabled = computed(() => props.native && Boolean(selected.value?.nativePath))
 const unavailable = computed(() => props.native ? '此素材没有可用的本地位置' : '仅桌面端可打开所在文件夹')
 let anchor: HTMLElement | undefined
+let menuGeneration = 0
 
 function close(restoreFocus = false): void {
+  ++menuGeneration
   selected.value = undefined
   document.removeEventListener('pointerdown', outside, true)
   document.removeEventListener('keydown', keyboard, true)
-  window.removeEventListener('resize', dismiss)
-  window.removeEventListener('scroll', dismiss, true)
+  window.removeEventListener('resize', dismissForViewportChange)
+  window.removeEventListener('scroll', dismissForViewportChange, true)
   if (restoreFocus && anchor?.isConnected) anchor.focus({ preventScroll: true })
 }
 function dismiss(): void { close() }
+function dismissForViewportChange(): void {
+  close(Boolean(menu.value?.contains(document.activeElement)))
+}
 function outside(event: PointerEvent): void { if (!menu.value?.contains(event.target as Node)) close() }
 function keyboard(event: KeyboardEvent): void {
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true) }
@@ -32,6 +37,7 @@ async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset): Promi
   event.preventDefault()
   event.stopPropagation()
   close()
+  const generation = menuGeneration
   anchor = event.currentTarget as HTMLElement
   portal.value = anchor.closest<HTMLElement>('.app-shell') ?? 'body'
   const rect = anchor.getBoundingClientRect()
@@ -40,10 +46,10 @@ async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset): Promi
   selected.value = asset
   document.addEventListener('pointerdown', outside, true)
   document.addEventListener('keydown', keyboard, true)
-  window.addEventListener('resize', dismiss)
-  window.addEventListener('scroll', dismiss, true)
+  window.addEventListener('resize', dismissForViewportChange)
+  window.addEventListener('scroll', dismissForViewportChange, true)
   await nextTick()
-  if (!menu.value) return
+  if (generation !== menuGeneration || !selected.value || !menu.value?.isConnected) return
   const bounds = menu.value.getBoundingClientRect()
   position.value = { x: Math.max(8, Math.min(position.value.x, window.innerWidth - bounds.width - 8)), y: Math.max(8, Math.min(position.value.y, window.innerHeight - bounds.height - 8)) }
   const focusTarget = menu.value.querySelector<HTMLElement>('button:not(:disabled)') ?? menu.value
