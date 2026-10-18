@@ -1,5 +1,5 @@
 use super::*;
-use std::io::{Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 
 fn fixture() -> (tempfile::TempDir, McpManager) {
@@ -23,15 +23,119 @@ fn request(status: &McpStatus, token: Option<&str>, body: &str, extra: &str) -> 
     let auth = token
         .map(|t| format!("Authorization: Bearer {t}\r\n"))
         .unwrap_or_default();
-    write!(stream, "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n{body}", status.port, body.len()).unwrap();
-    let mut output = String::new();
-    stream.read_to_string(&mut output).unwrap();
-    let (headers, body) = output.split_once("\r\n\r\n").unwrap();
-    let status = headers.split_whitespace().nth(1).unwrap().parse().unwrap();
-    (status, body.to_owned())
+    let message = format!("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n{body}", status.port, body.len());
+    stream.write_all(message.as_bytes()).unwrap();
+    read_response(stream).unwrap()
+}
+
+/// These fixed-size responses end at Content-Length, not at a TCP EOF. An early
+/// rejection can close a connection with unread request bytes; some systems then
+/// reset TCP after delivering the response. Missing body bytes must still fail.
+fn read_response(reader: impl Read) -> io::Result<(u16, String)> {
+    let invalid = |message| io::Error::new(io::ErrorKind::InvalidData, message);
+    let mut reader = BufReader::new(reader);
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+    if !line.ends_with("\r\n") {
+        return Err(invalid("incomplete HTTP status line"));
+    }
+    let mut fields = line.split_whitespace();
+    if !matches!(fields.next(), Some("HTTP/1.1" | "HTTP/1.0")) {
+        return Err(invalid("invalid HTTP response version"));
+    }
+    let status = fields
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|value| (100..=599).contains(value))
+        .ok_or_else(|| invalid("invalid HTTP response status"))?;
+    let mut length = None;
+    let mut header_bytes = line.len();
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 || !line.ends_with("\r\n") {
+            return Err(invalid("incomplete HTTP response headers"));
+        }
+        header_bytes += line.len();
+        if header_bytes > 32 * 1024 {
+            return Err(invalid("HTTP response headers exceed the limit"));
+        }
+        if line == "\r\n" {
+            break;
+        }
+        let (name, value) = line
+            .trim_end_matches("\r\n")
+            .split_once(':')
+            .ok_or_else(|| invalid("invalid HTTP response header"))?;
+        if name.eq_ignore_ascii_case("transfer-encoding") {
+            return Err(invalid("expected a fixed-size HTTP response"));
+        }
+        if name.eq_ignore_ascii_case("content-length") {
+            if length.is_some() {
+                return Err(invalid("duplicate Content-Length"));
+            }
+            let value = value.trim();
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(invalid("invalid Content-Length"));
+            }
+            length = Some(
+                value
+                    .parse::<usize>()
+                    .map_err(|_| invalid("invalid Content-Length"))?,
+            );
+        }
+    }
+    let length = length.ok_or_else(|| invalid("missing Content-Length"))?;
+    if length > MAX_BODY {
+        return Err(invalid("HTTP response body exceeds the limit"));
+    }
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body)?;
+    Ok((
+        status,
+        String::from_utf8(body).map_err(|_| invalid("invalid UTF-8 HTTP response"))?,
+    ))
 }
 fn rpc(id: u64, method: &str, params: Value) -> String {
     json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}).to_string()
+}
+
+#[test]
+fn http_client_accepts_complete_frames_but_rejects_truncated_responses() {
+    struct ResetAfterBytes(io::Cursor<Vec<u8>>);
+    impl Read for ResetAfterBytes {
+        fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+            if self.0.position() == self.0.get_ref().len() as u64 {
+                return Err(io::ErrorKind::ConnectionReset.into());
+            }
+            self.0.read(bytes)
+        }
+    }
+    let reply = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 2\r\n\r\n{}".to_vec();
+    assert_eq!(
+        read_response(ResetAfterBytes(io::Cursor::new(reply.clone()))).unwrap(),
+        (403, "{}".into())
+    );
+    let truncated = reply[..reply.len() - 1].to_vec();
+    assert_eq!(
+        read_response(ResetAfterBytes(io::Cursor::new(truncated.clone())))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::ConnectionReset
+    );
+    assert_eq!(
+        read_response(io::Cursor::new(truncated))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::UnexpectedEof
+    );
+    for invalid in [
+        "HTTP/1.1 200 OK\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n",
+    ] {
+        assert!(read_response(io::Cursor::new(invalid)).is_err());
+    }
 }
 
 #[test]
@@ -216,7 +320,8 @@ fn stop_cancels_queued_requests_and_service_can_restart() {
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();
-        write!(stream, "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", status.port, body.len()).unwrap();
+        let message = format!("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", status.port, body.len());
+        stream.write_all(message.as_bytes()).unwrap();
         let mut response = Vec::new();
         if let Err(error) = stream.read_to_end(&mut response) {
             // Shutdown can close an in-flight response instead of delivering an RPC error.
@@ -256,10 +361,11 @@ fn malformed_batched_and_oversize_requests_never_reach_editor() {
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
         .unwrap();
-    write!(stream, "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", status.port, MAX_BODY + 1).unwrap();
-    let mut rejected = String::new();
-    stream.read_to_string(&mut rejected).unwrap();
-    assert!(rejected.starts_with("HTTP/1.1 413"));
+    let message = format!("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", status.port, MAX_BODY + 1);
+    stream.write_all(message.as_bytes()).unwrap();
+    let (rejected, body) = read_response(stream).unwrap();
+    assert_eq!(rejected, 413);
+    assert!(serde_json::from_str::<Value>(&body).unwrap()["error"].is_string());
     let (_, body) = request(
         &status,
         Some(&token),
