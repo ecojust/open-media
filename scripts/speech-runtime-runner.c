@@ -63,6 +63,41 @@ static const char *select_provider(const char *requested) {
   return "cpu";
 }
 
+static int test_cuda_provider_load(void) {
+#if defined(OPEN_MEDIA_ORT_PROVIDER_QUERY)
+  const OrtApi *api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
+  OrtEnv *env = NULL;
+  OrtSessionOptions *session = NULL;
+  OrtCUDAProviderOptionsV2 *cuda = NULL;
+  if (!api || !has_provider("CUDAExecutionProvider")) {
+    fprintf(stderr, "CUDA provider is absent from this runtime.\n");
+    return 3;
+  }
+  /* The official loader installs ProviderHost before loading provider DLLs.
+   * Direct LoadLibrary bypasses that required initialization and is invalid.
+   * Registering the factory checks loading, not GPU execution or availability. */
+  OrtStatus *status = api->CreateEnv(ORT_LOGGING_LEVEL_WARNING, "speech-provider-check", &env);
+  if (!status) status = api->CreateSessionOptions(&session);
+  if (!status) status = api->CreateCUDAProviderOptions(&cuda);
+  if (!status) status = api->SessionOptionsAppendExecutionProvider_CUDA_V2(session, cuda);
+  int failed = status != NULL;
+  if (status) {
+    fprintf(stderr, "CUDA provider initialization failed: %s\n", api->GetErrorMessage(status));
+    api->ReleaseStatus(status);
+  }
+  if (session) api->ReleaseSessionOptions(session);
+  if (cuda) api->ReleaseCUDAProviderOptions(cuda);
+  if (env) api->ReleaseEnv(env);
+  if (failed) return 3;
+  printf("{\"provider\":\"cuda\",\"providerLoadVerified\":true,\"gpuInferenceVerified\":false,"
+         "\"selfTest\":\"official-provider-registration\"}\n");
+  return 0;
+#else
+  fprintf(stderr, "Provider registration checks require the optional GPU runtime.\n");
+  return 3;
+#endif
+}
+
 static const char *option(int argc, char **argv, const char *name) {
   size_t n = strlen(name);
   for (int i = 1; i < argc; ++i)
@@ -120,6 +155,7 @@ int main(int argc, char **argv) {
       strcmp(requested_provider, "cuda")) {
     fprintf(stderr, "Unsupported speech execution provider.\n"); return 2;
   }
+  if (has_flag(argc, argv, "--self-test-provider-load")) return test_cuda_provider_load();
   if (has_flag(argc, argv, "--self-test")) {
     const char *provider = select_provider(requested_provider);
     printf("stage=device,device=%s,engine=native\n", provider);

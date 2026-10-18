@@ -1,5 +1,6 @@
 """Native component verification must distinguish CPU recovery from GPU proof."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -55,6 +56,26 @@ class NativeComponentValidationTests(unittest.TestCase):
             with self.assertRaises(subprocess.TimeoutExpired):
                 builder.attempt_voice('gpu-helper', 'cpu-helper', [], self.output, self.root, 16000)
             process.assert_called_once()
+
+    def test_official_provider_registration_requires_complete_non_inference_proof(self):
+        log = self.root / 'provider-load.log'
+        expected = dict(provider='cuda', providerLoadVerified=True, gpuInferenceVerified=False,
+                        selfTest='official-provider-registration')
+        with patch.object(builder, 'run') as run:
+            log.write_text(json.dumps(expected), encoding='utf-8')
+            self.assertEqual(builder.verify_provider_load('gpu-helper', log), expected)
+            run.assert_called_once_with(['gpu-helper', '--self-test-provider-load'], log)
+        for record in [{}, {**expected, 'gpuInferenceVerified': True},
+                       {**expected, 'providerLoadVerified': False}, {**expected, 'provider': 'cpu'}]:
+            with self.subTest(record=record), patch.object(builder, 'run'):
+                log.write_text(json.dumps(record), encoding='utf-8')
+                with self.assertRaisesRegex(ValueError, 'official registration'):
+                    builder.verify_provider_load('gpu-helper', log)
+
+    def test_provider_initialization_failure_is_not_ignored(self):
+        with patch.object(builder, 'run', side_effect=RuntimeError('CUDA DLL initialization failed')):
+            with self.assertRaisesRegex(RuntimeError, 'CUDA DLL initialization failed'):
+                builder.verify_provider_load('gpu-helper', self.root / 'provider-load.log')
 
 
 if __name__ == '__main__':

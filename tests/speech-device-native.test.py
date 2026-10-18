@@ -57,12 +57,23 @@ void SherpaOnnxFreeWave(const SherpaOnnxWave *);
 """
 ORT_HEADER = r"""
 #define ORT_API_VERSION 28
+#define ORT_LOGGING_LEVEL_WARNING 2
 typedef struct { int value; } OrtStatus;
+typedef struct { int value; } OrtEnv;
+typedef struct { int value; } OrtSessionOptions;
+typedef struct { int value; } OrtCUDAProviderOptionsV2;
 typedef struct {
   OrtStatus *(*GetAvailableProviders)(char ***, int *);
   const char *(*GetErrorMessage)(const OrtStatus *);
   void (*ReleaseStatus)(OrtStatus *);
   OrtStatus *(*ReleaseAvailableProviders)(char **, int);
+  OrtStatus *(*CreateEnv)(int, const char *, OrtEnv **);
+  OrtStatus *(*CreateSessionOptions)(OrtSessionOptions **);
+  OrtStatus *(*CreateCUDAProviderOptions)(OrtCUDAProviderOptionsV2 **);
+  OrtStatus *(*SessionOptionsAppendExecutionProvider_CUDA_V2)(OrtSessionOptions *, const OrtCUDAProviderOptionsV2 *);
+  void (*ReleaseSessionOptions)(OrtSessionOptions *);
+  void (*ReleaseCUDAProviderOptions)(OrtCUDAProviderOptionsV2 *);
+  void (*ReleaseEnv)(OrtEnv *);
 } OrtApi;
 typedef struct { const OrtApi *(*GetApi)(int); } OrtApiBase;
 const OrtApiBase *OrtGetApiBase(void);
@@ -128,7 +139,32 @@ static OrtStatus *available(char ***names, int *count) {
 static const char *message(const OrtStatus *value) { (void)value; return "provider query failed"; }
 static void release_status(OrtStatus *value) { (void)value; }
 static OrtStatus *release_providers(char **names, int count) { (void)names; (void)count; return NULL; }
-static const OrtApi api = {available, message, release_status, release_providers};
+static OrtEnv env_value;
+static OrtSessionOptions session_value;
+static OrtCUDAProviderOptionsV2 cuda_value;
+static OrtStatus *create_env(int level, const char *name, OrtEnv **out) {
+  (void)level; (void)name;
+  if (failure("provider-env")) return &error;
+  *out = &env_value; puts("test=env"); return NULL;
+}
+static OrtStatus *create_session(OrtSessionOptions **out) {
+  if (failure("provider-session")) return &error;
+  *out = &session_value; puts("test=session"); return NULL;
+}
+static OrtStatus *create_cuda(OrtCUDAProviderOptionsV2 **out) {
+  if (failure("provider-options")) return &error;
+  *out = &cuda_value; puts("test=cuda-options"); return NULL;
+}
+static OrtStatus *append_cuda(OrtSessionOptions *session, const OrtCUDAProviderOptionsV2 *cuda) {
+  if (session != &session_value || cuda != &cuda_value) exit(78);
+  puts("test=official-registration");
+  return failure("provider-load") ? &error : NULL;
+}
+static void release_session(OrtSessionOptions *value) { (void)value; puts("test=release-session"); }
+static void release_cuda(OrtCUDAProviderOptionsV2 *value) { (void)value; puts("test=release-cuda"); }
+static void release_env(OrtEnv *value) { (void)value; puts("test=release-env"); }
+static const OrtApi api = {available, message, release_status, release_providers,
+  create_env, create_session, create_cuda, append_cuda, release_session, release_cuda, release_env};
 static const OrtApi *get_api(int version) { (void)version; return failure("api-version") ? NULL : &api; }
 static const OrtApiBase base = {get_api};
 const OrtApiBase *OrtGetApiBase(void) { return &base; }
@@ -233,6 +269,36 @@ class NativeSpeechDeviceTests(unittest.TestCase):
         self.assertEqual(report["selfTest"], "runtime-load-and-capabilities")
         self.assertFalse(report["gpuInferenceVerified"])
         self.assertNotIn("test=create", result.stdout)
+
+    def test_provider_load_uses_official_registration_without_claiming_inference(self):
+        result = subprocess.run([self.programs["gpu"], "--self-test-provider-load"],
+                                capture_output=True, text=True, timeout=10,
+                                env={**os.environ, "TEST_NATIVE_CUDA": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout.splitlines()[-1])
+        self.assertTrue(report["providerLoadVerified"])
+        self.assertFalse(report["gpuInferenceVerified"])
+        self.assertEqual(report["selfTest"], "official-provider-registration")
+        self.assertIn("test=official-registration", result.stdout)
+        self.assertIn("test=release-session", result.stdout)
+        self.assertIn("test=release-cuda", result.stdout)
+        self.assertIn("test=release-env", result.stdout)
+        self.assertNotIn("test=create,provider", result.stdout)
+
+    def test_provider_load_errors_remain_fatal_and_release_initialized_objects(self):
+        for failure, releases in [("api-version", []), ("provider-env", []),
+                                  ("provider-session", ["env"]),
+                                  ("provider-options", ["session", "env"]),
+                                  ("provider-load", ["session", "cuda", "env"])]:
+            with self.subTest(failure=failure):
+                result = subprocess.run([self.programs["gpu"], "--self-test-provider-load"],
+                                        capture_output=True, text=True, timeout=10,
+                                        env={**os.environ, "TEST_NATIVE_CUDA": "1", "TEST_NATIVE_FAILURE": failure})
+                self.assertEqual(result.returncode, 3)
+                self.assertNotIn('"providerLoadVerified":true', result.stdout)
+                self.assertNotIn("stage=fallback", result.stdout)
+                self.assertEqual([line.removeprefix("test=release-") for line in result.stdout.splitlines()
+                                  if line.startswith("test=release-")], releases)
 
     def test_invalid_provider_fails_before_loading_a_model(self):
         for provider in ("directml", "coreml:arbitrary.conf", "", "cpu\ninvalid"):

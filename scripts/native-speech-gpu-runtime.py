@@ -96,6 +96,20 @@ def windows_dependencies(root, report):
                                   externalRequirement='Operating system and compatible graphics driver only'))
 
 
+def verify_provider_load(executable, log):
+    # ORT must initialize its shared ProviderHost before loading the CUDA DLL.
+    # Direct ctypes/LoadLibrary calls bypass that contract and fail in DllMain.
+    # Any official registration error is still fatal, even on a CPU-only host.
+    run([executable, '--self-test-provider-load'], log)
+    records = [json.loads(line) for line in log.read_text(encoding='utf-8').splitlines()
+               if line.startswith('{')]
+    expected = dict(provider='cuda', providerLoadVerified=True, gpuInferenceVerified=False,
+                    selfTest='official-provider-registration')
+    if records != [expected]:
+        raise ValueError('The native CUDA provider did not pass official registration')
+    return records[0]
+
+
 def build(args, lock, root):
     if os.name != 'nt':
         raise ValueError('Build the Windows GPU component on Windows')
@@ -174,12 +188,7 @@ def build(args, lock, root):
          f'/MANIFESTINPUT:{SCRIPT / "speech-runtime-runner.manifest"}'], args.output / 'logs/compile.log')
     common.complete_windows_runtime(root, args.output / 'logs/native-crt.json', executable_directory='bin')
     windows_dependencies(root, root / 'licenses/dependency-closure.json')
-    # Windows Python 3.8+ does not implicitly search PATH for ctypes dependencies.
-    load = ('import ctypes,os,sys; d=os.add_dll_directory(sys.argv[1]); '
-            '[ctypes.WinDLL(os.path.join(sys.argv[1],n)) for n in '
-            '["onnxruntime.dll","sherpa-onnx-c-api.dll","onnxruntime_providers_cuda.dll"]]; '
-            'print("Bundled native dependencies loaded")')
-    run([sys.executable, '-I', '-c', load, root / 'bin'], args.output / 'logs/load-libraries.log')
+    provider_load = verify_provider_load(root / lock['executable'], args.output / 'logs/load-libraries.log')
     run([root / lock['executable'], '--self-test'], args.output / 'logs/self-test.log')
     records = [json.loads(line) for line in (args.output / 'logs/self-test.log').read_text().splitlines()
                if line.startswith('{')]
@@ -188,7 +197,8 @@ def build(args, lock, root):
     # GetApi(ORT_API_VERSION) must have succeeded for the CUDA inventory above.
     # The GPU archive filename and the pinned header source both require 1.28.2.
     common.write_json(root / 'licenses/build-provenance.json', dict(provenance(),
-                      ortSourceVersion=headers['version'], providerSelfTest=records[0]))
+                      ortSourceVersion=headers['version'], providerSelfTest=records[0],
+                      providerLoadTest=provider_load))
 
 
 def audio_result(path, sample_rate):
@@ -303,6 +313,7 @@ def package(args, lock, root, proof):
     root.rename(unpacked)
     common.verify_tree(unpacked, metadata)
     run([unpacked / lock['executable'], '--self-test'], args.output / 'logs/archive-self-test.log')
+    verify_provider_load(unpacked / lock['executable'], args.output / 'logs/archive-provider-load.log')
     common.verify_tree(unpacked, metadata)
     shutil.rmtree(unpacked)
     metadata = common.split_archive(archive, metadata, lock['releaseTag'])
