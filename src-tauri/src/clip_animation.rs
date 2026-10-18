@@ -429,7 +429,11 @@ pub(crate) fn audio_timing(
 }
 
 /// Fixed-size inverse affine sampling avoids changing frame dimensions during playback.
+#[cfg(test)]
 pub(crate) fn visual_filter(clip: &Value, cw: u32, ch: u32, fps: f64) -> Result<String> {
+    visual_filter_at(clip, cw, ch, fps, None)
+}
+pub(crate) fn visual_filter_at(clip: &Value, cw: u32, ch: u32, fps: f64, frame_time: Option<f64>) -> Result<String> {
     let frames = keyframes(clip)?;
     let transformed = ["scaleX", "scaleY", "rotation"]
         .iter()
@@ -440,7 +444,8 @@ pub(crate) fn visual_filter(clip: &Value, cw: u32, ch: u32, fps: f64) -> Result<
     }
     let start = number(clip, "start", 0.0, 0.0, 86400.0)?;
     let clock = format!(
-        "T-{start}+{}",
+        "{}-{start}+{}",
+        frame_time.map_or_else(|| "T".to_string(), |time| time.to_string()),
         number(clip, "animationOffset", 0.0, 0.0, 86400.0)?
     );
     let alpha = expression_for(frames.get("opacity"), opacity, &clock);

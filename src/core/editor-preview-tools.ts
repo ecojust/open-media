@@ -57,32 +57,64 @@ export async function artifactFromAsset(asset: MediaAsset, context: EditorToolCo
   context.signal.throwIfAborted()
   return storeToolArtifact(blob.type ? blob : new Blob([blob], { type: asset.mime }), asset.name, context.signal)
 }
+function frameError(stage: string, cause: unknown): Error {
+  if (cause && typeof cause === 'object' && 'name' in cause && cause.name === 'AbortError') return cause as Error
+  return new Error(`时间线取帧（${stage}）失败：${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+}
+async function frameFonts(signal: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => { cleanup(); reject(new DOMException('取帧已取消。', 'AbortError')) }
+    const timer = setTimeout(() => { cleanup(); reject(new Error('字体准备超时，请待字体加载完成后重试。')) }, 10000)
+    const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', abort) }
+    signal.addEventListener('abort', abort, { once: true })
+    document.fonts.ready.then(() => { cleanup(); resolve() }, error => { cleanup(); reject(error) })
+    if (signal.aborted) abort()
+  })
+}
 export async function timelineFrame(context: EditorToolContext, time: number, width = Math.min(1280, context.project.width)) {
-  if (time >= projectDuration(context.project)) throw new Error('取帧时间必须位于时间线内。')
-  const { TimelinePreview } = await import('./preview.ts')
+  if (!Number.isFinite(time) || time < 0 || time >= projectDuration(context.project)) throw new Error('取帧时间必须位于时间线内。')
+  if (!Number.isFinite(width) || width < 16 || width > 1920) throw new Error('取帧宽度需介于 16 和 1920 之间。')
   context.signal.throwIfAborted()
+  try { await frameFonts(context.signal) } catch (cause) { throw frameError('字体准备', cause) }
+  const { isDesktop } = await import('../native.ts')
+  if (isDesktop()) {
+    const { runTimelineFrame } = await import('../native-preview-tools.ts')
+    let stage = '原生合成'
+    let rendered: Awaited<ReturnType<typeof runTimelineFrame>> | undefined, failed = false
+    try {
+      rendered = await runTimelineFrame(context.project, time, { width, signal: context.signal, onProgress: context.onProgress })
+      context.signal.throwIfAborted()
+      stage = 'PNG 字节读取'
+      const blob = base64Blob(rendered.pngBase64, 'image/png')
+      stage = '预览缓存'
+      const artifact = await storeToolArtifact(blob, `时间线-${time.toFixed(3)}秒.png`, context.signal)
+      return { ...artifact, time, width: rendered.asset.width, height: rendered.asset.height, base64: rendered.pngBase64 }
+    } catch (cause) { failed = true; throw frameError(stage, cause) }
+    finally {
+      try { await rendered?.discard() } catch (cause) { if (!failed) throw frameError('临时文件清理', cause) }
+    }
+  }
+  const { TimelinePreview } = await import('./preview.ts')
   const canvas = document.createElement('canvas')
   const scale = Math.min(width / context.project.width, 1920 / context.project.width, 1920 / context.project.height)
   canvas.width = Math.max(1, Math.round(context.project.width * scale)); canvas.height = Math.max(1, Math.round(context.project.height * scale))
-  const errors: string[] = [], preview = new TimelinePreview(canvas, context.project, error => errors.push(error))
+  const errors: string[] = []
+  let preview: InstanceType<typeof TimelinePreview> | undefined, stage = '画面合成'
   try {
+    preview = new TimelinePreview(canvas, context.project, error => errors.push(error))
     context.onProgress({ stage: '正在合成时间线画面' })
-    await new Promise<void>((resolve, reject) => {
-      const abort = () => { cleanup(); reject(new DOMException('取帧已取消。', 'AbortError')) }
-      const timer = setTimeout(() => { cleanup(); reject(new Error('字体准备超时，请待字体加载完成后重试。')) }, 10000)
-      const cleanup = () => { clearTimeout(timer); context.signal.removeEventListener('abort', abort) }
-      context.signal.addEventListener('abort', abort, { once: true })
-      document.fonts.ready.then(() => { cleanup(); resolve() }, error => { cleanup(); reject(error) })
-      if (context.signal.aborted) abort()
-    })
     await preview.prepare(context.signal)
     await preview.seekReady(time, context.signal)
     if (errors.length) throw new Error(errors.join('；'))
     context.signal.throwIfAborted()
+    stage = '画布 PNG 导出'
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('无法生成合成画面。')), 'image/png'))
+    stage = '预览缓存'
     const artifact = await storeToolArtifact(blob, `时间线-${time.toFixed(3)}秒.png`, context.signal)
+    stage = 'PNG 字节读取'
     return { ...artifact, time, width: canvas.width, height: canvas.height, base64: bytesBase64(new Uint8Array(await blob.arrayBuffer())) }
-  } finally { preview.dispose(); canvas.width = canvas.height = 1 }
+  } catch (cause) { throw frameError(stage, cause) }
+  finally { preview?.dispose(); canvas.width = canvas.height = 1 }
 }
 export async function storyboardSheet(frames: { base64: string; requestedTime: number; width: number; height: number }[], context: EditorToolContext) {
   const cellWidth = 320, columns = Math.min(4, frames.length), cellHeight = 210

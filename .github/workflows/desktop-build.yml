@@ -327,6 +327,25 @@ jobs:
         run: npm ci
       - name: Build application frontend
         run: npm run build
+      - name: Verify frame artifacts in the actual macOS WebKit engine
+        id: webkit-frame
+        if: runner.os == 'macOS'
+        env:
+          OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg
+        run: |
+          mkdir -p .media-runtime/logs
+          set -o pipefail
+          node scripts/verify-macos-webkit.mjs 2>&1 | tee .media-runtime/logs/webkit.log
+      - name: Preserve actual WebKit frame verification evidence
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-media-webkit-${{ matrix.platform }}-${{ github.run_id }}
+          path: |
+            .media-runtime/logs/webkit.log
+            .media-runtime/logs/webkit-proof.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify native operations with packaged runtime
         id: native-tests
         env:
@@ -451,6 +470,7 @@ jobs:
           MEDIA_VERIFY_OUTCOME: ${{ steps.media-verify.outcome }}
           NATIVE_TEST_OUTCOME: ${{ steps.native-tests.outcome }}
           NATIVE_PACKAGE_OUTCOME: ${{ steps.native-package.outcome }}
+          WEBKIT_FRAME_OUTCOME: ${{ steps.webkit-frame.outcome }}
           CAPTURE_HELPER_OUTCOME: ${{ steps.capture-helper.outcome }}
           SPEECH_VERIFY_OUTCOME: ${{ steps.speech-verify.outcome }}
           SPEECH_NATIVE_OUTCOME: ${{ steps.speech-native.outcome }}
@@ -462,6 +482,7 @@ jobs:
           if [[ "$MEDIA_VERIFY_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/verify.log; fi
           if [[ "$NATIVE_TEST_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/native.log; fi
           if [[ "$NATIVE_PACKAGE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/package.log; fi
+          if [[ "$WEBKIT_FRAME_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/webkit.log .media-runtime/logs/webkit-proof.json; fi
           if [[ "$CAPTURE_HELPER_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .media-runtime/logs/capture-helper.log; fi
           if [[ "$SPEECH_VERIFY_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .speech-runtime/logs/prepare.log .speech-runtime/logs/verify.log; fi
           if [[ "$SPEECH_NATIVE_OUTCOME" == failure ]]; then node scripts/report-build-failure.mjs .speech-runtime/logs/native.log; fi

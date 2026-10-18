@@ -221,6 +221,7 @@ impl Transitions {
         mut chain: String,
         filters: &mut Vec<String>,
         index: usize,
+        frame_time: Option<f64>,
     ) -> String {
         let Some(halves) = clip["id"].as_str().and_then(|id| self.0.get(id)) else {
             return chain;
@@ -230,21 +231,23 @@ impl Transitions {
         // them on the source frame grid makes slowed or low-rate sources hold
         // stale mask positions across the cut. Preserve fractional clip offsets.
         chain += &format!(",settb=AVTB,setpts=PTS+{clip_start}/TB,fps={fps},settb=AVTB");
+        let clock = frame_time.map_or_else(|| "T".to_string(), |time| time.to_string());
+        let enabled_clock = frame_time.map_or_else(|| "t".to_string(), |time| time.to_string());
         for (part, half) in halves.iter().enumerate() {
             let duration = half.end - half.start;
             let start = clip_start + half.start;
             let end = clip_start + half.end;
             let progress = if half.incoming {
-                format!("clip((T-{start})/{duration},0,1)")
+                format!("clip(({clock}-{start})/{duration},0,1)")
             } else {
-                format!("clip(({end}-T)/{duration},0,1)")
+                format!("clip(({end}-{clock})/{duration},0,1)")
             };
             let v = format!("({})", half.easing.expression(&progress));
             if half.blur > 0.0 {
                 chain+=&format!(",format=gbrap,split[transition_plain{index}_{part}][transition_blur{index}_{part}]");
                 filters.push(chain);
                 filters.push(format!("[transition_blur{index}_{part}]gblur=sigma={}:steps=2[transition_blurred{index}_{part}]",half.blur));
-                filters.push(format!("[transition_plain{index}_{part}][transition_blurred{index}_{part}]blend=all_expr='A*{v}+B*(1-{v})':enable='gte(t,{start})*lt(t,{end})'[transition_mix{index}_{part}]"));
+                filters.push(format!("[transition_plain{index}_{part}][transition_blurred{index}_{part}]blend=all_expr='A*{v}+B*(1-{v})':enable='gte({enabled_clock},{start})*lt({enabled_clock},{end})'[transition_mix{index}_{part}]"));
                 chain = format!("[transition_mix{index}_{part}]null");
             }
             let mut sample_x = "X".to_string();
@@ -314,9 +317,9 @@ impl Transitions {
                 let green = u8::from_str_radix(&color[3..5], 16).unwrap();
                 let blue = u8::from_str_radix(&color[5..7], 16).unwrap();
                 let mix = format!("alpha(X,Y)/255*{v}");
-                chain+=&format!(",format=gbrap,geq=r='r(X,Y)*({mix})+{red}*(1-({mix}))':g='g(X,Y)*({mix})+{green}*(1-({mix}))':b='b(X,Y)*({mix})+{blue}*(1-({mix}))':a='255':enable='gte(t,{start})*lt(t,{end})',format=rgba");
+                chain+=&format!(",format=gbrap,geq=r='r(X,Y)*({mix})+{red}*(1-({mix}))':g='g(X,Y)*({mix})+{green}*(1-({mix}))':b='b(X,Y)*({mix})+{blue}*(1-({mix}))':a='255':enable='gte({enabled_clock},{start})*lt({enabled_clock},{end})',format=rgba");
             } else {
-                chain += &format!(",format=gbrap,geq=r='r({sample_x},{sample_y})':g='g({sample_x},{sample_y})':b='b({sample_x},{sample_y})':a='alpha({sample_x},{sample_y})*({mask})':enable='gte(t,{start})*lt(t,{end})',format=rgba");
+                chain += &format!(",format=gbrap,geq=r='r({sample_x},{sample_y})':g='g({sample_x},{sample_y})':b='b({sample_x},{sample_y})':a='alpha({sample_x},{sample_y})*({mask})':enable='gte({enabled_clock},{start})*lt({enabled_clock},{end})',format=rgba");
             }
         }
         chain += &format!(",setpts=PTS-{clip_start}/TB");

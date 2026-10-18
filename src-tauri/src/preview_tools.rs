@@ -1,14 +1,17 @@
 //! Temporary range previews share the production composition graph and job lifecycle.
 use crate::engine::{self, Asset, JobManager, MediaJob, MediaStore, RenderPlan, Result, Runtime};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 use std::{
     fs,
+    io::Read,
     path::PathBuf,
     thread,
     time::{Duration, Instant},
 };
 
 const PREFIX: &str = "tool-preview-";
+const MAX_PNG_BYTES: u64 = 16 * 1024 * 1024;
 fn scalar(spec: &Value, key: &str, default: Option<f64>, low: f64, high: f64) -> Result<f64> {
     let value = spec
         .get(key)
@@ -36,7 +39,7 @@ fn preview_name(name: &str) -> bool {
     };
     id.len() == 32
         && id.bytes().all(|c| c.is_ascii_hexdigit())
-        && matches!(extension, "mp4" | "wav")
+        && matches!(extension, "mp4" | "wav" | "png")
 }
 fn owned_job(store: &MediaStore, jobs: &JobManager, id: &str) -> Result<(MediaJob, PathBuf)> {
     let job = jobs
@@ -68,9 +71,17 @@ fn owned_job(store: &MediaStore, jobs: &JobManager, id: &str) -> Result<(MediaJo
     Ok((job, output))
 }
 fn make_plan(store: &MediaStore, runtime: &Runtime, spec: &Value) -> Result<RenderPlan> {
+    let frame_only = match spec.get("frameOnly") {
+        None => false,
+        Some(value) => value.as_bool().ok_or("取帧开关无效。")?,
+    };
     let start = scalar(spec, "start", None, 0.0, 86400.0)?;
-    let end = scalar(spec, "end", None, 0.001, 86400.0)?;
-    if end <= start || end - start > 60.0 + 1e-6 {
+    let end = if frame_only {
+        start
+    } else {
+        scalar(spec, "end", None, 0.001, 86400.0)?
+    };
+    if !frame_only && (end <= start || end - start > 60.0 + 1e-6) {
         return Err("预览区间需大于零且最多 60 秒。".into());
     }
     let project = spec
@@ -85,13 +96,23 @@ fn make_plan(store: &MediaStore, runtime: &Runtime, spec: &Value) -> Result<Rend
         .as_f64()
         .filter(|v| v.is_finite() && *v >= 16.0 && *v <= 16384.0)
         .ok_or("工程画面高度无效。")?;
-    let requested = scalar(spec, "width", Some(source_width.min(640.0)), 16.0, 1280.0)?;
+    let max_edge = if frame_only { 1920.0 } else { 1280.0 };
+    let requested = scalar(spec, "width", Some(source_width.min(640.0)), 16.0, max_edge)?;
     let scale = (requested / source_width)
-        .min(1280.0 / source_height)
-        .min(1.0);
-    let even = |n: f64| ((n.round() as u32 / 2) * 2).max(16);
-    let width = even(source_width * scale);
-    let height = even(source_height * scale);
+        .min(max_edge / source_width)
+        .min(max_edge / source_height);
+    let (width, height) = if frame_only {
+        (
+            (source_width * scale).round().max(1.0) as u32,
+            (source_height * scale).round().max(1.0) as u32,
+        )
+    } else {
+        let even = |n: f64| ((n.round() as u32 / 2) * 2).max(16);
+        (
+            even(source_width * scale.min(1.0)),
+            even(source_height * scale.min(1.0)),
+        )
+    };
     let fps = scalar(
         spec,
         "fps",
@@ -103,13 +124,48 @@ fn make_plan(store: &MediaStore, runtime: &Runtime, spec: &Value) -> Result<Rend
         None => false,
         Some(v) => v.as_bool().ok_or("音频预览开关无效。")?,
     };
+    if frame_only && audio_only {
+        return Err("取帧不能同时选择音频预览。".into());
+    }
     let mut plan = engine::build_plan(
         store,
         runtime,
-        &json!({ "kind":"timeline", "project":project, "audioOnly":audio_only, "textAssets":spec.get("textAssets").cloned().unwrap_or_else(||json!({})), "config":{"format":"mp4","width":width,"height":height,"fps":fps,"quality":"draft"} }),
+        &json!({ "kind":"timeline", "project":project, "audioOnly":audio_only,"frameOnly":frame_only,"frameTime":start, "textAssets":spec.get("textAssets").cloned().unwrap_or_else(||json!({})), "config":{"format":"mp4","width":width,"height":height,"fps":fps,"quality":"draft"} }),
     )?;
     if start >= plan.duration || end > plan.duration + 1e-6 {
         return Err("预览区间超出工程时长。".into());
+    }
+    if frame_only {
+        let first_map = plan
+            .args
+            .iter()
+            .position(|v| v == "-map")
+            .ok_or("预览输出流缺失。")?;
+        plan.args.truncate(first_map);
+        plan.args.extend(
+            [
+                "-map",
+                "[video]",
+                "-an",
+                "-c:v",
+                "png",
+                "-pix_fmt",
+                "rgba",
+                "-frames:v",
+                "1",
+                "-fps_mode",
+                "passthrough",
+                "-threads",
+                "1",
+                "-update",
+                "1",
+            ]
+            .map(str::to_owned),
+        );
+        plan.format = "image2".into();
+        plan.video = None;
+        plan.duration = 1.0 / fps;
+        return Ok(plan);
     }
     if audio_only {
         let script_index = plan
@@ -177,7 +233,12 @@ pub fn begin(
 ) -> Result<MediaJob> {
     let root = check_root(store)?;
     let plan = make_plan(store, runtime, spec)?;
-    let name = format!("{PREFIX}{}.{}", engine::new_id(), plan.format);
+    let extension = if plan.format == "image2" {
+        "png"
+    } else {
+        &plan.format
+    };
+    let name = format!("{PREFIX}{}.{extension}", engine::new_id());
     jobs.begin_with_overwrite(runtime, plan, root.join(name), false)
 }
 pub fn result(store: &MediaStore, runtime: &Runtime, jobs: &JobManager, id: &str) -> Result<Asset> {
@@ -188,7 +249,9 @@ pub fn result(store: &MediaStore, runtime: &Runtime, jobs: &JobManager, id: &str
     let mut asset = store.probe(
         runtime,
         &path,
-        if path.extension().is_some_and(|e| e == "wav") {
+        if path.extension().is_some_and(|e| e == "png") {
+            "时间线画面.png"
+        } else if path.extension().is_some_and(|e| e == "wav") {
             "音频预览.wav"
         } else {
             "区间预览.mp4"
@@ -196,6 +259,46 @@ pub fn result(store: &MediaStore, runtime: &Runtime, jobs: &JobManager, id: &str
     )?;
     asset.id = format!("preview-{id}");
     Ok(asset)
+}
+/// PNG readback is limited to this job's owned, completed temporary file. Native
+/// bytes avoid custom-protocol image readback through a browser canvas.
+pub fn result_payload(
+    store: &MediaStore,
+    runtime: &Runtime,
+    jobs: &JobManager,
+    id: &str,
+) -> Result<Value> {
+    let asset = result(store, runtime, jobs, id)?;
+    let (_, path) = owned_job(store, jobs, id)?;
+    let mut payload = serde_json::to_value(&asset).map_err(|e| e.to_string())?;
+    if path.extension().is_some_and(|extension| extension == "png") {
+        let mut bytes = Vec::new();
+        fs::File::open(&path)
+            .map_err(|e| e.to_string())?
+            .take(MAX_PNG_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() < 24
+            || bytes.len() as u64 > MAX_PNG_BYTES
+            || !bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+            || &bytes[12..16] != b"IHDR"
+        {
+            return Err("取帧 PNG 文件无效或超过 16 MB。".into());
+        }
+        let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        if width == 0
+            || height == 0
+            || width > 1920
+            || height > 1920
+            || width != asset.width
+            || height != asset.height
+        {
+            return Err("取帧 PNG 画面尺寸无效。".into());
+        }
+        payload["pngBase64"] = json!(STANDARD.encode(bytes));
+    }
+    Ok(payload)
 }
 pub fn discard(store: &MediaStore, jobs: &JobManager, id: &str) -> Result<()> {
     let (job, path) = owned_job(store, jobs, id)?;
@@ -307,6 +410,185 @@ mod tests {
         assert!(status.success());
         let title = store.probe(runtime, &overlay, "overlay.png").unwrap();
         json!({"project":{"width":160,"height":90,"fps":20,"background":"#000000","assets":[asset],"tracks":[{"kind":"text","clips":[{"id":"title","start":1,"trimIn":0,"trimOut":1,"speed":1,"width":40,"height":40,"x":10,"y":10,"opacity":1,"volume":0}]},{"kind":"video","muted":false,"clips":[{"id":"video","assetId":asset.id,"start":0,"trimIn":0,"trimOut":3,"speed":1,"width":160,"height":90,"x":0,"y":0,"volume":0.4,"opacity":1}]}]},"textAssets":{"title":title},"start":1.2,"end":1.8,"width":160,"fps":20})
+    }
+    fn pixels(runtime: &Runtime, asset: &Asset) -> Vec<u8> {
+        let output = engine::process(&runtime.encoder)
+            .args(["-v", "error", "-i"])
+            .arg(&asset.native_path)
+            .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            output.stdout.len(),
+            (asset.width * asset.height * 3) as usize
+        );
+        output.stdout
+    }
+    #[test]
+    fn real_png_frame_uses_exact_animation_time_full_composition_and_ipc_bytes() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(folder.path()).unwrap();
+        let runtime = runtime();
+        let mut spec = fixture(&store, &runtime);
+        spec["frameOnly"] = json!(true);
+        spec["start"] = json!(1.237);
+        spec["project"]["tracks"][0]["clips"][0]["keyframes"] = json!({"x":[{"time":0.2,"value":10},{"time":0.3,"value":110}],"opacity":[{"time":0.2,"value":1},{"time":0.3,"value":0}]});
+        let jobs = JobManager::default();
+        let job = begin(&store, &runtime, &jobs, &spec).unwrap();
+        finish(&jobs, &job.id);
+        let asset = result(&store, &runtime, &jobs, &job.id).unwrap();
+        assert_eq!(
+            (asset.kind.as_str(), asset.width, asset.height),
+            ("image", 160, 90)
+        );
+        let rgb = pixels(&runtime, &asset);
+        let sample = |x: usize, y: usize| &rgb[((y * 160 + x) * 3)..((y * 160 + x) * 3 + 3)];
+        let mixed = sample(50, 20);
+        assert!(
+            mixed[1] > 145 && mixed[1] < 175 && mixed[2] > 75 && mixed[2] < 115,
+            "exact 1.237 s alpha/position: {mixed:?}"
+        );
+        let uncovered = sample(92, 20);
+        assert!(
+            uncovered[2] > 200 && uncovered[1] < 10,
+            "must not quantize to 1.25 s: {uncovered:?}"
+        );
+        let payload = result_payload(&store, &runtime, &jobs, &job.id).unwrap();
+        let png = STANDARD
+            .decode(payload["pngBase64"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(png, fs::read(&asset.native_path).unwrap());
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        discard(&store, &jobs, &job.id).unwrap();
+        assert!(!PathBuf::from(asset.native_path).exists());
+        assert!(result_payload(&store, &runtime, &jobs, &job.id).is_err());
+    }
+    #[test]
+    fn real_png_frame_keeps_filters_and_colored_transition_at_requested_time() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(folder.path()).unwrap();
+        let runtime = runtime();
+        let mut spec = fixture(&store, &runtime);
+        spec["frameOnly"] = json!(true);
+        spec["start"] = json!(1.237);
+        let clips = spec["project"]["tracks"][1]["clips"]
+            .as_array_mut()
+            .unwrap();
+        let mut second = clips[0].clone();
+        second["id"] = json!("second");
+        second["start"] = json!(1.5);
+        second["trimIn"] = json!(1.5);
+        clips[0]["trimOut"] = json!(1.5);
+        clips[0]["filters"] = json!({"enabled":true,"intensity":1,"brightness":0,"contrast":1,"saturation":0,"temperature":0,"tint":0,"sepia":0});
+        clips.push(second);
+        spec["project"]["tracks"].as_array_mut().unwrap().push(json!({"kind":"transition","clips":[{"id":"transition","start":1,"trimIn":0,"trimOut":1,"speed":1,"transition":{"effect":"fade","fromClipId":"video","toClipId":"second","color":"#ffffff"}}]}));
+        let jobs = JobManager::default();
+        let job = begin(&store, &runtime, &jobs, &spec).unwrap();
+        finish(&jobs, &job.id);
+        let asset = result(&store, &runtime, &jobs, &job.id).unwrap();
+        let rgb = pixels(&runtime, &asset);
+        let transition = &rgb[(60 * 160 + 100) * 3..(60 * 160 + 100) * 3 + 3];
+        assert!(
+            transition
+                .iter()
+                .all(|channel| *channel >= 126 && *channel <= 134),
+            "0.526 gray/white fade at 1.237: {transition:?}"
+        );
+        let title = &rgb[(20 * 160 + 20) * 3..(20 * 160 + 20) * 3 + 3];
+        assert!(
+            title[1] > 240 && title[0] < 10 && title[2] < 10,
+            "title remains above transition: {title:?}"
+        );
+        discard(&store, &jobs, &job.id).unwrap();
+    }
+    #[test]
+    fn real_png_frame_blur_mask_tracks_exact_requested_time() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(folder.path()).unwrap();
+        let runtime = runtime();
+        let mut spec = fixture(&store, &runtime);
+        let source = store.root.join("source.mp4");
+        let status = engine::process(&runtime.encoder)
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=160x90:r=20:d=3,drawbox=x=80:y=0:w=80:h=90:color=white:t=fill",
+                "-c:v",
+                "libx264",
+                "-threads",
+                "1",
+                "-y",
+            ])
+            .arg(source)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        spec["frameOnly"] = json!(true);
+        spec["start"] = json!(1.237);
+        let blur = &mut spec["project"]["tracks"][0]["clips"][0];
+        blur["overlay"] = json!({"kind":"blur","blurRadius":10});
+        blur["keyframes"] = json!({"x":[{"time":0.2,"value":10},{"time":0.3,"value":110}]});
+        let jobs = JobManager::default();
+        let job = begin(&store, &runtime, &jobs, &spec).unwrap();
+        finish(&jobs, &job.id);
+        let asset = result(&store, &runtime, &jobs, &job.id).unwrap();
+        let rgb = pixels(&runtime, &asset);
+        let blurred = &rgb[(20 * 160 + 78) * 3..(20 * 160 + 78) * 3 + 3];
+        assert!(
+            blurred
+                .iter()
+                .all(|channel| *channel > 50 && *channel < 160),
+            "blur at requested position: {blurred:?}"
+        );
+        let outside = &rgb[(20 * 160 + 90) * 3..(20 * 160 + 90) * 3 + 3];
+        assert!(
+            outside.iter().all(|channel| *channel > 245),
+            "mask ends at x87, not rounded x100: {outside:?}"
+        );
+        discard(&store, &jobs, &job.id).unwrap();
+    }
+    #[test]
+    fn real_png_frame_retains_odd_and_extreme_dimensions_and_exclusive_endpoints() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(folder.path()).unwrap();
+        let runtime = runtime();
+        let mut spec = fixture(&store, &runtime);
+        spec["frameOnly"] = json!(true);
+        spec["start"] = json!(2.0); // subtitle's endpoint is exclusive
+        spec["width"] = json!(161);
+        let jobs = JobManager::default();
+        let job = begin(&store, &runtime, &jobs, &spec).unwrap();
+        finish(&jobs, &job.id);
+        let asset = result(&store, &runtime, &jobs, &job.id).unwrap();
+        assert_eq!((asset.width, asset.height), (161, 91));
+        let rgb = pixels(&runtime, &asset);
+        let pixel = &rgb[(20 * 161 + 20) * 3..(20 * 161 + 20) * 3 + 3];
+        assert!(
+            pixel[2] > 200 && pixel[1] < 10,
+            "subtitle must end at 2.0: {pixel:?}"
+        );
+        discard(&store, &jobs, &job.id).unwrap();
+        spec["project"]["width"] = json!(16);
+        spec["project"]["height"] = json!(16384);
+        spec["project"]["tracks"][1]["clips"][0]["width"] = json!(16);
+        spec["project"]["tracks"][1]["clips"][0]["height"] = json!(16384);
+        spec["width"] = json!(1920);
+        let job = begin(&store, &runtime, &jobs, &spec).unwrap();
+        finish(&jobs, &job.id);
+        let asset = result(&store, &runtime, &jobs, &job.id).unwrap();
+        assert_eq!((asset.width, asset.height), (2, 1920));
+        assert!(result_payload(&store, &runtime, &jobs, &job.id).unwrap()["pngBase64"].is_string());
+        discard(&store, &jobs, &job.id).unwrap();
+        spec["start"] = json!(3.0);
+        assert!(begin(&store, &runtime, &jobs, &spec).is_err());
     }
     #[test]
     fn real_range_preview_keeps_composition_and_exact_duration_and_discards_owned_output() {

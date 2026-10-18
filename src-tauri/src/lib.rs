@@ -124,10 +124,10 @@ mod desktop {
         blocking(move || crate::preview_tools::begin(&state.store, &state.runtime()?, &state.jobs, &spec)).await
     }
     #[tauri::command]
-    pub async fn tool_preview_result(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Asset> {
+    pub async fn tool_preview_result(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Value> {
         require_mcp_window(&window)?;
         let state = state.inner().clone();
-        blocking(move || crate::preview_tools::result(&state.store, &state.runtime()?, &state.jobs, &id)).await
+        blocking(move || crate::preview_tools::result_payload(&state.store, &state.runtime()?, &state.jobs, &id)).await
     }
     #[tauri::command]
     pub async fn tool_preview_discard(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
