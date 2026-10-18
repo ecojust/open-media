@@ -20,7 +20,7 @@ async function checkPanel(locator, theme) {
   if (style.prefixedSupported) assert.equal(style.prefixed, style.blur)
   const a = luminance(background), b = luminance(foreground)
   assert((Math.max(a, b) + .05) / (Math.min(a, b) + .05) >= 4.5, '弹窗正文对比度不足')
-  assert.equal(background[0] < 100, theme === 'dark', '传送到 body 的弹窗应保留当前主题')
+  assert.equal(background[0] < 100, theme === 'dark', '传送弹窗应保留当前主题')
 }
 async function checkShade(locator, theme, pseudo) {
   const style = await material(locator, pseudo)
@@ -73,7 +73,11 @@ async function main() {
       await page.getByRole('menuitem', { name: '删除轨道', exact: true }).click()
       const deleted = page.getByRole('dialog', { name: '删除轨道', exact: true })
       await expect(deleted).toBeVisible(); await checkPanel(deleted, theme)
-      const deletedShade = await checkShade(page.locator('body > .track-delete-backdrop'), theme)
+      const deletedBackdrop = deleted.locator('..')
+      await expect(deletedBackdrop).toHaveClass('track-delete-backdrop')
+      const backdropBounds = await deletedBackdrop.boundingBox()
+      assert.deepEqual(backdropBounds, { x: 0, y: 0, ...page.viewportSize() }, '删除确认遮罩应覆盖整个窗口')
+      const deletedShade = await checkShade(deletedBackdrop, theme)
       assert.equal(deletedShade.background, nativeShade.background)
       await page.screenshot({ path: `/tmp/open-media-dialog-glass-track-${theme}.png`, animations: 'disabled' })
       await deleted.getByRole('button', { name: '取消', exact: true }).click()

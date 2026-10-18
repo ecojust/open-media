@@ -89,6 +89,17 @@ fn duration(value: &Value) -> Option<f64> {
         .filter(|value| value.is_finite() && *value > 0.0)
 }
 
+fn import_duration(kind: &str, info: &Value) -> Option<f64> {
+    let reported = duration(info);
+    if kind == "image" {
+        // Still-image demuxers may report no duration or one synthetic frame.
+        // Match the editor's minimum image clip length, preserving longer animations.
+        Some(reported.unwrap_or(5.0).max(5.0))
+    } else {
+        reported
+    }
+}
+
 fn frame_rate(stream: &Value) -> Option<f64> {
     ["avg_frame_rate", "r_frame_rate"].iter().find_map(|key| {
         let rate = stream[*key].as_str()?;
@@ -219,15 +230,15 @@ pub fn probe_file(
         _ if kind == "video" => "video/mp4",
         _ => "application/octet-stream",
     };
-    let media_duration = match duration(&info) {
+    let media_duration = match import_duration(kind, &info) {
         Some(duration) => duration,
-        None if kind == "image" => 5.0,
         None => packet_duration(runtime, path, control)?,
     };
     Ok(json!({
         "kind": kind, "mime": mime, "width": width, "height": height,
         "format": info["format"]["format_name"],
         "duration": media_duration,
+        "sourceDuration": duration(&info),
         "startTime": number(&info["format"]["start_time"]),
         "size": std::fs::metadata(path).map_err(|_| "无法读取素材文件信息。")?.len(),
         "bitRate": number(&info["format"]["bit_rate"]),
@@ -1202,6 +1213,24 @@ mod tests {
     }
 
     #[test]
+    fn image_import_duration_handles_platform_frame_timing_and_long_animations() {
+        let no_duration = json!({"format":{"format_name":"png_pipe"},"streams":[{"codec_type":"video","codec_name":"png"}]});
+        let container_frame = json!({"format":{"format_name":"image2","duration":"0.040000"},"streams":[{"codec_type":"video","codec_name":"png"}]});
+        let stream_frame = json!({"format":{"format_name":"image2"},"streams":[{"codec_type":"video","codec_name":"png","duration":"0.040000"}]});
+        for info in [&no_duration, &container_frame, &stream_frame] {
+            assert_eq!(import_duration("image", info), Some(5.0));
+        }
+        let animation = json!({"format":{"format_name":"gif","duration":"8.500000"},"streams":[{"codec_type":"video","codec_name":"gif","nb_frames":"85"}]});
+        assert_eq!(import_duration("image", &animation), Some(8.5));
+        // The minimum applies only to image clips, never to short audio or video.
+        assert_eq!(import_duration("video", &container_frame), Some(0.04));
+        assert_eq!(import_duration("audio", &stream_frame), Some(0.04));
+        assert_eq!(import_duration("video", &no_duration), None);
+        assert_eq!(duration(&container_frame), Some(0.04));
+        assert_eq!(duration(&no_duration), None);
+    }
+
+    #[test]
     fn still_image_probe_and_frame_are_supported_but_playlists_are_rejected() {
         let directory = tempfile::tempdir().unwrap();
         let store = MediaStore::new(directory.path()).unwrap();
@@ -1235,6 +1264,10 @@ mod tests {
         assert_eq!(metadata["kind"], "image");
         assert_eq!(metadata["mime"], "image/png");
         assert_eq!(metadata["duration"], 5.0);
+        assert_eq!(
+            metadata["sourceDuration"],
+            json!(duration(&read_probe(&runtime, &path, &control()).unwrap()))
+        );
         assert_eq!(
             frame(&store, &runtime, &asset, 0.0, 48, &control()).unwrap()["width"],
             48
