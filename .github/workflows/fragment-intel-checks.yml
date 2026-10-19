@@ -28,6 +28,7 @@ jobs:
         with:
           workspaces: src-tauri -> target
           key: x86_64-apple-darwin
+          cache-on-failure: true
       - uses: actions/cache/restore@v4
         with:
           path: |
@@ -48,6 +49,12 @@ jobs:
             while sleep 10; do
               date -u
               ps -axo pid,ppid,%cpu,rss,comm | awk 'NR == 1 || /ffmpeg|ffprobe|cargo|open_media_lib/'
+              for media_pid in $(pgrep -x ffmpeg || true); do
+                sample_path=".media-runtime/logs/fragment-sample-${media_pid}.txt"
+                if [[ ! -f "$sample_path" ]]; then
+                  /usr/bin/sample "$media_pid" 2 -file "$sample_path" || true
+                fi
+              done
             done
           ) > .media-runtime/logs/fragment-processes.log &
           monitor_pid=$!
@@ -55,7 +62,13 @@ jobs:
           cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib tests::fragment_transitions_encode_live_textures_and_restore_both_endpoints -- --exact --nocapture --test-threads=1 2>&1 | tee .media-runtime/logs/fragment-native.log
       - name: Print process observations
         if: always()
-        run: cat .media-runtime/logs/fragment-processes.log 2>/dev/null || true
+        run: |
+          cat .media-runtime/logs/fragment-processes.log 2>/dev/null || true
+          for sample_path in .media-runtime/logs/fragment-sample-*.txt; do
+            if [[ -f "$sample_path" ]]; then
+              head -n 180 "$sample_path"
+            fi
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
