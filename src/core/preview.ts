@@ -157,6 +157,7 @@ export class TimelinePreview {
   private monitorAudio = true
   private disposed = false
   private readyVideoFrames = new Map<HTMLVideoElement, number>()
+  private presentedVideoFrames = new WeakSet<HTMLVideoElement>()
   private videoPresentationWaits = new Set<() => void>()
   private lastTime = 0
   private playing = false
@@ -245,13 +246,7 @@ export class TimelinePreview {
     media.addEventListener('error', () => { if (this.liveMedia.has(media)) this.report(asset.id, `无法预览“${asset.name}”，请重新导入素材`) })
     // Loaded data can precede presentation of the first decoded video frame.
     // A one-shot frame callback also refreshes the resting, paused preview.
-    if (media instanceof HTMLVideoElement && typeof media.requestVideoFrameCallback === 'function') {
-      const request = media.requestVideoFrameCallback(() => {
-        this.readyVideoFrames.delete(media)
-        if (!this.disposed && this.liveMedia.has(media)) this.render(this.lastTime, this.playing)
-      })
-      this.readyVideoFrames.set(media, request)
-    }
+    if (media instanceof HTMLVideoElement) this.observeVideoPresentation(media)
     media.src = asset.url
     return media
   }
@@ -336,9 +331,26 @@ export class TimelinePreview {
     for (const cancel of [...this.videoPresentationWaits]) cancel()
   }
 
+  private observeVideoPresentation(media: HTMLVideoElement): void {
+    this.presentedVideoFrames.delete(media)
+    if (typeof media.requestVideoFrameCallback !== 'function') return
+    const previous = this.readyVideoFrames.get(media)
+    if (previous !== undefined) media.cancelVideoFrameCallback(previous)
+    const request = media.requestVideoFrameCallback(() => {
+      if (this.readyVideoFrames.get(media) !== request) return
+      this.readyVideoFrames.delete(media)
+      if (this.disposed || !this.liveMedia.has(media)) return
+      this.presentedVideoFrames.add(media)
+      this.render(this.lastTime, this.playing)
+    })
+    this.readyVideoFrames.set(media, request)
+  }
+
   private waitForVideoPresentation(media: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted) return Promise.reject(new DOMException('播放已取消', 'AbortError'))
-    if (typeof media.requestVideoFrameCallback !== 'function') return Promise.resolve()
+    // A static/sparse video may have already presented its only image while
+    // paused. Reuse that presentation until a source seek invalidates it.
+    if (typeof media.requestVideoFrameCallback !== 'function' || this.presentedVideoFrames.has(media)) return Promise.resolve()
     return new Promise((resolve, reject) => {
       let request: number | undefined
       let settled = false
@@ -358,7 +370,12 @@ export class TimelinePreview {
       this.videoPresentationWaits.add(abort)
       signal?.addEventListener('abort', abort, { once: true })
       media.addEventListener('error', failure, { once: true })
-      request = media.requestVideoFrameCallback(() => { request = undefined; done() })
+      request = media.requestVideoFrameCallback(() => {
+        if (settled) return
+        request = undefined
+        if (!this.disposed && this.liveMedia.has(media)) this.presentedVideoFrames.add(media)
+        done()
+      })
       if (media.error) failure()
     })
   }
@@ -434,7 +451,10 @@ export class TimelinePreview {
         if (media.readyState >= 1 && (!media.seeking || forceSeek) && (entry.needsSeek || !playing || (canCorrectDrift && drifted))) {
           const target = Math.min(sourceTime, Number.isFinite(media.duration) ? Math.max(0, media.duration - 0.001) : sourceTime)
           try {
-            if (Math.abs(media.currentTime - target) > 0.015) media.currentTime = target
+            if (Math.abs(media.currentTime - target) > 0.015) {
+              if (media instanceof HTMLVideoElement) this.observeVideoPresentation(media)
+              media.currentTime = target
+            }
             entry.needsSeek = false
             entry.lastSync = now
           } catch { /* Metadata can arrive while a source is being replaced. */ }
@@ -645,6 +665,7 @@ export class TimelinePreview {
       const request = this.readyVideoFrames.get(entry.media)
       if (request !== undefined) entry.media.cancelVideoFrameCallback(request)
       this.readyVideoFrames.delete(entry.media)
+      this.presentedVideoFrames.delete(entry.media)
     }
     this.stopEntry(entry)
     entry.source?.disconnect()

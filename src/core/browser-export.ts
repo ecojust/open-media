@@ -40,8 +40,9 @@ export async function exportTimelineWebM(project: Project, options: BrowserVideo
     await preview.prepare(options.signal)
     await preview.seekReady(0, options.signal)
     if (options.signal?.aborted) throw new DOMException('已取消导出', 'AbortError')
-    const audioStream = await preview.enableAudio(false)
-    await preview.playReady(0)
+    const audioStream = await preview.enableAudio(false, options.signal)
+    await preview.playReady(0, options.signal)
+    if (options.signal?.aborted) throw new DOMException('已取消导出', 'AbortError')
     stream = canvas.captureStream(fps)
     const audibleAssetIds = new Set(project.assets.filter(asset => asset.kind === 'audio' || asset.kind === 'video').map(asset => asset.id))
     const hasAudibleMedia = project.tracks.some(track => !track.muted && track.kind !== 'text'

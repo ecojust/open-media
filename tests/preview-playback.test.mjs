@@ -165,11 +165,6 @@ test('尚未呈现首帧时移除或销毁素材释放帧回调，迟到回调�
 
 test('视频的加载和播放承诺完成后，仍等待实际呈现帧才完成播放准备并重绘', async t => {
   const harness = playbackHarness(t, { video: true, frameReady: true })
-  // The resting frame callback is independent of playback startup and may have
-  // fired while the decoder was still paused.
-  const resting = harness.media.frameCallbacks.get(1)
-  harness.media.frameCallbacks.delete(1)
-  resting()
   let ready = false
   const start = harness.preview.playReady(0).then(() => { ready = true })
   await new Promise(setImmediate)
@@ -177,13 +172,40 @@ test('视频的加载和播放承诺完成后，仍等待实际呈现帧才完�
   assert.equal(harness.media.paused, false)
   assert.equal(ready, false, 'play() 和 readyState 不能代替画面呈现')
   const drawn = harness.imagesDrawn
-  const [id, presented] = [...harness.media.frameCallbacks][0]
+  const [id, presented] = [...harness.media.frameCallbacks].at(-1)
   harness.media.frameCallbacks.delete(id)
   presented()
   await start
   assert.equal(ready, true)
   assert(harness.imagesDrawn > drawn, '启动返回前必须使用已呈现的视频帧重绘合成画面')
   assert.equal(harness.preview.videoPresentationWaits.size, 0)
+})
+
+test('静止视频已在暂停阶段呈现唯一画面时，播放不等待不存在的下一帧', async t => {
+  const { preview, media } = playbackHarness(t, { video: true, frameReady: true })
+  const resting = media.frameCallbacks.get(1)
+  media.frameCallbacks.delete(1)
+  resting()
+  await preview.playReady(0)
+  assert.equal(media.plays, 1)
+  assert.equal(media.frameCallbacks.size, 0)
+  assert.equal(preview.videoPresentationWaits.size, 0)
+})
+
+test('已呈现画面在重新定位时失效，目标帧实际呈现后才完成播放准备', async t => {
+  const { preview, media } = playbackHarness(t, { video: true, frameReady: true })
+  const resting = media.frameCallbacks.get(1)
+  media.frameCallbacks.delete(1)
+  resting()
+  let ready = false
+  const start = preview.playReady(2).then(() => { ready = true })
+  await new Promise(setImmediate)
+  media.finishSeek()
+  await new Promise(setImmediate)
+  assert.equal(ready, false, '上一个位置的首帧不能代替定位后的帧')
+  for (const [id, presented] of [...media.frameCallbacks]) { media.frameCallbacks.delete(id); presented() }
+  await start
+  assert.equal(ready, true)
 })
 
 for (const cancellation of ['pause', 'seek', 'project', 'dispose', 'signal']) {
