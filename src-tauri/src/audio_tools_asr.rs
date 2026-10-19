@@ -1,4 +1,5 @@
 use crate::{
+    ai_types::{AiJob, AiModel, AiRuntimeStatus},
     asset_tools::{run_process, TaskControl, MEDIA_FORMATS},
     engine::{self, MediaStore, Result, Runtime},
 };
@@ -16,7 +17,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 const LOCK: &str = include_str!("../../scripts/audio-asr-models.lock.json");
@@ -47,6 +48,8 @@ struct Model {
     download_size: u64,
     installed_size: u64,
     hardware: String,
+    license: String,
+    license_url: String,
     files: Vec<ModelFile>,
 }
 #[derive(Clone, Serialize)]
@@ -62,6 +65,9 @@ pub struct AsrJob {
 struct JobEntry {
     job: AsrJob,
     cancelled: Arc<AtomicBool>,
+    kind: String,
+    started_at: u64,
+    finished_at: Option<u64>,
 }
 struct ModelState {
     state: String,
@@ -154,6 +160,95 @@ impl AsrManager {
         })
     }
 
+    pub(crate) fn ai_models(&self) -> Vec<AiModel> {
+        let model = &self.0.model;
+        let (state, downloaded_bytes, error) = match self.0.model_state.lock() {
+            Ok(state) => (state.state.clone(), state.downloaded, state.error.clone()),
+            Err(_) => ("failed".into(), 0, Some("识别模型状态不可用。".into())),
+        };
+        let runtime_ready = self.0.helper.as_ref().is_some_and(|path| path.is_file());
+        vec![AiModel {
+            id: model.id.clone(),
+            name: model.name.clone(),
+            provider: "transcription".into(),
+            capabilities: vec!["audio-to-text".into()],
+            version: model.model_revision.clone(),
+            size: model.download_size,
+            downloaded_bytes,
+            download_total_bytes: None,
+            download_transferred_bytes: None,
+            download_phase: None,
+            active_source: None,
+            download_session: None,
+            download_speed_bytes_per_second: None,
+            remaining_seconds: None,
+            state,
+            hardware: model.hardware.clone(),
+            runtime: AiRuntimeStatus {
+                state: if runtime_ready { "ready" } else { "failed" }.into(),
+                device: None,
+                reason: (!runtime_ready)
+                    .then(|| "内置识别组件未安装完整，请使用最新桌面安装包。".into()),
+            },
+            bundled: false,
+            requires_license_acceptance: false,
+            license: Some(model.license.clone()),
+            license_url: Some(model.license_url.clone()),
+            error,
+            voices: Vec::new(),
+        }]
+    }
+
+    pub(crate) fn ai_jobs(&self) -> Result<Vec<AiJob>> {
+        let jobs = self.0.jobs.lock().map_err(|_| "识别任务状态不可用。")?;
+        let now = now_ms();
+        Ok(jobs
+            .values()
+            .map(|entry| {
+                let job = &entry.job;
+                AiJob {
+                    id: format!("transcription:{}", job.id),
+                    provider: "transcription".into(),
+                    model_id: Some(self.0.model.id.clone()),
+                    kind: entry.kind.clone(),
+                    state: job.state.clone(),
+                    stage: if job.state == "running" && entry.cancelled.load(Ordering::Acquire) {
+                        "正在取消识别任务".into()
+                    } else {
+                        job.stage.clone()
+                    },
+                    progress: Some(job.progress),
+                    started_at: entry.started_at,
+                    elapsed_seconds: entry
+                        .finished_at
+                        .unwrap_or(now)
+                        .saturating_sub(entry.started_at)
+                        as f64
+                        / 1000.0,
+                    assets: Vec::new(),
+                    cancelable: job.state == "running",
+                    error: job.error.clone(),
+                    warning: None,
+                }
+            })
+            .collect())
+    }
+
+    pub(crate) fn cancel_download(&self, model_id: &str) -> Result<()> {
+        self.check_model_id(Some(model_id))?;
+        let job_id = self
+            .0
+            .model_state
+            .lock()
+            .map_err(|_| "识别模型状态不可用。")?
+            .job_id
+            .clone();
+        if let Some(job_id) = job_id {
+            self.cancel(&job_id)?;
+        }
+        Ok(())
+    }
+
     fn check_model_id(&self, id: Option<&str>) -> Result<()> {
         if id.is_some_and(|id| id != self.0.model.id) {
             return Err("不支持该识别模型。".into());
@@ -161,7 +256,7 @@ impl AsrManager {
         Ok(())
     }
 
-    fn new_job(&self, stage: &str) -> Result<(AsrJob, Arc<AtomicBool>)> {
+    fn new_job(&self, stage: &str, kind: &str) -> Result<(AsrJob, Arc<AtomicBool>)> {
         let mut jobs = self.0.jobs.lock().map_err(|_| "识别任务状态不可用。")?;
         if jobs.values().any(|entry| entry.job.state == "running") {
             return Err("已有识别模型任务正在运行，请完成或取消后再试。".into());
@@ -183,6 +278,9 @@ impl AsrManager {
             JobEntry {
                 job: job.clone(),
                 cancelled: cancelled.clone(),
+                kind: kind.into(),
+                started_at: now_ms(),
+                finished_at: None,
             },
         );
         Ok((job, cancelled))
@@ -200,6 +298,7 @@ impl AsrManager {
     fn finish(&self, id: &str, result: Result<Value>) {
         if let Ok(mut jobs) = self.0.jobs.lock() {
             if let Some(entry) = jobs.get_mut(id) {
+                entry.finished_at = Some(now_ms());
                 if entry.cancelled.load(Ordering::Acquire) {
                     entry.job.state = "cancelled".into();
                     entry.job.stage = "已取消".into();
@@ -265,7 +364,7 @@ impl AsrManager {
             return Err("正在校验已下载识别模型，请稍候。".into());
         }
         let was_ready = self.0.model_state.lock().unwrap().state == "ready";
-        let (job, cancelled) = self.new_job("正在准备下载识别模型")?;
+        let (job, cancelled) = self.new_job("正在准备下载识别模型", "download")?;
         self.set_model_state("downloading", 0, None, Some(job.id.clone()));
         let manager = self.clone();
         let id = job.id.clone();
@@ -398,7 +497,7 @@ impl AsrManager {
         }
         store.authorized_path(&spec["asset"])?;
         validate_language(spec["language"].as_str().unwrap_or("auto"))?;
-        let (job, cancelled) = self.new_job("正在准备识别音频")?;
+        let (job, cancelled) = self.new_job("正在准备识别音频", "generation")?;
         let manager = self.clone();
         let id = job.id.clone();
         let runtime = runtime.clone();
@@ -598,6 +697,13 @@ impl AsrManager {
         }
         Ok(result)
     }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn find_helper(resource: Option<&Path>) -> Option<PathBuf> {
@@ -1092,6 +1198,83 @@ mod tests {
             &TaskControl::new(Duration::from_secs(10))
         )
         .is_err());
+    }
+
+    #[test]
+    fn global_ai_catalog_preserves_cache_state_and_runtime_availability() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manager = AsrManager::new(directory.path(), None).unwrap();
+        Arc::get_mut(&mut manager.0).unwrap().helper = None;
+        let model = manager.ai_models().remove(0);
+        assert_eq!(model.provider, "transcription");
+        assert_eq!(model.capabilities, vec!["audio-to-text"]);
+        assert_eq!(model.state, "not-downloaded");
+        assert_eq!(model.runtime.state, "failed");
+        assert!(model.runtime.reason.unwrap().contains("识别组件"));
+        assert_eq!(model.size, 375_744_699);
+        assert_eq!(model.license.as_deref(), Some("MIT"));
+        assert_eq!(
+            manager.0.root,
+            directory
+                .path()
+                .join("recognition-models")
+                .canonicalize()
+                .unwrap()
+        );
+
+        manager.set_model_state("downloading", 4096, None, Some("download".into()));
+        let model = manager.ai_models().remove(0);
+        assert_eq!(model.state, "downloading");
+        assert_eq!(model.downloaded_bytes, 4096);
+        manager.set_model_state("failed", 0, Some("校验失败".into()), None);
+        assert_eq!(manager.ai_models()[0].error.as_deref(), Some("校验失败"));
+    }
+
+    #[test]
+    fn global_ai_jobs_share_legacy_cancellation_and_freeze_completed_elapsed_time() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = AsrManager::new(directory.path(), None).unwrap();
+        let (download, cancelled) = manager.new_job("下载中", "download").unwrap();
+        manager.set_model_state("downloading", 0, None, Some(download.id.clone()));
+        let job = manager.ai_jobs().unwrap().remove(0);
+        assert_eq!(job.id, format!("transcription:{}", download.id));
+        assert_eq!(job.kind, "download");
+        assert!(job.cancelable);
+        assert!(job.started_at > 0);
+        assert!(manager.cancel_download("unknown").is_err());
+        assert!(!cancelled.load(Ordering::Acquire));
+        manager.cancel_download(&manager.0.model.id).unwrap();
+        assert!(cancelled.load(Ordering::Acquire));
+        assert_eq!(manager.ai_jobs().unwrap()[0].stage, "正在取消识别任务");
+        manager.finish(&download.id, Err("已取消".into()));
+        {
+            let mut jobs = manager.0.jobs.lock().unwrap();
+            let entry = jobs.get_mut(&download.id).unwrap();
+            assert!(entry.finished_at.is_some());
+            entry.started_at = 1_000;
+            entry.finished_at = Some(3_500);
+        }
+        let completed = manager.ai_jobs().unwrap().remove(0);
+        assert_eq!(completed.state, "cancelled");
+        assert!(!completed.cancelable);
+        assert_eq!(completed.elapsed_seconds, 2.5);
+
+        manager.set_model_state("ready", manager.0.model.download_size, None, None);
+        let (transcription, cancelled) = manager.new_job("识别中", "generation").unwrap();
+        manager.cancel_download(&manager.0.model.id).unwrap();
+        assert!(!cancelled.load(Ordering::Acquire));
+        let result = json!({"text": "识别结果"});
+        manager.finish(&transcription.id, Ok(result.clone()));
+        let legacy = serde_json::to_value(manager.get(&transcription.id).unwrap()).unwrap();
+        assert_eq!(legacy["result"], result);
+        assert!(legacy.get("kind").is_none());
+        assert!(legacy.get("startedAt").is_none());
+        let jobs = manager.ai_jobs().unwrap();
+        let generation = jobs.iter().find(|job| job.kind == "generation").unwrap();
+        assert_eq!(generation.state, "completed");
+        assert_eq!(generation.progress, Some(1.0));
+        assert_eq!(generation.provider, "transcription");
+        assert!(generation.assets.is_empty());
     }
 
     fn serve_body(bytes: Vec<u8>) -> (String, thread::JoinHandle<()>) {
