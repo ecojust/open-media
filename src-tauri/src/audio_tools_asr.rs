@@ -182,13 +182,15 @@ impl AsrManager {
             download_session: None,
             download_speed_bytes_per_second: None,
             remaining_seconds: None,
-            state,
+            state: if !runtime_ready && !matches!(state.as_str(), "downloading" | "verifying") {
+                "unsupported".into()
+            } else { state },
             hardware: model.hardware.clone(),
             runtime: AiRuntimeStatus {
                 state: if runtime_ready { "ready" } else { "failed" }.into(),
                 device: None,
                 reason: (!runtime_ready)
-                    .then(|| "内置识别组件未安装完整，请使用最新桌面安装包。".into()),
+                    .then(|| "内置识别组件缺失，请使用完整桌面安装包修复应用；仅重新下载模型无法修复该组件。".into()),
             },
             bundled: false,
             requires_license_acceptance: false,
@@ -1208,7 +1210,7 @@ mod tests {
         let model = manager.ai_models().remove(0);
         assert_eq!(model.provider, "transcription");
         assert_eq!(model.capabilities, vec!["audio-to-text"]);
-        assert_eq!(model.state, "not-downloaded");
+        assert_eq!(model.state, "unsupported");
         assert_eq!(model.runtime.state, "failed");
         assert!(model.runtime.reason.unwrap().contains("识别组件"));
         assert_eq!(model.size, 375_744_699);
@@ -1228,6 +1230,25 @@ mod tests {
         assert_eq!(model.downloaded_bytes, 4096);
         manager.set_model_state("failed", 0, Some("校验失败".into()), None);
         assert_eq!(manager.ai_models()[0].error.as_deref(), Some("校验失败"));
+    }
+
+    #[test]
+    fn global_ai_ready_requires_the_bundled_recognition_component() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut manager = AsrManager::new(directory.path(), None).unwrap();
+        Arc::get_mut(&mut manager.0).unwrap().helper = None;
+        manager.set_model_state("ready", manager.0.model.download_size, None, None);
+        assert_eq!(manager.status()["ready"], false);
+        let model = manager.ai_models().remove(0);
+        assert_eq!(model.state, "unsupported");
+        assert!(model.runtime.reason.unwrap().contains("修复应用"));
+        let helper = directory.path().join("recognition-helper");
+        fs::write(&helper, b"fixture").unwrap();
+        Arc::get_mut(&mut manager.0).unwrap().helper = Some(helper.clone());
+        assert_eq!(manager.ai_models()[0].state, "ready");
+        assert_eq!(manager.status()["ready"], true);
+        fs::remove_file(helper).unwrap();
+        assert_eq!(manager.ai_models()[0].state, "unsupported");
     }
 
     #[test]
