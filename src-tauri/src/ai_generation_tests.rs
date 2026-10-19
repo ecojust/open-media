@@ -399,19 +399,17 @@ fn runtime_fixture(
 #[test]
 fn runtime_layout_rejects_missing_runner_or_library_and_updates_all_sharing_models() {
     let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
     let model = catalog_model("qwen-image");
-    let (definitions, selected) = runtime_fixture(temp.path(), &model.runtime_id);
-    let directory = runtime_packages::path(&temp.path().join("runtime"), &selected);
-    assert_eq!(
-        runtime_status(temp.path(), &model, &definitions).state,
-        "ready"
-    );
+    let (definitions, selected) = runtime_fixture(&root, &model.runtime_id);
+    let directory = runtime_packages::path(&root.join("runtime"), &selected);
+    assert_eq!(runtime_status(&root, &model, &definitions).state, "ready");
     for (name, content) in [
         ("check.py", b"check fixture".as_slice()),
         ("library.py", b"library fixture".as_slice()),
     ] {
         fs::remove_file(directory.join(name)).unwrap();
-        let status = runtime_status(temp.path(), &model, &definitions);
+        let status = runtime_status(&root, &model, &definitions);
         assert_eq!(status.state, "update-available");
         assert!(status.reason.unwrap().contains("修复"));
         fs::write(directory.join(name), content).unwrap();
@@ -420,8 +418,8 @@ fn runtime_layout_rejects_missing_runner_or_library_and_updates_all_sharing_mode
     second.id = "another-model".into();
     let shared = Arc::new(Mutex::new(State {
         models: vec![
-            model_state(temp.path(), &model, &definitions),
-            model_state(temp.path(), &second, &definitions),
+            model_state(&root, &model, &definitions),
+            model_state(&root, &second, &definitions),
         ],
         jobs: vec![],
         tasks: HashMap::new(),
@@ -430,7 +428,7 @@ fn runtime_layout_rejects_missing_runner_or_library_and_updates_all_sharing_mode
         verified_runtimes: HashMap::new(),
     }));
     let worker = Worker {
-        root: temp.path().to_owned(),
+        root: root.clone(),
         catalog: Arc::new(vec![model, second]),
         runtimes: Arc::new(definitions),
         shared: shared.clone(),
