@@ -629,6 +629,23 @@ pub(crate) fn install(
     result
 }
 
+/// Reuse verified runtime installation without exposing a voice-model record to
+/// other application capabilities. The original speech installation path stays
+/// identical; callers provide only the locked download coordinates they need.
+pub(crate) fn install_with_download(
+    root: &Path,
+    runtime: &SelectedRuntime,
+    cancelled: &AtomicBool,
+    mut download: impl FnMut(&str, &[String], u64, &str, &Path, u64) -> Result<()>,
+) -> Result<Vec<FileStamp>> {
+    install(root, runtime, cancelled, |file, destination, offset| {
+        let urls: Vec<String> = std::iter::once(file.url.clone())
+            .chain(file.mirrors.iter().cloned())
+            .collect();
+        download(&file.path, &urls, file.size, &file.sha256, destination, offset)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

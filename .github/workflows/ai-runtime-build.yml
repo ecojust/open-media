@@ -1,0 +1,131 @@
+name: Optional image and music runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish verified runtime components as an independent prerelease
+        type: boolean
+        default: false
+  push:
+    branches: ['feat/shared-ai-generation-*', 'work/ai-runtime-*']
+    paths:
+      - 'scripts/ai-runtime*'
+      - '.github/workflows/ai-runtime-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-runtime-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  runtime:
+    name: Portable runtime — ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+          - platform: windows-x64
+            runner: windows-2022
+          - platform: linux-x64
+            runner: ubuntu-24.04
+    env:
+      PYTHONUNBUFFERED: '1'
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      PIP_NO_CACHE_DIR: '1'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Reserve space for redistributable libraries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h "$RUNNER_TEMP"
+      - name: Build, relocate and validate the offline runtime
+        shell: bash
+        run: |
+          python scripts/ai-runtime-build.py \
+            --platform '${{ matrix.platform }}' \
+            --work "$RUNNER_TEMP/ai-runtime" \
+            --output artifacts/ai-runtime
+      - name: Report build diagnostics
+        if: failure()
+        shell: python
+        run: |
+          import re
+          from pathlib import Path
+          for path in sorted(Path('artifacts/ai-runtime').rglob('*.log')):
+              value = path.read_text(encoding='utf-8', errors='replace')[-5000:]
+              value = re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', value)
+              value = value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::warning title={path.name}::{value}')
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-runtime-evidence-${{ matrix.platform }}-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            artifacts/ai-runtime/logs/
+            artifacts/ai-runtime/validation/
+            artifacts/ai-runtime/validation.json
+      - name: Upload verified runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-runtime-v1-${{ matrix.platform }}
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            artifacts/ai-runtime/*.zip
+            artifacts/ai-runtime/*.part*
+            artifacts/ai-runtime/runtime-metadata.json
+            artifacts/ai-runtime/SHA256SUMS.txt
+
+  publish:
+    name: Publish independent runtime components
+    needs: runtime
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ai-runtime-v1-*
+          path: runtime-artifacts
+      - name: Verify exact build and create application download catalog
+        run: python scripts/ai-runtime-publish.py --root runtime-artifacts --commit "$GITHUB_SHA"
+      - name: Publish immutable runtime assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view ai-runtime-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Runtime release already exists; checksums are immutable.' >&2
+            exit 1
+          fi
+          mapfile -d '' assets < <(find runtime-artifacts -type f \( -name '*.zip' -o -name '*.part*' \) -print0)
+          gh release create ai-runtime-v1 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --latest=false --title '可选图像与歌曲运行组件 v1' \
+            --notes-file runtime-artifacts/notes.md \
+            "${assets[@]}" runtime-artifacts/ai-runtime-models.json \
+            runtime-artifacts/runtime-metadata.json runtime-artifacts/SHA256SUMS.txt

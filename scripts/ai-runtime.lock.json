@@ -1,0 +1,101 @@
+{
+  "schema": 1,
+  "id": "ai-generation-v1",
+  "version": 1,
+  "releaseTag": "ai-runtime-v1",
+  "pythonVersion": "3.11.14",
+  "pythonRelease": "20251014",
+  "musicSource": {
+    "repository": "https://github.com/ace-step/ACE-Step-1.5",
+    "revision": "ca1e85fe9430179831e6bc6be790c332190a3866",
+    "url": "https://codeload.github.com/ace-step/ACE-Step-1.5/tar.gz/ca1e85fe9430179831e6bc6be790c332190a3866",
+    "size": 8439408,
+    "sha256": "b464c11f00af00e1e089a09f58a03962f803c080f116fd0517dbe5ec839706b3"
+  },
+  "platforms": {
+    "macos-arm64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "size": 18836160,
+      "sha256": "cd54cc868a9b1056fbd4654509431f402f0365329618e2583b60c82f73da4e56",
+      "executable": "python/bin/python3",
+      "torch": "2.9.1",
+      "minimumMacOS": "14.0",
+      "wheels": [
+        {
+          "name": "torch",
+          "url": "https://files.pythonhosted.org/packages/1e/ce/7d251155a783fb2c1bb6837b2b7023c622a2070a0a72726ca1df47e7ea34/torch-2.9.1-cp311-none-macosx_11_0_arm64.whl",
+          "size": 74463887,
+          "sha256": "52347912d868653e1528b47cafaf79b285b98be3f4f35d5955389b1b95224475"
+        },
+        {
+          "name": "torchaudio",
+          "url": "https://files.pythonhosted.org/packages/3f/6b/34e489fcb4adc4b571a166f2670cc7f156cbe3337867a892fade0a1a5224/torchaudio-2.9.1-cp311-cp311-macosx_11_0_arm64.whl",
+          "size": 807349,
+          "sha256": "6e3f5943135701168d30196e2befd46290180cdbb9ee508b167730d51f43208f"
+        },
+        {
+          "name": "torchvision",
+          "url": "https://files.pythonhosted.org/packages/e7/69/30f5f03752aa1a7c23931d2519b31e557f3f10af5089d787cddf3b903ecf/torchvision-0.24.1-cp311-cp311-macosx_11_0_arm64.whl",
+          "size": 1891436,
+          "sha256": "056c525dc875f18fe8e9c27079ada166a7b2755cea5a2199b0bc7f1f8364e600"
+        }
+      ]
+    },
+    "windows-x64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "size": 25648990,
+      "sha256": "c2a7b0bb86eb9f1cc094a01bdabef7ddc77f89f8e45161fa7819f2b4a7ba7bc1",
+      "executable": "python/python.exe",
+      "torch": "2.9.1+cu128",
+      "cudaVersion": "12.8",
+      "wheels": [
+        {
+          "name": "torch",
+          "url": "https://download-r2.pytorch.org/whl/cu128/torch-2.9.1%2Bcu128-cp311-cp311-win_amd64.whl",
+          "size": 2862053760,
+          "sha256": "633005a3700e81b5be0df2a7d3c1d48aced23ed927653797a3bd2b144a3aeeb6"
+        },
+        {
+          "name": "torchaudio",
+          "url": "https://download-r2.pytorch.org/whl/cu128/torchaudio-2.9.1%2Bcu128-cp311-cp311-win_amd64.whl",
+          "size": 2215246,
+          "sha256": "c91eea923573e7b02611a324232e4adb7aad5f828aa875b1f48241c228980899"
+        },
+        {
+          "name": "torchvision",
+          "url": "https://download-r2.pytorch.org/whl/cu128/torchvision-0.24.1%2Bcu128-cp311-cp311-win_amd64.whl",
+          "size": 9365769,
+          "sha256": "6d836745bd3130ef8f3569c9f0d9d70103b5e2e9fa058310bcac5f63bcf2d043"
+        }
+      ]
+    },
+    "linux-x64": {
+      "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20251014/cpython-3.11.14%2B20251014-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "size": 30045958,
+      "sha256": "91ab434738647ab45d630aaa02e3808bb516239beeb52f7799c12a12d1557a38",
+      "executable": "python/bin/python3",
+      "torch": "2.9.1+cu128",
+      "cudaVersion": "12.8",
+      "wheels": [
+        {
+          "name": "torch",
+          "url": "https://download-r2.pytorch.org/whl/cu128/torch-2.9.1%2Bcu128-cp311-cp311-manylinux_2_28_x86_64.whl",
+          "size": 900953458,
+          "sha256": "2a1da940f0757621d098c9755f7504d791a72a40920ec85a4fd98b20253fca4e"
+        },
+        {
+          "name": "torchaudio",
+          "url": "https://download-r2.pytorch.org/whl/cu128/torchaudio-2.9.1%2Bcu128-cp311-cp311-manylinux_2_28_x86_64.whl",
+          "size": 2005175,
+          "sha256": "430c22ecddd9b184117bf64d41d5f4d8d3f0353bb684f3182363bf8180e3e8a5"
+        },
+        {
+          "name": "torchvision",
+          "url": "https://download-r2.pytorch.org/whl/cu128/torchvision-0.24.1%2Bcu128-cp311-cp311-manylinux_2_28_x86_64.whl",
+          "size": 8047730,
+          "sha256": "1b44f67cbd8f36e2a58bfaa3176d35b37df55604adf5929e89006e531f849faa"
+        }
+      ]
+    }
+  }
+}
