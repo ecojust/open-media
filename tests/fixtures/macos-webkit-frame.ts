@@ -125,31 +125,48 @@ async function verifyRealtimeComposition() {
   const samples: { label: string; time: number; sourceTime: number; motionHash: number; watermarkTime?: number; watermarkHash?: number }[] = []
   let filteredSource = false, keyedWatermark = false
   let canvasReadbackAllowed = true
+  let sourceReference: number[] | undefined
   const snapshotCanvas = document.createElement('canvas'); snapshotCanvas.width = canvas.width; snapshotCanvas.height = canvas.height
-  const readPixels = async () => {
+  const readPixels = async (target = canvas) => {
     if (canvasReadbackAllowed) {
-      try { return context.getImageData(0, 0, canvas.width, canvas.height) }
+      try { return target.getContext('2d')!.getImageData(0, 0, target.width, target.height) }
       catch (cause) {
         if (!(cause instanceof DOMException) || cause.name !== 'SecurityError') throw cause
         canvasReadbackAllowed = false
         emit('realtime-canvas-readback-restricted', { error: errorData(cause), fallback: 'WKWebView.takeSnapshot of the visible test canvas' })
       }
     }
-    const bounds = canvas.getBoundingClientRect()
+    const bounds = target.getBoundingClientRect()
     const snapshot = await bounded(window.__captureRealtimeCanvas({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }), 5000, 'visible canvas snapshot')
     const image = new Image()
     await bounded(new Promise<void>((resolve, reject) => {
       image.onload = () => resolve(); image.onerror = () => reject(new Error('WKWebView canvas snapshot PNG could not be decoded'))
       image.src = `data:image/png;base64,${snapshot.pngBase64}`
     }), 5000, 'snapshot PNG decoding')
+    snapshotCanvas.width = target.width; snapshotCanvas.height = target.height
     const clean = snapshotCanvas.getContext('2d', { willReadFrequently: true })!
-    clean.clearRect(0, 0, canvas.width, canvas.height)
-    clean.drawImage(image, 0, 0, canvas.width, canvas.height)
-    return clean.getImageData(0, 0, canvas.width, canvas.height)
+    clean.drawImage(image, 0, 0, target.width, target.height)
+    return clean.getImageData(0, 0, target.width, target.height)
   }
   const near = (actual: number[], expected: number[], label: string, tolerance = 9) => assert(actual.slice(0, 3).every((value, index) => Math.abs(value - expected[index]!) <= tolerance), `${label}: actual=${actual}, expected=${expected}`)
   const sample = async (label: string, time: number) => {
     const media = videos.filter(video => video.getAttribute('src')).map(video => ({ source: video.currentSrc || video.src, currentTime: video.currentTime, paused: video.paused, seeking: video.seeking, readyState: video.readyState, width: video.videoWidth }))
+    if (!sourceReference) {
+      const sourceVideo = videos.find(video => (video.currentSrc || video.src).includes('/source.mp4') && !video.paused && video.readyState >= 2)
+      assert(sourceVideo, 'No decoded playing source video is available for the independent color reference')
+      // Measure the OS decoder's color conversion directly, outside the timeline
+      // compositor. Never calibrate against a potentially missing effect layer.
+      const referenceCanvas = document.createElement('canvas'); referenceCanvas.width = 160; referenceCanvas.height = 90
+      referenceCanvas.style.display = 'block'; document.body.append(referenceCanvas)
+      try {
+        referenceCanvas.getContext('2d')!.drawImage(sourceVideo!, 0, 0, 160, 90)
+        const referencePixels = await readPixels(referenceCanvas)
+        const offset = (5 * 160 + 5) * 4, rgba = [...referencePixels.data.slice(offset, offset + 4)]
+        assert(rgba[3] === 255 && rgba[0]! > 120 && rgba[0]! > rgba[1]! + 80 && rgba[0]! > rgba[2]! + 80, `Independent decoded source color is absent or invalid: ${rgba}`)
+        sourceReference = rgba.slice(0, 3)
+        emit('realtime-source-color-reference', { rgba, method: 'independent raw video drawImage', currentTime: sourceVideo!.currentTime, pixelReadback: canvasReadbackAllowed ? 'canvas' : 'WKWebView.takeSnapshot' })
+      } finally { referenceCanvas.remove(); referenceCanvas.width = referenceCanvas.height = 1 }
+    }
     const readbackStarted = performance.now()
     const pixels = await readPixels()
     const readbackMilliseconds = performance.now() - readbackStarted
@@ -157,7 +174,8 @@ async function verifyRealtimeComposition() {
     // The upper source band is a fixed encoded color; the lower band has real motion.
     // Expectations are independent of the renderer's keyframe/transition helpers.
     const visibility = time >= 2.5 && time < 3.5 ? Math.min(1, Math.abs(time - 3) * 2) : 1
-    const background = [16, 32, 48], original = filteredSource ? [74, 74, 74] : [200, 40, 40]
+    const gray = sourceReference.reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index]!, 0)
+    const background = [16, 32, 48], original = filteredSource ? [gray, gray, gray] : sourceReference
     const underlying = original.map((value, index) => value * visibility + background[index]! * (1 - visibility))
     const x = 80 + Math.min(time, 2) * 50, opacity = 1 - Math.min(time, 2) * .25
     const videoPixel = pixel(10, 10), textPixel = pixel(x + 4, 24), imagePixel = pixel(270, 24)
