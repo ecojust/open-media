@@ -33,6 +33,7 @@ function workspace(name, overrides = {}) {
     setInterval: callback => { const id = nextTimer++; timers.set(id, callback); return id }, clearInterval: id => timers.delete(id),
     listCaptureDevices: async () => captureDevices, pickCaptureSource: async () => ({ sourceId: 'screen:1', sourceName: '屏幕一', sourceWidth: 2560, sourceHeight: 1440 }), cancelCapturePicker: async () => {}, startCapture: async () => ({ state: 'recording', elapsed: 0, segments: 0 }),
     getCaptureStatus: async () => ({ state: 'recording', elapsed: 1, segments: 0 }),
+    showMainWindow: async () => {},
     pauseCapture: async () => ({ state: 'paused', elapsed: 1, segments: 1 }),
     resumeCapture: async () => ({ state: 'recording', elapsed: 1, segments: 1 }), stopCapture: async () => null, cancelCaptureStart: async () => {},
     beginMediaJob: async () => ({ id: 'job', state: 'running', progress: 0, name: 'result.gif' }),

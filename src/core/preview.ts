@@ -157,6 +157,7 @@ export class TimelinePreview {
   private monitorAudio = true
   private disposed = false
   private readyVideoFrames = new Map<HTMLVideoElement, number>()
+  private videoPresentationWaits = new Set<() => void>()
   private lastTime = 0
   private playing = false
   private playbackGeneration = 0
@@ -176,6 +177,7 @@ export class TimelinePreview {
 
   setProject(project: Project): void {
     this.playbackGeneration++
+    this.cancelVideoPresentationWaits()
     this.project = project
     this.assets = new Map(project.assets.map(asset => [asset.id, asset]))
     const valid = new Map<string, string>()
@@ -326,7 +328,39 @@ export class TimelinePreview {
   /** Explicit user seeks are independent of the continuous playback drift guard. */
   seek(time: number, playing = this.playing): void {
     this.playbackGeneration++
+    this.cancelVideoPresentationWaits()
     this.render(time, playing, true)
+  }
+
+  private cancelVideoPresentationWaits(): void {
+    for (const cancel of [...this.videoPresentationWaits]) cancel()
+  }
+
+  private waitForVideoPresentation(media: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(new DOMException('播放已取消', 'AbortError'))
+    if (typeof media.requestVideoFrameCallback !== 'function') return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      let request: number | undefined
+      let settled = false
+      const done = (error?: Error) => {
+        if (settled) return
+        settled = true
+        window.clearTimeout(timeout)
+        if (request !== undefined) media.cancelVideoFrameCallback(request)
+        media.removeEventListener('error', failure)
+        signal?.removeEventListener('abort', abort)
+        this.videoPresentationWaits.delete(abort)
+        error ? reject(error) : resolve()
+      }
+      const abort = () => done(new DOMException('播放已取消', 'AbortError'))
+      const failure = () => done(new Error('无法读取视频画面，请重新导入该文件'))
+      const timeout = window.setTimeout(() => done(new Error('视频画面准备超时，请再次点击播放')), 10000)
+      this.videoPresentationWaits.add(abort)
+      signal?.addEventListener('abort', abort, { once: true })
+      media.addEventListener('error', failure, { once: true })
+      request = media.requestVideoFrameCallback(() => { request = undefined; done() })
+      if (media.error) failure()
+    })
   }
 
   private continueSplitVideo(time: number, now: number): void {
@@ -433,22 +467,35 @@ export class TimelinePreview {
 
   async playReady(time: number, signal?: AbortSignal): Promise<void> {
     const generation = ++this.playbackGeneration
+    this.cancelVideoPresentationWaits()
     await this.waitForSeek(time, signal)
     if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
     if (signal?.aborted) throw new DOMException('已取消播放', 'AbortError')
     this.render(time, true)
     const entries = this.activeEntries(time)
     try {
-      await waitForPlayback(Promise.all(entries.map(entry => entry.playRequest)), signal, '素材播放启动超时，请再次点击播放')
+      // Decoder readiness and play() can precede a drawable video texture. Keep
+      // the playback clock stopped until the compositor presents a real frame.
+      // Register before yielding to play(), otherwise a very short remaining
+      // segment could present its final frame before the listener is attached.
+      // Audio, frozen clips and already-ended media need no new video frame.
+      const presentations = entries.filter(entry => entry.wantsPlayback && this.assets.get(entry.assetId)?.kind === 'video' && entry.media instanceof HTMLVideoElement && !entry.media.ended)
+        .map(entry => this.waitForVideoPresentation(entry.media as HTMLVideoElement, signal))
+      await Promise.all([
+        waitForPlayback(Promise.all(entries.map(entry => entry.playRequest)), signal, '素材播放启动超时，请再次点击播放'),
+        ...presentations,
+      ])
     } catch (cause) {
       if (generation === this.playbackGeneration) this.pause()
       throw cause
     }
     if (this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
+    this.draw()
   }
 
   async seekReady(time: number, signal?: AbortSignal): Promise<void> {
     this.playbackGeneration++
+    this.cancelVideoPresentationWaits()
     await this.waitForSeek(time, signal)
   }
 
@@ -590,7 +637,7 @@ export class TimelinePreview {
     ctx.restore()
   }
 
-  pause(): void { this.playbackGeneration++; this.render(this.lastTime, false) }
+  pause(): void { this.playbackGeneration++; this.cancelVideoPresentationWaits(); this.render(this.lastTime, false) }
 
   private removeEntry(entry: MediaEntry): void {
     this.liveMedia.delete(entry.media)
@@ -608,6 +655,7 @@ export class TimelinePreview {
 
   dispose(): void {
     this.disposed = true
+    this.cancelVideoPresentationWaits()
     for (const entry of this.entries.values()) this.removeEntry(entry)
     this.entries.clear()
     this.filterRenderer?.dispose()

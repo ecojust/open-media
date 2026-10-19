@@ -163,6 +163,84 @@ test('尚未呈现首帧时移除或销毁素材释放帧回调，迟到回调�
   assert.equal(harness.imagesDrawn, 0)
 })
 
+test('视频的加载和播放承诺完成后，仍等待实际呈现帧才完成播放准备并重绘', async t => {
+  const harness = playbackHarness(t, { video: true, frameReady: true })
+  // The resting frame callback is independent of playback startup and may have
+  // fired while the decoder was still paused.
+  const resting = harness.media.frameCallbacks.get(1)
+  harness.media.frameCallbacks.delete(1)
+  resting()
+  let ready = false
+  const start = harness.preview.playReady(0).then(() => { ready = true })
+  await new Promise(setImmediate)
+  assert.equal(harness.media.readyState, 4)
+  assert.equal(harness.media.paused, false)
+  assert.equal(ready, false, 'play() 和 readyState 不能代替画面呈现')
+  const drawn = harness.imagesDrawn
+  const [id, presented] = [...harness.media.frameCallbacks][0]
+  harness.media.frameCallbacks.delete(id)
+  presented()
+  await start
+  assert.equal(ready, true)
+  assert(harness.imagesDrawn > drawn, '启动返回前必须使用已呈现的视频帧重绘合成画面')
+  assert.equal(harness.preview.videoPresentationWaits.size, 0)
+})
+
+for (const cancellation of ['pause', 'seek', 'project', 'dispose', 'signal']) {
+  test(`视频首帧等待期间 ${cancellation} 立即取消，迟到帧不会重新启动`, async t => {
+    const { preview, media } = playbackHarness(t, { video: true, frameReady: true })
+    const controller = new AbortController()
+    const start = preview.playReady(0, controller.signal)
+    const rejected = assert.rejects(start, error => error.name === 'AbortError')
+    await new Promise(setImmediate)
+    const presentation = [...media.frameCallbacks.values()].at(-1)
+    if (cancellation === 'pause') preview.pause()
+    if (cancellation === 'seek') preview.seek(1, false)
+    if (cancellation === 'project') preview.setProject(createProject('替换项目', { width: 32, height: 32 }))
+    if (cancellation === 'dispose') preview.dispose()
+    if (cancellation === 'signal') controller.abort()
+    await rejected
+    assert.equal(preview.videoPresentationWaits.size, 0)
+    presentation()
+    assert.equal(media.plays, 1)
+    assert.equal(media.paused, true)
+  })
+}
+
+test('视频首帧无响应时超时退出准备状态并释放呈现回调', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { preview, media } = playbackHarness(t, { video: true, frameReady: true })
+  const start = preview.playReady(0)
+  const rejected = assert.rejects(start, /视频画面准备超时/)
+  await new Promise(setImmediate)
+  t.mock.timers.tick(10000)
+  await rejected
+  assert.equal(media.paused, true)
+  assert.equal(preview.videoPresentationWaits.size, 0)
+  assert.equal(media.frameCallbacks.size, 1, '只保留静止预览自身的首帧回调')
+})
+
+test('极短视频在播放承诺完成前呈现的最后一帧也会完成准备', async t => {
+  const { preview, media } = playbackHarness(t, { video: true, frameReady: true, pending: true })
+  const start = preview.playReady(0)
+  await new Promise(setImmediate)
+  const [id, presented] = [...media.frameCallbacks].at(-1)
+  media.frameCallbacks.delete(id)
+  presented()
+  media.ended = true
+  media.resolvePlay()
+  await start
+  assert.equal(preview.videoPresentationWaits.size, 0)
+})
+
+test('已到达尾帧的视频不会等待不存在的下一帧', async t => {
+  const { preview, media } = playbackHarness(t, { video: true, frameReady: true })
+  media.ended = true
+  await preview.playReady(0)
+  assert.equal(media.plays, 0)
+  assert.equal(preview.videoPresentationWaits.size, 0)
+})
+
 test('连续播放和待完成的启动不会逐帧重写速度或重复启动音轨', async t => {
   const { preview, media } = playbackHarness(t, { pending: true })
   for (let frame = 0; frame < 120; frame++) {
