@@ -12,6 +12,29 @@ const snapshot = page => page.evaluate(() => JSON.parse(JSON.stringify(window.re
 const assetCount = page => page.evaluate(() => window.recordingLibrary.current.value.assets.length)
 const clipsFor = (page, id) => page.evaluate(id => window.recordingLibrary.current.value.tracks.flatMap(track => track.clips).filter(clip => clip.assetId === id), id)
 
+async function assertLibraryHeader(page) {
+  const actions = page.getByTestId('video-library-actions')
+  await expect(actions).toBeVisible()
+  await expect(actions.getByRole('button')).toHaveCount(2)
+  await expect(page.getByTestId('video-library-directory')).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText(recordingDirectory)
+  await expect(page.locator(`[title="${recordingDirectory}"]`)).toHaveCount(0)
+  const geometry = await actions.evaluate(element => {
+    const header = element.closest('.asset-panel > header'), title = header?.querySelector('strong')
+    if (!header || !title) return null
+    const rect = element => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height } }
+    return { header: rect(header), title: rect(title), actions: rect(element), buttons: [...element.querySelectorAll('button')].map(rect), viewport: innerWidth }
+  })
+  assert(geometry, '录屏目录操作应位于项目素材主标题中')
+  assert(geometry.actions.x >= geometry.title.x + geometry.title.width - 1, '目录操作应放在项目素材标题右侧')
+  for (const button of geometry.buttons) {
+    assert(button.width >= 24 && button.height >= 24, '图标按钮保留足够的点击区域')
+    assert(button.x >= geometry.header.x && button.x + button.width <= Math.min(geometry.header.x + geometry.header.width, geometry.viewport) + 1, '目录按钮不能被标题或视口挤出')
+    assert(button.y >= geometry.header.y && button.y + button.height <= geometry.header.y + geometry.header.height + 1, '目录操作与主标题保持同一行')
+    assert(Math.abs(button.y + button.height / 2 - geometry.title.y - geometry.title.height / 2) <= 4, '图标与标题垂直居中')
+  }
+}
+
 async function mount(page, url, native, media) {
   await page.route('**/__editor_recordings__', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body,#app{height:100%;margin:0}*{box-sizing:border-box}</style></head><body><div id="app"></div></body></html>' }))
   await page.route('**/editor-library-video/*', route => route.fulfill({ contentType: 'video/webm', body: media.video }))
@@ -149,11 +172,18 @@ async function main() {
       page.on('request', request => { if (request.url().includes('/editor-library-video/')) requests.push(request.url()) })
       await mount(page, url, native, media)
       const initial = await page.evaluate(() => window.recordingLibrary.initial)
-      const toolbar = page.getByTestId('video-library-toolbar')
+      const toolbar = page.getByTestId('video-library-toolbar'), actions = page.getByTestId('video-library-actions')
       if (native) {
-        await expect(toolbar).toBeVisible()
-        await expect(page.getByTestId('video-library-directory')).toHaveAttribute('title', recordingDirectory)
         await expect(page.locator('.asset-card')).toHaveCount(3)
+        await expect(toolbar).toHaveCount(0)
+        await assertLibraryHeader(page)
+        for (const width of [780, 540]) {
+          await page.setViewportSize({ width, height: 960 })
+          await actions.scrollIntoViewIfNeeded()
+          await assertLibraryHeader(page)
+          await page.screenshot({ path: path.join(directory, `editor-recordings-${width}.png`), animations: 'disabled' })
+        }
+        await page.setViewportSize({ width: 1440, height: 960 })
         assert.deepEqual(await page.locator('.asset-card').evaluateAll(items => items.map(item => item.dataset.sourceAssetId)), ['recording-c', 'recording-b', 'recording-a'])
         for (const id of ['project-video', 'project-audio', 'project-image', 'builtin-watermark', 'builtin-music']) await expect(card(page, id)).toHaveCount(0)
         assert.deepEqual(await snapshot(page), initial, '浏览录屏目录不能改变工程或标记修改')
@@ -161,6 +191,7 @@ async function main() {
         assert(!requests.some(url => /\/recording-[abc]$/.test(url)), '读取列表不能逐个解码录屏')
       } else {
         await expect(toolbar).toHaveCount(0)
+        await expect(actions).toHaveCount(0)
         await expect(page.getByRole('button', { name: '录屏', exact: true })).toHaveCount(0)
         assert.equal(await page.evaluate(() => window.recordingLibrary.calls.length), 0)
       }
@@ -205,27 +236,32 @@ async function main() {
         await expect(page.locator('.asset-card')).toHaveCount(1)
         const beforeRefresh = await snapshot(page)
         await page.evaluate(() => { window.recordingLibrary.addStored('recording-d', '2032-01-01T00:00:00Z'); window.recordingLibrary.holdScan = true })
-        await toolbar.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await expect(toolbar).toBeVisible()
         await expect(toolbar).toContainText('正在读取目录视频')
+        await expect(toolbar).toHaveAttribute('aria-busy', 'true')
+        await expect(actions.getByRole('button', { name: '刷新本机视频列表' })).toBeDisabled()
         await expect(card(page, 'recording-b')).toBeVisible()
         await page.waitForFunction(() => typeof window.recordingLibrary.releaseScan === 'function')
         await page.evaluate(() => window.recordingLibrary.releaseScan())
-        await expect(toolbar).not.toContainText('正在读取目录视频')
+        await expect(toolbar).toHaveCount(0)
         await expect(page.getByLabel('搜索素材', { exact: true })).toHaveValue('recording-b')
         await expect(page.getByRole('button', { name: '录屏', exact: true })).toHaveAttribute('aria-pressed', 'true')
         await expect(page.locator('.asset-card')).toHaveCount(1)
         assert.deepEqual(await snapshot(page), beforeRefresh)
         await page.evaluate(() => { window.recordingLibrary.failScan = true })
-        await toolbar.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await expect(toolbar).toBeVisible()
         await expect(toolbar.getByRole('alert')).toContainText('录屏保存目录暂时不可读取')
         await expect(card(page, 'recording-b')).toBeVisible()
         assert.deepEqual(await snapshot(page), beforeRefresh)
         await page.getByLabel('搜索素材', { exact: true }).fill('')
         await expect(page.locator('.asset-card')).toHaveCount(4)
         await page.evaluate(() => { window.recordingLibrary.failScan = false })
-        await toolbar.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
         await expect(toolbar.getByRole('alert')).toHaveCount(0)
-        await toolbar.getByRole('button', { name: '打开录屏保存目录' }).click()
+        await expect(toolbar).toHaveCount(0)
+        await actions.getByRole('button', { name: '打开录屏保存目录' }).click()
         await expect.poll(() => page.evaluate(() => window.recordingLibrary.calls.filter(call => call.command === 'open_media_library_directory').length)).toBe(1)
         await saveAndInspect(page, path.join(directory, 'recording-library.omedia'), media)
         assert(!requests.some(url => /\/recording-[cd]$/.test(url)), '后续刷新和项目保存也不能读取未选中的目录文件')

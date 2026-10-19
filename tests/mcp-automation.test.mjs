@@ -8,7 +8,7 @@ import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from
 // Replace only native/file/canvas I/O boundaries. The controller, project edits,
 // revision checks, undo history, speech settings and speech scheduler are real.
 const boundaryExports = {
-  '../src/native.ts': ['acceptSpeechJobs', 'beginSpeechJob', 'beginSpeechModelDownload', 'cancelMediaJob', 'cancelSpeechJob', 'cancelSpeechModelDownload', 'discardSpeechJob', 'getMediaJobs', 'getSpeechJob', 'getSpeechStatus', 'repairSpeechModel'],
+  '../src/native.ts': ['acceptSpeechJobs', 'beginSpeechJob', 'beginSpeechModelDownload', 'cancelMediaJob', 'cancelSpeechJob', 'cancelSpeechModelDownload', 'discardSpeechJob', 'getMediaJobs', 'getSpeechJob', 'getSpeechStatus', 'repairSpeechModel', 'revealMediaJobOutput'],
   '../src/native-mcp-files.ts': ['beginMcpMediaJob', 'importMcpMediaPaths', 'openMcpProjectFile', 'saveMcpProjectFile'],
   '../src/core/native-project.ts': ['prepareNativeProject'],
   '../src/core/project-file.ts': ['exportProjectFile', 'importProjectFile'],
@@ -49,6 +49,7 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
     async beginSpeechModelDownload() { return { ready: true, voices: [voice] } }, async cancelSpeechModelDownload() { return { ready: true, voices: [voice] } }, async repairSpeechModel() { return { ready: true, voices: [voice] } },
     async beginMcpMediaJob(spec, outputPath) { return { id: 'native-export', state: 'completed', progress: 1, name: '导出', outputPath, backend: 'cpu', elapsedSeconds: 2 } },
     async getMediaJobs() { return [] }, async cancelMediaJob() {},
+    async revealMediaJobOutput() {},
     async importMcpMediaPaths() { return [video()] },
     async openMcpProjectFile(path) { return { path, token: 'open-file-capability', bytes: [1, 2, 3] } },
     async saveMcpProjectFile(_bytes, options) { return { path: options.path || '/existing.omedia', token: 'saved-file-capability' } },
@@ -252,6 +253,53 @@ test('export uses project dimensions and forwards output overwrite policy withou
   assert.equal(f.commits.length, 0)
   assert.equal(done.result.outputPath, '/result.mp4')
   assert.equal(done.result.backend, 'cpu')
+  assert.equal(done.result.folderOpened, true)
+  await f.run('job_get', { id: done.id })
+  await f.run('job_list')
+  f.controller.summaries()
+  assert.deepEqual(f.calls.filter(call => call.name === 'revealMediaJobOutput').map(call => call.args), [['native-export']])
+  await f.controller.dispose()
+})
+
+test('folder opening failure preserves a completed export and reports a separate warning', async () => {
+  const f = fixture()
+  f.io.revealMediaJobOutput = async () => { throw new Error('系统文件管理器不可用') }
+  const done = await finished(f.controller, await f.run('export_start', { outputPath: '/result.mp4', format: 'mp4' }))
+  assert.equal(done.state, 'completed')
+  assert.equal(done.error, undefined)
+  assert.equal(done.result.outputPath, '/result.mp4')
+  assert.equal(done.result.folderOpened, false)
+  assert.match(done.warning, /系统文件管理器不可用/)
+  assert.match(f.announcements.at(-1), /导出视频已完成；无法自动打开导出文件夹/)
+  assert.equal(f.calls.some(call => call.name === 'cancelMediaJob'), false)
+  assert.equal(f.busy, false)
+  await f.controller.dispose()
+})
+
+test('running exports wait for native completion before opening the folder once', async () => {
+  const f = fixture(), polled = deferred()
+  f.io.beginMcpMediaJob = async () => ({ id: 'polled-export', state: 'running', progress: .2 })
+  f.io.getMediaJobs = async () => {
+    polled.resolve()
+    return [{ id: 'polled-export', state: 'completed', progress: 1, outputPath: '/finished.mp4' }]
+  }
+  const job = await f.run('export_start', { outputPath: '/finished.mp4', format: 'mp4' })
+  await until(() => f.calls.some(call => call.name === 'beginMcpMediaJob'))
+  assert.equal(f.calls.some(call => call.name === 'revealMediaJobOutput'), false)
+  await polled.promise
+  const done = await finished(f.controller, job)
+  assert.equal(done.state, 'completed')
+  assert.equal(done.result.folderOpened, true)
+  assert.deepEqual(f.calls.filter(call => call.name === 'revealMediaJobOutput').map(call => call.args), [['polled-export']])
+  await f.controller.dispose()
+})
+
+test('failed exports never open an output folder', async () => {
+  const f = fixture()
+  f.io.beginMcpMediaJob = async () => ({ id: 'native-failed', state: 'failed', error: '编码失败', outputPath: '/failed.mp4' })
+  const done = await finished(f.controller, await f.run('export_start', { outputPath: '/failed.mp4', format: 'mp4' }))
+  assert.equal(done.state, 'failed')
+  assert.equal(f.calls.some(call => call.name === 'revealMediaJobOutput'), false)
   await f.controller.dispose()
 })
 
@@ -261,11 +309,12 @@ test('cancelling export while native launch is pending cancels the late native j
   const job = await f.run('export_start', { outputPath: '/cancel.mp4', format: 'mp4' })
   await until(() => f.calls.some(call => call.name === 'beginMcpMediaJob'))
   await f.run('job_cancel', { id: job.id })
-  pending.resolve({ id: 'late-native', state: 'running', name: '导出', progress: .1 })
+  pending.resolve({ id: 'late-native', state: 'completed', name: '导出', progress: 1, outputPath: '/cancel.mp4' })
   const done = await finished(f.controller, job)
   assert.equal(done.state, 'cancelled')
   assert.ok(f.calls.some(call => call.name === 'cancelMediaJob' && call.args[0] === 'late-native'))
   assert.equal(f.busy, false)
+  assert.equal(f.calls.some(call => call.name === 'revealMediaJobOutput'), false)
   await f.controller.dispose()
 })
 
@@ -275,6 +324,7 @@ test('native export cancellation is reported as cancellation rather than a faile
   const done = await finished(f.controller, await f.run('export_start', { outputPath: '/cancelled.mp4', format: 'mp4' }))
   assert.equal(done.state, 'cancelled')
   assert.equal(f.busy, false)
+  assert.equal(f.calls.some(call => call.name === 'revealMediaJobOutput'), false)
   await f.controller.dispose()
 })
 

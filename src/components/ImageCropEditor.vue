@@ -2,11 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import { clampImageCrop, imageCropFromPoints, imageRulerTicks, moveImageCrop, resizeImageCrop, type ImageCrop, type ImageCropHandle, type ImagePoint } from '../core/image-crop'
+import { drawImageAnnotations, type ImageAnnotation } from '../core/image-annotations'
 
-const props = withDefaults(defineProps<{ source: string; width: number; height: number; modelValue?: ImageCrop; disabled?: boolean }>(), { disabled: false })
+const props = withDefaults(defineProps<{ source: string; width: number; height: number; modelValue?: ImageCrop; disabled?: boolean; annotations?: ImageAnnotation[] }>(), { disabled: false, annotations: () => [] })
 const emit = defineEmits<{ 'update:modelValue': [crop: ImageCrop | undefined] }>()
 const viewport = ref<HTMLDivElement | null>(null)
 const stage = ref<HTMLDivElement | null>(null)
+const annotationCanvas = ref<HTMLCanvasElement | null>(null)
 const metrics = reactive({ width: 600, height: 320, left: 0, top: 0 })
 const zoom = ref('fit')
 const tool = ref<'draw' | 'move'>('draw')
@@ -40,8 +42,28 @@ const handles: { id: ImageCropHandle; label: string }[] = [
 ]
 const fields: { key: keyof ImageCrop; label: string }[] = [{ key: 'x', label: 'X' }, { key: 'y', label: 'Y' }, { key: 'width', label: '宽' }, { key: 'height', label: '高' }]
 let observer: ResizeObserver | undefined
+let annotationFrame = 0
 let drag: { pointerId: number; kind: 'draw' | 'move' | ImageCropHandle; start: ImagePoint; crop: ImageCrop; original: ImageCrop | undefined; changed: boolean } | undefined
 
+function scheduleAnnotations(): void {
+  if (!annotationFrame) annotationFrame = requestAnimationFrame(() => { annotationFrame = 0; drawAnnotations() })
+}
+function drawAnnotations(): void {
+  const element = annotationCanvas.value
+  if (!element) return
+  if (!props.annotations.length) { element.width = 0; element.height = 0; return }
+  const width = sourceWidth.value, height = sourceHeight.value
+  // Keep a bounded backing surface even when zooming into a very large image.
+  const renderScale = Math.min(scale.value * Math.min(2, window.devicePixelRatio || 1), 4096 / width, 4096 / height, Math.sqrt(8_000_000 / (width * height)))
+  const renderWidth = Math.max(1, Math.round(width * renderScale)), renderHeight = Math.max(1, Math.round(height * renderScale))
+  if (element.width !== renderWidth || element.height !== renderHeight) { element.width = renderWidth; element.height = renderHeight }
+  const context = element.getContext('2d')
+  if (!context) return
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.clearRect(0, 0, renderWidth, renderHeight)
+  context.setTransform(renderWidth / width, 0, 0, renderHeight / height, 0, 0)
+  drawImageAnnotations(context, props.annotations)
+}
 function syncMetrics(): void {
   const element = viewport.value
   if (!element) return
@@ -156,12 +178,19 @@ watch(() => [props.source, props.width, props.height], (value, previous) => {
   void nextTick(() => { if (viewport.value) { viewport.value.scrollLeft = 0; viewport.value.scrollTop = 0 }; syncMetrics() })
 })
 watch(() => props.disabled, value => { if (value) finish() })
+watch([() => props.annotations, sourceWidth, sourceHeight, scale], scheduleAnnotations, { deep: true, flush: 'post' })
 onMounted(() => {
   syncMetrics()
+  scheduleAnnotations()
   observer = new ResizeObserver(syncMetrics)
   if (viewport.value) observer.observe(viewport.value)
 })
-onBeforeUnmount(() => { observer?.disconnect(); finish() })
+onBeforeUnmount(() => {
+  observer?.disconnect()
+  cancelAnimationFrame(annotationFrame)
+  if (annotationCanvas.value) { annotationCanvas.value.width = 0; annotationCanvas.value.height = 0 }
+  finish()
+})
 </script>
 
 <template>
@@ -193,6 +222,7 @@ onBeforeUnmount(() => { observer?.disconnect(); finish() })
       <div ref="viewport" class="crop-viewport" data-testid="crop-viewport" @scroll="syncMetrics">
         <div ref="stage" class="crop-stage" :class="{ 'crop-draw': tool === 'draw', 'crop-pixelated': scale >= 2 }" :style="stageStyle" :tabindex="disabled ? -1 : 0" role="group" aria-label="图片框选画布，方向键移动选区" @pointerdown="begin($event, tool)" @pointermove="update" @pointerup="finish" @pointercancel="cancelDrag" @lostpointercapture="finish()" @keydown="keyboard">
           <img :src="source" alt="原图框选预览" draggable="false" @load="imageReady = true" @error="imageFailed = true; imageReady = false" />
+          <canvas ref="annotationCanvas" class="crop-annotations" width="0" height="0" data-testid="crop-annotations" aria-hidden="true" />
           <div v-if="showGrid" class="crop-grid" :style="gridStyle" aria-hidden="true" />
           <svg class="crop-mask" :viewBox="`0 0 ${sourceWidth} ${sourceHeight}`" preserveAspectRatio="none" aria-hidden="true"><path :d="maskPath" fill-rule="evenodd" /></svg>
           <div class="crop-selection" :style="selectionStyle" data-testid="crop-selection" aria-hidden="true">
@@ -208,7 +238,7 @@ onBeforeUnmount(() => { observer?.disconnect(); finish() })
 </template>
 
 <style scoped>
-.image-crop-editor{padding:16px;min-width:0;color:var(--ui-text);font-size:12px;container-type:inline-size}
+.image-crop-editor{box-sizing:border-box;width:100%;padding:12px;min-width:0;color:var(--ui-text);font-size:12px;container:crop-editor / inline-size}
 .crop-toolbar,.crop-grid-options{display:flex;align-items:center;flex-wrap:wrap;gap:10px;min-width:0}
 .crop-tools{display:flex;gap:4px}.crop-toolbar button{height:32px;padding:0 9px;font-size:12px}.crop-tools button[aria-pressed=true]{background:var(--ui-accent-soft);border-color:var(--ui-accent);color:var(--ui-accent)}
 .crop-inline{display:flex;align-items:center;gap:6px;margin:0;font-size:11px;white-space:nowrap}.crop-inline select{width:104px}.crop-toolbar>.crop-inline{margin-left:auto}.crop-reset{flex-shrink:0}
@@ -220,11 +250,12 @@ onBeforeUnmount(() => { observer?.disconnect(); finish() })
 .crop-viewport{grid-row:2;grid-column:2;min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--ui-border-strong) var(--ui-surface-2)}
 .crop-stage{position:relative;isolation:isolate;touch-action:none;user-select:none;cursor:move;background-color:var(--ui-surface);background-image:linear-gradient(45deg,var(--ui-line) 25%,transparent 25%),linear-gradient(-45deg,var(--ui-line) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,var(--ui-line) 75%),linear-gradient(-45deg,transparent 75%,var(--ui-line) 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}
 .crop-stage:focus-visible{outline:2px solid var(--ui-accent);outline-offset:-2px}.crop-stage.crop-draw{cursor:crosshair}.crop-stage>img{display:block;position:absolute;inset:0;width:100%;height:100%;max-width:none;pointer-events:none}.crop-stage.crop-pixelated>img{image-rendering:pixelated}
-.crop-grid,.crop-mask{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.crop-grid{background-image:linear-gradient(to right,#fff4 1px,transparent 1px),linear-gradient(to bottom,#fff4 1px,transparent 1px);filter:drop-shadow(0 0 1px #0008)}.crop-mask{fill:#07101f73}
+.crop-annotations,.crop-grid,.crop-mask{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.crop-grid{background-image:linear-gradient(to right,#fff4 1px,transparent 1px),linear-gradient(to bottom,#fff4 1px,transparent 1px);filter:drop-shadow(0 0 1px #0008)}.crop-mask{fill:#07101f73}
 .crop-selection{position:absolute;box-sizing:border-box;border:1px solid #fff;outline:1px solid var(--ui-accent);outline-offset:-2px}.crop-selection::before{content:'';position:absolute;inset:0;border:1px dashed var(--ui-accent);pointer-events:none}
 .crop-handle{position:absolute;z-index:1;width:10px;height:10px;min-width:0;min-height:0;padding:0;border:1px solid var(--ui-accent);border-radius:2px;background:#fff;transform:translate(-50%,-50%);box-shadow:0 0 0 1px #0003}.crop-handle:hover:enabled{background:var(--ui-accent-soft);border-color:var(--ui-accent)}
 .crop-handle-nw{left:0;top:0;cursor:nwse-resize}.crop-handle-n{left:50%;top:0;cursor:ns-resize}.crop-handle-ne{left:100%;top:0;cursor:nesw-resize}.crop-handle-e{left:100%;top:50%;cursor:ew-resize}.crop-handle-se{left:100%;top:100%;cursor:nwse-resize}.crop-handle-s{left:50%;top:100%;cursor:ns-resize}.crop-handle-sw{left:0;top:100%;cursor:nesw-resize}.crop-handle-w{left:0;top:50%;cursor:ew-resize}
 .crop-disabled{opacity:.6}.crop-disabled .crop-stage{cursor:default}.crop-help{font-size:10px;color:var(--ui-muted);line-height:1.7;margin:10px 0 6px}.crop-error{font-size:11px;color:var(--ui-danger);margin:10px 0 6px}.crop-summary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:5px;color:var(--ui-muted);font-size:10px;font-variant-numeric:tabular-nums}.crop-summary strong{font-weight:500;color:var(--ui-text)}
-@container(max-width:450px){.crop-toolbar>.crop-inline{margin-left:0}.crop-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.crop-toolbar{gap:8px}.crop-reset{margin-left:auto}.crop-scale-info{width:100%;margin-left:0}.crop-stage-layout{height:300px}.crop-fields{gap:8px 12px}.crop-inline select{width:95px}}
+@container crop-editor (max-width:450px){.crop-toolbar>.crop-inline{margin-left:0}.crop-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.crop-toolbar{gap:8px}.crop-reset{margin-left:auto}.crop-scale-info{width:100%;margin-left:0}.crop-stage-layout{height:300px}.crop-fields{gap:8px 12px}.crop-inline select{width:95px}}
+@container crop-editor (max-width:320px){.crop-toolbar{gap:6px}.crop-toolbar>.crop-inline{order:3;width:100%;justify-content:space-between}.crop-toolbar>.crop-inline select{width:120px}.crop-fields{gap:8px}.crop-unit{display:none}.crop-help{font-size:10px}}
 @media(max-height:600px){.crop-stage-layout{height:220px}}
 </style>

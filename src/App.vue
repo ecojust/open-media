@@ -43,6 +43,7 @@ const workspaces: { id: Workspace; title: string; icon: string; description: str
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
 const desktopPlatform = ref<DesktopPlatform | null>(null)
+const sidebarControls = computed(() => desktopPlatform.value === 'windows' || desktopPlatform.value === 'macos')
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
 const projectRevision = ref(0)
 watch(project, () => { projectRevision.value++ }, { flush: 'sync' })
@@ -59,6 +60,38 @@ const mcpCompactStatus = computed(() => mcpBusy.value && activeMcpJob.value ? `$
 watch(() => mcpBusy.value || !!mcpToolActivity.value, visible => { if (!visible) mcpDetailsOpen.value = false })
 let mcpActivityDeadlineTimer: ReturnType<typeof setTimeout> | undefined, mcpActivityFeedbackTimer: ReturnType<typeof setTimeout> | undefined
 const mcpConnected = ref(false)
+const mcpFocusActive = computed(() => native && !booting.value && mcpServiceRunning.value)
+const mcpWorkHighlighted = computed(() => mcpFocusActive.value && mcpConnected.value && (mcpBusy.value || mcpToolActivity.value?.state === 'running'))
+const mcpFocusDimmed = ref(false)
+let mcpFocusIdleTimer: ReturnType<typeof setTimeout> | undefined
+let mcpPointerPosition: { x: number; y: number } | undefined
+function clearMcpFocusIdle(): void { clearTimeout(mcpFocusIdleTimer); mcpFocusIdleTimer = undefined }
+function scheduleMcpFocusIdle(delay: number): void {
+  clearMcpFocusIdle()
+  mcpFocusIdleTimer = setTimeout(() => {
+    mcpFocusIdleTimer = undefined
+    if (!destroyed && mcpFocusActive.value) mcpFocusDimmed.value = true
+  }, delay)
+}
+function mcpPointerMoved(event: PointerEvent): void {
+  if (!mcpFocusActive.value || event.pointerType && event.pointerType !== 'mouse') return
+  if (mcpPointerPosition?.x === event.clientX && mcpPointerPosition.y === event.clientY) return
+  mcpPointerPosition = { x: event.clientX, y: event.clientY }
+  mcpFocusDimmed.value = false
+  scheduleMcpFocusIdle(5000)
+}
+function releaseMcpFocus(): void {
+  clearMcpFocusIdle(); mcpFocusDimmed.value = false
+  mcpPointerPosition = undefined
+  document.removeEventListener('pointermove', mcpPointerMoved, true)
+}
+watch(mcpFocusActive, active => {
+  releaseMcpFocus()
+  if (active) {
+    scheduleMcpFocusIdle(5000)
+    document.addEventListener('pointermove', mcpPointerMoved, { capture: true, passive: true })
+  }
+}, { flush: 'sync' })
 let mcpStatusRevision = 0, mcpObservedEpoch = getMcpServiceEpoch()
 let mcpBridgeError = ''
 let unlistenMcp: (() => void) | undefined, mcpRequestQueue = Promise.resolve()
@@ -842,16 +875,17 @@ onMounted(async () => {
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { destroyed = true; nativeAppearance.dispose(); clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; releaseMcpFocus(); nativeAppearance.dispose(); clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>
-  <div class="app-shell" :data-theme="effectiveTheme" @dragover.prevent @drop="dropped">
-    <header class="topbar">
-      <button v-if="desktopPlatform !== 'windows'" class="brand" :disabled="speechWorking || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
+  <div class="app-shell" :class="{ 'sidebar-appearance': sidebarControls, 'mcp-focus-dimmed': mcpFocusDimmed }" :data-theme="effectiveTheme" :data-platform="desktopPlatform" @dragover.prevent @drop="dropped">
+    <header v-if="!sidebarControls" class="topbar">
+      <button class="brand" :disabled="speechWorking || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
     </header>
-    <section v-if="!booting && (mcpBusy || mcpToolActivity)" class="mcp-processing-banner" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state" :data-call-tool="mcpToolActivity?.tool" @keydown.esc.stop="mcpDetailsOpen=false">
+    <div v-if="mcpFocusActive" class="mcp-focus-shade" data-testid="mcp-focus-shade" aria-hidden="true"/>
+    <section v-if="!booting && (mcpBusy || mcpToolActivity)" class="mcp-processing-banner" :class="{ working: mcpWorkHighlighted }" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state" :data-call-tool="mcpToolActivity?.tool" @keydown.esc.stop="mcpDetailsOpen=false">
       <span v-if="mcpBusy || mcpToolActivity?.state==='running'" class="spinner small" aria-hidden="true"/><Icon v-else :name="mcpToolActivity?.state==='failed' ? 'alert' : 'check'" :size="16"/>
       <div class="mcp-processing-copy" role="status" aria-live="polite" :title="`${mcpActivityTitle} · ${mcpCompactStatus}`"><strong>{{ mcpActivityTitle }}</strong><span>{{ mcpCompactStatus }}</span></div>
       <span v-if="mcpBusy && activeMcpProgress!==undefined" class="mcp-processing-percent">{{ activeMcpProgress }}%</span>
@@ -869,10 +903,10 @@ onBeforeUnmount(() => { destroyed = true; nativeAppearance.dispose(); clearMcpTo
       </div>
     </section>
     <div class="workbench-body" :inert="switching || booting">
-      <aside class="sidebar" :class="{collapsed}">
+      <aside class="sidebar" :class="{collapsed, 'with-controls': sidebarControls}">
         <div class="sidebar-heading"><span v-if="!collapsed">工作台</span><button class="icon-button" :title="collapsed?'展开侧栏':'折叠侧栏'" :aria-label="collapsed?'展开侧栏':'折叠侧栏'" @click="collapsed=!collapsed"><Icon name="panel" :size="17"/></button></div>
         <nav aria-label="工作区"><button :disabled="speechWorking || mcpBusy" :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :disabled="speechWorking || mcpBusy" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
-        <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · {{ buildInfo.version }}</small></div>
+        <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · {{ buildInfo.version }}</small><HeaderControls v-if="sidebarControls" sidebar :collapsed="collapsed" :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
       </aside>
       <main class="main-area">
         <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking || mcpBusy" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
@@ -944,10 +978,17 @@ onBeforeUnmount(() => { destroyed = true; nativeAppearance.dispose(); clearMcpTo
 .mcp-task-item progress{display:block;width:100%;height:5px;accent-color:var(--ui-accent)}
 .mcp-task-item .error-message{color:var(--ui-danger)}
 .mcp-processing-banner{position:fixed;z-index:90;top:calc(5px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:min(780px,calc(100vw - 360px));height:44px;display:flex;align-items:center;gap:9px;padding:0 11px;border:1px solid color-mix(in srgb,var(--ui-accent) 25%,var(--ui-line));border-radius:9px;background:var(--ui-surface);box-shadow:0 5px 24px #0002;color:var(--ui-text)}
+.app-shell.sidebar-appearance .mcp-processing-banner{top:calc(54px + env(safe-area-inset-top,0px))}
+.mcp-focus-shade{position:fixed;inset:0;z-index:80;background:#050916;opacity:0;pointer-events:none;transition:opacity .18s ease}
+.mcp-focus-dimmed .mcp-focus-shade{opacity:.42}
+.mcp-processing-banner.working{border-color:#8c8afd;box-shadow:0 0 0 1px #8c8afd40,0 0 24px #7195ff55,0 6px 24px #0003}
+.mcp-processing-banner.working::before{content:'';position:absolute;inset:-2px;padding:2px;border-radius:11px;pointer-events:none;background:linear-gradient(110deg,#22d3ee,#a78bfa,#2dd4bf,#22d3ee);background-size:300% 100%;-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation:mcp-status-flow 3s linear infinite}
+.mcp-processing-banner.working .mcp-processing-copy strong{font-weight:700}
+@keyframes mcp-status-flow{from{background-position:0% 50%}to{background-position:100% 50%}}
 .mcp-processing-banner>.spinner{flex:none}.mcp-processing-copy{display:flex;align-items:center;gap:10px;flex:1;min-width:0;white-space:nowrap;font-size:11px;line-height:18px}.mcp-processing-copy strong{flex:none;color:var(--ui-accent);font-weight:600}.mcp-processing-copy>span{min-width:0;overflow:hidden;text-overflow:ellipsis}.mcp-processing-percent{flex:none;font-size:11px;width:4ch;text-align:right;font-variant-numeric:tabular-nums}.mcp-processing-actions{display:flex;gap:5px;flex:none}.mcp-processing-actions button{display:inline-flex;align-items:center;gap:4px;height:28px;min-width:28px;padding:0 7px;border:1px solid var(--ui-line);border-radius:5px;background:var(--ui-surface);color:var(--ui-text);font:inherit;font-size:11px;white-space:nowrap;cursor:pointer}.mcp-processing-actions .mcp-processing-detail-button{padding:0;width:28px;border-color:transparent}.mcp-processing-actions button:hover:not(:disabled){border-color:var(--ui-accent);color:var(--ui-accent)}.mcp-processing-actions button:disabled{opacity:.5;cursor:wait}
 .mcp-processing-progress{position:absolute;bottom:0;left:8px;right:8px;height:2px;overflow:hidden;border-radius:2px}.mcp-processing-progress i{display:block;height:100%;background:var(--ui-accent)}.mcp-processing-details{position:absolute;top:52px;right:0;width:min(440px,100%);max-height:min(280px,calc(100dvh - 128px));overflow:auto;padding:14px;border:1px solid var(--ui-line);border-radius:9px;background:var(--ui-surface);box-shadow:var(--ui-shadow);font-size:12px;line-height:1.6;overflow-wrap:anywhere}.mcp-processing-details p{margin:7px 0 0;color:var(--ui-muted);font-size:11px}.mcp-job-metrics{font-variant-numeric:tabular-nums}
 @media(max-width:700px){.mcp-processing-banner{top:calc(62px + env(safe-area-inset-top,0px));width:calc(100vw - 24px);gap:6px;padding:0 8px}.mcp-processing-copy{gap:6px}.mcp-processing-copy strong{font-size:10px}.mcp-action-label{display:none}.mcp-processing-actions button{width:28px;padding:0}.mcp-processing-percent{font-size:10px}}
 @media(max-width:640px){.mcp-processing-banner{top:calc(57px + env(safe-area-inset-top,0px))}}
-@media(prefers-reduced-motion:reduce){.mcp-processing-banner>.spinner{animation:none}}
+@media(prefers-reduced-motion:reduce){.mcp-processing-banner>.spinner,.mcp-processing-banner.working::before{animation:none}.mcp-focus-shade{transition:none}}
 
 </style>

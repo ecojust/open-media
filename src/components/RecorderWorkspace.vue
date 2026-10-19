@@ -11,7 +11,7 @@ import type { MediaAsset } from '../core/types'
 import { readMicrophonePreference, writeMicrophonePreference } from '../core/microphone-devices'
 import { recordingClock, type CaptureControlAction, type CaptureControlsSnapshot } from '../core/capture-controls'
 import { browserCaptureAvailable, captureErrorMessage, startBrowserCapture, type BrowserCapture, type BrowserCaptureSelectionRequest } from '../core/capture'
-import { cancelCapturePicker, cancelCaptureStart, getCaptureStatus, onCaptureControlsAction, pauseCapture, pickCaptureSource, resumeCapture, setCaptureMicrophone, showMainWindow, startCapture, stopCapture, type CaptureSelection, type CapturePickerPreferences, type CaptureStatus } from '../native'
+import { cancelCapturePicker, cancelCaptureStart, getCaptureStatus, onCaptureControlsAction, openMediaLibraryDirectory, pauseCapture, pickCaptureSource, resumeCapture, setCaptureMicrophone, showMainWindow, startCapture, stopCapture, type CaptureSelection, type CapturePickerPreferences, type CaptureStatus } from '../native'
 
 const props = withDefaults(defineProps<{ assets: MediaAsset[]; native: boolean; screenshotShortcut?: string | null; screenshotBusy?: boolean; screenshotDisabled?: boolean; screenshotError?: string; screenshotConfiguring?: boolean }>(), { screenshotShortcut: null, screenshotBusy: false, screenshotDisabled: false, screenshotError: '', screenshotConfiguring: false })
 const emit = defineEmits<{ captured: [blob: Blob, name: string]; asset: [asset: MediaAsset]; status: [message: string]; 'add-to-timeline': [assetId: string]; 'recording-change': [active: boolean]; screenshot: []; 'screenshot-shortcut-change': [shortcut: string | null] }>()
@@ -59,6 +59,18 @@ const phaseLabel = computed(() => ({ idle: '准备录制', selecting: '正在选
 const recentVideos = computed(() => props.assets.filter(item => item.kind === 'video').slice(-4).reverse())
 const screenshotSettingsOpen = ref(false)
 const screenshotSettingsButton = ref<HTMLButtonElement>()
+const directoryOpening = ref(false)
+const directoryError = ref('')
+
+async function openRecordingDirectory(): Promise<void> {
+  if (!props.native || destroyed || directoryOpening.value) return
+  directoryOpening.value = true
+  directoryError.value = ''
+  try { await openMediaLibraryDirectory() }
+  catch (cause) {
+    if (!destroyed) directoryError.value = `无法打开录屏保存目录：${cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '请重试。'}`
+  } finally { if (!destroyed) directoryOpening.value = false }
+}
 
 async function takeScreenshot(): Promise<void> {
   screenshotSettingsOpen.value = false
@@ -374,7 +386,8 @@ defineExpose({ isRecording: () => active.value, stop })
 
 <template>
   <section class="recorder-workspace" data-testid="recorder-workspace">
-    <div class="capture-heading"><div><span class="eyebrow">CAPTURE STUDIO</span><h1>屏幕录制</h1><p>记录屏幕、窗口或演示，录制完成后直接开始剪辑。</p></div><div class="capture-heading-actions"><button ref="screenshotSettingsButton" class="screenshot-settings-button" type="button" data-testid="screenshot-settings-open" aria-haspopup="dialog" :aria-expanded="screenshotSettingsOpen" @click="screenshotSettingsOpen = true"><Icon name="camera" :size="16" />截屏设置</button><span class="capture-platform"><Icon :name="native ? 'monitor' : 'globe'" :size="15" />{{ native ? '桌面录制' : '网页录制' }}</span></div></div>
+    <div class="capture-heading"><div><span class="eyebrow">CAPTURE STUDIO</span><div class="capture-title-row"><h1>屏幕录制</h1><button v-if="native" class="recording-directory-button" type="button" :disabled="directoryOpening" aria-label="打开录屏保存目录" title="打开录屏保存目录" @click="openRecordingDirectory"><Icon name="folder" :size="18" /></button></div><p>记录屏幕、窗口或演示，录制完成后直接开始剪辑。</p></div><div class="capture-heading-actions"><button ref="screenshotSettingsButton" class="screenshot-settings-button" type="button" data-testid="screenshot-settings-open" aria-haspopup="dialog" :aria-expanded="screenshotSettingsOpen" @click="screenshotSettingsOpen = true"><Icon name="camera" :size="16" />截屏设置</button><span class="capture-platform"><Icon :name="native ? 'monitor' : 'globe'" :size="15" />{{ native ? '桌面录制' : '网页录制' }}</span></div></div>
+    <p v-if="directoryError" class="capture-error screenshot-page-error" role="alert">{{ directoryError }}</p>
     <p v-if="screenshotError && !screenshotSettingsOpen" class="capture-error screenshot-page-error" role="alert">{{ screenshotError }}</p>
     <div class="capture-grid">
       <div class="capture-stage">
@@ -417,6 +430,7 @@ defineExpose({ isRecording: () => active.value, stop })
 </template>
 
 <style scoped>
+.capture-title-row{display:flex;align-items:center;gap:10px}.recording-directory-button{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ui-muted,#7c8492);cursor:pointer}.recording-directory-button:hover{background:var(--ui-surface-2,#f7f8fc);color:var(--ui-accent,#6257db);border-color:var(--ui-border,#e5e8f0)}.recording-directory-button:focus-visible{outline:2px solid var(--ui-accent,#6257db);outline-offset:2px}.recording-directory-button:disabled{opacity:.45;cursor:wait}
 .preview-recording-toolbar{position:absolute;top:8px;right:8px;z-index:6;max-width:calc(100% - 16px)}
 .record-actions button{white-space:nowrap;padding-inline:8px;gap:5px}.record-actions button[aria-pressed]{flex:0 0 34px;width:34px;padding-inline:0}
 .capture-heading-actions{display:flex;align-items:center;justify-content:flex-end;gap:9px;flex-wrap:wrap;flex-shrink:0}.screenshot-settings-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:var(--ui-control-height,32px);padding:5px 11px;border:1px solid var(--ui-border,#e5e8f0);border-radius:7px;background:var(--ui-panel,#fff);color:var(--ui-text,#253044);font-size:11px;white-space:nowrap;cursor:pointer}.screenshot-settings-button:hover{border-color:var(--ui-accent,#6257db);color:var(--ui-accent,#6257db)}.screenshot-settings-button:focus-visible{outline:2px solid var(--ui-accent,#6257db);outline-offset:2px}.screenshot-settings-dialog{--ed-border:var(--ui-border,#e5e8f0);--ed-panel:var(--ui-panel,#fff);--ed-text:var(--ui-text,#253044);--ed-muted:var(--ui-muted,#7c8492);--ed-accent:var(--ui-accent,#6257db);--ed-bg:var(--ui-surface-2,#f7f8fc);width:min(420px,calc(100vw - 24px))}.screenshot-page-error{margin:0 0 16px}@media(max-width:600px){.capture-heading{align-items:flex-start;gap:12px;flex-wrap:wrap}.capture-heading-actions{justify-content:flex-start}}

@@ -5,7 +5,7 @@ import EditorDialog from './EditorDialog.vue'
 import Icon from './Icon.vue'
 
 type Theme = 'light' | 'dark' | 'system'
-const props = defineProps<{ theme: Theme; effectiveTheme: 'light' | 'dark' }>()
+const props = defineProps<{ theme: Theme; effectiveTheme: 'light' | 'dark'; sidebar?: boolean; collapsed?: boolean }>()
 const emit = defineEmits<{ 'update:theme': [theme: Theme] }>()
 const infoOpen = ref(false)
 const infoButton = ref<HTMLButtonElement | null>(null)
@@ -18,7 +18,7 @@ const buildTime = formatBuildTime(buildInfo.builtAt)
 </script>
 
 <template>
-  <div class="header-controls" role="group" aria-label="外观与信息" @keydown.space.stop @keyup.space.stop>
+  <div class="header-controls" :class="{ 'sidebar-controls': sidebar, compact: sidebar && collapsed }" role="group" aria-label="外观与信息" @keydown.space.stop @keyup.space.stop>
     <div class="theme-switch" role="group" aria-label="界面主题">
       <button v-for="option in themes" :key="option.id" type="button" :data-testid="`theme-${option.id}`" :aria-label="option.label" :title="option.id === 'system' && props.theme === 'system' ? `跟随系统（当前为${props.effectiveTheme === 'dark' ? '深色' : '浅色'}）` : option.label" :aria-pressed="props.theme === option.id" @click="emit('update:theme', option.id)"><Icon :name="option.icon" :size="17" /></button>
     </div>
@@ -46,6 +46,9 @@ const buildTime = formatBuildTime(buildInfo.builtAt)
 .header-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--ui-muted)}
 .header-icon:hover:not(:disabled){background:var(--ui-hover);border-color:transparent;color:var(--ui-text)}
 .header-icon:focus-visible{outline:2px solid var(--ui-accent);outline-offset:2px}
+.sidebar-controls{justify-content:center;padding-top:10px;border-top:1px solid var(--ui-line)}
+.sidebar-controls.compact,.sidebar-controls.compact .theme-switch{flex-direction:column}
+@media(max-width:900px){.sidebar-controls,.sidebar-controls .theme-switch{flex-direction:column}}
 .app-information{padding:22px 20px 20px}
 .app-identity{display:flex;align-items:center;gap:12px;margin-bottom:23px}
 .app-identity img{flex:none}

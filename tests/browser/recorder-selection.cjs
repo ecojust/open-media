@@ -27,6 +27,10 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null }
           if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
           if (command === 'show_main_window') return null
+          if (command === 'open_media_library_directory') {
+            if (state.directoryFailure) { state.directoryFailure = false; throw new Error('目录暂不可用') }
+            return null
+          }
           if (command === 'pick_capture_source') {
             if (state.permissionFailure) { state.permissionFailure = false; throw new Error('未获得屏幕录制权限，请在系统设置中允许后重试。') }
             return new Promise(resolve => { state.resolvePicker = resolve })
@@ -106,6 +110,20 @@ async function main() {
     await mountRecorder(page, baseURL, true)
     await page.getByTestId('record-start').waitFor()
     assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => !['get_runtime_status', 'plugin:event|listen'].includes(call.command))), [], '打开录制页不能枚举来源或申请采集权限')
+    const directoryButton = page.getByRole('button', { name: '打开录屏保存目录', exact: true })
+    const headingBounds = await page.getByRole('heading', { name: '屏幕录制', exact: true }).boundingBox()
+    const directoryBounds = await directoryButton.boundingBox()
+    assert(directoryBounds.x >= headingBounds.x + headingBounds.width, '打开目录位于主标题右侧')
+    assert(Math.abs(directoryBounds.y + directoryBounds.height / 2 - headingBounds.y - headingBounds.height / 2) < 2, '目录按钮与主标题同排居中')
+    await expect(directoryButton.locator('svg')).toHaveCount(1)
+    await page.evaluate(() => { window.recorderHarness.directoryFailure = true })
+    await directoryButton.click()
+    await expect(page.getByRole('alert')).toContainText('无法打开录屏保存目录：目录暂不可用')
+    await directoryButton.click()
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'open_media_library_directory').length)).toBe(2)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => !['get_runtime_status', 'plugin:event|listen'].includes(call.command)).map(call => call.command)), ['open_media_library_directory', 'open_media_library_directory'], '打开目录不扫描视频列表或启动采集')
+    console.log('PASS 录屏目录入口紧邻主标题，按需打开、错误可重试且不扫描目录')
     assert.equal(await page.getByTestId('capture-source').count(), 0)
     assert.equal(await page.getByTestId('capture-region-x').count(), 0)
     assert.equal(await page.getByTestId('capture-output').count(), 0)
@@ -201,6 +219,7 @@ async function main() {
 
     await page.setViewportSize({ width: 1100, height: 850 })
     await mountRecorder(page, baseURL, false)
+    await expect(page.getByRole('button', { name: '打开录屏保存目录', exact: true })).toHaveCount(0)
     await page.getByLabel('开始倒计时').selectOption('0')
     await page.getByTestId('record-start').click()
     await page.getByRole('dialog', { name: '选择录制范围', exact: true }).waitFor()

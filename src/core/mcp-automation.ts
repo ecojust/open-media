@@ -1,6 +1,6 @@
 import type { ImportedProject, MediaAsset, Project } from './types.ts'
 import type { MediaJob, ProjectFileTarget } from '../native.ts'
-import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelMediaJob, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getMediaJobs, getSpeechJob, getSpeechStatus, repairSpeechModel } from '../native.ts'
+import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelMediaJob, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getMediaJobs, getSpeechJob, getSpeechStatus, repairSpeechModel, revealMediaJobOutput } from '../native.ts'
 import { beginMcpMediaJob, importMcpMediaPaths, openMcpProjectFile, saveMcpProjectFile } from '../native-mcp-files.ts'
 import { cloneProject, createProject, newId } from './project.ts'
 import { addAssets } from './timeline.ts'
@@ -54,6 +54,7 @@ export interface McpAutomationJob {
   stage: string
   error?: string
   errorDetails?: Record<string, unknown>
+  warning?: string
   result?: unknown
 }
 interface Operation {
@@ -111,7 +112,7 @@ export function createMcpAutomation(host: McpAutomationHost) {
     }
     void Promise.resolve().then(() => { check(operation); return action(operation) }).then(result => {
       operation.job.result = result; operation.job.state = 'completed'; operation.job.progress = 1; operation.job.stage = '已完成'
-      host.announce(`MCP：${name}已完成`)
+      host.announce(`MCP：${name}已完成${operation.job.warning ? `；${operation.job.warning}` : ''}`)
     }).catch(async cause => {
       if (!operation.irrevocable) await operation.cancelNative?.().catch(() => {})
       operation.job.state = (operation.controller.signal.aborted || !!cause && typeof cause === 'object' && 'name' in cause && cause.name === 'AbortError') && !operation.irrevocable ? 'cancelled' : 'failed'
@@ -291,7 +292,10 @@ export function createMcpAutomation(host: McpAutomationHost) {
             changed(operation, job.stage || '正在导出', job.progress, job)
             if (job.state === 'completed') {
               operation.irrevocable = true; operation.job.cancelable = false
-              return { outputPath: job.outputPath, nativeJobId: job.id, backend: job.backend, elapsedSeconds: job.elapsedSeconds, fallbackReason: job.fallbackReason }
+              let folderOpened = false
+              try { await revealMediaJobOutput(job.id); folderOpened = true }
+              catch (cause) { operation.job.warning = `无法自动打开导出文件夹：${message(cause)}` }
+              return { outputPath: job.outputPath, nativeJobId: job.id, backend: job.backend, elapsedSeconds: job.elapsedSeconds, fallbackReason: job.fallbackReason, folderOpened }
             }
             if (job.state === 'failed') throw new Error(job.error || '视频导出失败。')
             if (job.state === 'cancelled') throw new DOMException('导出已取消。', 'AbortError')

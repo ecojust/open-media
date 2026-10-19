@@ -117,30 +117,272 @@ async function editorGeometry(page) {
   })))
 }
 async function assertFloatingBar(page, width) {
+  await expect(page.locator('.topbar')).toHaveCount(0)
   const geometry = await page.getByTestId('mcp-processing-banner').evaluate(element => {
     const { x, y, width, height } = element.getBoundingClientRect()
-    const header = document.querySelector('.topbar').getBoundingClientRect()
-    const brand = document.querySelector('.brand').getBoundingClientRect()
-    const controls = document.querySelector('.topbar-end').getBoundingClientRect()
+    const projectBar = document.querySelector('.project-bar').getBoundingClientRect()
+    const controls = document.querySelector('.sidebar-bottom .header-controls').getBoundingClientRect()
     const detail = element.querySelector('.mcp-processing-details')?.getBoundingClientRect()
     return { x, y, width, height, position: getComputedStyle(element).position, viewport: innerWidth,
-      headerBottom: header.bottom, brandRight: brand.right, controlsLeft: controls.left,
+      projectBarTop: projectBar.top, projectBarBottom: projectBar.bottom,
+      controls: { left: controls.left, right: controls.right, top: controls.top, bottom: controls.bottom },
       detail: detail ? { top: detail.top, bottom: detail.bottom } : null, viewportHeight: innerHeight }
   })
   assert.equal(geometry.position, 'fixed')
   assert.equal(geometry.height, 44)
   assert.ok(geometry.x >= 0 && geometry.x + geometry.width <= geometry.viewport, JSON.stringify(geometry))
-  if (geometry.viewport > 700) {
-    assert.ok(geometry.y >= 0 && geometry.y + geometry.height <= geometry.headerBottom, '宽屏状态条位于全局顶栏内')
-    assert.ok(geometry.x > geometry.brandRight && geometry.x + geometry.width < geometry.controlsLeft, '状态条不遮挡品牌和主题按钮')
-  } else {
-    assert.equal(geometry.y, geometry.headerBottom + 8, '窄屏状态条置于顶栏下方')
-  }
+  assert.equal(geometry.projectBarTop, 0, '项目工具栏直接占用窗口顶部，不保留空白顶栏')
+  assert.equal(geometry.y, 54, '状态条悬浮在项目工具栏下方')
+  assert.ok(geometry.y >= geometry.projectBarBottom, '状态条不遮挡项目操作按钮')
+  assert.ok(geometry.x + geometry.width <= geometry.controls.left || geometry.x >= geometry.controls.right ||
+    geometry.y + geometry.height <= geometry.controls.top || geometry.y >= geometry.controls.bottom,
+    '状态条不遮挡左下角主题和信息按钮')
   if (geometry.detail) {
     assert.ok(geometry.detail.top >= geometry.y + geometry.height, '详情向下展开')
     assert.ok(geometry.detail.bottom <= geometry.viewportHeight, '详情不超出窗口底部')
   }
   if (width) assert.equal(geometry.viewport, width)
+}
+
+async function verifyMcpFocus(browser, url) {
+  // Keep the focus clock separate from the request expiry and ordering scenarios below.
+  const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } })
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.setDefaultTimeout(15000)
+  try {
+    // Assert timer boundaries independently of the browser's real-time CSS transition clock.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await installNativeBridge(page)
+    await page.goto(url)
+    await completion(page, 'startup-replay')
+    await page.getByTestId('create-project').click()
+    await expect(page.getByTestId('editor-mcp-open')).toBeVisible()
+    await page.waitForFunction(() => document.querySelector('#app').__vue_app__._instance.setupState.mcpServiceRunning)
+    const now = await page.evaluate(() => Date.now())
+    await page.clock.install({ time: now })
+    await page.clock.pauseAt(now + 1000)
+    const shell = page.locator('.app-shell'), shade = page.getByTestId('mcp-focus-shade'), banner = page.getByTestId('mcp-processing-banner')
+    const expectNotWorking = async () => {
+      if (await banner.count()) await expect(banner).not.toHaveClass(/\bworking\b/)
+    }
+    const expectInactive = async () => {
+      await expect(shade).toHaveCount(0)
+      await expect(shell).not.toHaveClass(/\bmcp-focus-dimmed\b/)
+      await expectNotWorking()
+    }
+    const expectDimmed = async value => {
+      await expect(shade).toHaveCount(1)
+      if (value) await expect(shell).toHaveClass(/\bmcp-focus-dimmed\b/)
+      else await expect(shell).not.toHaveClass(/\bmcp-focus-dimmed\b/)
+      await expect(shade).toHaveCSS('opacity', value ? '0.42' : '0')
+    }
+    const updateStatus = async patch => {
+      await page.evaluate(patch => Object.assign(window.mcpAppFixture, patch), patch)
+      await page.clock.runFor(1100)
+    }
+    const click = async locator => {
+      const rect = await locator.boundingBox()
+      assert(rect, '需要实际点击的控件必须可见')
+      await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2)
+    }
+    const toggleService = async running => {
+      await click(page.getByTestId('editor-mcp-open'))
+      await expect(page.getByRole('dialog', { name: 'MCP 服务', exact: true })).toBeVisible()
+      const control = page.getByTestId('mcp-service-switch')
+      await expect(control).toHaveAttribute('aria-checked', String(!running))
+      await expect(control).toBeEnabled()
+      await click(control)
+      await expect(control).toHaveAttribute('aria-checked', String(running))
+      await click(page.getByRole('button', { name: '关闭MCP 服务', exact: true }))
+    }
+    const holdTool = async id => {
+      await page.evaluate(id => { window.mcpAppFixture.holdCompleteId = id }, id)
+      await enqueue(page, 'project_get', {}, { id, ttl: 120000 })
+      await page.waitForFunction(id => window.mcpAppFixture.heldCompletions.has(id), id)
+    }
+    const releaseTool = async id => {
+      await page.evaluate(id => {
+        const fixture = window.mcpAppFixture
+        fixture.holdCompleteId = ''; fixture.heldCompletions.get(id)(); fixture.heldCompletions.delete(id)
+      }, id)
+      await completion(page, id)
+    }
+
+    // Starting the service grants a full idle interval, even without any client or task.
+    await toggleService(false)
+    await expectInactive()
+    await toggleService(true)
+    await expectDimmed(false)
+    await expectNotWorking()
+    await page.clock.runFor(4999)
+    await expectDimmed(false)
+    await page.clock.runFor(1)
+    await expectDimmed(true)
+    await expect(page.getByTestId('editor-mcp-open')).not.toHaveClass(/\bconnected\b/)
+    await expectNotWorking()
+    const geometry = await editorGeometry(page)
+    await expect(shade).toHaveCSS('pointer-events', 'none')
+    await expect(shade).toHaveCSS('z-index', '80')
+    await page.screenshot({ path: '/tmp/open-media-mcp-focus-idle.png', fullPage: true })
+    await page.evaluate(() => window.mcpAppFixture.mediaJobs.push({ id: 'local-focus-export', name: '本地视频导出', state: 'running', progress: 0.4 }))
+    await page.clock.runFor(1100)
+    await page.waitForFunction(() => document.querySelector('#app').__vue_app__._instance.setupState.runningJobs === 1)
+    await expectDimmed(true)
+    await expectNotWorking()
+    await page.evaluate(() => { window.mcpAppFixture.mediaJobs.find(job => job.id === 'local-focus-export').state = 'completed' })
+
+    // Touch input and unchanged coordinates do not count as mouse activity.
+    await page.locator('.project-bar').dispatchEvent('pointermove', { pointerType: 'touch', clientX: 510, clientY: 250 })
+    await expectDimmed(true)
+    await page.mouse.move(510, 250)
+    await expectDimmed(false)
+    await page.clock.runFor(4000)
+    await page.locator('.project-bar').dispatchEvent('pointermove', { pointerType: 'mouse', clientX: 510, clientY: 250 })
+    await page.clock.runFor(999)
+    await expectDimmed(false)
+    await page.clock.runFor(1)
+    await expectDimmed(true)
+    // A child stopping bubbling still lets the document capture listener see movement.
+    await page.evaluate(() => {
+      const target = document.querySelector('.project-bar')
+      target.addEventListener('pointermove', event => event.stopPropagation(), { once: true })
+      target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 520, clientY: 250 }))
+    })
+    await expectDimmed(false)
+    await page.clock.runFor(4900)
+    await page.mouse.move(530, 250)
+    await page.clock.runFor(100)
+    await expectDimmed(false)
+    await page.clock.runFor(4899)
+    await expectDimmed(false)
+    await page.clock.runFor(1)
+    await expectDimmed(true)
+
+    // Tool activity only controls the animated banner; it never resets idle dimming.
+    await holdTool('focus-held-tool')
+    await expect(banner).toHaveAttribute('data-call-state', 'running')
+    await expectNotWorking()
+    await expectDimmed(true)
+    await updateStatus({ connectedClients: 1 })
+    await expect(banner).toHaveClass(/\bworking\b/)
+    await expect(banner).toHaveCSS('z-index', '90')
+    await expectDimmed(true)
+    assert.deepEqual(await editorGeometry(page), geometry, '全局暗化和流光不得改变编辑器布局')
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    const motion = await banner.evaluate(element => {
+      const style = getComputedStyle(element, '::before')
+      return { animation: style.animationName, pointerEvents: style.pointerEvents, background: style.backgroundImage }
+    })
+    assert.match(motion.animation, /^mcp-status-flow(?:-|$)/)
+    assert.equal(motion.pointerEvents, 'none')
+    assert.match(motion.background, /linear-gradient/)
+    await page.screenshot({ path: '/tmp/open-media-mcp-focus-dimmed.png', fullPage: true })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    assert.equal(await banner.evaluate(element => getComputedStyle(element, '::before').animationName), 'none')
+    assert.notEqual(await banner.evaluate(element => getComputedStyle(element).boxShadow), 'none', '减少动态效果时保留静态高亮')
+    await expectDimmed(true)
+    await page.mouse.move(540, 250)
+    await expectDimmed(false)
+    await page.clock.runFor(2000)
+    await releaseTool('focus-held-tool')
+    await expect(banner).toHaveAttribute('data-call-state', 'completed')
+    await expectNotWorking()
+    await expectDimmed(false)
+    await page.evaluate(() => { window.mcpAppFixture.connectedClients = 0 })
+    await page.clock.runFor(2999)
+    await expect(page.getByTestId('editor-mcp-open')).not.toHaveClass(/\bconnected\b/)
+    await expectDimmed(false)
+    await page.clock.runFor(1)
+    await expectDimmed(true)
+    await updateStatus({ connectedClients: 1 })
+    await expectDimmed(true)
+    await holdTool('focus-following-tool')
+    await expect(banner).toHaveClass(/\bworking\b/)
+    await expectDimmed(true)
+    await releaseTool('focus-following-tool')
+    await expectNotWorking()
+    await expectDimmed(true)
+    console.log('PASS MCP聚焦：开启服务后静止5000ms暗化，无客户端、无任务亦生效，鼠标移动恢复并重新计时，工具完成和断连不重置；流光仅在已连接执行中显示')
+
+    const imported = await tool(page, 'asset_import', { paths: ['/fixture/focus-import.png'] })
+    assert.equal(imported.state, 'running')
+    await page.waitForFunction(() => typeof window.mcpAppFixture.releaseImport === 'function')
+    await expect(banner).toHaveAttribute('data-call-state', 'completed')
+    await page.clock.runFor(1300)
+    await expect(banner).toContainText('MCP 正在处理')
+    await expect(banner).toHaveClass(/\bworking\b/)
+    await expectDimmed(true)
+    const asyncGeometry = await editorGeometry(page)
+    await click(page.getByRole('button', { name: '关于 Open Media', exact: true }))
+    const info = page.getByRole('dialog', { name: '关于 Open Media', exact: true })
+    await expect(info).toBeVisible()
+    await page.clock.runFor(5000)
+    await expectDimmed(true)
+    assert.equal(await info.evaluate(element => {
+      const button = element.querySelector('button'), rect = button.getBoundingClientRect()
+      return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    }), true, '顶层信息弹窗必须位于暗化层上方且可命中')
+    await click(info.getByRole('button', { name: '关闭关于 Open Media', exact: true }))
+    await expect(info).not.toBeVisible()
+    await updateStatus({ connectedClients: 0 })
+    await expectNotWorking()
+    await expectDimmed(false)
+    await page.clock.runFor(3899)
+    await expectDimmed(false)
+    await page.clock.runFor(1)
+    await expectDimmed(true)
+    await expect(banner).toContainText('MCP 正在处理')
+    await updateStatus({ connectedClients: 1 })
+    await expect(banner).toHaveClass(/\bworking\b/)
+    await expectDimmed(true)
+    assert.deepEqual(await editorGeometry(page), asyncGeometry, '对话框、连接状态和异步工具完成不推移工作区')
+    await click(page.getByTestId('mcp-processing-tasks'))
+    const tasks = page.getByRole('dialog', { name: '处理任务', exact: true })
+    await expect(tasks).toBeVisible()
+    await page.clock.runFor(5000)
+    await expectDimmed(true)
+    const cancel = tasks.locator(`[data-mcp-job-id="${imported.jobId}"]`).getByRole('button', { name: /取消 MCP 任务/ })
+    assert.equal(await cancel.evaluate(button => {
+      const rect = button.getBoundingClientRect()
+      return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    }), true, '任务弹窗及取消按钮必须位于暗化层上方且可命中')
+    await page.screenshot({ path: '/tmp/open-media-mcp-focus-dialog.png', fullPage: true })
+    await click(cancel)
+    await page.evaluate(() => { window.mcpAppFixture.releaseImport([]); window.mcpAppFixture.releaseImport = undefined })
+    await expect(tasks.locator(`[data-mcp-job-id="${imported.jobId}"]`)).toContainText('已取消')
+    await expectNotWorking()
+    await expectDimmed(false)
+    await page.clock.runFor(5000)
+    await expectDimmed(true)
+    await click(tasks.getByRole('button', { name: '关闭任务', exact: true }))
+    await expect(tasks).not.toBeVisible()
+
+    await holdTool('focus-stopped-tool')
+    await expectDimmed(false)
+    await page.clock.runFor(5000)
+    await expectDimmed(true)
+    await page.mouse.move(550, 250)
+    await expectDimmed(false)
+    await toggleService(false)
+    await expectInactive()
+    await releaseTool('focus-stopped-tool')
+    await page.mouse.move(560, 250)
+    await page.clock.runFor(6000)
+    await expectInactive()
+    await toggleService(true)
+    await expectDimmed(false)
+    await expectNotWorking()
+    await page.clock.runFor(4999)
+    await expectDimmed(false)
+    await page.clock.runFor(1)
+    await expectDimmed(true)
+    await toggleService(false)
+    await expectInactive()
+    assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+    assert.deepEqual(errors, [])
+    console.log('PASS MCP聚焦生命周期：异步任务流光持续、取消后仍按空闲时间暗化，信息/任务弹窗可点，停服立即清理暗化和定时器，重新开启等待完整5000ms')
+  } finally { await page.close() }
 }
 
 async function main() {
@@ -152,6 +394,10 @@ async function main() {
   page.setDefaultTimeout(15000)
   page.on('pageerror', error => errors.push(error.message))
   try {
+    if (process.argv.includes('--focus-only')) {
+      await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+      return
+    }
     await installNativeBridge(page)
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`)
     const replay = await completion(page, 'startup-replay')
@@ -550,6 +796,7 @@ async function main() {
 
     assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
     assert.deepEqual(errors, [])
+    await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
   } finally { await browser.close(); await server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

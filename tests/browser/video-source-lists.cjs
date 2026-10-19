@@ -47,6 +47,30 @@ async function mount(page, url, mode, native, source, options = {}) {
   }, { mode, native, options })
 }
 
+async function assertLibraryHeader(page, mode) {
+  const actions = page.getByTestId('video-library-actions')
+  await expect(actions).toBeVisible()
+  await expect(actions.getByRole('button')).toHaveCount(2)
+  await expect(page.getByTestId('video-library-directory')).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText('/Users/demo/Library/Application Support/Open Media/recordings')
+  await expect(page.locator('[title="/Users/demo/Library/Application Support/Open Media/recordings"]')).toHaveCount(0)
+  const geometry = await actions.evaluate((element, mode) => {
+    const header = element.closest(mode === 'gif' ? '.gif-sources > header' : '.convert-section-title')
+    const title = header?.querySelector('h2, strong')
+    if (!header || !title) return null
+    const rect = element => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height } }
+    return { header: rect(header), title: rect(title), actions: rect(element), buttons: [...element.querySelectorAll('button')].map(rect), viewport: innerWidth }
+  }, mode)
+  assert(geometry, '目录操作应位于视频列表主标题中')
+  assert(geometry.actions.x >= geometry.title.x + geometry.title.width - 1, '目录操作应放在主标题右侧')
+  for (const button of geometry.buttons) {
+    assert(button.width >= 24 && button.height >= 24, '图标按钮保留足够的点击区域')
+    assert(button.x >= geometry.header.x && button.x + button.width <= Math.min(geometry.header.x + geometry.header.width, geometry.viewport) + 1, '目录操作不能被标题或视口挤出')
+    assert(button.y >= geometry.header.y && button.y + button.height <= geometry.header.y + geometry.header.height + 1, '目录操作与主标题保持同一行')
+    assert(Math.abs(button.y + button.height / 2 - geometry.title.y - geometry.title.height / 2) <= 4, '图标与标题垂直居中')
+  }
+}
+
 async function main() {
   const directory = process.env.BROWSER_ARTIFACTS ? path.join(process.env.BROWSER_ARTIFACTS, 'video-source-lists') : fs.mkdtempSync(path.join(os.tmpdir(), 'open-media-video-lists-'))
   fs.mkdirSync(directory, { recursive: true })
@@ -199,21 +223,23 @@ async function main() {
           await page.getByTestId('export-gif').click()
           await expect(page.getByLabel('GIF 视频来源')).toBeDisabled()
           await expect(rows.first()).toBeDisabled()
+          await expect(page.getByTestId('video-library-actions').getByRole('button', { name: '刷新本机视频列表' })).toBeDisabled()
           await page.getByRole('button', { name: '取消导出', exact: true }).click()
           await expect(rows.first()).toBeEnabled()
         }
       } else if (native) {
         await page.getByTestId('convert-start').click()
         await expect(rows.first().locator('.source-details')).toBeDisabled()
+        await expect(page.getByTestId('video-library-actions').getByRole('button', { name: '刷新本机视频列表' })).toBeDisabled()
         await rows.first().dispatchEvent('click')
         await expect(preview).toHaveAttribute('src', '/list-video/older')
         await page.getByRole('button', { name: '取消转换', exact: true }).click()
         await expect(rows.first().locator('.source-details')).toBeEnabled()
       }
       if (native) {
-        const toolbar = page.getByTestId('video-library-toolbar')
-        await expect(toolbar).toBeVisible()
-        await expect(page.getByTestId('video-library-directory')).toHaveAttribute('title', '/Users/demo/Library/Application Support/Open Media/recordings')
+        const toolbar = page.getByTestId('video-library-toolbar'), actions = page.getByTestId('video-library-actions')
+        await expect(toolbar).toHaveCount(0)
+        await assertLibraryHeader(page, mode)
         const initialSource = await preview.getAttribute('src'), beforeCount = await rows.count()
         const projectAssetsBeforeScan = await page.evaluate(() => window.listHarness.assets.value.map(asset => asset.id))
         if (mode === 'gif') await page.getByLabel('开始时间', { exact: true }).fill('2')
@@ -224,8 +250,11 @@ async function main() {
           window.listHarness.warnings = ['损坏视频.webm：无法读取视频信息']
           window.listHarness.holdScan = true
         })
-        await toolbar.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await expect(toolbar).toBeVisible()
         await expect(toolbar).toContainText('正在读取目录视频')
+        await expect(toolbar).toHaveAttribute('aria-busy', 'true')
+        await expect(actions.getByRole('button', { name: '刷新本机视频列表' })).toBeDisabled()
         await expect(rows).toHaveCount(beforeCount)
         await expect(preview).toHaveAttribute('src', initialSource)
         await page.waitForFunction(() => typeof window.listHarness.releaseScan === 'function')
@@ -242,7 +271,7 @@ async function main() {
         assert(!mediaRequests.some(url => url.endsWith('/recording-only')), '目录扫描不应逐个加载或转换未选中的视频')
         await toolbar.getByText('部分文件已跳过（1）', { exact: true }).click()
         await expect(toolbar).toContainText('损坏视频.webm：无法读取视频信息')
-        await toolbar.getByRole('button', { name: '打开录屏保存目录' }).click()
+        await actions.getByRole('button', { name: '打开录屏保存目录' }).click()
         await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'open_media_library_directory').length)).toBe(1)
         const recording = page.locator('[data-source-asset-id="recording-only"]')
         await (mode === 'gif' ? recording : recording.locator('.source-details')).click()
@@ -264,7 +293,8 @@ async function main() {
         if (mode === 'gif') await expect(page.getByLabel('开始时间', { exact: true })).toHaveValue('1.2')
         const beforeFailure = await rows.count()
         await page.evaluate(() => { window.listHarness.failScan = true })
-        await toolbar.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
+        await expect(toolbar).toBeVisible()
         await expect(toolbar.getByRole('alert')).toContainText('录屏目录暂时不可读取')
         await expect(rows).toHaveCount(beforeFailure)
         await expect(preview).toHaveAttribute('src', '/list-video/recording-only')
@@ -276,6 +306,7 @@ async function main() {
         console.log(`PASS ${mode} 本机目录模拟：默认扫描、路径去重、延迟/失败保留选择与GIF片段、按需解码、激活和窗口聚焦刷新、打开目录与跳过提示`)
       } else {
         await expect(page.getByTestId('video-library-toolbar')).toHaveCount(0)
+        await expect(page.getByTestId('video-library-actions')).toHaveCount(0)
         assert.equal(await page.evaluate(() => window.listHarness.calls.some(call => ['list_stored_videos', 'open_media_library_directory'].includes(call.command))), false, '网页不扫描本机目录')
       }
       await page.evaluate(() => { for (let index = 0; index < 25; index++) window.listHarness.append(`extra-${index}`, '2028-01-01T00:00:00Z') })
@@ -294,16 +325,14 @@ async function main() {
         await page.evaluate(() => window.listHarness.theme('light'))
         await expect(page.locator('select').first()).toHaveCSS('background-color', 'rgb(255, 255, 255)')
         await page.setViewportSize({ width: 780, height: 850 })
-        await toolbar.scrollIntoViewIfNeeded()
-        const toolbarBox = await toolbar.boundingBox()
-        const sourcesBox = await page.locator(mode === 'gif' ? '.gif-sources' : '.convert-sources').boundingBox()
-        const directoryBox = await page.getByTestId('video-library-directory').boundingBox()
-        assert(directoryBox && directoryBox.height >= 12 && directoryBox.y >= toolbarBox.y && directoryBox.y + directoryBox.height <= toolbarBox.y + toolbarBox.height, '窄屏目录路径保持可见')
-        for (const button of await toolbar.getByRole('button').all()) {
-          const box = await button.boundingBox()
-          assert(box && box.width >= 24 && box.height >= 24 && box.x >= toolbarBox.x && box.x + box.width <= toolbarBox.x + toolbarBox.width + 1 && box.y >= sourcesBox.y && box.y + box.height <= sourcesBox.y + sourcesBox.height, '窄屏目录栏操作按钮保持可见，不被长路径或布局挤出')
-        }
+        await page.getByTestId('video-library-actions').scrollIntoViewIfNeeded()
+        await assertLibraryHeader(page, mode)
+        await expect(toolbar).toBeVisible()
         await page.screenshot({ path: path.join(directory, `${mode}-desktop-narrow.png`) })
+        await page.setViewportSize({ width: 540, height: 850 })
+        await page.getByTestId('video-library-actions').scrollIntoViewIfNeeded()
+        await assertLibraryHeader(page, mode)
+        await page.screenshot({ path: path.join(directory, `${mode}-desktop-compact.png`) })
       }
       assert.deepEqual(errors, [])
       await page.evaluate(() => window.listHarness.dispose())
@@ -332,6 +361,7 @@ async function main() {
     await mount(imagePage, url, 'image', true, source)
     await expect(imagePage.getByTestId('convert-workspace')).toBeVisible()
     await expect(imagePage.getByTestId('video-library-toolbar')).toHaveCount(0)
+    await expect(imagePage.getByTestId('video-library-actions')).toHaveCount(0)
     assert.equal(await imagePage.evaluate(() => window.listHarness.calls.some(call => call.command === 'list_stored_videos')), false, '图片编辑不读取视频目录')
     await imagePage.evaluate(() => window.listHarness.dispose())
     await imagePage.close()

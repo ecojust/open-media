@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import { zipSync } from 'fflate'
 import Icon from './Icon.vue'
 import RuntimeCheck from './RuntimeCheck.vue'
 import MediaAssetMenu from './MediaAssetMenu.vue'
 import VideoLibraryToolbar from './VideoLibraryToolbar.vue'
-import EditorDialog from './EditorDialog.vue'
+import VideoLibraryActions from './VideoLibraryActions.vue'
 import ImageCropEditor from './ImageCropEditor.vue'
 import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import type { MediaAsset } from '../core/types'
@@ -57,6 +57,8 @@ const annotationsTool = ref<'text' | 'stroke'>('text')
 const annotationsAsset = ref<MediaAsset>()
 const annotationsDraft = ref<ImageAnnotation[]>([])
 const annotationsError = ref('')
+const annotationEditor = ref<InstanceType<typeof ImageAnnotationEditor>>()
+const imageEditing = computed(() => cropOpen.value || annotationsOpen.value)
 const previewOriginal = ref(false)
 const previewConverted = ref(false)
 const editedPreview = ref<{ sourceId: string; url: string; width: number; height: number }>()
@@ -91,11 +93,11 @@ let focusedAssetId = ''
 const outputAssetIds = new Set<string>()
 const resultPreviewUrls = new Set<string>()
 watch(busy, value => emit('busy-change', value, props.mode), { flush: 'sync' })
-watch(activeId, () => { previewOriginal.value = false; previewConverted.value = false })
-watch(() => props.mode, () => { cropOpen.value = false; annotationsOpen.value = false })
+watch(() => active.value?.id, () => { finishImageEdit(); previewOriginal.value = false; previewConverted.value = false })
+watch(() => props.mode, () => { finishImageEdit(); cancelImageEdit() })
 watch([() => active.value?.id, () => props.mode], cancelImageCopy)
 watch(() => [props.mode, active.value?.id, active.value?.url, { ...image }, sizeWidth.value, sizeHeight.value, [...iconSizes.value], activeCrop.value, activeAnnotations.value], scheduleEditedPreview, { deep: true, immediate: true })
-onDeactivated(() => { deactivated = true; cancelImageCopy(); stopPreview(); cropOpen.value = false; annotationsOpen.value = false })
+onDeactivated(() => { deactivated = true; finishImageEdit(); cancelImageCopy(); stopPreview(); cancelImageEdit() })
 onActivated(() => { deactivated = false; scheduleEditedPreview() })
 onMounted(async () => {
   const formats = await getSupportedImageFormats()
@@ -122,6 +124,7 @@ watch(available, assets => {
 watch([() => props.focusAssetId, available, busy], ([id, assets, processing]) => {
   if (!id) { focusedAssetId = ''; return }
   if (processing || id === focusedAssetId || !assets.some(asset => asset.id === id)) return
+  if (!finishImageEdit()) return
   selectedIds.value = [id]
   activeId.value = id
   message.value = ''
@@ -129,11 +132,11 @@ watch([() => props.focusAssetId, available, busy], ([id, assets, processing]) =>
 }, { immediate: true })
 
 function toggle(id: string) {
-  if (busy.value) return
+  if (busy.value || !finishImageEdit()) return
   selectedIds.value = selectedIds.value.includes(id) ? selectedIds.value.filter(value => value !== id) : [...selectedIds.value, id]
   activeId.value = id
 }
-function selectSource(id: string): void { if (!busy.value) activeId.value = id }
+function selectSource(id: string): void { if (!busy.value && finishImageEdit()) activeId.value = id }
 function selectAll() { selectedIds.value = selected.value.length === available.value.length ? [] : available.value.map(asset => asset.id) }
 function imageSettings(asset: MediaAsset): ImageConvertOptions {
   return { ...image, iconSizes: [...iconSizes.value], width: sizeWidth.value === '' ? undefined : Number(sizeWidth.value), height: sizeHeight.value === '' ? undefined : Number(sizeHeight.value), crop: imageCrops[asset.id] ? { ...imageCrops[asset.id]! } : undefined, annotations: cloneImageAnnotations(imageAnnotations[asset.id] ?? []) }
@@ -177,39 +180,73 @@ function scheduleEditedPreview() {
 }
 function openAnnotations(tool: 'text' | 'stroke') {
   if (busy.value || active.value?.kind !== 'image') return
+  if (annotationsOpen.value && annotationsAsset.value?.id === active.value.id) {
+    annotationsTool.value = tool
+    annotationEditor.value?.activateTool(tool)
+    return
+  }
+  if (!finishImageEdit()) return
   annotationsAsset.value = active.value
   annotationsTool.value = tool
   annotationsError.value = ''
   annotationsDraft.value = cloneImageAnnotations(imageAnnotations[active.value.id] ?? [])
+  previewOriginal.value = false
+  previewConverted.value = false
   annotationsOpen.value = true
 }
-function applyAnnotations() {
+function applyAnnotations(): boolean {
   const asset = annotationsAsset.value
-  if (!asset || busy.value || !available.value.some(item => item.id === asset.id)) return
+  if (busy.value) return false
+  if (!asset || !available.value.some(item => item.id === asset.id)) { annotationsOpen.value = false; return true }
   try {
     imageAnnotations[asset.id] = validateImageAnnotations(annotationsDraft.value)
     annotationsOpen.value = false
     previewOriginal.value = false
     previewConverted.value = false
     message.value = ''
-  } catch (cause) { annotationsError.value = cause instanceof Error ? cause.message : String(cause) }
+    annotationsError.value = ''
+    return true
+  } catch (cause) { annotationsError.value = cause instanceof Error ? cause.message : String(cause); return false }
 }
 function openCrop() {
-  if (busy.value || active.value?.kind !== 'image') return
+  if (busy.value || active.value?.kind !== 'image' || cropOpen.value || !finishImageEdit()) return
+  annotationsError.value = ''
   cropAsset.value = active.value
   cropDraft.value = activeCrop.value ? { ...activeCrop.value } : undefined
+  previewOriginal.value = false
+  previewConverted.value = false
   cropOpen.value = true
 }
-function applyCrop() {
+function applyCrop(): boolean {
   const asset = cropAsset.value
-  if (!asset || busy.value) return
-  if (cropDraft.value) imageCrops[asset.id] = validateImageCrop(cropDraft.value, asset.width, asset.height)
-  else delete imageCrops[asset.id]
-  if (active.value?.id === asset.id) { previewOriginal.value = false; previewConverted.value = false }
-  cropOpen.value = false
+  if (busy.value) return false
+  if (!asset || !available.value.some(item => item.id === asset.id)) { cropOpen.value = false; return true }
+  try {
+    if (cropDraft.value) imageCrops[asset.id] = validateImageCrop(cropDraft.value, asset.width, asset.height)
+    else delete imageCrops[asset.id]
+    if (active.value?.id === asset.id) { previewOriginal.value = false; previewConverted.value = false }
+    cropOpen.value = false
+    annotationsError.value = ''
+    return true
+  } catch (cause) { annotationsError.value = cause instanceof Error ? cause.message : String(cause); return false }
+}
+function finishImageEdit(): boolean {
+  if (cropOpen.value && !applyCrop()) return false
+  if (annotationsOpen.value && !applyAnnotations()) return false
+  return true
+}
+function cancelImageEdit(): void { cropOpen.value = false; annotationsOpen.value = false; annotationsError.value = '' }
+async function switchImagePreview(target: 'original' | 'result'): Promise<void> {
+  const assetId = active.value?.id
+  const show = !(target === 'original' ? previewOriginal.value : previewConverted.value)
+  if (!finishImageEdit()) return
+  await nextTick()
+  if (destroyed || active.value?.id !== assetId) return
+  if (target === 'original') { previewOriginal.value = show; previewConverted.value = false }
+  else { previewConverted.value = show; previewOriginal.value = false }
 }
 function clearCrop() {
-  if (busy.value || !active.value) return
+  if (busy.value || !active.value || !finishImageEdit()) return
   delete imageCrops[active.value.id]
   previewOriginal.value = false
   previewConverted.value = false
@@ -226,6 +263,7 @@ function cancelImageCopy() {
 async function copyCurrentImage() {
   const asset = active.value
   if (destroyed || busy.value || copyingImage.value || props.mode !== 'image' || asset?.kind !== 'image') return
+  if (!finishImageEdit()) return
   const controller = new AbortController()
   copyAbort = controller
   copyingImage.value = true
@@ -333,7 +371,7 @@ async function convertVideo(asset: MediaAsset, item: Result, signal: AbortSignal
   item.progress = 1
 }
 async function run() {
-  if (busy.value || !selected.value.length) return
+  if (busy.value || !selected.value.length || !finishImageEdit()) return
   message.value = ''
   const batchMode = props.mode
   const batch = selected.value.map(asset => ({ asset, result: { id: newId('result'), sourceId: asset.id, mode: props.mode, name: props.mode === 'image' ? convertedImageName(asset.name, image.format) : `${asset.name.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_') || '媒体'}.${video.format}`, state: 'waiting', progress: 0 } as Result }))
@@ -418,8 +456,8 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
     </header>
     <div class="convert-layout">
       <aside class="convert-sources" aria-label="待转换素材">
-        <div class="convert-section-title"><h2>{{ mode === 'image' ? '素材' : '视频' }} <span>{{ available.length }}</span></h2><button :disabled="busy || !available.length" @click="selectAll">{{ selected.length === available.length && available.length ? '取消全选' : '全选' }}</button></div>
-        <VideoLibraryToolbar v-if="native && mode === 'video'" :directory="directory" :loading="libraryLoading" :preparing="previewPreparing" :error="libraryError" :warnings="libraryWarnings" :disabled="busy" @refresh="refreshVideos" @reveal="revealVideoDirectory" />
+        <div class="convert-section-title"><h2>{{ mode === 'image' ? '素材' : '视频' }} <span>{{ available.length }}</span></h2><div class="convert-source-actions"><button :disabled="busy || !available.length" @click="selectAll">{{ selected.length === available.length && available.length ? '取消全选' : '全选' }}</button><VideoLibraryActions v-if="native && mode === 'video'" :directory="directory" :loading="libraryLoading" :disabled="busy" @refresh="refreshVideos" @reveal="revealVideoDirectory" /></div></div>
+        <VideoLibraryToolbar v-if="native && mode === 'video'" :loading="libraryLoading" :preparing="previewPreparing" :error="libraryError" :warnings="libraryWarnings" />
         <div v-if="!available.length" class="convert-empty"><Icon :name="mode === 'image' ? 'image' : 'video'" :size="36" /><p>拖入文件开始转换</p><button class="convert-button" @click="emit('import')">选择文件</button></div>
         <div v-for="asset in available" :key="asset.id" class="convert-source" :class="{ active: active?.id === asset.id }" :data-source-asset-id="asset.id" @click="selectSource(asset.id)" @contextmenu="mode === 'video' && assetMenu?.open($event, asset)">
           <input type="checkbox" :checked="selectedIds.includes(asset.id)" :aria-label="`选择 ${asset.name}`" :disabled="busy" @click.stop @change="toggle(asset.id)">
@@ -431,24 +469,34 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
       <main class="convert-preview">
         <div class="preview-heading"><span>{{ mode === 'image' ? '图片预览' : '原始媒体' }}</span><span v-if="active">{{ active.name }}</span></div>
         <div v-if="mode === 'image' && active" class="image-preview-tools">
-          <button :disabled="busy" data-testid="image-crop-open" @click="openCrop"><Icon name="crop" :size="14" />框选裁剪</button>
+          <button :disabled="busy" :aria-pressed="cropOpen" data-testid="image-crop-open" @click="openCrop"><Icon name="crop" :size="14" />框选裁剪</button>
           <button :disabled="busy" data-testid="image-add-text" @click="openAnnotations('text')"><Icon name="text" :size="14" />插入文字</button>
           <button :disabled="busy" data-testid="image-add-stroke" @click="openAnnotations('stroke')"><Icon name="pen" :size="14" />自定义笔触</button>
           <button :disabled="busy || copyingImage || (image.format === 'ico' && !iconSizes.length)" :aria-busy="copyingImage" title="复制当前图片，包含文字、笔触、裁剪与方向设置" data-testid="image-copy" @click="copyCurrentImage"><Icon :name="copyingImage ? 'clock' : 'copy'" :size="14" />复制图片</button>
           <button v-if="activeCrop" :disabled="busy" data-testid="image-crop-clear" @click="clearCrop">清除裁剪</button>
           <span v-if="copyMessage" class="image-copy-feedback" :class="{ 'copy-error': copyFailed }" role="status" data-testid="image-copy-status">{{ copyMessage }}</span>
-          <button class="preview-switch" :aria-pressed="previewOriginal" data-testid="image-preview-original" @click="previewOriginal = !previewOriginal; previewConverted = false">{{ previewOriginal ? '返回编辑预览' : '查看原图' }}</button>
-          <button v-if="latestImage" :aria-pressed="previewConverted" data-testid="image-preview-result" @click="previewConverted = !previewConverted; previewOriginal = false">{{ previewConverted ? '返回编辑预览' : '查看导出结果' }}</button>
+          <button class="preview-switch" :aria-pressed="previewOriginal" data-testid="image-preview-original" @click="switchImagePreview('original')">{{ previewOriginal ? '返回编辑预览' : '查看原图' }}</button>
+          <button v-if="latestImage" :aria-pressed="previewConverted" data-testid="image-preview-result" @click="switchImagePreview('result')">{{ previewConverted ? '返回编辑预览' : '查看导出结果' }}</button>
         </div>
-        <div class="preview-stage" :class="{ checkerboard: mode === 'image' }">
-          <template v-if="active">
+        <div class="preview-stage" :class="{ checkerboard: mode === 'image', 'image-editing': imageEditing }">
+          <section v-if="cropOpen && cropAsset" class="image-inline-editor" role="region" aria-label="框选裁剪" data-testid="image-crop-panel" @keydown.esc.stop="cancelImageEdit">
+            <ImageCropEditor :key="cropAsset.id" v-model="cropDraft" :source="cropAsset.url" :width="cropAsset.width" :height="cropAsset.height" :annotations="imageAnnotations[cropAsset.id]" />
+            <p v-if="annotationsError" class="annotation-apply-error" role="alert">{{ annotationsError }}</p>
+            <div class="image-inline-actions"><span>裁剪仅应用于当前图片</span><button @click="cancelImageEdit">取消</button><button class="primary" data-testid="image-crop-apply" @click="applyCrop">应用裁剪</button></div>
+          </section>
+          <section v-else-if="annotationsOpen && annotationsAsset" class="image-inline-editor" role="region" aria-label="图片标注" data-testid="image-annotations-panel" @keydown.esc.stop="cancelImageEdit">
+            <ImageAnnotationEditor ref="annotationEditor" :key="annotationsAsset.id" v-model="annotationsDraft" :source="annotationsAsset.url" :width="annotationsAsset.width" :height="annotationsAsset.height" :crop="imageCrops[annotationsAsset.id]" :initial-tool="annotationsTool" />
+            <p v-if="annotationsError" class="annotation-apply-error" role="alert">{{ annotationsError }}</p>
+            <div class="image-inline-actions"><span>文字和笔触仅应用于当前图片</span><button @click="cancelImageEdit">取消</button><button class="primary" data-testid="image-annotations-apply" @click="applyAnnotations">应用编辑</button></div>
+          </section>
+          <template v-else-if="active">
             <img v-if="active.kind === 'image'" :src="previewImageUrl" :alt="active.name" data-testid="convert-image-preview">
             <video v-else-if="active.kind === 'video'" :key="active.id" :src="active.url" controls playsinline preload="metadata" />
             <div v-else class="audio-preview"><Icon name="audio" :size="52" /><audio :src="active.url" controls preload="metadata" /></div>
           </template>
           <div v-else class="preview-placeholder"><Icon :name="mode === 'image' ? 'image' : 'video'" :size="52" /><p>选择素材预览</p></div>
         </div>
-        <div class="preview-caption" data-testid="image-preview-caption"><template v-if="mode === 'image' && active"><span v-if="previewOriginal">原图 · {{ active.width }} × {{ active.height }}</span><span v-else-if="previewResult">导出结果 · {{ previewResult.width }} × {{ previewResult.height }} · {{ previewResult.name }}</span><span v-else-if="previewBusy" role="status">正在更新编辑预览…</span><span v-else-if="previewError" role="alert">{{ previewError }}</span><span v-else-if="editedPreview">编辑预览 · {{ editedPreview.width }} × {{ editedPreview.height }}<template v-if="activeAnnotations.length"> · {{ activeAnnotations.length }} 个标注</template></span><span v-else>原始文件始终保留</span></template><span v-else>原始文件始终保留</span></div>
+        <div v-if="!imageEditing" class="preview-caption" data-testid="image-preview-caption"><template v-if="mode === 'image' && active"><span v-if="previewOriginal">原图 · {{ active.width }} × {{ active.height }}</span><span v-else-if="previewResult">导出结果 · {{ previewResult.width }} × {{ previewResult.height }} · {{ previewResult.name }}</span><span v-else-if="previewBusy" role="status">正在更新编辑预览…</span><span v-else-if="previewError" role="alert">{{ previewError }}</span><span v-else-if="editedPreview">编辑预览 · {{ editedPreview.width }} × {{ editedPreview.height }}<template v-if="activeAnnotations.length"> · {{ activeAnnotations.length }} 个标注</template></span><span v-else>原始文件始终保留</span></template><span v-else>原始文件始终保留</span></div>
         <section class="convert-results" aria-label="转换结果">
           <div class="convert-section-title"><h2>{{ mode === 'image' ? '导出结果' : '转换队列' }} <span>{{ visibleResults.length }}</span></h2><button v-if="completed.length" data-testid="convert-download-all" @click="downloadAll"><Icon name="download" />打包下载</button></div>
           <div v-if="!visibleResults.length" class="results-empty">{{ mode === 'image' ? '编辑完成后，点击「导出图片」' : '选择格式后，点击「开始转换」' }}</div>
@@ -461,7 +509,7 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
       </main>
       <aside class="convert-settings" aria-label="转换设置">
         <h2>输出设置</h2>
-        <fieldset :disabled="busy">
+        <fieldset :disabled="busy" @focusin="finishImageEdit">
           <template v-if="mode === 'image'">
             <label>输出格式<select v-model="image.format" data-testid="convert-format"><option v-for="format in supportedFormats" :key="format.value" :value="format.value">{{ format.label }}</option></select></label>
             <p class="setting-help">{{ formatDetails.description }}</p>
@@ -513,32 +561,19 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
         </div>
       </aside>
     </div>
-    <EditorDialog :open="cropOpen" title="框选裁剪" icon="crop" class="image-crop-dialog" wide @close="cropOpen = false">
-      <template v-if="cropOpen && cropAsset">
-        <p class="crop-source-name">{{ cropAsset.name }} · {{ cropAsset.width }} × {{ cropAsset.height }} px</p>
-        <ImageCropEditor :key="cropAsset.id" v-model="cropDraft" :source="cropAsset.url" :width="cropAsset.width" :height="cropAsset.height" />
-        <p class="crop-scope-note">裁剪范围仅应用于这张图片。按原始像素选择，转换时再应用尺寸和方向设置。</p>
-      </template>
-      <template #footer><button @click="cropOpen = false">取消</button><button class="primary" data-testid="image-crop-apply" @click="applyCrop">应用裁剪</button></template>
-    </EditorDialog>
-    <EditorDialog :open="annotationsOpen" :title="annotationsTool === 'text' ? '插入文字' : '自定义笔触'" :icon="annotationsTool === 'text' ? 'text' : 'pen'" class="image-annotations-dialog" wide @close="annotationsOpen = false">
-      <ImageAnnotationEditor v-if="annotationsOpen && annotationsAsset" :key="annotationsAsset.id" v-model="annotationsDraft" :source="annotationsAsset.url" :width="annotationsAsset.width" :height="annotationsAsset.height" :crop="imageCrops[annotationsAsset.id]" :initial-tool="annotationsTool" />
-      <p v-if="annotationsError" class="annotation-apply-error" role="alert">{{ annotationsError }}</p>
-      <template #footer><button @click="annotationsOpen = false">取消</button><button class="primary" data-testid="image-annotations-apply" @click="applyAnnotations">应用编辑</button></template>
-    </EditorDialog>
     <MediaAssetMenu ref="assetMenu" :native="native" @error="message = $event" />
   </section>
 </template>
 
 <style scoped>
-.convert-sources>.video-library-toolbar{margin:0 5px 10px}@media(max-width:800px){.convert-sources:has(>.video-library-toolbar){min-height:106px;max-height:106px}.convert-sources>.video-library-toolbar{flex:0 0 205px;margin:0;max-height:85px;overflow:auto}}
+.convert-sources>.video-library-toolbar{margin:0 5px 10px}@media(max-width:800px){.convert-sources>.video-library-toolbar{flex:0 0 205px;margin:0;max-height:85px;overflow:auto}}
 .source-imported-time{font-size:9px;white-space:nowrap;color:var(--ui-muted,#959aad);font-variant-numeric:tabular-nums}.source-details:disabled{cursor:not-allowed}
 .convert-workspace{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--ui-text,#e5e7ef);background:var(--ui-bg,#11131b)}
 .convert-toolbar{display:flex;align-items:center;gap:16px;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--ui-line,#2a2d3a)}
 .convert-toolbar h1{font-size:18px;margin:0 0 5px;font-weight:650}.convert-toolbar p{font-size:12px;margin:0;color:var(--ui-muted,#959aad)}
 .convert-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:9px 13px;border:1px solid var(--ui-line,#34384a);border-radius:8px;background:var(--ui-panel,#1b1e2a);color:inherit;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}.convert-button.primary{background:var(--ui-accent,#8b74ed);border-color:var(--ui-accent,#8b74ed);color:#fff;font-weight:600}.convert-button:disabled,button:disabled{opacity:.45;cursor:not-allowed}.convert-button:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--ui-accent,#8b74ed);outline-offset:3px}
-.convert-layout{display:grid;grid-template-columns:220px minmax(220px,1fr) 268px;flex:1;min-height:0;overflow:hidden}.convert-sources{border-right:1px solid var(--ui-line,#2a2d3a);padding:16px 10px;overflow:auto}.convert-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 4px 14px}.convert-section-title h2,.convert-settings h2{font-size:12px;line-height:1.5;font-weight:650;margin:0}.convert-section-title h2 span{font-size:11px;color:var(--ui-muted,#959aad);margin-left:5px}.convert-section-title>button{display:flex;align-items:center;gap:5px;border:0;background:none;color:var(--ui-muted,#959aad);font-size:11px;cursor:pointer;padding:2px}.convert-source{display:flex;align-items:center;gap:9px;padding:9px 7px;margin-bottom:4px;border:1px solid transparent;border-radius:8px;cursor:pointer}.convert-source.active{background:color-mix(in srgb,var(--ui-accent,#8b74ed) 10%,transparent);border-color:color-mix(in srgb,var(--ui-accent,#8b74ed) 35%,transparent)}.convert-source>input{width:13px;height:13px;accent-color:var(--ui-accent,#8b74ed);flex-shrink:0}.convert-source>img,.source-icon{width:38px;height:38px;object-fit:contain;border-radius:5px;background:var(--ui-panel,#202330);flex-shrink:0}.source-icon{display:grid;place-items:center;color:var(--ui-muted,#959aad)}.source-details{display:flex;min-width:0;flex-direction:column;gap:5px;border:0;background:none;color:inherit;text-align:left;padding:0;cursor:pointer}.source-details strong{font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.source-details small{font-size:10px;color:var(--ui-muted,#959aad)}.source-selection{font-size:11px;color:var(--ui-muted,#959aad);padding:10px}.convert-empty{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;margin:70px 0;color:var(--ui-muted,#959aad);font-size:12px}.convert-empty p{margin:0}.convert-preview{display:flex;flex-direction:column;min-width:0;overflow:auto;padding:18px 22px;gap:12px}.preview-heading{display:flex;justify-content:space-between;gap:12px;min-width:0;font-size:11px;color:var(--ui-muted,#959aad)}.preview-heading span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%}.preview-stage{display:flex;align-items:center;justify-content:center;min-height:220px;height:clamp(220px,36vh,480px);flex-shrink:0;border:1px solid var(--ui-line,#2a2d3a);border-radius:10px;background:#090b11;overflow:hidden}.checkerboard{background-color:#1b1e27;background-image:linear-gradient(45deg,#242834 25%,transparent 25%),linear-gradient(-45deg,#242834 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#242834 75%),linear-gradient(-45deg,transparent 75%,#242834 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}.preview-stage>img,.preview-stage>video{display:block;max-width:100%;max-height:100%;object-fit:contain}.audio-preview,.preview-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;color:var(--ui-muted,#959aad);font-size:12px}.audio-preview audio{max-width:100%}.preview-caption{font-size:10px;text-align:center;color:var(--ui-muted,#959aad);min-height:13px}.convert-results{margin-top:12px;border-top:1px solid var(--ui-line,#2a2d3a);padding-top:18px}.results-empty{font-size:11px;color:var(--ui-muted,#959aad);padding:20px 4px}.convert-result{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--ui-line,#2a2d3a)}.convert-result>svg{color:var(--ui-muted,#959aad);flex-shrink:0}.convert-result.done>svg{color:#54bc91}.convert-result.error>svg{color:#f18f87}.result-description{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.result-description strong{font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result-description span,.result-description small{font-size:10px;color:var(--ui-muted,#959aad);overflow-wrap:anywhere}.result-description small{line-height:1.5}.convert-result.error .result-description small{color:#f18f87}.result-download{display:flex;border:1px solid var(--ui-line,#34384a);border-radius:6px;background:none;color:inherit;padding:6px;cursor:pointer}.convert-settings{padding:20px 18px;border-left:1px solid var(--ui-line,#2a2d3a);background:var(--ui-panel,#171923);overflow:auto}.convert-settings>h2{margin-bottom:22px}.convert-settings fieldset{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:16px;min-width:0}.convert-settings label{display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--ui-muted,#a3a8bb);min-width:0}.convert-settings label>span{float:right;color:var(--ui-text,#e5e7ef)}.convert-settings input:not([type=checkbox]):not([type=range]):not([type=color]){width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--ui-line,#34384a);background:var(--ui-bg,#11131b);border-radius:6px;color:var(--ui-text,#e5e7ef);padding:8px;font-size:11px;font-family:inherit;line-height:1.3}.convert-settings select{width:100%}.convert-settings input[type=range]{width:100%;accent-color:var(--ui-accent,#8b74ed);margin:0}.settings-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.convert-settings h3{font-size:11px;font-weight:600;margin:0}.settings-divider{height:1px;background:var(--ui-line,#2a2d3a);margin:2px 0}.convert-settings .check-label{display:flex;flex-direction:row;align-items:center;gap:7px;font-size:11px}.check-label>input{margin:0;width:13px;height:13px;accent-color:var(--ui-accent,#8b74ed)}.setting-help{font-size:10px;line-height:1.7;margin:-7px 0 0;color:var(--ui-muted,#959aad)}.convert-settings .color-label{flex-direction:row;justify-content:space-between;align-items:center}.color-label input{height:28px;width:52px;border:1px solid var(--ui-line,#34384a);padding:2px;border-radius:5px;background:transparent}.browser-notice{padding:10px;border-radius:7px;background:color-mix(in srgb,var(--ui-accent,#8b74ed) 9%,transparent);margin-top:0}.runtime-select{border:0;background:none;color:var(--ui-muted,#959aad);display:flex;align-items:center;justify-content:center;gap:7px;font-size:11px;cursor:pointer}.convert-actions{margin-top:24px;display:flex;flex-direction:column;gap:12px}.convert-actions .convert-button{width:100%;box-sizing:border-box}.convert-actions .convert-button span{font-size:10px;margin-left:auto;opacity:.8}.conversion-message{font-size:11px;line-height:1.7;margin:0;color:var(--ui-muted,#a3a8bb);overflow-wrap:anywhere}progress{height:4px;border:0;width:100%;accent-color:var(--ui-accent,#8b74ed);border-radius:4px;overflow:hidden}progress::-webkit-progress-bar{background:var(--ui-line,#34384a)}progress::-webkit-progress-value{background:var(--ui-accent,#8b74ed)}.is-dragging{outline:2px dashed var(--ui-accent,#8b74ed);outline-offset:-5px}
-.image-preview-tools{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.image-preview-tools button{display:inline-flex;align-items:center;gap:6px;font-size:11px;height:32px;padding:0 10px}.image-preview-tools .preview-switch{margin-left:auto}.image-copy-feedback{font-size:11px;color:var(--ui-muted,#959aad);overflow-wrap:anywhere}.image-copy-feedback.copy-error{color:#db625c}.source-details .source-cropped{color:var(--ui-accent)}.icon-options{display:grid;gap:12px}.icon-size-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.icon-options .setting-help{margin:0}.image-crop-dialog.editor-dialog,.image-annotations-dialog.editor-dialog{--ed-panel:var(--ui-surface,#fff);--ed-bg:var(--ui-bg,#f7f9fc);--ed-text:var(--ui-text,#263044);--ed-muted:var(--ui-muted,#8995a9);--ed-border:var(--ui-line,#e4e9f2);--ed-accent:var(--ui-accent,#3267f6);width:min(1100px,calc(100vw - 24px))}.crop-source-name,.crop-scope-note{font-size:11px;color:var(--ui-muted);margin:12px 16px;overflow-wrap:anywhere}.image-crop-dialog :deep(.editor-dialog-footer),.image-annotations-dialog :deep(.editor-dialog-footer){gap:8px}.export-edit-help{margin:0}.annotation-apply-error{margin:10px 16px;color:#db625c;font-size:12px;line-height:1.6}
+.convert-layout{display:grid;grid-template-columns:220px minmax(220px,1fr) 268px;flex:1;min-height:0;overflow:hidden}.convert-sources{border-right:1px solid var(--ui-line,#2a2d3a);padding:16px 10px;overflow:auto}.convert-section-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 4px 14px}.convert-section-title h2,.convert-settings h2{font-size:12px;line-height:1.5;font-weight:650;margin:0}.convert-section-title h2 span{font-size:11px;color:var(--ui-muted,#959aad);margin-left:5px}.convert-source-actions{display:flex;align-items:center;gap:4px;flex:none}.convert-section-title h2{white-space:nowrap}.convert-section-title>button,.convert-source-actions>button{display:flex;align-items:center;gap:5px;border:0;background:none;color:var(--ui-muted,#959aad);font-size:11px;cursor:pointer;padding:2px}.convert-source{display:flex;align-items:center;gap:9px;padding:9px 7px;margin-bottom:4px;border:1px solid transparent;border-radius:8px;cursor:pointer}.convert-source.active{background:color-mix(in srgb,var(--ui-accent,#8b74ed) 10%,transparent);border-color:color-mix(in srgb,var(--ui-accent,#8b74ed) 35%,transparent)}.convert-source>input{width:13px;height:13px;accent-color:var(--ui-accent,#8b74ed);flex-shrink:0}.convert-source>img,.source-icon{width:38px;height:38px;object-fit:contain;border-radius:5px;background:var(--ui-panel,#202330);flex-shrink:0}.source-icon{display:grid;place-items:center;color:var(--ui-muted,#959aad)}.source-details{display:flex;min-width:0;flex-direction:column;gap:5px;border:0;background:none;color:inherit;text-align:left;padding:0;cursor:pointer}.source-details strong{font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.source-details small{font-size:10px;color:var(--ui-muted,#959aad)}.source-selection{font-size:11px;color:var(--ui-muted,#959aad);padding:10px}.convert-empty{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center;margin:70px 0;color:var(--ui-muted,#959aad);font-size:12px}.convert-empty p{margin:0}.convert-preview{display:flex;flex-direction:column;min-width:0;overflow:auto;padding:18px 22px;gap:12px}.preview-heading{display:flex;justify-content:space-between;gap:12px;min-width:0;font-size:11px;color:var(--ui-muted,#959aad)}.preview-heading span:last-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:65%}.preview-stage{display:flex;align-items:center;justify-content:center;min-height:220px;height:clamp(220px,36vh,480px);flex-shrink:0;border:1px solid var(--ui-line,#2a2d3a);border-radius:10px;background:#090b11;overflow:hidden}.checkerboard{background-color:#1b1e27;background-image:linear-gradient(45deg,#242834 25%,transparent 25%),linear-gradient(-45deg,#242834 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#242834 75%),linear-gradient(-45deg,transparent 75%,#242834 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0}.preview-stage>img,.preview-stage>video{display:block;max-width:100%;max-height:100%;object-fit:contain}.audio-preview,.preview-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;color:var(--ui-muted,#959aad);font-size:12px}.audio-preview audio{max-width:100%}.preview-caption{font-size:10px;text-align:center;color:var(--ui-muted,#959aad);min-height:13px}.convert-results{margin-top:12px;border-top:1px solid var(--ui-line,#2a2d3a);padding-top:18px}.results-empty{font-size:11px;color:var(--ui-muted,#959aad);padding:20px 4px}.convert-result{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--ui-line,#2a2d3a)}.convert-result>svg{color:var(--ui-muted,#959aad);flex-shrink:0}.convert-result.done>svg{color:#54bc91}.convert-result.error>svg{color:#f18f87}.result-description{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.result-description strong{font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.result-description span,.result-description small{font-size:10px;color:var(--ui-muted,#959aad);overflow-wrap:anywhere}.result-description small{line-height:1.5}.convert-result.error .result-description small{color:#f18f87}.result-download{display:flex;border:1px solid var(--ui-line,#34384a);border-radius:6px;background:none;color:inherit;padding:6px;cursor:pointer}.convert-settings{padding:20px 18px;border-left:1px solid var(--ui-line,#2a2d3a);background:var(--ui-panel,#171923);overflow:auto}.convert-settings>h2{margin-bottom:22px}.convert-settings fieldset{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:16px;min-width:0}.convert-settings label{display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--ui-muted,#a3a8bb);min-width:0}.convert-settings label>span{float:right;color:var(--ui-text,#e5e7ef)}.convert-settings input:not([type=checkbox]):not([type=range]):not([type=color]){width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--ui-line,#34384a);background:var(--ui-bg,#11131b);border-radius:6px;color:var(--ui-text,#e5e7ef);padding:8px;font-size:11px;font-family:inherit;line-height:1.3}.convert-settings select{width:100%}.convert-settings input[type=range]{width:100%;accent-color:var(--ui-accent,#8b74ed);margin:0}.settings-pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.convert-settings h3{font-size:11px;font-weight:600;margin:0}.settings-divider{height:1px;background:var(--ui-line,#2a2d3a);margin:2px 0}.convert-settings .check-label{display:flex;flex-direction:row;align-items:center;gap:7px;font-size:11px}.check-label>input{margin:0;width:13px;height:13px;accent-color:var(--ui-accent,#8b74ed)}.setting-help{font-size:10px;line-height:1.7;margin:-7px 0 0;color:var(--ui-muted,#959aad)}.convert-settings .color-label{flex-direction:row;justify-content:space-between;align-items:center}.color-label input{height:28px;width:52px;border:1px solid var(--ui-line,#34384a);padding:2px;border-radius:5px;background:transparent}.browser-notice{padding:10px;border-radius:7px;background:color-mix(in srgb,var(--ui-accent,#8b74ed) 9%,transparent);margin-top:0}.runtime-select{border:0;background:none;color:var(--ui-muted,#959aad);display:flex;align-items:center;justify-content:center;gap:7px;font-size:11px;cursor:pointer}.convert-actions{margin-top:24px;display:flex;flex-direction:column;gap:12px}.convert-actions .convert-button{width:100%;box-sizing:border-box}.convert-actions .convert-button span{font-size:10px;margin-left:auto;opacity:.8}.conversion-message{font-size:11px;line-height:1.7;margin:0;color:var(--ui-muted,#a3a8bb);overflow-wrap:anywhere}progress{height:4px;border:0;width:100%;accent-color:var(--ui-accent,#8b74ed);border-radius:4px;overflow:hidden}progress::-webkit-progress-bar{background:var(--ui-line,#34384a)}progress::-webkit-progress-value{background:var(--ui-accent,#8b74ed)}.is-dragging{outline:2px dashed var(--ui-accent,#8b74ed);outline-offset:-5px}
+.image-preview-tools{display:flex;align-items:center;flex-wrap:wrap;gap:7px}.image-preview-tools button{display:inline-flex;align-items:center;gap:6px;font-size:11px;height:32px;padding:0 10px}.image-preview-tools .preview-switch{margin-left:auto}.image-copy-feedback{font-size:11px;color:var(--ui-muted,#959aad);overflow-wrap:anywhere}.image-copy-feedback.copy-error{color:#db625c}.source-details .source-cropped{color:var(--ui-accent)}.icon-options{display:grid;gap:12px}.icon-size-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.icon-options .setting-help{margin:0}.preview-stage.image-editing{display:block;height:auto;overflow:visible;min-width:0;background:var(--ui-panel);border-color:var(--ui-line)}.image-inline-editor{width:100%;min-width:0}.image-inline-actions{position:sticky;bottom:0;z-index:3;display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;padding:10px 12px;border-top:1px solid var(--ui-line);background:var(--ui-panel);border-radius:0 0 10px 10px}.image-inline-actions>span{margin-right:auto;color:var(--ui-muted);font-size:10px}.image-inline-actions>button{min-height:32px;font-size:11px}.image-preview-tools button[aria-pressed=true]{background:var(--ui-accent-soft);color:var(--ui-accent);border-color:var(--ui-accent)}.export-edit-help{margin:0}.annotation-apply-error{margin:10px 16px;color:#db625c;font-size:12px;line-height:1.6}
 @media(max-width:1100px){.convert-layout{grid-template-columns:180px minmax(180px,1fr) 240px}.convert-preview{padding:16px 14px}.convert-sources{padding:16px 6px}.convert-source{gap:6px;padding:8px 4px}.convert-source>img,.source-icon{width:30px;height:30px}.convert-settings{padding:18px 14px}}
 @media(max-width:800px){.convert-layout{grid-template-columns:minmax(240px,1fr) 240px;overflow:auto}.convert-sources{grid-column:1 / -1;display:flex;align-items:center;gap:8px;overflow:auto;border-right:0;border-bottom:1px solid var(--ui-line,#2a2d3a);padding:10px;max-height:96px}.convert-sources .convert-section-title{flex-shrink:0;margin:0 5px}.convert-source{width:180px;flex-shrink:0;margin:0}.source-selection{display:none}.convert-empty{margin:0;flex-direction:row;gap:12px}.convert-empty>svg{display:none}.convert-preview,.convert-settings{overflow:visible}.convert-layout{grid-template-rows:auto 1fr}.convert-toolbar{padding:14px 16px}}
 @media(max-width:560px){.convert-layout{display:flex;flex-direction:column;overflow:auto}.convert-sources{flex-shrink:0;min-height:62px}.convert-preview{overflow:visible;flex-shrink:0}.convert-settings{overflow:visible;border-left:0;border-top:1px solid var(--ui-line,#2a2d3a)}.preview-stage{height:220px;min-height:180px}.convert-toolbar h1{font-size:16px}.convert-toolbar p{font-size:10px}.convert-toolbar{gap:8px;padding:12px}.convert-toolbar .convert-button{font-size:11px;padding:8px}.convert-settings fieldset{display:grid;grid-template-columns:1fr 1fr;gap:16px}.convert-settings fieldset>.settings-pair,.convert-settings fieldset>.settings-divider,.convert-settings fieldset>.setting-help,.convert-settings fieldset>h3,.convert-settings fieldset>.runtime-select,.convert-settings fieldset>.icon-options{grid-column:1 / -1}.convert-actions{position:static}.convert-preview .convert-results{max-height:340px;overflow:auto}}

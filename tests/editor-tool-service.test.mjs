@@ -8,7 +8,7 @@ import { getSpeechPronunciation, setSpeechPronunciation } from '../src/core/spee
 // Keep the shared service, schemas, project operations and artifact cache real.
 // Replace only IPC endpoints, so commit/cancel/accept behavior runs end to end.
 const boundaries = {
- '../src/native.ts':['acceptSpeechJobs','beginSpeechJob','beginSpeechModelDownload','cancelMediaJob','cancelSpeechJob','cancelSpeechModelDownload','discardSpeechJob','getMediaJobs','getSpeechJob','getSpeechStatus','repairSpeechModel','importBlobAsset'],
+ '../src/native.ts':['acceptSpeechJobs','beginSpeechJob','beginSpeechModelDownload','cancelMediaJob','cancelSpeechJob','cancelSpeechModelDownload','discardSpeechJob','getMediaJobs','getSpeechJob','getSpeechStatus','repairSpeechModel','revealMediaJobOutput','importBlobAsset'],
  '../src/native-audio-tools.ts':['beginAudioTool','getAudioTool','cancelAudioTool','acceptAudioTool','discardAudioTool'],
  '../src/native-transcription.ts':['getAsrStatus','beginAsrDownload','beginAsrTranscription','getAsrJob','cancelAsrJob'],
  '../src/native-mcp-files.ts':['beginMcpMediaJob','importMcpMediaPaths','openMcpProjectFile','saveMcpProjectFile'],

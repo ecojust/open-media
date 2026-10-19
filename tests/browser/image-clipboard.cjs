@@ -60,12 +60,18 @@ async function main() {
 
     await page.locator('.source-details').filter({ hasText: '四色透明图.png' }).click()
     await page.getByTestId('image-crop-open').click()
-    const crop = page.getByRole('dialog', { name: '框选裁剪' })
+    const crop = page.getByRole('region', { name: '框选裁剪', exact: true })
+    await expect(crop).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    assert.equal(await crop.evaluate(element => !!element.closest('.convert-preview .preview-stage')), true, '裁剪在当前预览中编辑')
     for (const [field, value] of [['宽', 40], ['高', 40], ['X', 20], ['Y', 10]]) {
       await crop.getByLabel(`框选${field}`, { exact: true }).fill(String(value))
       await crop.getByLabel(`框选${field}`, { exact: true }).press('Tab')
     }
-    await page.getByTestId('image-crop-apply').click()
+    content = await copy([[5, 5], [35, 5], [5, 35], [35, 35]])
+    await expect(crop).toHaveCount(0)
+    assert.equal(content.width, 40); assert.equal(content.height, 40)
+    assert.deepEqual(content.pixels, [red, green, blue, transparent], '复制前自动应用尚未确认的裁剪草稿')
     await page.getByTestId('convert-width').fill('20')
     await page.getByLabel('图片旋转').selectOption('90')
     await page.getByLabel('水平翻转', { exact: true }).check()

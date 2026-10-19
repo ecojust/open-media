@@ -119,7 +119,7 @@ async function main() {
       await page.getByRole('button', { name: '导入图片', exact: true }).click()
       await expect(page.locator('.convert-source')).toHaveCount(2)
       await expect(page.locator('.convert-source input:checked')).toHaveCount(2)
-      await page.locator('.brand').click()
+      await page.getByRole('navigation', { name: '工作区' }).getByRole('button', { name: '开始', exact: true }).click()
       await emitScreenshot(page)
       await expect.poll(async () => (await calls(page, 'pick_capture_source')).length).toBe(1)
       assert.deepEqual((await calls(page, 'pick_capture_source'))[0].args.preferences, { mode: 'region', purpose: 'screenshot' })
