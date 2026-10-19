@@ -11,6 +11,11 @@ on:
         required: true
         default: '39279110019'
         type: string
+      release_id:
+        description: Existing pinned draft release ID, created with an authorized user token
+        required: true
+        default: '417493689'
+        type: string
       source_commit:
         description: Exact commit used for the existing runtime build
         required: true
@@ -36,14 +41,11 @@ jobs:
       PYTHONUNBUFFERED: '1'
       BUILD_RUN_ID: ${{ inputs.runtime_build_run_id }}
       BUILD_COMMIT: ${{ inputs.source_commit }}
+      RELEASE_ID: ${{ inputs.release_id }}
     steps:
       - uses: actions/checkout@v4
       - name: Guard immutable release and reserve artifact space
         run: |
-          if gh release view ai-runtime-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'Runtime release already exists; refuse to overwrite it.' >&2
-            exit 1
-          fi
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           mkdir -p runtime-artifacts
           df -h .
@@ -51,21 +53,13 @@ jobs:
         id: verify
         run: |
           set -o pipefail
+          python scripts/test-ai-runtime-publish.py
           python scripts/ai-runtime-recover.py --run "$BUILD_RUN_ID" --commit "$BUILD_COMMIT" --root runtime-artifacts 2>&1 | tee runtime-artifacts/recovery.log
       - name: Publish immutable independent runtime
         id: release
         run: |
           set -o pipefail
-          if gh release view ai-runtime-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo 'Another publisher created the runtime release; refuse to overwrite it.' >&2
-            exit 1
-          fi
-          mapfile -d '' assets < <(find runtime-artifacts -type f \( -name '*.zip' -o -name '*.part*' \) -print0)
-          gh release create ai-runtime-v1 --repo "$GITHUB_REPOSITORY" --target "$BUILD_COMMIT" \
-            --prerelease --latest=false --title 'Open Media AI Runtime v1' \
-            --notes-file runtime-artifacts/notes.md "${assets[@]}" \
-            runtime-artifacts/ai-runtime-models.json runtime-artifacts/runtime-metadata.json \
-            runtime-artifacts/SHA256SUMS.txt runtime-artifacts/artifact-provenance.json 2>&1 | tee runtime-artifacts/publish.log
+          python scripts/ai-runtime-release.py --root runtime-artifacts --release "$RELEASE_ID" --commit "$BUILD_COMMIT" 2>&1 | tee runtime-artifacts/publish.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
