@@ -101,3 +101,30 @@ test('rejected submissions release the global pending state and retain the actio
   assert.equal(f.service.aiState.value.busy, false)
   assert.match(f.service.aiServiceError.value, /model is not installed/)
 })
+
+test('speech download, cancellation and repair route through the shared model service and refresh authoritative status', async t => {
+  const f = await fixture(t), calls = []
+  const model = { id: 'speech:f5-v1-base-fp32', provider: 'speech', state: 'not-downloaded' }
+  f.status.models = [model]
+  f.io.downloadAiModel = async (id, accepted) => { calls.push(['download', id, accepted]); f.status.models[0].state = 'downloading'; return structuredClone(f.status) }
+  f.io.cancelAiModelDownload = async id => { calls.push(['cancel', id]); f.status.models[0].state = 'not-downloaded'; return structuredClone(f.status) }
+  f.io.repairAiModel = async (id, accepted) => { calls.push(['repair', id, accepted]); f.status.models[0].state = 'verifying'; return structuredClone(f.status) }
+  await f.service.installAiModel(model.id, true)
+  assert.equal(f.service.aiState.value.models[0].state, 'downloading')
+  await f.service.stopAiModelDownload(model.id)
+  assert.equal(f.service.aiState.value.models[0].state, 'not-downloaded')
+  await f.service.updateAiModel(model.id, true)
+  assert.equal(f.service.aiState.value.models[0].state, 'verifying')
+  assert.deepEqual(calls, [['download', model.id, true], ['cancel', model.id], ['repair', model.id, true]])
+})
+
+test('a failed speech model download remains visible after catalog refresh and can be retried', async t => {
+  const f = await fixture(t)
+  f.io.downloadAiModel = async () => { throw Error('网络不可用') }
+  await assert.rejects(f.service.installAiModel('speech:f5-v1-base-fp32', false), /网络不可用/)
+  assert.match(f.service.aiServiceError.value, /网络不可用/)
+  assert.equal(f.service.aiState.value.busy, false)
+  f.io.downloadAiModel = async () => empty()
+  await f.service.installAiModel('speech:f5-v1-base-fp32', false)
+  assert.equal(f.service.aiServiceError.value, '')
+})

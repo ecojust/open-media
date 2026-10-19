@@ -38,7 +38,7 @@ async function mount(page, url) {
     const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#266b9a'; ctx.fillRect(0, 0, 320, 180); ctx.fillStyle = '#ffffff'; ctx.fillText('SOURCE FRAME', 20, 80)
     const png = canvas.toDataURL('image/png').split(',')[1]
-    const fixture = window.editorTools = { current: shallowRef(project), editor: ref(), calls: [], tools: [], busy: [], commits: 0, theme: ref('light'), held: false, fail: false, asrReady: false, devices: 0 }
+    const fixture = window.editorTools = { current: shallowRef(project), editor: ref(), calls: [], tools: [], busy: [], commits: 0, theme: ref('light'), held: false, fail: false, asrReady: false, modelProviders: [], devices: 0 }
     let history = createHistory(project), revision = 0
     const commit = next => { history = commitHistory(history, next); fixture.current.value = next; revision++; fixture.commits++ }
     fixture.undo = () => { history = undoHistory(history); fixture.current.value = history.present; revision++ }
@@ -61,6 +61,7 @@ async function mount(page, url) {
           throw new Error(`Unexpected asset operation: ${args.operation}`)
         }
         if (command === 'mcp_asset_cancel') { fixture.release?.(); return true }
+        if (command === 'ai_get_status') return { models: [{ id: 'transcription:asr-small', provider: 'transcription', state: fixture.asrReady ? 'ready' : 'not-downloaded' }], jobs: [], busy: false }
         if (command === 'asr_status') return asrStatus()
         if (command === 'asr_download') { fixture.asrReady = true; return { id: 'download-1', state: 'completed', stage: '模型下载完成', progress: 1, result: asrStatus() } }
         if (command === 'asr_transcribe') return { id: 'asr-1', state: 'completed', stage: '识别完成', progress: 1, result: { text: '识别字幕验证', language: 'zh', segments: [{ text: '识别字幕验证', start: .5, end: 2, words: [], tokens: [] }], tokens: [], timestampKind: 'model', wordSegmentation: 'latin-whitespace-and-cjk-model-tokens', backend: 'fixture', duration: 5, modelId: 'asr-small' } }
@@ -87,7 +88,7 @@ async function mount(page, url) {
     }
     const Editor = (await import('/src/components/VideoEditor.vue')).default
     fixture.app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': fixture.theme.value }, h(Editor, {
-      ref: fixture.editor, project: fixture.current.value, runTool: fixture.run, onChange: commit, onBusy: value => fixture.busy.push(value),
+      ref: fixture.editor, project: fixture.current.value, runTool: fixture.run, onChange: commit, onBusy: value => fixture.busy.push(value), onOpenModels: provider => fixture.modelProviders.push(provider),
     })) })
     fixture.app.mount('#app')
   })
@@ -258,8 +259,18 @@ async function main() {
     await clip(page, 'video-a').click()
     const asr = page.getByTestId('transcription-tools')
     await asr.getByText('识别语音为字幕', { exact: true }).click()
-    await expect(asr.getByText('下载 143 MB', { exact: false })).toBeVisible()
-    await asr.getByRole('button', { name: '下载模型', exact: true }).click()
+    await expect(asr).toContainText('依靠 离线识别模型 模型识别语音')
+    await expect(asr.getByRole('button', { name: '识别并添加字幕', exact: true })).toBeDisabled()
+    await asr.getByRole('button', { name: '前往 Info 管理 离线识别模型', exact: true }).click()
+    assert.deepEqual(await page.evaluate(() => window.editorTools.modelProviders), ['transcription'])
+    assert.equal(await page.evaluate(() => window.editorTools.calls.some(call => call.command === 'asr_download')), false)
+    await page.evaluate(async () => {
+      window.editorTools.asrReady = true
+      const { refreshAi } = await import('/src/core/ai-service.ts')
+      await refreshAi()
+    })
+    await expect(asr.getByRole('button', { name: '识别并添加字幕', exact: true })).toBeEnabled()
+    await asr.getByRole('button', { name: '刷新识别模型状态', exact: true }).click()
     await expect(asr).toContainText('模型已就绪')
     await asr.getByRole('button', { name: '识别并添加字幕', exact: true }).click()
     await expect.poll(async () => (await read(page)).tracks.flatMap(track => track.clips).some(clip => clip.text === '识别字幕验证')).toBe(true)
@@ -268,7 +279,7 @@ async function main() {
     assert.equal(await page.evaluate(() => window.editorTools.devices), 0)
     assert.deepEqual(errors, [])
     await page.screenshot({ path: path.join(output, 'transcription-dark.png') })
-    console.log('PASS GUI ASR IPC fixture: model download/status and imported timestamped subtitles; no capture device access')
+    console.log('PASS GUI ASR IPC fixture: Info model delegation/status and imported timestamped subtitles; no capture device access')
     await clip(page, 'audio-a').click()
     const audio = page.getByTestId('audio-clip-tools')
     await audio.getByText('响度分析与统一', { exact: true }).click()

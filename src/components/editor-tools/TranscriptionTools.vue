@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { AsrStatus } from '../../native-transcription'
+import { aiState } from '../../core/ai-service.ts'
 import type { EditorToolRunner } from './types'
 import { toolData } from './types'
 import { useEditorTool } from './use-editor-tool'
@@ -8,14 +9,16 @@ import EditorToolStatus from './EditorToolStatus.vue'
 import Icon from '../Icon.vue'
 
 const props = defineProps<{ clipId: string; run: EditorToolRunner; native: boolean; disabled?: boolean }>()
-const emit = defineEmits<{ busy: [value: boolean] }>()
+const emit = defineEmits<{ busy: [value: boolean]; 'open-models': [provider: 'transcription'] }>()
 const task = useEditorTool(() => props.run, busy => emit('busy', busy))
 const status = ref<AsrStatus>(), modelId = ref(''), language = ref('zh'), granularity = ref('sentence')
 const blocked = computed(() => props.disabled || !props.native || task.busy.value)
 const selected = computed(() => status.value?.models.find(model => model.id === modelId.value))
 const result = computed(() => toolData(task.result.value))
 const rows = computed(() => Array.isArray(result.value.segments) ? result.value.segments as { text: string; start: number; end: number }[] : [])
-function bytes(value: number): string { return value >= 1024 ** 3 ? `${(value / 1024 ** 3).toFixed(2)} GB` : `${(value / 1024 ** 2).toFixed(0)} MB` }
+watch(() => aiState.value.models.find(model => model.id === `transcription:${modelId.value}`)?.state, state => {
+  if (state && status.value && !blocked.value) void load()
+})
 async function load(): Promise<void> {
   if (!props.native || task.busy.value) return
   const value = await task.execute('open_media_audio_transcribe', { action: 'status' }, '')
@@ -25,21 +28,12 @@ async function load(): Promise<void> {
   status.value = data as unknown as AsrStatus
   if (!data.models.some(model => model.id === modelId.value)) modelId.value = status.value.models[0]?.id || ''
 }
-async function download(): Promise<void> {
-  const value = await task.execute('open_media_audio_transcribe', { action: 'download', modelId: modelId.value }, '识别模型已准备就绪')
-  if (value !== undefined) await load()
-}
-async function cancelDownload(): Promise<void> {
-  if (!selected.value?.jobId) return
-  const value = await task.execute('open_media_audio_transcribe', { action: 'cancel', jobId: selected.value.jobId }, '下载已取消')
-  if (value !== undefined) await load()
-}
 async function transcribe(): Promise<void> {
   await task.execute('open_media_audio_transcribe', { action: 'transcribe', modelId: modelId.value, clipId: props.clipId, language: language.value, granularity: granularity.value, createSubtitles: true }, '识别字幕已添加到时间线')
 }
 </script>
 <template>
-  <details class="et-panel et-inline et-section" data-testid="transcription-tools" @toggle="($event.target as HTMLDetailsElement).open && !status && !blocked && load()">
+  <details class="et-panel et-inline et-section" data-testid="transcription-tools" @toggle="($event.target as HTMLDetailsElement).open && !blocked && load()">
     <summary>识别语音为字幕</summary>
     <p v-if="!native" class="et-note">离线语音识别需要桌面版运行环境。</p>
     <fieldset :disabled="blocked">
@@ -48,12 +42,12 @@ async function transcribe(): Promise<void> {
         <label class="et-field">离线模型<select v-model="modelId" aria-label="语音识别模型"><option v-for="model in status.models" :key="model.id" :value="model.id">{{ model.name }}</option></select></label>
         <p v-if="status.error" class="et-error">{{ status.error }}</p>
         <template v-if="selected">
-          <p class="et-note">下载 {{ bytes(selected.downloadSize) }} · 模型 {{ bytes(selected.modelSize) }}<br />{{ selected.hardware }}</p>
+          <p class="et-note">依靠 {{ selected.name }} 模型识别语音。</p>
           <p v-if="selected.error" class="et-error">{{ selected.error }}</p>
           <div class="et-actions">
             <span v-if="selected.status === 'ready'" class="et-chip">模型已就绪</span>
-            <template v-else-if="selected.status === 'downloading' || selected.status === 'verifying'"><span class="et-note">{{ selected.status === 'verifying' ? '正在校验' : `下载中 ${Math.round(selected.progress * 100)}%` }}</span><button v-if="selected.jobId" @click="cancelDownload">取消下载</button></template>
-            <button v-else @click="download"><Icon name="download" :size="13" />{{ selected.status === 'failed' ? '重试下载' : '下载模型' }}</button>
+            <span v-else class="et-note">{{ selected.status === 'downloading' || selected.status === 'verifying' ? '模型准备中' : '模型未就绪' }}</span>
+            <button :aria-label="`前往 Info 管理 ${selected.name}`" @click="emit('open-models', 'transcription')"><Icon name="info" :size="13" />{{ selected.status === 'not-downloaded' ? '请前往下载' : '前往模型管理' }}</button>
             <button aria-label="刷新识别模型状态" @click="load"><Icon name="refresh" :size="13" /></button>
           </div>
         </template>

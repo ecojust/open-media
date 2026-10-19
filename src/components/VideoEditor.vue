@@ -61,7 +61,7 @@ import { importBlobAsset, isDesktop, prepareStoredVideoPreview } from '../native
 import type { RecordedMicrophoneAudio } from '../core/microphone-recording'
 
 const props = defineProps<{ project: Project; exportDisabled?: boolean; recordingDisabled?: boolean; automationBusy?: boolean; mcpConnected?: boolean; runTool?: EditorToolRunner }>()
-const emit = defineEmits<{ change: [project: Project, label?: string, historyGroup?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; openMcp: []; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
+const emit = defineEmits<{ change: [project: Project, label?: string, historyGroup?: string]; import: [files?: File[]]; export: []; status: [message: string]; busy: [value: boolean]; openMcp: []; 'open-models': [provider: 'speech' | 'transcription']; 'recorded-asset': [asset: MediaAsset, blob: Blob]; 'prepared-asset': [asset: MediaAsset, blob: Blob] }>()
 const canvas = ref<HTMLCanvasElement | null>(null)
 const previewSelection = ref<InstanceType<typeof PreviewSelection> | null>(null)
 const editorRoot = ref<HTMLElement | null>(null)
@@ -328,6 +328,11 @@ function openEditorDialog(kind: NonNullable<typeof editorDialog.value>): void {
 }
 function openSpeech(): void { openEditorDialog('speech') }
 function closeEditorDialog(): void { if (!editingBusy.value) editorDialog.value = null }
+function openModels(provider: 'speech' | 'transcription'): void {
+  if (editingBusy.value) return
+  closeEditorDialog()
+  emit('open-models', provider)
+}
 function applyAssistChange(next: Project, label: string): void {
   if (editingBusy.value || props.exportDisabled || next.id !== props.project.id) return
   pause(); cancelGesture()
@@ -1520,7 +1525,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
           </template>
           <VisualClipTools v-if="runTool && (selected.clip.transition || inspectorTab === 'properties')" :key="`visual-${project.id}-${selected.clip.id}`" :clip="selected.clip" :kind="selectedToolKind" :time="playhead" :focus-region="focusRegion" :picking-focus="focusPicking" :run="runTool" :disabled="selectedLocked || editingBusy || !!exportDisabled" @pick-focus="startFocusPick()" @busy="setToolBusy" />
           <AudioClipTools v-if="runTool && selectedSupportsAudioPlayback && inspectorTab === 'properties'" :key="`audio-${project.id}-${selected.clip.id}`" :clip="selected.clip" :project="project" :native="native" :run="runTool" :disabled="selectedLocked || editingBusy || !!exportDisabled" @busy="setToolBusy" />
-          <TranscriptionTools v-if="runTool && ['audio', 'video'].includes(selectedToolKind) && inspectorTab === 'properties'" :key="`transcription-${project.id}-${selected.clip.id}`" :clip-id="selected.clip.id" :native="native" :run="runTool" :disabled="editingBusy || !!exportDisabled" @busy="setToolBusy" />
+          <TranscriptionTools v-if="runTool && ['audio', 'video'].includes(selectedToolKind) && inspectorTab === 'properties'" :key="`transcription-${project.id}-${selected.clip.id}`" :clip-id="selected.clip.id" :native="native" :run="runTool" :disabled="editingBusy || !!exportDisabled" @busy="setToolBusy" @open-models="openModels" />
         </div>
         <div v-else class="property-empty"><Icon name="settings" :size="28" /><strong>选择一个片段</strong><span>调整画面、速度、声音<br />或添加淡入淡出</span></div>
       </aside>
@@ -1590,7 +1595,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
       <WatermarkLibrary v-if="editorDialog === 'watermark'" :project-width="project.width" :project-height="project.height" :busy="watermarkBusy" :error="watermarkError" @select="insertWatermark" @import-local="importLocalWatermark" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'speech'" title="文字转语音" icon="audio" wide :busy="editingBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
-      <div :inert="toolBusy || undefined"><SpeechPanel ref="speechPanel" :active="editorDialog === 'speech'" in-dialog :project="project" @change="(next, label) => emit('change', next, label)" @status="emit('status', $event)" @busy="setSpeechBusy" /></div>
+      <div :inert="toolBusy || undefined"><SpeechPanel ref="speechPanel" :active="editorDialog === 'speech'" in-dialog :project="project" @change="(next, label) => emit('change', next, label)" @status="emit('status', $event)" @busy="setSpeechBusy" @open-models="openModels" /></div>
       <SpeechToolsPanel v-if="runTool && editorDialog === 'speech'" :run="runTool" :disabled="speechBusy" :selected-clip-id="selected?.track.kind === 'text' ? selected.clip.id : undefined" @busy="setToolBusy" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'asset-tools'" :title="assetToolAction === 'url' ? '从网址导入' : '素材工具'" icon="video" wide :busy="toolBusy" busy-message="正在处理素材…" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><AssetToolsPanel v-if="runTool && editorDialog === 'asset-tools'" :asset="toolAsset" :action="assetToolAction" :native="native" :run="runTool" @busy="setToolBusy" /></EditorDialog>

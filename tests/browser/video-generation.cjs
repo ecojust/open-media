@@ -14,7 +14,7 @@ async function mount(page, base, native = true) {
     const { default: Workspace } = await import('/src/components/VideoGenerationWorkspace.vue')
     const image = { id: 'image-1', name: '湖畔首帧.png', kind: 'image', url: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect fill="%23447788" width="64" height="64"/></svg>', duration: 5, width: 64, height: 64, size: 100, mime: 'image/png', nativePath: '/fixture/image.png' }
     const asset = { id: 'video-result', name: '生成镜头.mp4', kind: 'video', url: '', duration: 3.04, width: 512, height: 288, size: 200, mime: 'video/mp4', nativePath: '/fixture/generation/result.mp4' }
-    const state = window.generationHarness = { calls: [], jobs: [], selections: [image], added: [], timeline: [], busy: false, mcp: false, active: ref(true), enabled: ref(true), supported: true,
+    const state = window.generationHarness = { calls: [], jobs: [], selections: [image], added: [], timeline: [], busy: false, mcp: false, modelProviders: [], active: ref(true), enabled: ref(true), supported: true,
       models: [
         { id: 'h3-base-fl2va', name: 'MiniMax H3 FL2VA', version: '1', modes: ['prompt', 'image', 'storyboard'], size: 144000000000, downloadedBytes: 0, state: 'not-downloaded', hardware: 'Apple 芯片，建议低内存模式', licenseUrl: 'https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE' },
         { id: 'h3-base-ref2va', name: 'MiniMax H3 Ref2VA', version: '1', modes: ['reference'], size: 150000000000, downloadedBytes: 0, state: 'not-downloaded', hardware: 'Apple 芯片，建议 64 GB 以上内存', licenseUrl: 'https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE' },
@@ -32,7 +32,7 @@ async function mount(page, base, native = true) {
       if (command === 'reveal_media_asset') return
       throw new Error(`未预期命令：${command}`)
     } }
-    state.app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': 'dark' }, [state.enabled.value ? h(Workspace, { native, active: state.active.value, projectTitle: '当前项目', onBusyChange: value => { state.busy = value }, onAddAsset: value => state.added.push(value), onAddTimeline: value => state.timeline.push(value), onOpenMcp: () => { state.mcp = true } }) : null]) }).mount('#app')
+    state.app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': 'dark' }, [state.enabled.value ? h(Workspace, { native, active: state.active.value, projectTitle: '当前项目', onBusyChange: value => { state.busy = value }, onAddAsset: value => state.added.push(value), onAddTimeline: value => state.timeline.push(value), onOpenMcp: () => { state.mcp = true }, onOpenModels: provider => state.modelProviders.push(provider) }) : null]) }).mount('#app')
   }, native)
 }
 
@@ -53,18 +53,12 @@ async function main() {
     await expect(page.getByLabel('低内存模式', { exact: false })).toBeChecked()
     await expect(page.getByLabel('生成画面尺寸')).toHaveValue('512x512')
     await expect(page.getByRole('button', { name: '参考素材', exact: true })).toBeDisabled()
-    await page.getByRole('button', { name: '下载模型 MiniMax H3 FL2VA', exact: true }).click()
-    const license = page.getByRole('dialog', { name: '下载模型前确认' })
-    await expect(license).toContainText('欧盟、英国、韩国及美国')
-    await license.getByText('阅读随附的完整模型许可', { exact: true }).click()
-    await expect(license.locator('pre')).toContainText('MiniMax H3 COMMUNITY LICENSE AGREEMENT')
-    await expect(license.getByRole('button', { name: '确认并下载' })).toBeDisabled()
-    await license.getByLabel('我已阅读模型许可，并确认所在地及用途符合许可条件').check()
-    await license.getByRole('button', { name: '确认并下载' }).click()
-    await expect(license).not.toBeVisible()
-    await expect.poll(() => page.evaluate(() => window.generationHarness.busy)).toBe(true)
-    await workspace.locator('[data-model-id="h3-base-fl2va"]').getByRole('button', { name: '取消', exact: true }).click()
-    await expect(page.getByRole('button', { name: '继续下载 MiniMax H3 FL2VA', exact: true })).toBeVisible()
+    await expect(workspace).toContainText('依靠 MiniMax H3 FL2VA 模型生成')
+    await workspace.locator('[data-model-id="h3-base-fl2va"]').getByRole('button', { name: '前往 Info 管理 MiniMax H3 FL2VA', exact: true }).click()
+    assert.deepEqual(await page.evaluate(() => window.generationHarness.modelProviders), ['video'])
+    assert.equal(await page.evaluate(() => window.generationHarness.calls.some(call => /video_model_download/.test(call.command))), false, '功能工作区必须交由 Info 管理下载')
+    await expect(page.getByRole('dialog', { name: '下载模型前确认' })).toHaveCount(0)
+    assert.equal(await page.evaluate(() => window.generationHarness.busy), false, '跳转模型管理不得锁住生成工作区')
     await page.evaluate(() => { for (const model of window.generationHarness.models) { model.state = 'ready'; model.downloadedBytes = model.size } })
     await page.getByRole('button', { name: '重新检查模型', exact: true }).click()
     await page.getByLabel('视频提示词', { exact: true }).fill('清晨湖面升起薄雾，镜头缓缓向前，远处鸟鸣。')
@@ -167,7 +161,7 @@ async function main() {
     await expect(appPage.locator('.timeline-clip.video')).toHaveCount(2)
     await expect(appPage.locator('.project-summary')).toContainText('1 个素材')
     assert.deepEqual(errors, [])
-    console.log('Video generation GUI contract passed: license, download resume, four modes, reactive frame/reference requests, ordered storyboards, per-job retry, background polling, manual asset actions, draft restore, unsupported platforms and App asset deduplication.')
+    console.log('Video generation GUI contract passed: Info model management delegation, four modes, reactive frame/reference requests, ordered storyboards, per-job retry, background polling, manual asset actions, draft restore, unsupported platforms and App asset deduplication.')
   } finally { await browser?.close(); await server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

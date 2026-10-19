@@ -2,59 +2,51 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const { chromium, expect } = require('@playwright/test')
 
+// IPC fixtures verify UI routing and shared states; no model download or synthesis is performed.
 async function installNativeContract(page) {
   await page.addInitScript(() => {
     const packs = [
-      { id: 'zipvoice_zh_female', modelId: 'zipvoice-distill-fp32', name: 'ZipVoice Distill FP32', modelSize: 531957872, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC', usageNote: '模型限非商业用途' },
-      { id: 'f5_zh_female', modelId: 'f5-v1-base-fp32', name: 'F5-TTS v1 Base FP32', modelSize: 1402816013, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC-4.0', usageNote: '模型限非商业用途' },
-      { id: 'qwen3_serena', modelId: 'qwen3-tts-1.7b-serena', name: 'Qwen3-TTS 1.7B BF16 · Serena', modelSize: 4520159586, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'Apache-2.0', usageNote: '中文男声与女声；CPU离线合成，建议至少16GB' },
+      { id: 'zipvoice_zh_female', modelId: 'zipvoice-distill-fp32', name: 'ZipVoice Distill FP32', modelSize: 531957872, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC' },
+      { id: 'f5_zh_female', modelId: 'f5-v1-base-fp32', name: 'F5-TTS v1 Base FP32', modelSize: 1402816013, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC-4.0' },
+      { id: 'qwen3_serena', modelId: 'qwen3-tts-1.7b-serena', name: 'Qwen3-TTS 1.7B BF16 · Serena', modelSize: 4520159586, runtimeSize: 780000000, language: 'zh-CN', gender: 'female', license: 'Apache-2.0' },
     ].flatMap((voice, index) => [voice, { ...voice, id: ['zipvoice_zh_male', 'f5_zh_male', 'qwen3_uncle_fu'][index], name: `${voice.name.replace(' · Serena', '')} · 男声`, gender: 'male' }])
-    const state = window.voiceDownloadHarness = { calls: [], deferDownloadDispatch: false, releaseDownloadDispatch: null, deferDownload: false, releaseDownload: null, bundledReady: true, sharedRuntimeReady: false, nativeUpgrade: null, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
+    const state = window.voiceDownloadHarness = { calls: [], bundledReady: true, sharedRuntimeReady: false, nativeUpgrade: null, models: Object.fromEntries(packs.map(voice => [voice.modelId, { status: 'not-downloaded', downloadedBytes: 0, error: '' }])) }
     const catalog = () => ({ ready: state.bundledReady || Object.entries(state.models).some(([id, model]) => model.status === 'ready' && (id === 'zipvoice-distill-fp32' || state.sharedRuntimeReady || model.runtimeStatus === 'ready')), error: state.bundledReady ? undefined : '内置模型完整性校验失败', voices: [
       { id: 'matcha_zh_en_female', name: '温柔女声（中英）', language: 'zh-CN', gender: 'female', status: state.bundledReady ? 'bundled' : 'failed', modelSize: 149227292, ...(state.nativeUpgrade || {}) },
       ...packs.map(voice => {
         const model = state.models[voice.modelId]
         const runtimeStatus = voice.runtimeSize ? model.runtimeStatus || (state.sharedRuntimeReady ? 'ready' : 'not-downloaded') : undefined
-        return { ...voice, downloadSize: voice.modelSize + (voice.runtimeSize || 0), downloadSources: ['https://huggingface.co', 'https://hf-mirror.com'], ...model, runtimeStatus, ...(voice.modelId === 'zipvoice-distill-fp32' && model.status === 'ready' ? state.nativeUpgrade || {} : {}) }
+        return { ...voice, downloadSize: voice.modelSize + (voice.runtimeSize || 0), ...model, runtimeStatus, ...(voice.modelId === 'zipvoice-distill-fp32' && model.status === 'ready' ? state.nativeUpgrade || {} : {}) }
       }),
     ] })
+    const globalStatus = () => ({ jobs: [], busy: false, models: packs.filter(voice => voice.gender === 'female').map(voice => {
+      const model = state.models[voice.modelId]
+      return { id: `speech:${voice.modelId}`, name: voice.name.replace(' · Serena', ''), provider: 'speech', capabilities: ['text-to-speech'], version: 'fixture', size: voice.modelSize, downloadedBytes: model.downloadedBytes, state: model.status, hardware: '优先可用 GPU，建议 16 GB 内存', runtime: { state: model.runtimeStatus || (state.sharedRuntimeReady ? 'ready' : 'not-downloaded') }, bundled: false, requiresLicenseAcceptance: true, license: voice.license, licenseUrl: 'https://example.com/license', error: model.error, voices: packs.filter(item => item.modelId === voice.modelId) }
+    }) })
     window.__TAURI_INTERNALS__ = {
       transformCallback: () => 1, unregisterCallback() {},
       invoke: async (command, args) => {
-        if (command === 'begin_speech_model_download' && state.deferDownloadDispatch) await new Promise(resolve => { state.releaseDownloadDispatch = resolve })
         state.calls.push({ command, args })
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
-        if (command === 'get_media_jobs') return []
-        if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
+        if (command === 'get_media_jobs' || command === 'mcp_pending') return []
+        if (command === 'mcp_get_status') return { running: false, connectedClients: 0, pendingRequests: 0 }
+        if (command === 'get_desktop_platform') return 'macos'
+        if (command === 'configure_screenshot_shortcut') return args.shortcut
+        if (command === 'ai_get_status') return globalStatus()
         if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
         if (command === 'plugin:event|listen') return 1
         if (command === 'plugin:event|unlisten') return null
         if (command === 'get_speech_status') return catalog()
-        if (command === 'begin_speech_model_download') {
-          if (args.modelId === 'native-gpu-runtime') {
-            if (state.deferDownload) await new Promise(resolve => { state.releaseDownload = resolve })
-            Object.assign(state.nativeUpgrade, { runtimeStatus: 'upgrade-downloading', downloadedBytes: 0, runtimeError: '' })
-            return catalog()
-          }
-          const model = state.models[args.modelId]
+        if (command === 'ai_model_download' || command === 'ai_model_repair') {
+          if (!args.acceptedLicense) throw new Error('许可未确认')
+          const model = state.models[args.modelId.replace(/^speech:/, '')]
           if (!model) throw new Error('未知模型')
-          if (state.deferDownload) await new Promise(resolve => { state.releaseDownload = resolve })
-          if (model.runtimeStatus?.startsWith('upgrade-')) Object.assign(model, { runtimeStatus: 'upgrade-downloading', downloadedBytes: packs.find(voice => voice.modelId === args.modelId).modelSize, runtimeError: '', error: '' })
-          else Object.assign(model, { status: 'downloading', downloadedBytes: 0, error: '', downloadSource: 'https://huggingface.co' })
-          return catalog()
+          Object.assign(model, { status: command === 'ai_model_repair' ? 'verifying' : 'downloading', downloadedBytes: 0, error: '' })
+          return globalStatus()
         }
-        if (command === 'repair_speech_model') {
-          if (state.deferRepair) await new Promise(resolve => { state.releaseRepair = resolve })
-          const model = state.models[args.modelId]
-          if (!model) throw new Error('未知修复模型')
-          Object.assign(model, { status: 'verifying', runtimeStatus: 'ready', downloadedBytes: packs.find(voice => voice.modelId === args.modelId).modelSize + 780000000 })
-          return catalog()
-        }
-        if (command === 'cancel_speech_model_download') {
-          if (args.modelId === 'native-gpu-runtime') Object.assign(state.nativeUpgrade, { runtimeStatus: 'upgrade-available', downloadedBytes: 0 })
-          else if (state.models[args.modelId]?.runtimeStatus?.startsWith('upgrade-')) Object.assign(state.models[args.modelId], { runtimeStatus: 'upgrade-available', downloadedBytes: 0 })
-          else Object.assign(state.models[args.modelId], { status: 'not-downloaded', downloadedBytes: 0, runtimeStatus: undefined })
-          return catalog()
+        if (command === 'ai_model_cancel') {
+          Object.assign(state.models[args.modelId.replace(/^speech:/, '')], { status: 'not-downloaded', downloadedBytes: 0, runtimeStatus: undefined })
+          return globalStatus()
         }
         throw new Error(`未预期的原生命令：${command}`)
       },
@@ -77,278 +69,93 @@ async function main() {
     await page.getByTestId('create-project').click()
     await page.getByRole('button', { name: '字幕', exact: true }).click()
     const open = page.locator('.editor-tools').getByRole('button', { name: '文字转语音', exact: true })
-    await open.click()
     const dialog = page.getByRole('dialog', { name: '文字转语音', exact: true })
     const close = dialog.getByRole('button', { name: '关闭文字转语音', exact: true })
-    const zip = dialog.locator('[data-voice-id="zipvoice_zh_female"]')
-    const f5 = dialog.locator('[data-voice-id="f5_zh_female"]')
-    const qwen = dialog.locator('[data-voice-id="qwen3_serena"]')
-    const zipMale = dialog.locator('[data-voice-id="zipvoice_zh_male"]')
-    const f5Male = dialog.locator('[data-voice-id="f5_zh_male"]')
-    const qwenMale = dialog.locator('[data-voice-id="qwen3_uncle_fu"]')
+    const f5 = dialog.locator('[data-voice-id="f5_zh_female"]'), f5Male = dialog.locator('[data-voice-id="f5_zh_male"]')
+    const info = page.getByRole('dialog', { name: '关于 Open Media', exact: true })
+    const infoF5 = info.locator('[data-ai-model="speech:f5-v1-base-fp32"]')
+    const closeInfo = () => info.getByRole('button', { name: '关闭关于 Open Media', exact: true }).click()
+    const confirm = async (repair = false) => {
+      const modal = page.getByRole('dialog', { name: repair ? '修复模型' : '下载模型', exact: true })
+      await expect(modal.getByRole('button', { name: repair ? '检查并修复' : '开始下载', exact: true })).toBeDisabled()
+      await modal.getByRole('checkbox').check()
+      await modal.getByRole('button', { name: repair ? '检查并修复' : '开始下载', exact: true }).click()
+      await expect(modal).not.toBeVisible()
+    }
+    await open.click()
     await expect(dialog.getByRole('button', { name: '选择 Matcha 中英', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(dialog.locator('[data-voice-id="matcha_zh_en_female"] .voice-model-size')).toHaveText('已内置 · 149.2 MB')
+    await expect(dialog.locator('.voice-card')).toHaveCount(7)
     await expect(dialog.getByRole('tab')).toHaveCount(0)
-    await expect(dialog.locator('.voice-card')).toHaveCount(7)
-    const rows = await dialog.locator('.voice-card').evaluateAll(cards => cards.map(card => Math.round(card.getBoundingClientRect().top)))
-    assert.equal(new Set(rows).size, 2, '七个声音在同一列表内排列为四列两行')
+    await expect(dialog.locator('.voice-hardware,.voice-model-license,.voice-download-button,.voice-repair-button')).toHaveCount(0)
     const search = dialog.getByLabel('搜索声音', { exact: true })
-    await search.fill('英语')
-    await expect(dialog.locator('.voice-card')).toHaveCount(1)
-    await search.fill('男声')
-    await expect(dialog.locator('.voice-card')).toHaveCount(3)
-    await search.fill('Serena')
-    await expect(dialog.locator('.voice-card')).toHaveCount(1)
-    await search.fill('')
-    await expect(dialog.locator('.voice-card')).toHaveCount(7)
-    await expect(zip.getByRole('button', { name: '选择 ZipVoice Distill FP32', exact: true })).toBeDisabled()
-    await expect(zip.locator('.voice-model-size')).toHaveText('模型 · 532 MB')
-    await expect(f5.locator('.voice-model-size')).toHaveText('模型 · 1.4 GB')
-    await expect(f5.locator('.voice-runtime-size')).toHaveText('运行组件 · 780 MB · 待下载')
-    await expect(f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true })).toContainText('2.18 GB')
-    await expect(qwen.locator('.voice-model-size')).toHaveText('模型 · 4.52 GB')
-    await expect(zip.locator('.voice-model-license')).toHaveText('模型限非商业用途')
-    await expect(f5.locator('.voice-model-license')).toHaveText('模型限非商业用途')
-    await expect(qwen.locator('.voice-model-license')).toHaveText('Apache-2.0')
-    await expect(qwenMale.locator('.voice-model-license')).toHaveText('Apache-2.0')
-    await expect(dialog.getByText('中文男声与女声；CPU离线合成，建议至少16GB', { exact: true })).toHaveCount(0)
-    await expect(dialog.locator('.voice-card-copy > strong')).toHaveText(['Matcha 中英', 'ZipVoice Distill FP32', 'ZipVoice Distill FP32', 'F5-TTS v1 Base FP32', 'F5-TTS v1 Base FP32', 'Qwen3-TTS 1.7B BF16', 'Qwen3-TTS 1.7B BF16'])
-    await expect(dialog.locator('.voice-hardware')).toHaveCount(7)
-    await expect(dialog.locator('.voice-model-shared')).toHaveCount(6)
-    for (const [female, male, model] of [[zip, zipMale, 'ZipVoice Distill FP32'], [f5, f5Male, 'F5-TTS v1 Base FP32'], [qwen, qwenMale, 'Qwen3-TTS 1.7B BF16']]) {
-      await expect(male.locator('.voice-card-copy > span')).toHaveText('中文 · 男声')
-      await expect(male.locator('.voice-model-shared')).toHaveText('共用模型 · 下载一次即可')
-      await expect(male.locator('.voice-model-size')).toHaveText(await female.locator('.voice-model-size').innerText())
-      await expect(male.getByRole('button', { name: `下载 ${model} · 男声`, exact: true })).toHaveText(await female.getByRole('button', { name: `下载 ${model}`, exact: true }).textContent())
-    }
-    for (const [id, memoryGb, gpuAuto] of [['matcha_zh_en_female', 4, false], ['zipvoice_zh_female', 8, false], ['zipvoice_zh_male', 8, false], ['f5_zh_female', 8, true], ['f5_zh_male', 8, true], ['qwen3_serena', 16, true], ['qwen3_uncle_fu', 16, true]]) {
-      const hardware = dialog.locator(`[data-voice-id="${id}"] .voice-hardware`)
-      await expect(hardware).toContainText(`建议系统内存 ${memoryGb} GB`)
-      await expect(hardware).toContainText('优先可用 GPU · CPU 自动回退')
-    }
-    await expect(dialog.locator('.voice-hardware-note')).toHaveText('GPU 组件按硬件下载后启用，不可用时自动回退 CPU。实际设备见生成进度；内存为整机建议。')
-    await expect(dialog.locator('.voice-download-sources, .voice-current-source, .voice-download-help')).toHaveCount(0)
-    for (const button of await dialog.locator('.voice-download-button').all()) {
-      await button.scrollIntoViewIfNeeded()
-      await expect(button).toBeInViewport({ ratio: 1 })
-    }
-    await dialog.locator('.voice-grid-scroll').evaluate(element => { element.scrollTop = 0 })
-    await page.screenshot({ path: '/tmp/open-media-voice-downloads-available.png', animations: 'disabled' })
-    for (const [card, name, id] of [
-      [zip, 'ZipVoice Distill FP32', 'zipvoice_zh_female'],
-      [zipMale, 'ZipVoice Distill FP32 · 男声', 'zipvoice_zh_male'],
-      [f5, 'F5-TTS v1 Base FP32', 'f5_zh_female'],
-      [f5Male, 'F5-TTS v1 Base FP32 · 男声', 'f5_zh_male'],
-      [qwen, 'Qwen3-TTS 1.7B BF16', 'qwen3_serena'],
-      [qwenMale, 'Qwen3-TTS 1.7B BF16 · 男声', 'qwen3_uncle_fu'],
+    await search.fill('英语'); await expect(dialog.locator('.voice-card')).toHaveCount(1)
+    await search.fill('男声'); await expect(dialog.locator('.voice-card')).toHaveCount(3)
+    await search.fill(''); await expect(dialog.locator('.voice-card')).toHaveCount(7)
+    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
+    await expect(f5).toContainText('依靠 F5-TTS v1 Base FP32 模型')
+    for (const [id, name] of [
+      ['zipvoice_zh_female', 'ZipVoice Distill FP32'], ['zipvoice_zh_male', 'ZipVoice Distill FP32 · 男声'],
+      ['f5_zh_female', 'F5-TTS v1 Base FP32'], ['f5_zh_male', 'F5-TTS v1 Base FP32 · 男声'],
+      ['qwen3_serena', 'Qwen3-TTS 1.7B BF16'], ['qwen3_uncle_fu', 'Qwen3-TTS 1.7B BF16 · 男声'],
     ]) {
-      await card.getByRole('button', { name: `试听 ${name}`, exact: true }).click()
+      await dialog.locator(`[data-voice-id="${id}"]`).getByRole('button', { name: `试听 ${name}`, exact: true }).click()
       const audio = dialog.getByLabel('声音试听音频')
-      await expect(audio).toHaveJSProperty('paused', false)
-      await expect(audio).toHaveJSProperty('readyState', 4)
+      await expect(audio).toHaveJSProperty('paused', false); await expect(audio).toHaveJSProperty('readyState', 4)
       assert.match(await audio.getAttribute('src'), new RegExp(`${id}\\.mp3`))
-      assert.ok(await audio.evaluate(element => element.duration > 1 && element.duration < 20), '真实原句MP3应成功解码并具有有效时长')
+      assert.ok(await audio.evaluate(element => element.duration > 1 && element.duration < 20))
     }
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.some(call => /begin_speech/.test(call.command))), false, '试听本地音频不能自动下载或合成')
-    console.log('PASS 三种模型的男女声原句MP3均可本地播放，试听不下载或合成')
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.some(call => /begin_speech|ai_model_(download|repair)/.test(call.command))), false, '原句MP3试听不触发下载或合成')
+    console.log('PASS 七张声音卡同页选择、搜索，男女声音频无需下载即可本地试听')
 
-    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = true; window.voiceDownloadHarness.deferDownload = true })
-    await f5Male.getByRole('button', { name: '下载 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
-    await expect(f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
-    await expect(f5Male.getByRole('button', { name: '下载 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeDisabled()
-    await expect.poll(() => page.evaluate(() => typeof window.voiceDownloadHarness.releaseDownloadDispatch), { message: '等待请求进入受控原生桥，禁用按钮不能代表异步调用已经抵达' }).toBe('function')
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download').length), 0, '请求尚未送达时，男女声按钮也应立即共同禁用')
-    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = false; window.voiceDownloadHarness.releaseDownloadDispatch() })
-    await expect.poll(() => page.evaluate(() => ({
-      count: window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download').length,
-      ready: typeof window.voiceDownloadHarness.releaseDownload === 'function',
-    })), { message: '等待唯一共享下载请求完成派发，且响应测试门闩已就绪' }).toEqual({ count: 1, ready: true })
-    await page.evaluate(() => { window.voiceDownloadHarness.deferDownload = false; window.voiceDownloadHarness.releaseDownload() })
-    await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '0')
-    await expect(f5Male.getByRole('progressbar')).toHaveAttribute('value', '0')
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download').length), 1, '男声与女声只能启动一次共享模型下载')
-    await expect(close).toBeEnabled()
-    await expect(page.getByTestId('save-project')).toBeEnabled()
-    await expect(page.getByTestId('nav-record')).toBeEnabled()
-    await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].downloadedBytes = 1091408007 })
-    await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '50')
-    await expect(f5Male.getByRole('progressbar')).toHaveAttribute('value', '50')
-    await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].downloadSource = 'https://hf-mirror.com' })
-    await expect(f5.locator('.voice-current-source')).toHaveCount(0)
-    await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '50')
-    await expect(f5Male.getByRole('progressbar')).toHaveAttribute('value', '50')
-    await expect(zip.getByRole('progressbar')).toHaveCount(0)
-    await f5.getByRole('button', { name: '取消下载 F5-TTS v1 Base FP32', exact: true }).click()
-    await expect(f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
-    await expect(f5Male.getByRole('button', { name: '下载 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
-    await f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true }).click()
-    await expect(f5.getByRole('progressbar')).toBeVisible()
-    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.models['f5-v1-base-fp32'], { status: 'failed', error: '连接中断，请重试。' }))
-    await expect(f5.locator('.voice-model-error')).toHaveText('连接中断，请重试。')
-    await expect(f5Male.locator('.voice-model-error')).toHaveText('连接中断，请重试。')
-    await f5Male.getByRole('button', { name: '重试下载 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
-    await expect(f5.getByRole('progressbar')).toBeVisible()
-    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.models['f5-v1-base-fp32'], { status: 'verifying', runtimeStatus: 'verifying', downloadedBytes: 2182816013 }))
-    await expect(f5.locator('.voice-model-state')).toHaveText('正在校验模型与运行组件…')
-    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
-    await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].status = 'ready' })
-    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
-    await expect(f5.locator('.voice-runtime-size')).toContainText('校验中')
-    console.log('PASS 男女声共享模型下载、待处理、进度、取消和重试；运行组件未校验时仍不可用')
-
-    await close.click()
-    await expect(dialog).not.toBeVisible()
-    const calls = await page.evaluate(() => window.voiceDownloadHarness.calls)
-    const cancellations = calls.filter(call => call.command === 'cancel_speech_model_download').length
-    const reads = calls.filter(call => call.command === 'get_speech_status').length
-    await page.waitForTimeout(1200)
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'get_speech_status').length), reads, '关闭停止界面轮询')
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'cancel_speech_model_download').length), cancellations, '关闭不取消后台下载')
+    await f5Male.getByRole('button', { name: '前往 Info 管理 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
+    await expect(dialog).not.toBeVisible(); await expect(info).toBeVisible()
+    await expect(info.getByTestId('ai-category-speech')).toHaveAttribute('aria-expanded', 'true')
+    await expect(infoF5).toBeVisible(); await expect(infoF5).toContainText('CC-BY-NC-4.0')
+    await infoF5.getByRole('button', { name: '下载', exact: true }).click(); await confirm()
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'ai_model_download').length), 1, '男女声音色共用一个全局模型下载')
+    await expect(infoF5.getByRole('progressbar')).toBeVisible()
+    await infoF5.getByRole('button', { name: '取消', exact: true }).click()
+    await expect(infoF5.getByRole('button', { name: '下载', exact: true })).toBeEnabled()
+    await infoF5.getByRole('button', { name: '下载', exact: true }).click(); await confirm()
+    await closeInfo(); await open.click()
+    await expect(f5.locator('.voice-model-state')).toHaveText('模型准备中')
+    await expect(f5Male.locator('.voice-model-state')).toHaveText('模型准备中')
+    await expect(f5.getByRole('progressbar')).toHaveCount(0)
+    await expect(f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeDisabled()
     await page.evaluate(() => {
       window.voiceDownloadHarness.sharedRuntimeReady = true
-      Object.assign(window.voiceDownloadHarness.models['f5-v1-base-fp32'], { status: 'ready', runtimeStatus: 'ready', error: '' })
+      Object.assign(window.voiceDownloadHarness.models['f5-v1-base-fp32'], { status: 'ready', runtimeStatus: 'ready' })
     })
-    await open.click()
-    await expect(dialog.getByRole('button', { name: '选择 Matcha 中英', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(f5.locator('.voice-model-size')).toHaveText('已下载 · 1.4 GB')
-    await expect(f5Male.locator('.voice-model-size')).toHaveText('已下载 · 1.4 GB')
-    await expect(f5Male.getByRole('button', { name: '下载 F5-TTS v1 Base FP32 · 男声', exact: true })).toHaveCount(0)
+    await expect(f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
     await f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
+    await expect(dialog.getByTestId('speech-generate-all')).toBeEnabled()
+    await close.click(); await open.click()
     await expect(f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(dialog.locator('.voice-current')).toContainText('F5-TTS v1 Base FP32 · 男声')
-    await f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true }).click()
-    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(dialog.getByTestId('speech-generate-all')).toBeEnabled()
-    await expect(qwen.locator('.voice-runtime-size')).toHaveText('运行组件 · 780 MB · 已就绪')
-    await expect(qwen.getByRole('button', { name: '下载 Qwen3-TTS 1.7B BF16', exact: true })).toContainText('4.52 GB')
-    await expect(qwen.getByRole('button', { name: '选择 Qwen3-TTS 1.7B BF16', exact: true })).toBeDisabled()
-    console.log('PASS 重开保持原选择，共享运行组件不重复计入下一模型下载量')
+    console.log('PASS 模型下载与取消集中在 Info，配音模态关闭后再打开 Info，共享状态刷新与声音选择保留')
 
-    await close.click()
-    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.models['qwen3-tts-1.7b-serena'], { status: 'unsupported', runtimeStatus: 'unsupported', runtimeError: '当前平台尚无已验证运行组件' }))
-    await open.click()
-    await expect(qwen.locator('.voice-model-error')).toHaveText('当前平台尚无已验证运行组件')
-    await expect(qwen.getByRole('button', { name: '下载 Qwen3-TTS 1.7B BF16', exact: true })).toHaveCount(0)
-    await expect(qwen.getByRole('button', { name: '选择 Qwen3-TTS 1.7B BF16', exact: true })).toBeDisabled()
-    await expect(qwen.getByRole('button', { name: '试听 Qwen3-TTS 1.7B BF16', exact: true })).toBeEnabled()
-    await page.screenshot({ path: '/tmp/open-media-voice-downloads.png', animations: 'disabled' })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await expect(dialog).toBeVisible()
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
-    await expect(dialog.locator('.voice-card')).toHaveCount(7)
-    const narrowRows = await dialog.locator('.voice-card').evaluateAll(cards => cards.map(card => Math.round(card.getBoundingClientRect().top)))
-    assert.equal(new Set(narrowRows).size, 4, '窄屏中七个声音自动排列为四行')
-    assert.equal(await dialog.locator('.voice-grid-scroll').evaluate(element => element.scrollWidth <= element.clientWidth), true, '声音网格不得横向溢出')
-    await qwenMale.scrollIntoViewIfNeeded()
-    await expect(qwenMale.getByRole('button', { name: '试听 Qwen3-TTS 1.7B BF16 · 男声', exact: true })).toBeInViewport()
-    await page.screenshot({ path: '/tmp/open-media-voice-downloads-narrow.png', animations: 'disabled' })
-    console.log('PASS 不支持平台仅允许试听，七卡无Tab，长模型名与窄屏滚动布局正常')
-
-    await close.click()
-    await page.setViewportSize({ width: 1440, height: 1000 })
-    await page.evaluate(() => {
-      const state = window.voiceDownloadHarness
-      state.bundledReady = false; state.sharedRuntimeReady = false
-      for (const model of Object.values(state.models)) Object.assign(model, { status: 'not-downloaded', runtimeStatus: undefined, downloadedBytes: 0, error: '', runtimeError: undefined })
-    })
-    await open.click()
-    await expect(dialog.getByRole('alert').filter({ hasText: '内置模型完整性校验失败' })).toBeVisible()
-    await expect(dialog.getByTestId('speech-generate-all')).toBeDisabled()
+    await dialog.getByRole('button', { name: '在 Info 中管理配音模型', exact: true }).click()
+    await expect(dialog).not.toBeVisible(); await expect(infoF5).toBeVisible()
+    await info.getByRole('button', { name: '刷新模型状态', exact: true }).click()
+    await infoF5.getByRole('button', { name: '检查 / 修复', exact: true }).click(); await confirm(true)
+    await expect(infoF5.getByRole('progressbar')).toBeVisible()
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'ai_model_repair').length), 1)
+    await closeInfo(); await open.click()
     await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
-    await expect(f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
-    await f5.getByRole('button', { name: '试听 F5-TTS v1 Base FP32', exact: true }).click()
-    await expect(dialog.getByLabel('声音试听音频')).toHaveJSProperty('paused', false)
-    await f5.getByRole('button', { name: '下载 F5-TTS v1 Base FP32', exact: true }).click()
-    await expect(f5.getByRole('progressbar')).toBeVisible()
-    await expect(dialog.getByTestId('speech-generate-all')).toBeDisabled()
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_job').length), 0)
-    await page.evaluate(() => {
-      window.voiceDownloadHarness.sharedRuntimeReady = true
-      Object.assign(window.voiceDownloadHarness.models['f5-v1-base-fp32'], { status: 'ready', runtimeStatus: 'ready', error: '' })
-    })
-    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
-    await expect(dialog.getByTestId('speech-generate-all')).toBeEnabled()
-    await expect(dialog.getByRole('button', { name: '选择 Matcha 中英', exact: true })).toBeDisabled()
-    assert.deepEqual(errors, [])
-    console.log('PASS 内置模型损坏时仍可试听与下载独立模型，未就绪禁止生成，下载验证后正常解锁')
-
-    await close.click()
-    await page.evaluate(() => {
-      const state = window.voiceDownloadHarness
-      state.bundledReady = true
-      state.nativeUpgrade = { runtimeStatus: 'upgrade-available', runtimeDownloadId: 'native-gpu-runtime', runtimeSize: 240000000, downloadSize: 240000000, downloadedBytes: 0 }
-      Object.assign(state.models['zipvoice-distill-fp32'], { status: 'ready' })
-      Object.assign(state.models['f5-v1-base-fp32'], { runtimeStatus: 'upgrade-available' })
-    })
-    await open.click()
-    const bundled = dialog.locator('[data-voice-id="matcha_zh_en_female"]')
-    const nativeCards = [[bundled, 'Matcha 中英'], [zip, 'ZipVoice Distill FP32'], [zipMale, 'ZipVoice Distill FP32 · 男声']]
-    for (const [card, name] of nativeCards) {
-      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
-      await expect(card.getByRole('button', { name: `下载 GPU 加速组件 ${name}`, exact: true })).toContainText('240 MB')
-      await expect(card.locator('.voice-runtime-size')).toContainText('CPU 可用')
-    }
-    await expect(f5.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32', exact: true })).toContainText('780 MB')
-    const nativeStarts = await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download' && call.args.modelId === 'native-gpu-runtime').length)
-    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = true })
-    await zipMale.getByRole('button', { name: '下载 GPU 加速组件 ZipVoice Distill FP32 · 男声', exact: true }).click()
-    for (const [card, name] of nativeCards) {
-      await expect(card.getByRole('button', { name: `下载 GPU 加速组件 ${name}`, exact: true })).toBeDisabled()
-      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
-    }
-    await expect.poll(() => page.evaluate(() => typeof window.voiceDownloadHarness.releaseDownloadDispatch)).toBe('function')
-    await page.evaluate(() => { window.voiceDownloadHarness.deferDownloadDispatch = false; window.voiceDownloadHarness.releaseDownloadDispatch() })
-    await expect(bundled.getByRole('progressbar')).toHaveAttribute('value', '0')
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'begin_speech_model_download' && call.args.modelId === 'native-gpu-runtime').length), nativeStarts + 1)
-    await page.evaluate(() => { window.voiceDownloadHarness.nativeUpgrade.downloadedBytes = 120000000 })
-    for (const [card, name] of nativeCards) {
-      await expect(card.getByRole('progressbar')).toHaveAttribute('value', '50')
-      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
-    }
-    await bundled.getByRole('button', { name: '取消下载 Matcha 中英', exact: true }).click()
-    for (const [card, name] of nativeCards) await expect(card.getByRole('button', { name: `下载 GPU 加速组件 ${name}`, exact: true })).toBeEnabled()
-    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'cancel_speech_model_download').at(-1).args.modelId), 'native-gpu-runtime')
-    await bundled.getByRole('button', { name: '下载 GPU 加速组件 Matcha 中英', exact: true }).click()
-    await expect(bundled.getByRole('progressbar')).toHaveAttribute('value', '0')
-    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.nativeUpgrade, { runtimeStatus: 'upgrade-verifying', downloadedBytes: 240000000 }))
-    for (const [card, name] of nativeCards) {
-      await expect(card.locator('.voice-model-state')).toHaveText('正在校验 GPU 加速组件…')
-      await expect(card.getByRole('button', { name: `选择 ${name}`, exact: true })).toBeEnabled()
-    }
-    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.nativeUpgrade, { runtimeStatus: 'upgrade-failed', runtimeError: '组件下载中断，CPU 仍可使用' }))
-    await expect(zipMale.getByRole('button', { name: '重试下载 GPU 加速组件 ZipVoice Distill FP32 · 男声', exact: true })).toBeEnabled()
-    await expect(bundled.getByRole('button', { name: '选择 Matcha 中英', exact: true })).toBeEnabled()
-    await zipMale.getByRole('button', { name: '重试下载 GPU 加速组件 ZipVoice Distill FP32 · 男声', exact: true }).click()
-    await expect(bundled.getByRole('progressbar')).toHaveAttribute('value', '0')
-    await page.evaluate(() => Object.assign(window.voiceDownloadHarness.nativeUpgrade, { runtimeStatus: 'ready', downloadedBytes: 240000000 }))
-    await expect(bundled.locator('.voice-runtime-size')).toHaveText('运行组件 · 240 MB · 已就绪')
-    await expect(bundled.locator('.voice-download-button:not(.voice-repair-button)')).toHaveCount(0)
-    await f5Male.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
-    await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '0')
-    await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].downloadedBytes = 1402816013 + 390000000 })
-    await expect(f5.getByRole('progressbar')).toHaveAttribute('value', '50')
-    await expect(f5Male.getByRole('progressbar')).toHaveAttribute('value', '50')
-    await expect(f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
-    await f5.getByRole('button', { name: '取消下载 F5-TTS v1 Base FP32', exact: true }).click()
-    await expect(f5Male.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
-    await page.screenshot({ path: '/tmp/open-media-voice-gpu-upgrade.png', animations: 'disabled' })
-    assert.deepEqual(errors, [])
-    console.log('PASS GPU 组件独立大小与进度，共享待处理/取消/失败重试同步，现有 CPU 音色持续可用')
-    await page.evaluate(() => { window.voiceDownloadHarness.deferRepair = true })
-    await f5Male.getByRole('button', { name: '检查并修复 F5-TTS v1 Base FP32 · 男声', exact: true }).click()
-    await expect(f5.getByRole('button', { name: '检查并修复 F5-TTS v1 Base FP32', exact: true })).toBeDisabled()
-    await expect(f5Male.getByRole('button', { name: '下载 GPU 加速组件 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeDisabled()
-    await expect.poll(() => page.evaluate(() => typeof window.voiceDownloadHarness.releaseRepair)).toBe('function')
-    assert.deepEqual(await page.evaluate(() => window.voiceDownloadHarness.calls.filter(call => call.command === 'repair_speech_model').map(call => call.args.modelId)), ['f5-v1-base-fp32'])
-    await page.evaluate(() => { window.voiceDownloadHarness.deferRepair = false; window.voiceDownloadHarness.releaseRepair() })
-    await expect(f5.locator('.voice-model-state')).toHaveText('正在校验模型与运行组件…')
     await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].status = 'ready' })
-    await expect(f5Male.getByRole('button', { name: '选择 F5-TTS v1 Base FP32 · 男声', exact: true })).toBeEnabled()
-    await expect(f5.getByRole('button', { name: '检查并修复 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
+    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
+    await close.click()
+    await page.evaluate(() => { window.voiceDownloadHarness.models['f5-v1-base-fp32'].runtimeStatus = 'upgrade-available' })
+    await open.click()
+    await expect(f5.locator('.voice-model-state')).toHaveText('已就绪 · 加速组件可更新')
+    await expect(f5.getByRole('button', { name: '选择 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
+    await expect(f5.getByRole('button', { name: '前往 Info 管理 F5-TTS v1 Base FP32', exact: true })).toBeEnabled()
+    await page.setViewportSize({ width: 680, height: 820 })
+    assert.equal(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth), true, '精简配音面板不得横向溢出')
+    await dialog.locator('[data-voice-id="qwen3_uncle_fu"]').scrollIntoViewIfNeeded()
+    await expect(dialog.getByRole('button', { name: '试听 Qwen3-TTS 1.7B BF16 · 男声', exact: true })).toBeInViewport()
+    assert.equal(await page.evaluate(() => window.voiceDownloadHarness.calls.some(call => ['begin_speech_model_download', 'cancel_speech_model_download', 'repair_speech_model'].includes(call.command))), false, '组件不得绕过全局模型服务')
     assert.deepEqual(errors, [])
-    console.log('PASS 已下载声音提供独立检查修复入口，男女声共享待处理，校验后恢复可选')
-
-
+    console.log('PASS Info 修复后恢复声音选择，GPU更新保持已有CPU声音可用，窄屏布局正常，无分散下载IPC')
   } catch (error) {
     await page?.screenshot({ path: '/tmp/open-media-voice-downloads-failure.png', animations: 'disabled' }).catch(() => {})
     throw error
