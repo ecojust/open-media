@@ -823,9 +823,10 @@ fn select_runtime(
     if !definitions.iter().any(|r| r.id == model.runtime_id) {
         return Err("当前版本尚未提供此平台的 AI 运行环境，请更新应用后再下载模型。".into());
     }
+    let selected = runtime_packages::select(&model.runtime_id, definitions)?
+        .ok_or_else(|| "当前平台暂不支持该模型的本地推理。".to_owned())?;
     platform_requirements()?;
-    runtime_packages::select(&model.runtime_id, definitions)?
-        .ok_or_else(|| "当前平台暂不支持该模型的本地推理。".into())
+    Ok(selected)
 }
 fn platform_requirements() -> Result<()> {
     #[cfg(target_os = "macos")]
