@@ -1,0 +1,119 @@
+name: Optional music real-weight smoke
+
+on:
+  push:
+    branches: ['feat/shared-ai-generation-*', 'work/ai-music-smoke-*']
+    paths: ['.github/workflows/ai-music-smoke.yml']
+  workflow_dispatch:
+    inputs:
+      runtime_build_run_id:
+        description: Run ID containing a successful ai-runtime-v1-linux-x64 artifact
+        required: true
+        type: string
+      generation_timeout_seconds:
+        description: CPU inference timeout, 60–7200 seconds
+        required: true
+        default: '5400'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: music-real-weight-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cpu-inference:
+    if: github.event_name == 'workflow_dispatch'
+    name: Real ten-second music generation — Linux CPU
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      PYTHONUNBUFFERED: '1'
+      RUNTIME_RUN_ID: ${{ inputs.runtime_build_run_id }}
+      GENERATION_TIMEOUT: ${{ inputs.generation_timeout_seconds }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate the runtime build provenance
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p artifacts/music-smoke
+          [[ "$RUNTIME_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$GENERATION_TIMEOUT" =~ ^[0-9]+$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUNTIME_RUN_ID" > artifacts/music-smoke/runtime-build.json
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          run = json.loads(Path('artifacts/music-smoke/runtime-build.json').read_text())
+          assert run['repository']['full_name'] == os.environ['GITHUB_REPOSITORY']
+          assert run['path'] == '.github/workflows/ai-runtime-build.yml'
+          assert re.fullmatch(r'[a-f0-9]{40}', run['head_sha'])
+          assert 60 <= int(os.environ['GENERATION_TIMEOUT']) <= 7200
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('commit=' + run['head_sha'], file=output)
+          PY
+      - name: Reserve disk and bounded swap for the CPU model
+        shell: bash
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg time
+          python scripts/test-ai-music-smoke.py
+          python scripts/test-ai-music-runner.py
+          sudo fallocate -l 8G "$RUNNER_TEMP/music-smoke.swap"
+          sudo chmod 600 "$RUNNER_TEMP/music-smoke.swap"
+          sudo mkswap "$RUNNER_TEMP/music-smoke.swap"
+          sudo swapon "$RUNNER_TEMP/music-smoke.swap"
+          free -h | tee artifacts/music-smoke/memory-before.txt
+          df -h "$RUNNER_TEMP" | tee artifacts/music-smoke/disk-before.txt
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.runtime_build_run_id }}
+          name: ai-runtime-v1-linux-x64
+          path: ${{ runner.temp }}/music-runtime-artifacts
+      - name: Download verified weights and run the production adapter offline
+        env:
+          RUNTIME_SOURCE_COMMIT: ${{ steps.provenance.outputs.commit }}
+        shell: bash
+        run: |
+          python scripts/ai-music-smoke.py \
+            --runtime-artifacts "$RUNNER_TEMP/music-runtime-artifacts" \
+            --runtime-source-commit "$RUNTIME_SOURCE_COMMIT" \
+            --work "$RUNNER_TEMP/music-real-model" \
+            --evidence artifacts/music-smoke \
+            --timeout "$GENERATION_TIMEOUT"
+      - name: Report actual result
+        if: always()
+        shell: python
+        run: |
+          import json, os
+          from pathlib import Path
+          path = Path('artifacts/music-smoke/report.json')
+          value = json.loads(path.read_text()) if path.exists() else {'actualModelGeneration': 'not-run', 'error': 'Preparation did not complete; inspect job logs.'}
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              print('Real music model CPU probe\n\n```json\n' + json.dumps(value, indent=2) + '\n```\n\nThis checks a ten-second output, not subjective quality or GPU performance.', file=output)
+      - name: Preserve audio and test evidence, excluding model weights
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-music-real-smoke-${{ github.run_id }}
+          path: artifacts/music-smoke/
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Release temporary swap
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/music-smoke.swap" ]; then
+            sudo swapoff "$RUNNER_TEMP/music-smoke.swap" || true
+            sudo rm -f "$RUNNER_TEMP/music-smoke.swap"
+          fi
