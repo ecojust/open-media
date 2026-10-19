@@ -764,6 +764,32 @@ test('AI jobs retain global status access while busy and cancel or fail without 
   }
 })
 
+for (const provider of ['image', 'music']) test(`${provider} cancellation before native registration waits for the actual job ID`, async () => {
+  const f = fixture(), pending = deferred(), complete = f.io.beginAiGeneration
+  let registeredId
+  f.io.beginAiGeneration = () => pending.promise
+  f.io.cancelAiJob = async id => {
+    if (!registeredId || id !== registeredId) throw Error('AI 任务不存在。')
+  }
+  const args = provider === 'image' ? aiImage({ destination: 'timeline' }) : { modelId: 'ace-step-1.5-turbo', prompt: '轻快的钢琴纯音乐', instrumental: true, destination: 'timeline' }
+  const job = await f.run(provider === 'image' ? 'image_generate' : 'music_generate', args)
+  await until(() => f.calls.some(call => call.name === 'beginAiGeneration'))
+  await assert.doesNotReject(f.run('job_cancel', { id: job.id }))
+  assert.equal(f.calls.filter(call => call.name === 'cancelAiJob').length, 0)
+  const request = f.calls.find(call => call.name === 'beginAiGeneration').args[0]
+  const native = await complete(request)
+  registeredId = `${provider}:${request.request.requestId}`
+  pending.resolve({ ...native, id: registeredId })
+  const result = await finished(f.controller, job)
+  assert.equal(result.state, 'cancelled')
+  assert.equal(f.commits.length, 0)
+  assert.equal(f.assets.length, 0)
+  const cancellations = f.calls.filter(call => call.name === 'cancelAiJob')
+  assert.ok(cancellations.length > 0)
+  assert.ok(cancellations.every(call => call.args[0] === registeredId))
+  await f.controller.dispose()
+})
+
 test('global AI job queries redact native capabilities and can cancel a task created in the GUI', async () => {
   const f = fixture()
   const native = { ...(await f.io.beginAiGeneration({ provider: 'image', request: { requestId: 'gui-task', modelId: 'qwen-image' } })), state: 'running', cancelable: true, stage: '正在生成', progress: .5 }

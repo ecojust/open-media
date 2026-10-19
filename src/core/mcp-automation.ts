@@ -303,7 +303,8 @@ export function createMcpAutomation(host: McpAutomationHost) {
           if (!model || model.provider !== provider) throw new Error('所选模型不支持此生成类型，请查询 ai_status。')
           if (model.state !== 'ready' || model.runtime.state !== 'ready') throw new Error(model.error || model.runtime.reason || '请先下载或修复所选模型与推理环境。')
           changed(operation, provider === 'image' ? '正在启动图像生成' : '正在启动歌曲生成')
-          operation.cancelNative = () => cancelAiJob(prepared.request.request.requestId)
+          // The request is not a registered native job yet. Keep an early abort
+          // pending until begin returns the provider-prefixed job ID to cancel.
           let nativeJob = await beginAiGeneration(prepared.request)
           operation.cancelNative = () => cancelAiJob(nativeJob.id)
           if (operation.controller.signal.aborted) await operation.cancelNative()
