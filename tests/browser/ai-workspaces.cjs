@@ -54,6 +54,8 @@ async function main(){
     const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',cause=>errors.push(cause.message));page.setDefaultTimeout(12000)
     await mount(page,server.resolvedUrls.local[0])
     await page.getByLabel('图像提示词',{exact:true}).fill('山谷里的一座安静的小屋')
+    await page.evaluate(()=>window.dispatchEvent(new Event('open-media:save-generation-drafts')))
+    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('open-media:ai-image-draft:v1')).prompt),'山谷里的一座安静的小屋')
     await expect(page.getByTestId('ai-generation-start')).toBeDisabled()
     await page.getByRole('button',{name:'全局模型中心',exact:true}).click()
     const center=page.getByRole('dialog',{name:'AI 模型中心',exact:true})

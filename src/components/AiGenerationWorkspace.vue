@@ -45,9 +45,11 @@ onMounted(() => {
     if (typeof draft.lowMemory==='boolean') lowMemory.value=draft.lowMemory
     if (Number.isFinite(draft.bpm) && draft.bpm>=30 && draft.bpm<=240) bpm.value=draft.bpm
   } catch { /* Ignore an incomplete local parameter draft. */ }
+  window.addEventListener('beforeunload',persist)
+  window.addEventListener('open-media:save-generation-drafts',persist)
   release=observeAi()
 })
-onBeforeUnmount(()=>{release?.();clearTimeout(saveTimer);persist()})
+onBeforeUnmount(()=>{release?.();clearTimeout(saveTimer);persist();window.removeEventListener('beforeunload',persist);window.removeEventListener('open-media:save-generation-drafts',persist)})
 async function pickImage(): Promise<void> {
   selecting.value=true;error.value=''
   try { const assets=await pickMediaAssets(); const asset=assets.find(item=>item.kind==='image'); if(asset) inputAsset.value=asset; else if(assets.length) error.value='请选择图片文件。' }

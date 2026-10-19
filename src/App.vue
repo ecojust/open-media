@@ -13,7 +13,7 @@ import GifWorkspace from './components/GifWorkspace.vue'
 import VideoGenerationWorkspace from './components/VideoGenerationWorkspace.vue'
 import AiGenerationWorkspace from './components/AiGenerationWorkspace.vue'
 import AiModelCenter from './components/AiModelCenter.vue'
-import { aiState } from './core/ai-service.ts'
+import { aiState, observeAi } from './core/ai-service.ts'
 import { getAiStatus, type AiProvider } from './native-ai.ts'
 import ConvertWorkspace from './components/ConvertWorkspace.vue'
 import ExportPanel from './components/ExportPanel.vue'
@@ -53,6 +53,7 @@ const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false
 const generationVisited = ref(false), videoGenerating = ref(false)
 const imageGenerationVisited = ref(false), songGenerationVisited = ref(false)
 const aiModelsOpen = ref(false), aiInitialProvider = ref<AiProvider>()
+let releaseAiStatus: (() => void) | undefined
 function openAiModels(provider?: AiProvider): void { aiInitialProvider.value=provider; aiModelsOpen.value=true }
 watch(view, value => { if (value === 'generate') generationVisited.value = true; if(value==='image-generate') imageGenerationVisited.value=true; if(value==='song-generate') songGenerationVisited.value=true })
 const desktopPlatform = ref<DesktopPlatform | null>(null)
@@ -640,6 +641,7 @@ async function nativeClose() {
       if (choice === 'cancel') return
       if (choice === 'save' && (!await save(false, true) || dirty.value)) return
     }
+    window.dispatchEvent(new Event('open-media:save-generation-drafts'))
     allowClose = true
     try {
       clearMcpToolActivity()
@@ -906,12 +908,13 @@ onMounted(async () => {
   booting.value = false
   void initializeScreenshot()
   if (native) {
+    releaseAiStatus = observeAi()
     void initializeMcp()
     void pollJobs()
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { destroyed = true; releaseMcpFocus(); nativeAppearance.dispose(); clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus(); nativeAppearance.dispose(); clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>

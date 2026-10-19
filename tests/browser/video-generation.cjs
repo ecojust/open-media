@@ -137,6 +137,7 @@ async function main() {
     await appPage.addInitScript(() => {
       const result = { id: 'app-result', name: '已生成视频.mp4', kind: 'video', url: '/fixture-preview.mp4', duration: 3, width: 512, height: 512, size: 1000, mime: 'video/mp4', nativePath: '/fixture/result.mp4' }
       window.__TAURI_INTERNALS__ = { transformCallback: () => 1, unregisterCallback() {}, convertFileSrc: () => `${location.origin}/fixture-preview.mp4`, invoke: async (command, args) => {
+        if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
         if (command === 'get_video_generation_status') return { supported: true, runtimeReady: true, models: [{ id: 'h3-base-fl2va', name: 'MiniMax H3 FL2VA', modes: ['prompt', 'image', 'storyboard'], state: 'ready', size: 144000000000, downloadedBytes: 144000000000, version: '1', licenseUrl: 'https://example.com/license', hardware: 'Apple 芯片' }] }
         if (command === 'list_video_generation_jobs') return [{ id: 'app-job', state: 'completed', stage: '生成完成', progress: 1, shotIndex: 0, shotCount: 1, startedAt: Date.now(), elapsedSeconds: 10, assets: [result] }]
         if (command === 'get_runtime_status') return { ready: true }
