@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { MCP_TOOLS, executeProjectTool, inspectMcpProject, isProjectTool, validateMcpToolArguments } from '../src/core/mcp-tools.ts'
 import { createClip, createProject, createSubtitleClip, validateProject } from '../src/core/project.ts'
 import { addAsset, addClip, findClip, setTrack, projectDuration } from '../src/core/timeline.ts'
-import { addTransition } from '../src/core/transitions.ts'
+import { addTransition, TRANSITION_PRESETS } from '../src/core/transitions.ts'
 import { applySpeechResults, planSpeech } from '../src/core/speech.ts'
 
 function fixture() {
@@ -164,7 +164,11 @@ test('transitions use nearest cut and reconcile deletion, with locked affected t
 test('MCP discovers, adds and updates every new transition preset with matching schema choices', () => {
   const { project } = fixture()
   const presets = exec(project, 'transition_list').data.presets
-  for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down', 'iris', 'diamond', 'blinds', 'flash-white', 'defocus', 'zoom-through', 'diagonal', 'radial']) {
+  const expectedEffects = TRANSITION_PRESETS.map(preset => preset.id).sort()
+  for (const name of ['open_media_transition_add', 'open_media_transition_update']) {
+    assert.deepEqual([...MCP_TOOLS.find(tool => tool.name === name).inputSchema.properties.effect.enum].sort(), expectedEffects)
+  }
+  for (const effect of expectedEffects) {
     assert.ok(presets.some(preset => preset.id === effect))
     validateMcpToolArguments('open_media_transition_add', { time: 5, effect, duration: 2 })
     const added = exec(project, 'transition_add', { time: 5, effect, duration: 2 })

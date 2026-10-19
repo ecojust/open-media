@@ -23,6 +23,8 @@ export interface TimelineMarker { id: string; time: number; label: string; kind:
 export type TransitionEffect = 'fade' | 'wipe-up' | 'wipe-down' | 'wipe-left' | 'wipe-right' | 'close-vertical' | 'close-horizontal' | 'slide-left' | 'slide-right' | 'zoom'
   | 'zoom-fade' | 'zoom-fade-left' | 'zoom-fade-right' | 'zoom-fade-up' | 'zoom-fade-down'
   | 'iris' | 'diamond' | 'blinds' | 'flash-white' | 'defocus' | 'zoom-through' | 'diagonal' | 'radial'
+  | 'fragment-burst' | 'fragment-vortex' | 'fragment-collapse' | 'pixel-dissolve' | 'pixel-wave' | 'slice-stagger' | 'slice-vertical' | 'checker-flip'
+  | 'tile-orbit' | 'glitch-slices' | 'zipper-slices' | 'stepped-shutter'
 
 /** A transition is anchored to the shared cut of two adjacent video clips. */
 export interface ClipTransition {

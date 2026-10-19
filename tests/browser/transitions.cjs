@@ -40,6 +40,7 @@ async function main() {
   const result = await page.evaluate(async (only) => {
     const { createProject, createClip, validateProject } = await import('/src/core/project.ts')
     const { addTransition, TRANSITION_PRESETS } = await import('/src/core/transitions.ts')
+    const { isFragmentEffect } = await import('/src/core/fragment-transitions.ts')
     const { TimelinePreview } = await import('/src/core/preview.ts')
     const { exportTimelineWebM } = await import('/src/core/browser-export.ts')
     const project = createProject('转场真实画面验证', { width: 160, height: 90, fps: 20, background: '#102030' })
@@ -51,7 +52,7 @@ async function main() {
     const pixels = () => points.map(([x, y]) => [...canvas.getContext('2d').getImageData(x, y, 1, 1).data])
     await preview.prepare()
     const frames = {}
-    for (const { id } of TRANSITION_PRESETS.filter(item => !only.length || only.includes(item.id))) {
+    for (const { id } of TRANSITION_PRESETS.filter(item => !isFragmentEffect(item.id) && (!only.length || only.includes(item.id)))) {
       const next = addTransition(source, 2, id, 1)
       preview.setProject(next)
       frames[id] = []
@@ -91,6 +92,15 @@ async function main() {
     for (let iy = 0; iy < 32; iy++) for (let ix = 0; ix < 32; ix++) if (inside(x + (ix + .5) / 32, y + (iy + .5) / 32)) count++
     return { visible: true, alpha: count / 1024 }
   }
+  // A Gaussian at a transparent canvas edge loses alpha outside the source.
+  // Integrate the independent normal distribution instead of assuming an opaque
+  // uniform image extends infinitely beyond the video frame.
+  const normalCdf = value => {
+    const x = Math.abs(value) / Math.SQRT2, t = 1 / (1 + .3275911 * x)
+    const erf = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - .284496736) * t + .254829592) * t * Math.exp(-x * x)
+    return (1 + Math.sign(value) * erf) / 2
+  }
+  const blurCoverage = (x, y) => (normalCdf((160 - x - .5) / 16) - normalCdf((-x - .5) / 16)) * (normalCdf((90 - y - .5) / 16) - normalCdf((-y - .5) / 16))
   const effects = {
     fade: () => ({ visible: true, alpha: 0.5 }),
     'wipe-up': (x, y) => ({ visible: y >= 45 }),
@@ -107,7 +117,7 @@ async function main() {
     diamond: (x, y) => coverage(x, y, (sx, sy) => Math.abs(sx / 80 - 1) + Math.abs(sy / 45 - 1) < 1),
     blinds: (x, y) => coverage(x, y, (sx, sy) => { const row = Math.floor(sy / (90 / 8)); return sy < row * 90 / 8 + Math.max(0, Math.min(1, (.5 - .22 * row / 7) / .78)) * 90 / 8 }),
     'flash-white': () => ({ visible: true, alpha: .5, background: [255, 249, 232] }),
-    defocus: () => ({ visible: true, alpha: .5 }),
+    defocus: (x, y, v = .5) => ({ visible: true, alpha: v * (v + (1 - v) * blurCoverage(x, y)) }),
     'zoom-through': () => ({ visible: true, alpha: .5 }),
     zoom: (x, y) => ({ visible: x >= 40 && x < 120 && y >= 22.5 && y < 67.5, alpha: 0.5 }),
   }

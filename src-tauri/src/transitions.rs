@@ -4,6 +4,9 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
+#[path = "transition_fragments.rs"]
+mod fragments;
+
 const EPSILON: f64 = 0.000001;
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -32,6 +35,18 @@ enum Effect {
     ZoomThrough,
     Diagonal,
     Radial,
+    FragmentBurst,
+    FragmentVortex,
+    FragmentCollapse,
+    PixelDissolve,
+    PixelWave,
+    SliceStagger,
+    SliceVertical,
+    CheckerFlip,
+    TileOrbit,
+    GlitchSlices,
+    ZipperSlices,
+    SteppedShutter,
 }
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -237,6 +252,8 @@ impl Transitions {
         index: usize,
         frame_time: Option<f64>,
         render_scale: f64,
+        width: u32,
+        height: u32,
     ) -> String {
         let Some(halves) = clip["id"].as_str().and_then(|id| self.0.get(id)) else {
             return chain;
@@ -283,7 +300,15 @@ impl Transitions {
             } else {
                 half.effect
             };
+            if let Some(graph) = fragments::append_graph(effect, &v, &enabled_clock, start, end, index, part, width, height, &chain, filters) {
+                chain = graph;
+                continue;
+            }
             let mask = match effect {
+                Effect::FragmentBurst | Effect::FragmentVortex | Effect::FragmentCollapse
+                | Effect::PixelDissolve | Effect::PixelWave | Effect::SliceStagger
+                | Effect::SliceVertical | Effect::CheckerFlip | Effect::TileOrbit
+                | Effect::GlitchSlices | Effect::ZipperSlices | Effect::SteppedShutter => unreachable!("fragment graph handled above"),
                 Effect::Fade | Effect::FlashWhite | Effect::Defocus => v.clone(),
                 Effect::Iris => format!("gt({v},0)*lte(hypot(X-W/2,Y-H/2),hypot(W,H)*{v}/2)"),
                 Effect::Diamond => format!("gt({v},0)*lte(abs(2*X/W-1)+abs(2*Y/H-1),2*{v})"),

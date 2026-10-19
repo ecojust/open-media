@@ -6,6 +6,7 @@ import { CanvasBlurRenderer } from './canvas-blur.ts'
 import { audioSourceDistance, audioSourceTime } from './audio-loop.ts'
 import { animatedClipAt, drawClipOverlay, playbackSpeedAt } from './visual-animation.ts'
 import { transitionBlindRects, transitionVisualAt } from './transitions.ts'
+import { drawFragmentTransition, isFragmentEffect } from './fragment-transitions.ts'
 
 export { clipOpacityAt } from './timeline.ts'
 import { clipDuration as previewClipDuration, projectDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
@@ -565,13 +566,14 @@ export class TimelinePreview {
         const crop = clip.crop ?? { x: 0, y: 0, width: 1, height: 1 }
         const rect = fitRect(width * crop.width, height * crop.height, clip.width, clip.height, clip.fit)
         rect[0] += width * crop.x; rect[1] += height * crop.y
-        if (transition && ((transition.blur && transition.blurStrength) || (transition.color && ['fade', 'flash-white'].includes(transition.effect)))) {
+        const fragmentEffect = transition && isFragmentEffect(transition.effect) && transition.visibility < 1 ? transition.effect : undefined
+        if (transition && (fragmentEffect || (transition.blur && transition.blurStrength) || (transition.color && ['fade', 'flash-white'].includes(transition.effect)))) {
           const layer = this.transitionCanvas ??= document.createElement('canvas')
           const canvasScale = Math.max(this.canvas.width / this.project.width, this.canvas.height / this.project.height) * Math.max(animated.width / clip.width, animated.height / clip.height)
-          const factor = Math.min(1, canvasScale, 2048 / Math.max(clip.width, clip.height)), w = Math.max(1, Math.ceil(clip.width * factor)), h = Math.max(1, Math.ceil(clip.height * factor))
+          const factor = Math.min(1, canvasScale, 2048 / Math.max(clip.width, clip.height), fragmentEffect ? Math.sqrt(1_048_576 / (clip.width * clip.height)) : 1), w = Math.max(1, Math.ceil(clip.width * factor)), h = Math.max(1, Math.ceil(clip.height * factor))
           if (layer.width !== w || layer.height !== h) { layer.width = w; layer.height = h }
           const original = layer.getContext('2d')!
-          original.setTransform(1, 0, 0, 1, 0, 0); original.clearRect(0, 0, w, h); original.save(); original.scale(factor, factor)
+          original.setTransform(1, 0, 0, 1, 0, 0); original.clearRect(0, 0, w, h); original.save(); original.scale(w / clip.width, h / clip.height)
           if (transition.color && ['fade', 'flash-white'].includes(transition.effect)) { original.fillStyle = transition.color; original.fillRect(0, 0, clip.width, clip.height); original.globalAlpha = transition.opacity }
           original.drawImage(source, ...rect); original.restore()
           if (transition.blur && transition.blurStrength) {
@@ -580,7 +582,8 @@ export class TimelinePreview {
             original.save(); original.globalCompositeOperation = 'destination-in'; original.globalAlpha = 1 - transition.blurStrength; original.fillStyle = '#fff'; original.fillRect(0, 0, w, h)
             original.globalCompositeOperation = 'lighter'; original.globalAlpha = transition.blurStrength; original.drawImage(blurred, 0, 0, blurred.width, blurred.height, 0, 0, w, h); original.restore()
           }
-          ctx.drawImage(layer, 0, 0, w, h, 0, 0, clip.width, clip.height)
+          if (fragmentEffect) drawFragmentTransition(ctx, layer, w, h, fragmentEffect, transition.visibility, clip.width, clip.height)
+          else ctx.drawImage(layer, 0, 0, w, h, 0, 0, clip.width, clip.height)
         } else ctx.drawImage(source, ...rect)
       }
     }

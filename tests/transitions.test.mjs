@@ -52,8 +52,8 @@ test('降低项目帧率会将最短转场扩至新帧率的两帧，锁定转�
 
 test('转场预设绑定最近切点，居中且不改变时间线总长度', () => {
   const { project, trackId } = fixture()
-  assert.equal(TRANSITION_PRESETS.length, 23)
-  assert.equal(new Set(TRANSITION_PRESETS.map(item => item.id)).size, 23)
+  assert.equal(TRANSITION_PRESETS.length, 35)
+  assert.equal(new Set(TRANSITION_PRESETS.map(item => item.id)).size, 35)
   assert.deepEqual(findTransitionCut(project, 3.7), { trackId, fromClipId: 'first', toClipId: 'second', time: 4, maxDuration: 4 })
   for (const preset of TRANSITION_PRESETS) {
     const edited = addTransition(project, 5, preset.id, 2)

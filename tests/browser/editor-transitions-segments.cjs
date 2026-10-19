@@ -68,12 +68,17 @@ async function main() {
     await expect(page.getByLabel('项目宽度', { exact: true })).toBeVisible()
     await page.getByTestId('transition-open').click()
     const gallery = page.getByRole('dialog', { name: '转场', exact: true })
-    await expect(gallery.getByRole('radio')).toHaveCount(23)
+    await expect(gallery.getByRole('radio')).toHaveCount(35)
+    await gallery.getByRole('button', { name: '碎片 6', exact: true }).click()
+    await expect(gallery.getByRole('radio')).toHaveCount(6)
+    await expect(gallery.getByRole('radio', { name: '碎片爆散', exact: true })).toBeChecked()
+    await gallery.getByRole('button', { name: '动感切片 6', exact: true }).click()
+    await expect(gallery.getByRole('radio')).toHaveCount(6)
     await gallery.getByRole('button', { name: '几何开幕 7' }).click()
     await expect(gallery.getByRole('radio')).toHaveCount(7)
     await page.screenshot({ path: '/tmp/open-media-science-transition-library.png' })
-    await gallery.getByRole('button', { name: '全部 23' }).click()
-    await expect(gallery.getByRole('radio')).toHaveCount(23)
+    await gallery.getByRole('button', { name: '全部 35' }).click()
+    await expect(gallery.getByRole('radio')).toHaveCount(35)
     for (const effect of ['zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down', 'iris', 'diamond', 'blinds', 'flash-white', 'defocus', 'zoom-through', 'diagonal', 'radial']) {
       await expect(gallery.locator(`input[value="${effect}"]`)).toHaveCount(1)
     }
@@ -136,7 +141,16 @@ async function main() {
       await page.getByLabel('片段转场效果').selectOption(effectId)
       assert.equal(effects(await read(page))[0].transition.effect, effectId)
     }
-    console.log('PASS 转场库23效果、5种缩放淡化及8种科普转场应用及修改、切点居中、禁止自由拖动/复制、撤销重做')
+    const currentEasing = effects(await read(page))[0].transition.easing
+    for (const effectId of ['fragment-burst', 'fragment-vortex', 'fragment-collapse', 'pixel-dissolve', 'pixel-wave', 'slice-stagger', 'slice-vertical', 'checker-flip', 'tile-orbit', 'glitch-slices', 'zipper-slices', 'stepped-shutter']) {
+      await page.getByLabel('片段转场效果').selectOption(effectId)
+      const current = effects(await read(page))[0]
+      assert.equal(current.transition.effect, effectId)
+      assert.equal(current.transition.easing, currentEasing)
+      assert.equal(current.start, 1.9)
+      assert.equal(current.trimOut, 1.2)
+    }
+    console.log('PASS 转场库35效果、原有转场及12种碎片切片效果应用修改、切点居中、禁止自由拖动/复制、撤销重做')
 
     await page.getByTestId('video-segment-intro-open').click()
     const segments = page.getByRole('dialog', { name: '片头', exact: true })

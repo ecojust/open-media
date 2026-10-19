@@ -1495,3 +1495,327 @@ fn transitions_keep_fractional_speed_adjusted_cuts_and_multiple_boundaries_in_sy
         }
     }
 }
+
+#[test]
+fn fragment_transitions_encode_live_textures_and_restore_both_endpoints() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let source = temp.path().join("fragment-source.mp4");
+    let created = process(&rt.encoder).args(["-v", "error", "-y", "-f", "lavfi", "-i",
+        "nullsrc=s=160x120:r=20:d=2,geq=r='100+70*X/W+25*sin(8*T)':g='20+20*Y/H':b='80+70*Y/H+25*cos(8*T)'",
+        "-c:v", "libx264", "-crf", "10", "-pix_fmt", "yuv420p"]).arg(&source).output().unwrap();
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let reference = decoded_video(&rt, &source);
+    let asset = MediaStore::new(temp.path())
+        .unwrap()
+        .import(&rt, &source, None)
+        .unwrap();
+    let frame_bytes = 160 * 120 * 3;
+    let mut signatures = std::collections::HashSet::new();
+    for effect in [
+        "fragment-burst",
+        "fragment-vortex",
+        "fragment-collapse",
+        "pixel-dissolve",
+        "pixel-wave",
+        "slice-stagger",
+        "slice-vertical",
+        "checker-flip",
+        "tile-orbit",
+        "glitch-slices",
+        "zipper-slices",
+        "stepped-shutter",
+    ] {
+        let filename = format!("{effect}.mp4");
+        let started = Instant::now();
+        let spec = transition_spec(&asset, effect);
+        if let Some(folder) = std::env::var_os("OPEN_MEDIA_FRAGMENT_ARTIFACTS") {
+            fs::create_dir_all(&folder).unwrap();
+            let plan = build_plan(&MediaStore::new(temp.path()).unwrap(), &rt, &spec).unwrap();
+            fs::copy(
+                plan.workspace.path().join("filters.txt"),
+                Path::new(&folder).join(format!("{effect}.ffgraph")),
+            )
+            .unwrap();
+            fs::copy(&source, Path::new(&folder).join("texture-source.mp4")).unwrap();
+        }
+        let (_, probe) = run(temp.path(), &rt, spec, &filename);
+        if let Some(folder) = std::env::var_os("OPEN_MEDIA_FRAGMENT_ARTIFACTS") {
+            fs::copy(
+                temp.path().join(&filename),
+                Path::new(&folder).join(&filename),
+            )
+            .unwrap();
+        }
+        let decoded = decoded_video(&rt, &temp.path().join(&filename));
+        assert_eq!(decoded.len(), frame_bytes * 40, "{effect}: dropped frames");
+        assert_eq!(
+            probe["streams"][0]["width"], 160,
+            "{effect}: expanded canvas"
+        );
+        for frame in [2, 10, 29, 37] {
+            let a = &decoded[frame * frame_bytes..(frame + 1) * frame_bytes];
+            let b = &reference[frame * frame_bytes..(frame + 1) * frame_bytes];
+            let mae = a
+                .iter()
+                .zip(b)
+                .map(|(a, b)| (*a as f64 - *b as f64).abs())
+                .sum::<f64>()
+                / frame_bytes as f64;
+            assert!(
+                mae < 5.0,
+                "{effect}: original texture not restored at frame {frame}, MAE={mae}"
+            );
+        }
+        let cut = &decoded[20 * frame_bytes..21 * frame_bytes];
+        assert!(
+            cut.chunks_exact(3)
+                .all(|p| p[1] > 235 && p[0] < 15 && p[2] < 15),
+            "{effect}: nonempty exact cut"
+        );
+        for frame in [16, 24] {
+            let image = &decoded[frame * frame_bytes..(frame + 1) * frame_bytes];
+            let background = image
+                .chunks_exact(3)
+                .filter(|p| p[1] > 235 && p[0] < 15 && p[2] < 15)
+                .count();
+            let visible = image
+                .chunks_exact(3)
+                .filter(|p| p[0] > 20 && p[2] > 15)
+                .count();
+            assert!(
+                background > if effect == "glitch-slices" { 90 } else { 300 } && visible > 40,
+                "{effect}: missing fragments at frame {frame}, bg={background}, visible={visible}"
+            );
+            // A plain dissolve has a spatially smooth green channel; separated
+            // image cells must instead expose full background and image texture.
+            let greens: std::collections::HashSet<_> =
+                image.chunks_exact(3).map(|p| p[1] / 8).collect();
+            assert!(greens.len() > 4, "{effect}: no textured transparent edges");
+        }
+        let sample = &decoded[16 * frame_bytes..17 * frame_bytes];
+        let signature: Vec<u8> = sample
+            .chunks_exact(3)
+            .step_by(17)
+            .flat_map(|p| [p[0] / 16, p[1] / 16, p[2] / 16])
+            .collect();
+        assert!(
+            signatures.insert(signature),
+            "{effect}: duplicated transition output"
+        );
+        println!(
+            "FRAGMENT_EXPORT {effect}: 40 decoded frames, endpoint MAE < 5, elapsed {:.3}s",
+            started.elapsed().as_secs_f64()
+        );
+        if let Some(folder) = std::env::var_os("OPEN_MEDIA_FRAGMENT_ARTIFACTS") {
+            fs::create_dir_all(&folder).unwrap();
+            fs::copy(
+                temp.path().join(&filename),
+                Path::new(&folder).join(filename),
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[test]
+#[ignore = "explicit real 720p export performance observation"]
+fn fragment_transition_real_720p_export_observation() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    for effect in ["fragment-vortex", "pixel-wave"] {
+        let mut spec = transition_spec(&asset, effect);
+        for field in ["project", "config"] {
+            spec[field]["width"] = json!(1280);
+            spec[field]["height"] = json!(720);
+        }
+        for clip in spec["project"]["tracks"][1]["clips"]
+            .as_array_mut()
+            .unwrap()
+        {
+            clip["width"] = json!(1280);
+            clip["height"] = json!(720);
+        }
+        let started = Instant::now();
+        let (_, probe) = run(temp.path(), &rt, spec, "fragment-720p.mp4");
+        let elapsed = started.elapsed().as_secs_f64();
+        assert_eq!(probe["streams"][0]["width"], 1280);
+        assert_eq!(probe["streams"][0]["height"], 720);
+        let decoded = decoded_video(&rt, &temp.path().join("fragment-720p.mp4"));
+        assert_eq!(decoded.len(), 40 * 1280 * 720 * 3);
+        println!("FRAGMENT_720P {effect}: 2 seconds, 20 fps, 0.8 second window, actual encode {:.3}s, output decoded successfully", elapsed);
+    }
+}
+
+#[test]
+#[ignore = "explicit native/browser comparison using generated browser fixtures"]
+fn fragment_transition_native_comparison_frames() {
+    let folder = std::env::var_os("OPEN_MEDIA_FRAGMENT_ARTIFACTS")
+        .expect("set OPEN_MEDIA_FRAGMENT_ARTIFACTS to browser fixture folder");
+    let folder = Path::new(&folder);
+    let rt = runtime();
+    let store = MediaStore::new(&folder.join("native-store")).unwrap();
+    let asset = store
+        .import(&rt, &folder.join("source.webm"), None)
+        .unwrap();
+    let jobs = JobManager::default();
+    let selected = std::env::var("OPEN_MEDIA_FRAGMENT_EFFECTS").ok();
+    for size in ["320x180", "180x320"] {
+        for effect in [
+            "fragment-burst",
+            "fragment-vortex",
+            "fragment-collapse",
+            "pixel-dissolve",
+            "pixel-wave",
+            "slice-stagger",
+            "slice-vertical",
+            "checker-flip",
+            "tile-orbit",
+            "glitch-slices",
+            "zipper-slices",
+            "stepped-shutter",
+        ] {
+            if selected
+                .as_ref()
+                .is_some_and(|list| !list.split(',').any(|item| item == effect))
+            {
+                continue;
+            }
+            let mut project: Value = serde_json::from_slice(
+                &fs::read(folder.join(format!("native-{size}-{effect}.json"))).unwrap(),
+            )
+            .unwrap();
+            project["assets"][0]["nativePath"] = json!(asset.native_path);
+            for time in [1.5, 2.5] {
+                let spec = json!({"project":project,"start":time,"end":time+0.1,"width":project["width"],"fps":30,"frameOnly":true});
+                let job = crate::preview_tools::begin(&store, &rt, &jobs, &spec).unwrap();
+                let finished = wait(&jobs, &job.id);
+                assert_eq!(
+                    finished.state, "completed",
+                    "{size}/{effect}/{time}: {:?}",
+                    finished.error
+                );
+                let result = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+                fs::copy(
+                    &result.native_path,
+                    folder.join(format!("native-{size}-{effect}-{time}.png")),
+                )
+                .unwrap();
+                crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+            }
+            println!("NATIVE_COMPARISON {size}/{effect} both sides rendered");
+        }
+    }
+}
+
+#[test]
+#[ignore = "explicit late-cut buffering and tiny-frame regression"]
+fn fragment_transition_late_cut_and_tiny_frame() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let source = temp.path().join("long-source.mp4");
+    let made = process(&rt.encoder)
+        .args([
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=320x180:r=20:d=20",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "24",
+            "-pix_fmt",
+            "yuv420p",
+        ])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+    let store = MediaStore::new(temp.path()).unwrap();
+    let asset = store.import(&rt, &source, None).unwrap();
+    let mut spec = transition_spec(&asset, "fragment-vortex");
+    for field in ["project", "config"] {
+        spec[field]["width"] = json!(320);
+        spec[field]["height"] = json!(180);
+    }
+    spec["project"]["tracks"][0]["clips"][0]["start"] = json!(18.6);
+    spec["project"]["tracks"][1]["clips"][0]["trimOut"] = json!(19);
+    spec["project"]["tracks"][1]["clips"][1]["start"] = json!(19);
+    spec["project"]["tracks"][1]["clips"][1]["trimIn"] = json!(19);
+    spec["project"]["tracks"][1]["clips"][1]["trimOut"] = json!(20);
+    for clip in spec["project"]["tracks"][1]["clips"]
+        .as_array_mut()
+        .unwrap()
+    {
+        clip["width"] = json!(320);
+        clip["height"] = json!(180);
+    }
+    let jobs = JobManager::default();
+    let started = Instant::now();
+    let target = temp.path().join("late-cut.mp4");
+    let job = jobs
+        .begin(&rt, build_plan(&store, &rt, &spec).unwrap(), target.clone())
+        .unwrap();
+    let mut first_encoded = None;
+    loop {
+        let item = jobs
+            .list()
+            .into_iter()
+            .find(|item| item.id == job.id)
+            .unwrap();
+        if first_encoded.is_none() && item.encoded_frames > 0 {
+            first_encoded = Some(started.elapsed().as_secs_f64());
+        }
+        if item.state != "running" {
+            assert_eq!(item.state, "completed", "{:?}", item.error);
+            break;
+        }
+        if started.elapsed() > Duration::from_secs(60) {
+            jobs.cancel(&job.id).unwrap();
+            panic!("late transition timed out");
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let decoded = decoded_video(&rt, &target);
+    assert_eq!(decoded.len(), 400 * 320 * 180 * 3);
+    assert!(
+        first_encoded.unwrap() < 5.0,
+        "did not encode the prefix promptly: {first_encoded:?}"
+    );
+    println!(
+        "FRAGMENT_LATE_CUT: 20s source, cut at19s, first encoded frame {:.3}s, complete {:.3}s",
+        first_encoded.unwrap(),
+        started.elapsed().as_secs_f64()
+    );
+    let mut project = transition_spec(&asset, "pixel-wave")["project"].clone();
+    project["width"] = json!(16);
+    project["height"] = json!(16000);
+    for clip in project["tracks"][1]["clips"].as_array_mut().unwrap() {
+        clip["width"] = json!(16);
+        clip["height"] = json!(16000);
+    }
+    let tiny =
+        json!({"project":project,"start":0.8,"end":0.9,"width":16,"fps":20,"frameOnly":true});
+    let job = crate::preview_tools::begin(&store, &rt, &jobs, &tiny).unwrap();
+    let done = wait(&jobs, &job.id);
+    assert_eq!(done.state, "completed", "tiny frame: {:?}", done.error);
+    let image = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+    assert_eq!(
+        decoded_video(&rt, Path::new(&image.native_path)).len(),
+        2 * 1920 * 3
+    );
+}

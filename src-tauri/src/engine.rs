@@ -1392,7 +1392,7 @@ fn timeline_plan(
                 ));
                 chain = format!("[filter_color{index}][filter_mask{index}]alphamerge");
             }
-            chain = transitions.append_graph(clip,fps,chain,&mut filters,index,frame_time,width as f64/project_w);
+            chain = transitions.append_graph(clip,fps,chain,&mut filters,index,frame_time,width as f64/project_w,cw,ch);
             chain += &format!(",colorchannelmixer=aa={opacity}");
             if fade_in > 0.0 && frame_time.is_none() {
                 chain += &format!(",fade=t=in:st=0:d={fade_in}:alpha=1");

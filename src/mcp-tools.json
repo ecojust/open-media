@@ -1510,7 +1510,19 @@
             "defocus",
             "zoom-through",
             "diagonal",
-            "radial"
+            "radial",
+            "fragment-burst",
+            "fragment-vortex",
+            "fragment-collapse",
+            "pixel-dissolve",
+            "pixel-wave",
+            "slice-stagger",
+            "slice-vertical",
+            "checker-flip",
+            "tile-orbit",
+            "glitch-slices",
+            "zipper-slices",
+            "stepped-shutter"
           ]
         },
         "duration": {
@@ -1587,7 +1599,19 @@
             "defocus",
             "zoom-through",
             "diagonal",
-            "radial"
+            "radial",
+            "fragment-burst",
+            "fragment-vortex",
+            "fragment-collapse",
+            "pixel-dissolve",
+            "pixel-wave",
+            "slice-stagger",
+            "slice-vertical",
+            "checker-flip",
+            "tile-orbit",
+            "glitch-slices",
+            "zipper-slices",
+            "stepped-shutter"
           ]
         },
         "duration": {

@@ -8,6 +8,8 @@ export const TRANSITION_COLLECTIONS = [
   { id: 'direction', name: '方向移动', effects: ['wipe-up', 'wipe-down', 'wipe-left', 'wipe-right', 'slide-left', 'slide-right'] },
   { id: 'geometry', name: '几何开幕', effects: ['close-vertical', 'close-horizontal', 'diagonal', 'radial', 'iris', 'diamond', 'blinds'] },
   { id: 'zoom', name: '缩放衔接', effects: ['zoom', 'zoom-fade', 'zoom-fade-left', 'zoom-fade-right', 'zoom-fade-up', 'zoom-fade-down', 'zoom-through'] },
+  { id: 'fragments', name: '碎片', effects: ['fragment-burst', 'fragment-vortex', 'fragment-collapse', 'pixel-dissolve', 'pixel-wave', 'tile-orbit'] },
+  { id: 'slices', name: '动感切片', effects: ['slice-stagger', 'slice-vertical', 'checker-flip', 'glitch-slices', 'zipper-slices', 'stepped-shutter'] },
 ] as const
 
 export const TRANSITION_PRESETS: readonly { id: TransitionEffect; name: string; description: string }[] = [
@@ -34,6 +36,18 @@ export const TRANSITION_PRESETS: readonly { id: TransitionEffect; name: string; 
   { id: 'flash-white', name: '柔光闪白', description: '画面渐变至暖白柔光，再显现下一镜头，适合重要发现' },
   { id: 'defocus', name: '失焦叠化', description: '画面柔化并淡出，下一镜头从朦胧中逐渐清晰' },
   { id: 'zoom-through', name: '推近穿越', description: '前段轻推至 112% 并淡出，后段从 112% 回到原比例，衔接宏观与细节' },
+  { id: 'fragment-burst', name: '碎片爆散', description: '真实画面分解为旋转碎片向外散开，下一镜头从碎片中聚合' },
+  { id: 'fragment-vortex', name: '旋涡碎片', description: '画面碎片沿旋涡扩散，再旋转汇聚为完整镜头' },
+  { id: 'fragment-collapse', name: '碎片聚拢', description: '画面碎片向中心旋转收拢，再由中心向外展开' },
+  { id: 'pixel-dissolve', name: '像素消散', description: '画面分解为错落收缩的像素块，再逐块还原下一镜头' },
+  { id: 'pixel-wave', name: '像素波浪', description: '像素块沿对角方向错峰消散与重组，形成流动的画面波浪' },
+  { id: 'slice-stagger', name: '交错横切', description: '横向画面切片交错滑向两侧，再从两侧交错拼回' },
+  { id: 'slice-vertical', name: '交错纵切', description: '纵向画面切片交错滑向上下，再从上下交错拼回' },
+  { id: 'checker-flip', name: '棋盘翻片', description: '画面切成棋盘格交错翻转收起，再翻开为下一镜头' },
+  { id: 'tile-orbit', name: '环绕重组', description: '画面碎片沿中心环绕散开，保持画面朝向并回旋重组' },
+  { id: 'glitch-slices', name: '数字故障', description: '画面切片高速横向错位，呈现数字信号扰动与恢复的节奏' },
+  { id: 'zipper-slices', name: '拉链开幕', description: '两侧切片错峰向外拉开，再逐行合拢下一镜头' },
+  { id: 'stepped-shutter', name: '阶梯折屏', description: '竖向画面切片沿右边缘依次折叠与展开，形成阶梯推进感' },
 ]
 
 const EPSILON = 1e-6

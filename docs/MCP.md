@@ -226,6 +226,8 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 
 通用转场还提供 `iris`（圆形光圈）、`diamond`（菱形开幕）、`blinds`（阶梯百叶）、`flash-white`（柔光闪白）、`defocus`（失焦叠化）、`zoom-through`（推近穿越）、`diagonal`（斜向揭幕）和 `radial`（环弧开幕）。这些效果在画布预览、区间预览、取帧和视频导出中使用一致的时间与几何定义。
 
+碎片与切片转场还提供 `fragment-burst`（碎片爆散）、`fragment-vortex`（旋涡碎片）、`fragment-collapse`（碎片聚拢）、`pixel-dissolve`（像素消散）、`pixel-wave`（像素波浪）、`slice-stagger`（交错横切）、`slice-vertical`（交错纵切）、`checker-flip`（棋盘翻片）、`tile-orbit`（环绕重组）、`glitch-slices`（数字故障）、`zipper-slices`（拉链开幕）和 `stepped-shutter`（阶梯折屏）。效果直接切分原视频画面，以确定的运动规则析出、析入；同一时间点重复预览不改变碎片位置。沿用 `transition_add` / `transition_update`，使用 `transition_parameters_set` 设置缓动和 `scope`（前后两段、仅析出或仅析入），不额外插入素材或改变项目时长。
+
 素材目录搜索“科普”可找到 24 款标注/文字水印及 12 款片头片尾，返回的 `collection: "science"` 标识专题，`editableText` 与 `placement` 分别表示文字编辑能力和默认插入位置。动画中的刻度与图表是视觉示意；需要填写真实数值、来源或结论时，可选择原生文字模板。
 
 使用 `collection: "general"` 可筛出 24 款通用文字布局或 16 款通用片头片尾。文字水印的 `text`、`color`、`background`、`duration`、`watermarkPlacement`、`animation` 均可在添加时设定，之后仍保留为可编辑文字。`animation` 支持 `none`、`fade`、`slide-up`、`slide-down`、`slide-left`、`slide-right`、`push-in`、`pull-back`；入场与退场之间保持稳定阅读。参数不适用于已经编码的图片或视频水印。
