@@ -14,6 +14,7 @@ watch(() => props.open, open => { release?.(); release = undefined; if (open) { 
 onBeforeUnmount(() => release?.())
 const models = computed(() => aiState.value.models.filter(model => tab.value === 'all' || model.provider === tab.value))
 const running = computed(() => aiState.value.jobs.filter(job => job.state === 'running').length)
+const runtimePending = (model: AiModel) => ['downloading', 'verifying'].includes(model.runtime.state)
 const pending = (model: AiModel) => ['downloading', 'verifying'].includes(model.state)
 async function perform(id: string, callback: () => Promise<unknown>): Promise<void> {
   action.value = id; actionError.value = ''
@@ -46,7 +47,7 @@ async function confirmInstall(): Promise<void> {
           <p class="ai-model-hardware">{{ model.hardware }}</p><p v-if="model.runtime.reason" class="ai-model-detail">{{ model.runtime.reason }}</p><p v-if="model.runtime.device" class="ai-model-detail">推理设备：{{ model.runtime.device }}</p>
           <p v-if="model.license" class="ai-model-license">{{ model.license }}<a v-if="model.licenseUrl" :href="model.licenseUrl" target="_blank" rel="noopener noreferrer">模型许可<Icon name="export" :size="11" /></a></p>
           <p v-if="model.error" class="ai-center-error">{{ model.error }}</p>
-          <template v-if="pending(model)"><progress :value="model.state==='verifying' ? undefined : model.downloadedBytes" :max="Math.max(1,model.size)" :aria-label="`${model.name}下载进度`"/><footer><small>{{ model.state==='verifying' ? '正在校验文件完整性' : `${aiBytes(model.downloadedBytes)} / ${aiBytes(model.size)}` }}</small><button :disabled="!!action" @click="perform(model.id,()=>stopAiModelDownload(model.id))">取消</button></footer></template>
+          <template v-if="pending(model)"><progress :value="runtimePending(model) || model.state==='verifying' ? undefined : model.downloadedBytes" :max="Math.max(1,model.size)" :aria-label="`${model.name}下载进度`"/><footer><small>{{ runtimePending(model) ? '正在准备运行环境' : model.state==='verifying' ? '正在校验文件完整性' : `${aiBytes(model.downloadedBytes)} / ${aiBytes(model.size)}` }}</small><button :disabled="!!action" @click="perform(model.id,()=>stopAiModelDownload(model.id))">取消</button></footer></template>
           <footer v-else><small>{{ model.state==='ready' ? '可供所有工作区使用' : '模型与运行组件按需下载' }}</small><button v-if="model.state==='ready' && !model.bundled" :disabled="!!action" @click="askInstall(model,true)"><Icon name="refresh" :size="13"/>检查 / 修复</button><button v-else-if="model.state!=='ready'" :disabled="!native || !!action || model.state==='unsupported'" @click="askInstall(model)"><Icon name="download" :size="13"/>{{ model.state==='update-available' ? '更新' : model.downloadedBytes ? '继续下载' : '下载' }}</button></footer>
         </article>
         <p v-if="native && !models.length" class="ai-center-note">{{ aiRefreshing ? '正在读取模型目录…' : '暂无此类别模型' }}</p>

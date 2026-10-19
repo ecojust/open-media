@@ -284,7 +284,8 @@ export function createMcpAutomation(host: McpAutomationHost) {
             check(operation)
             const model = modelStatus.models.find(item => item.id === modelId)
             if (!model) throw new Error('模型已不在全局目录中。')
-            changed(operation, model.state === 'verifying' ? `正在校验 ${model.name}` : model.state === 'ready' && model.runtime.state !== 'ready' ? '正在准备 AI 推理环境' : `正在下载 ${model.name}`, model.size > 0 ? Math.min(1, model.downloadedBytes / model.size) : undefined)
+            const preparingRuntime = ['downloading', 'verifying'].includes(model.runtime.state)
+            changed(operation, preparingRuntime ? model.runtime.reason || '正在准备 AI 推理环境' : model.state === 'verifying' ? `正在校验 ${model.name}` : model.state === 'ready' && model.runtime.state !== 'ready' ? '正在准备 AI 推理环境' : `正在下载 ${model.name}`, !preparingRuntime && model.size > 0 ? Math.min(1, model.downloadedBytes / model.size) : undefined)
             if (model.state === 'ready' && model.runtime.state === 'ready') return { modelId, model }
             if (model.state === 'failed' || model.state === 'unsupported' || ['failed', 'unsupported', 'unavailable'].includes(model.runtime.state)) throw new Error(model.error || model.runtime.reason || '模型或运行环境安装失败。')
             if (model.state === 'not-downloaded') throw new DOMException('模型下载已取消。', 'AbortError')

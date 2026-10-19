@@ -28,8 +28,8 @@ async function mount(page, base) {
     window.__TAURI_INTERNALS__={convertFileSrc:()=>state.asset.url,invoke:async(command,args={})=>{
       state.calls.push({command,args:JSON.parse(JSON.stringify(args))})
       if(command==='ai_get_status')return status()
-      if(command==='ai_model_download'||command==='ai_model_repair'){if(!args.acceptedLicense)throw Error('许可未确认');const model=state.models.find(model=>model.id===args.modelId);model.state='downloading';return status()}
-      if(command==='ai_model_cancel'){state.models.find(model=>model.id===args.modelId).state='not-downloaded';return status()}
+      if(command==='ai_model_download'||command==='ai_model_repair'){if(!args.acceptedLicense)throw Error('许可未确认');const model=state.models.find(model=>model.id===args.modelId);model.state='downloading';model.runtime={state:'downloading',reason:'正在下载运行环境：50 MB / 100 MB'};return status()}
+      if(command==='ai_model_cancel'){const model=state.models.find(model=>model.id===args.modelId);model.state='not-downloaded';model.runtime={state:'ready'};return status()}
       if(command==='ai_generate'){const request=args.request;const job={id:`${request.provider}:${request.request.requestId}`,provider:request.provider,modelId:request.request.modelId,kind:'generation',state:'running',stage:'排队等待推理',startedAt:Date.now(),elapsedSeconds:0,assets:[],cancelable:true};state.jobs.unshift(job);return structuredClone(job)}
       if(command==='ai_job_cancel'){state.jobs.find(job=>job.id===args.id).state='cancelled';return}
       if(command==='pick_media_assets')return [state.asset]
@@ -65,6 +65,8 @@ async function main(){
     await expect(license.getByRole('button',{name:'开始下载'})).toBeDisabled()
     await license.getByRole('checkbox').check();await license.getByRole('button',{name:'开始下载'}).click()
     await expect(license).not.toBeVisible();await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('正在下载')
+    await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('50 MB / 100 MB')
+    assert.equal(await center.locator('[data-ai-model="qwen-image"] progress').getAttribute('value'),null)
     await center.locator('[data-ai-model="qwen-image"]').getByRole('button',{name:'取消',exact:true}).click()
     await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('待下载')
     await page.evaluate(()=>{window.aiHarness.models[0].state='ready';return window.aiHarness.refresh()})
