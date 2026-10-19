@@ -164,12 +164,13 @@ impl AiGenerationManager {
                     *entry = next;
                 }
                 state.download = None;
-                // Shared runtime installation makes other models' runtime status current.
-                for other in &mut state.models {
-                    if let Some(definition) = worker.catalog.iter().find(|m| m.id == other.id) {
-                        other.runtime = runtime_status(&worker.root, definition, &worker.runtimes);
-                    }
-                }
+                refresh_shared_runtime_models(
+                    &worker.root,
+                    &worker.catalog,
+                    &worker.runtimes,
+                    &mut state.models,
+                    &model.id,
+                );
             }
         });
         Ok(())
@@ -889,6 +890,33 @@ fn runtime_file_progress(name: &str, bytes: u64, size: u64, verifying: bool) -> 
         bytes.min(size) as f64 / scale,
         size as f64 / scale
     )
+}
+
+fn refresh_shared_runtime_models(
+    root: &Path,
+    catalog: &[Model],
+    runtimes: &[runtime_packages::RuntimeDefinition],
+    entries: &mut [AiModel],
+    finished_id: &str,
+) {
+    for entry in entries {
+        let Some(definition) = catalog.iter().find(|model| model.id == entry.id) else {
+            continue;
+        };
+        entry.runtime = runtime_status(root, definition, runtimes);
+        // The finished download keeps its own error/cancellation result. Other
+        // installed models become usable as soon as their shared runtime returns.
+        if entry.id == finished_id || matches!(entry.state.as_str(), "downloading" | "verifying") {
+            continue;
+        }
+        if entry.runtime.state == "ready" && models::installed_ready(root, definition) {
+            entry.state = "ready".into();
+            entry.downloaded_bytes = entry.size;
+            entry.error = None;
+        } else if entry.state == "ready" {
+            entry.state = "update-available".into();
+        }
+    }
 }
 
 fn select_runtime(

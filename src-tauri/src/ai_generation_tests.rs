@@ -196,6 +196,72 @@ fn runtime_download_progress_does_not_change_model_weight_bytes() {
 }
 
 #[test]
+fn restoring_shared_runtime_updates_all_intact_models_without_redownloading() {
+    use sha2::{Digest, Sha256};
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    for directory in ["blobs", "parts", "models", "runtime"] {
+        models::safe_directory(&root, directory).unwrap();
+    }
+    let bytes = b"locked test weights";
+    let sha = format!("{:x}", Sha256::digest(bytes));
+    let file = models::ModelFile {
+        path: "weights.safetensors".into(),
+        size: bytes.len() as u64,
+        sha256: sha.clone(),
+        urls: vec!["https://example.invalid/weights".into()],
+    };
+    fs::write(root.join("parts").join(format!("{sha}.part")), bytes).unwrap();
+    let client = models::http_client().unwrap();
+    models::ensure_blob(&root, &client, &file, &AtomicBool::new(false), |_, _| {}).unwrap();
+    let mut installed = catalog_model("qwen-image");
+    installed.files = vec![file.clone()];
+    models::install_model(&root, &installed, &AtomicBool::new(false), |_, _| {}).unwrap();
+    let mut missing = installed.clone();
+    missing.id = "missing-model".into();
+    let mut finished = installed.clone();
+    finished.id = "finished-model".into();
+    let archive: runtime_packages::RuntimeArchive = serde_json::from_value(json!({"url":"https://github.com/ecojust/open-media/releases/download/test/runtime.zip", "size":10,"unpackedSize":10,"sha256":"a".repeat(64),"manifestSha256":"b".repeat(64),"executable":"python", "script":"check.py"})).unwrap();
+    let definitions = vec![runtime_packages::RuntimeDefinition {
+        id: installed.runtime_id.clone(),
+        version: 1,
+        platforms: HashMap::from([(runtime_packages::platform().into(), archive)]),
+    }];
+    let mut entries: Vec<_> = [&installed, &missing, &finished]
+        .into_iter()
+        .map(|model| model_state(&root, model, &definitions))
+        .collect();
+    assert_eq!(entries[0].state, "update-available");
+    entries[0].error = Some("旧运行环境需要更新".into());
+    entries[2].state = "failed".into();
+    entries[2].error = Some("下载已失败".into());
+    let selected = runtime_packages::select(&installed.runtime_id, &definitions)
+        .unwrap()
+        .unwrap();
+    let directory = runtime_packages::path(&root.join("runtime"), &selected);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("manifest.json"), b"{}").unwrap();
+    fs::write(directory.join("python"), b"runtime metadata fixture").unwrap();
+    let catalog = vec![installed.clone(), missing, finished.clone()];
+    refresh_shared_runtime_models(&root, &catalog, &definitions, &mut entries, &finished.id);
+    assert_eq!(entries[0].state, "ready");
+    assert_eq!(entries[0].runtime.state, "ready");
+    assert!(entries[0].error.is_none());
+    assert_eq!(entries[0].downloaded_bytes, entries[0].size);
+    assert_eq!(entries[1].state, "not-downloaded");
+    assert_eq!(entries[1].runtime.state, "ready");
+    assert_eq!(entries[2].state, "failed");
+    assert_eq!(entries[2].error.as_deref(), Some("下载已失败"));
+    fs::write(
+        models::model_root(&root, &installed).join(&file.path),
+        b"damaged",
+    )
+    .unwrap();
+    refresh_shared_runtime_models(&root, &catalog, &definitions, &mut entries, &finished.id);
+    assert_eq!(entries[0].state, "update-available");
+}
+
+#[test]
 fn accelerator_failure_is_distinct_from_invalid_input() {
     assert!(accelerator_failure(
         "生成进程退出 signal: 6 device=mps invalid shape"
