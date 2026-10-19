@@ -13,6 +13,7 @@ const boundaryExports = {
   '../src/core/native-project.ts': ['prepareNativeProject'],
   '../src/core/project-file.ts': ['exportProjectFile', 'importProjectFile'],
   '../src/core/mcp-materials.ts': ['listMcpMaterials', 'prepareMcpMaterial'],
+  '../src/core/editor-preview-tools.ts': ['preparePreviewTool'],
 }
 const mockedModules = new Map(Object.entries(boundaryExports).map(([file, exports]) => [new URL(file, import.meta.url).href, exports]))
 registerHooks({ load(url, context, nextLoad) {
@@ -54,6 +55,7 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
     async exportProjectFile(project, options) { options.onProgress?.(1, 1); return new Blob([JSON.stringify(project)]) },
     async importProjectFile() { return { project: createProject('已打开工程'), blobs: new Map(), revoke() {} } },
     async prepareNativeProject(project) { return { project: clone(project) } },
+    async preparePreviewTool() { throw new Error('unexpected preview operation') },
     async listMcpMaterials(query) { return { kind: query.kind, total: 1, offset: 0, limit: 50, items: [{ id: 'sample', name: '示例' }] } },
     async prepareMcpMaterial(project, args) {
       const clip = createSubtitleClip(project, { text: '内置素材', start: args.start ?? 0 })
@@ -366,6 +368,44 @@ test('native encoded frame and output time evidence survives final job polling',
   assert.ok(done.elapsedSeconds >= 0)
   assert.equal(done.result.elapsedSeconds, 2)
   await f.controller.dispose()
+})
+
+test('interface job summaries never clone accumulated frame payloads while protocol queries retain full results', async () => {
+  const f = fixture(), base64 = 'AQID'.repeat(4096)
+  f.io.preparePreviewTool = async () => ({ data: { artifactId: 'frame-preview', base64, width: 1280, height: 720, time: 1 } })
+  const first = await finished(f.controller, await f.run('timeline_get_frame', { time: 1, width: 1280 }))
+  const second = await finished(f.controller, await f.run('timeline_get_frame', { time: 2, width: 1280 }))
+  assert.equal(first.result.base64, base64)
+  let payloadCopies = 0
+  const originalClone = globalThis.structuredClone
+  globalThis.structuredClone = (value, ...args) => {
+    if (value?.result?.base64) payloadCopies++
+    return originalClone(value, ...args)
+  }
+  try {
+    for (let update = 0; update < 4; update++) {
+      const summaries = f.controller.summaries()
+      assert.equal(summaries.length, 2)
+      for (const job of summaries) {
+        assert.equal(Object.hasOwn(job, 'result'), false)
+        assert.equal(job.state, 'completed')
+        assert.equal(job.cancelable, false)
+        assert.equal(job.progress, 1)
+        job.name = '外部修改'; job.poll.arguments.id = '不能覆盖任务'
+      }
+    }
+    assert.equal(payloadCopies, 0, 'status refreshes must not traverse frame data')
+    const fullList = await f.run('job_list')
+    assert.equal(payloadCopies, 2)
+    assert.ok(fullList.every(job => job.result.base64 === base64))
+    const current = await f.run('job_get', { id: second.id })
+    assert.equal(current.result.artifactId, 'frame-preview')
+    assert.equal(current.result.base64, base64)
+    assert.notEqual(current.name, '外部修改')
+    assert.equal(current.poll.arguments.id, second.id)
+    fullList[0].result.artifactId = '不能覆盖结果'
+    assert.equal((await f.run('job_get', { id: fullList[0].id })).result.artifactId, 'frame-preview')
+  } finally { globalThis.structuredClone = originalClone; await f.controller.dispose() }
 })
 
 for (const action of ['download', 'repair']) test(`model ${action} explicitly returns model polling links instead of a completed result or invented editor job`, async () => {

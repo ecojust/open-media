@@ -77,7 +77,7 @@ export function createMcpAutomation(host: McpAutomationHost) {
   })
   function available(): void {
     if (disposed) throw new Error('应用正在关闭，MCP 操作已停止。')
-    const blocking = active?.job ?? speech.list().find(job => job.state === 'running')
+    const blocking = active?.job ?? speech.summaries().find(job => job.state === 'running')
     if (blocking) throw new McpBusyError(mcpBlockingJob(blocking))
     if (host.isBusy()) throw new McpBusyError(host.getBlockingOperation?.() ?? { jobId: null, kind: 'local-interaction', state: 'running', cancelable: false, poll: null, cancel: null, source: 'local' })
   }
@@ -92,8 +92,9 @@ export function createMcpAutomation(host: McpAutomationHost) {
     if (metrics?.outputTime !== undefined) operation.job.outputTime = metrics.outputTime
     host.onJobsChanged()
   }
-  function snapshot(operation: Operation): McpAutomationJob & McpJobProtocol {
-    return mcpJobResponse(structuredClone({ ...operation.job, elapsedSeconds: Math.max(0, ((operation.job.finishedAt ?? Date.now()) - operation.job.startedAt) / 1000) }))
+  function snapshot(operation: Operation, includeResult = true): McpAutomationJob & McpJobProtocol {
+    const { result, ...status } = operation.job
+    return mcpJobResponse(structuredClone({ ...status, ...(includeResult && result !== undefined ? { result } : {}), elapsedSeconds: Math.max(0, ((operation.job.finishedAt ?? Date.now()) - operation.job.startedAt) / 1000) }))
   }
   function start(kind: string, name: string, action: (operation: Operation) => Promise<unknown>, tool: string): McpAutomationJob & McpJobProtocol {
     available()
@@ -307,7 +308,11 @@ export function createMcpAutomation(host: McpAutomationHost) {
     return mcpSynchronousResponse(await executeInner(name, input))
   }
   function list(): ((McpAutomationJob | McpSpeechJob) & McpJobProtocol)[] {
-    return [...[...operations.values()].map(snapshot), ...speech.list().map(mcpJobResponse)].sort((a, b) => b.startedAt - a.startedAt)
+    return [...[...operations.values()].map(operation => snapshot(operation)), ...speech.list().map(mcpJobResponse)].sort((a, b) => b.startedAt - a.startedAt)
+  }
+  /** Frequent interface updates need status, not copies of accumulated frame/artifact payloads. */
+  function summaries(): ((McpAutomationJob | McpSpeechJob) & McpJobProtocol)[] {
+    return [...[...operations.values()].map(operation => snapshot(operation, false)), ...speech.summaries().map(mcpJobResponse)].sort((a, b) => b.startedAt - a.startedAt)
   }
   function status(id: string): (McpAutomationJob | McpSpeechJob) & McpJobProtocol {
     const operation = operations.get(id)
@@ -324,8 +329,8 @@ export function createMcpAutomation(host: McpAutomationHost) {
     return snapshot(operation)
   }
   async function cancelAll(): Promise<void> {
-    await Promise.allSettled(list().filter(job => job.state === 'running' && job.cancelable).map(job => cancel(job.id)))
+    await Promise.allSettled(summaries().filter(job => job.state === 'running' && job.cancelable).map(job => cancel(job.id)))
   }
   async function dispose(): Promise<void> { disposed = true; await cancelAll(); await speech.dispose() }
-  return { execute, list, status, cancel, cancelAll, dispose }
+  return { execute, list, summaries, status, cancel, cancelAll, dispose }
 }

@@ -74,8 +74,9 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
   let active: Operation | undefined
   let disposed = false
 
-  function snapshot(operation: Operation): McpSpeechJob {
-    return structuredClone({ ...operation.job, elapsedSeconds: Math.max(0, Math.floor(((operation.job.finishedAt ?? Date.now()) - operation.job.startedAt) / 1000)) })
+  function snapshot(operation: Operation, includeResult = true): McpSpeechJob {
+    const { result, ...status } = operation.job
+    return structuredClone({ ...status, ...(includeResult && result !== undefined ? { result } : {}), elapsedSeconds: Math.max(0, Math.floor(((operation.job.finishedAt ?? Date.now()) - operation.job.startedAt) / 1000)) })
   }
   function publish(operation: Operation): void { options.onChange?.(snapshot(operation)) }
   function check(operation: Operation): void {
@@ -221,5 +222,6 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
     const operation = active
     if (operation) { await cancel(operation.job.id); await operation.done }
   }
-  return { startSpeech, status: (id: string) => snapshot(find(id)), list: () => [...operations.values()].reverse().map(snapshot), cancel, dispose }
+  return { startSpeech, status: (id: string) => snapshot(find(id)), list: () => [...operations.values()].reverse().map(operation => snapshot(operation)),
+    summaries: () => [...operations.values()].reverse().map(operation => snapshot(operation, false)), cancel, dispose }
 }

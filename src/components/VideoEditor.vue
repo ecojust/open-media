@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import AssetVideoThumbnail from './AssetVideoThumbnail.vue'
 import type { Clip, MediaAsset, Project, Track, TrackKind } from '../core/types'
 import { cloneProject, createClip, createSubtitleClip, createTrack, MAX_PROJECT_DURATION, newId, validateProject } from '../core/project'
@@ -115,7 +115,8 @@ const deleteTrackError = ref('')
 const snapEnabled = ref(true), snapGuide = ref<number | null>(null)
 const draggingTrackId = ref(''), trackDropBoundary = ref<number | null>(null), trackDropTop = ref(0)
 const trackOrderNotice = ref('')
-const workingProject = ref<Project | null>(null)
+// Editing helpers return complete immutable snapshots, including during a drag.
+const workingProject = shallowRef<Project | null>(null)
 const activeProject = computed(() => workingProject.value || props.project)
 const duration = computed(() => projectDuration(activeProject.value))
 const selected = computed(() => findClip(activeProject.value, selectedId.value))
@@ -1285,11 +1286,16 @@ function keyboard(event: KeyboardEvent): void {
 }
 watch(activeProject, project => {
   if (preview) {
-    if (canvas.value) { canvas.value.width = Math.min(1280, project.width); canvas.value.height = Math.round(canvas.value.width * project.height / project.width) }
+    if (canvas.value) {
+      const width = Math.min(1280, project.width), height = Math.round(width * project.height / project.width)
+      // Assigning an unchanged canvas size still clears its bitmap and drawing state.
+      if (canvas.value.width !== width) canvas.value.width = width
+      if (canvas.value.height !== height) canvas.value.height = height
+    }
     preview.setProject(project)
     if (playhead.value > projectDuration(project)) seek(projectDuration(project))
   }
-}, { deep: true })
+})
 watch(() => props.project, project => {
   if (previewPositionGesture && project !== previewPositionGesture.base) cancelPreviewPosition()
   if (gesture && project !== gesture.base) cancelGesture()

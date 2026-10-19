@@ -734,7 +734,7 @@ const mcpAutomation = createMcpAutomation({
     if (value) { videoEditor.value?.pause(); view.value = 'edit' }
     mcpBusy.value = value
   },
-  onJobsChanged: () => { if (!destroyed) mcpJobs.value = mcpAutomation.list() },
+  onJobsChanged: () => { if (!destroyed) mcpJobs.value = mcpAutomation.summaries() },
   announce: message => { if (!destroyed) announce(message) },
 })
 function openJobs(): void {
@@ -749,7 +749,7 @@ function mcpJobMetrics(job: McpPanelJob): string {
   return [job.encodedFrames !== undefined ? `已处理 ${job.encodedFrames} 帧` : '', job.outputTime !== undefined ? `输出 ${job.outputTime.toFixed(1)} 秒` : '', job.elapsedSeconds !== undefined ? `已用 ${job.elapsedSeconds.toFixed(1)} 秒` : ''].filter(Boolean).join(' · ')
 }
 async function cancelMcpJob(id: string): Promise<void> {
-  try { await mcpAutomation.cancel(id); mcpJobs.value = mcpAutomation.list() } catch (cause) { fail(cause) }
+  try { await mcpAutomation.cancel(id); mcpJobs.value = mcpAutomation.summaries() } catch (cause) { fail(cause) }
 }
 function clearMcpToolActivity(id?: string): void {
   if (id && mcpToolActivity.value?.id !== id) return

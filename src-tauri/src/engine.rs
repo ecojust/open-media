@@ -1022,10 +1022,10 @@ fn convert_plan(
         return Err("结束时间必须晚于开始时间。".into());
     }
     let mut args = Vec::new();
-    arg(&mut args, &["-i", &input.to_string_lossy()]);
     if start > 0.0 {
         arg(&mut args, &["-ss", &start.to_string()]);
     }
+    arg(&mut args, &["-i", &input.to_string_lossy()]);
     if end > start {
         arg(&mut args, &["-t", &(end - start).to_string()]);
     }
@@ -1155,25 +1155,38 @@ fn gif_plan(store: &MediaStore, spec: &Value, workspace: tempfile::TempDir) -> R
     let width = number(spec, "width", 640.0, 16.0, 1920.0)? as u32;
     let fps = number(spec, "fps", 12.0, 1.0, 60.0)?;
     let source_duration = number(&spec["asset"], "duration", 0.0, 0.0, 86400.0)?;
-    let mut filters = Vec::new();
+    let mut ranges = Vec::with_capacity(segments.len());
     let mut duration = 0.0;
-    for (i, segment) in segments.iter().enumerate() {
+    let mut source_start = source_duration;
+    let mut source_end = 0.0_f64;
+    for segment in segments {
         let start = number(segment, "start", 0.0, 0.0, source_duration)?;
         let end = number(segment, "end", source_duration, 0.0, source_duration)?;
         if end <= start {
             return Err("片段结束必须晚于开始。".into());
         }
         duration += end - start;
-        filters.push(format!("[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS,scale={width}:-2,fps={fps}[s{i}]"));
+        source_start = source_start.min(start);
+        source_end = source_end.max(end);
+        ranges.push((start, end));
     }
     if duration > 600.0 {
         return Err("动图片段总长请控制在 10 分钟以内。".into());
     }
+    // Keep one decoder even with many selected segments, but skip the unused
+    // prefix and tail. Segment timestamps remain relative to the source seek.
+    let mut filters: Vec<_> = ranges.iter().enumerate().map(|(i, (start, end))| {
+        format!("[0:v]trim=start={}:end={},setpts=PTS-STARTPTS,fps={fps},scale={width}:-2[s{i}]", start-source_start, end-source_start)
+    }).collect();
     let labels = (0..segments.len())
         .map(|i| format!("[s{i}]"))
         .collect::<String>();
     filters.push(format!("{labels}concat=n={}:v=1:a=0,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a[out]",segments.len()));
     let mut args = Vec::new();
+    if source_start > 0.0 {
+        arg(&mut args, &["-ss", &source_start.to_string()]);
+    }
+    arg(&mut args, &["-t", &(source_end-source_start).to_string()]);
     arg(
         &mut args,
         &[
@@ -1295,6 +1308,9 @@ fn timeline_plan(
     let mut visuals = 0;
     let mut input_count = 0;
     let mut audio_labels = Vec::new();
+    // Probe once per source within this plan. New jobs inspect the files again,
+    // without retaining stale stream metadata when a file changes.
+    let mut audio_streams = HashMap::<PathBuf, bool>::new();
     for (track, clip, start, _trim_in, trim_out, _speed, duration) in &clips {
         let text = track["kind"] == "text";
         if let Some(time) = frame_time {
@@ -1449,7 +1465,7 @@ fn timeline_plan(
             visuals += 1;
         }
         let volume = number(clip, "volume", 1.0, 0.0, 4.0)?;
-        if frame_time.is_none() && !image && clip.get("freezeFrame").is_none() && (volume > 0.0 || crate::clip_animation::has_keyframe(clip,"volume")) && track["muted"] != true && store.has_audio(runtime, &path) {
+        if frame_time.is_none() && !image && clip.get("freezeFrame").is_none() && (volume > 0.0 || crate::clip_animation::has_keyframe(clip,"volume")) && track["muted"] != true && *audio_streams.entry(path.clone()).or_insert_with(|| store.has_audio(runtime, &path)) {
             let (fade_in, fade_out, fade_peak) = fade_parameters(clip, *duration)?;
             let clock = if windowed { format!("t+{local_from}") } else { "t".to_string() };
             let volume = crate::clip_animation::expression(clip,"volume",volume,&clock)?;

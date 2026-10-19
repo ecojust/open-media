@@ -98,6 +98,12 @@ test('立即返回任务编号，完整批次一次写入原生素材并接收�
   const external = f.service.status(job.id)
   external.result.assetIds.length = 0
   assert.equal(f.service.status(job.id).result.assetIds.length, 2)
+  const summary = f.service.summaries()[0]
+  assert.equal(summary.id, job.id)
+  assert.equal(summary.completed, 2)
+  assert.equal(summary.state, 'completed')
+  assert.equal(Object.hasOwn(summary, 'result'), false)
+  assert.equal(f.service.list()[0].result.assetIds.length, 2)
   await f.service.dispose()
 })
 

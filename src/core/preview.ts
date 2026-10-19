@@ -7,6 +7,7 @@ import { audioSourceDistance, audioSourceTime } from './audio-loop.ts'
 import { animatedClipAt, drawClipOverlay, playbackSpeedAt } from './visual-animation.ts'
 import { transitionBlindRects, transitionVisualAt } from './transitions.ts'
 import { drawFragmentTransition, isFragmentEffect } from './fragment-transitions.ts'
+import { measureTextLayout, TextLayoutCache } from './text-layout.ts'
 
 export { clipOpacityAt } from './timeline.ts'
 import { clipDuration as previewClipDuration, projectDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
@@ -24,7 +25,7 @@ export function fitRect(sourceWidth: number, sourceHeight: number, width: number
 }
 
 /** Draw subtitle content in local clip coordinates; used by preview and native export rasterization. */
-export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
+export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip, layoutCache?: TextLayoutCache): void {
   if (clip.overlay) { drawClipOverlay(ctx, clip); return }
   if (clip.textRole === 'watermark' && clip.background && clip.background !== 'transparent') {
     ctx.fillStyle = clip.background
@@ -35,29 +36,24 @@ export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
   ctx.textAlign = clip.textAlign || 'center'
   ctx.textBaseline = 'middle'
   const maxWidth = Math.max(1, clip.width - 24)
-  const lines: string[] = []
-  for (const paragraph of (clip.text || '').split('\n')) {
-    let line = ''
-    for (const char of paragraph) {
-      if (line && ctx.measureText(line + char).width > maxWidth) { lines.push(line); line = char } else line += char
-    }
-    lines.push(line)
-  }
+  const withBackground = clip.textRole !== 'watermark' && Boolean(clip.background && clip.background !== 'transparent')
+  const lines = layoutCache ? layoutCache.get(ctx, clip.text || '', maxWidth, withBackground)
+    : measureTextLayout(ctx, clip.text || '', maxWidth, withBackground)
   const x = ctx.textAlign === 'left' ? 12 : ctx.textAlign === 'right' ? clip.width - 12 : clip.width / 2
   const lineHeight = fontSize * 1.35
   const padding = Math.min(12, Math.max(0, (clip.height - fontSize) / 2))
   const firstLineY = clip.textVerticalAlign === 'top' ? padding + fontSize / 2
     : clip.textVerticalAlign === 'bottom' ? clip.height - padding - fontSize / 2 - (lines.length - 1) * lineHeight
       : clip.height / 2 - (lines.length - 1) * lineHeight / 2
-  if (clip.textRole !== 'watermark' && clip.background && clip.background !== 'transparent') {
-    ctx.fillStyle = clip.background
+  if (withBackground) {
+    ctx.fillStyle = clip.background!
     const horizontalPadding = Math.min(12, fontSize * 0.2)
     const verticalPadding = Math.min(6, fontSize * 0.12)
     // Measure each painted line, rather than the positioning box. All backgrounds
     // are drawn first so the next line cannot cover a preceding line's descenders.
     lines.forEach((line, index) => {
-      if (!line.trim()) return
-      const metrics = ctx.measureText(line)
+      if (!line.metrics) return
+      const metrics = line.metrics
       const scale = metrics.width > maxWidth ? maxWidth / metrics.width : 1
       const advance = metrics.width * scale
       const fallbackLeft = ctx.textAlign === 'left' ? 0 : ctx.textAlign === 'right' ? advance : advance / 2
@@ -74,7 +70,7 @@ export function drawTextClip(ctx: CanvasRenderingContext2D, clip: Clip): void {
     })
   }
   ctx.fillStyle = clip.color || '#ffffff'
-  lines.forEach((line, index) => ctx.fillText(line, x, firstLineY + index * lineHeight, maxWidth))
+  lines.forEach((line, index) => ctx.fillText(line.text, x, firstLineY + index * lineHeight, maxWidth))
 }
 
 type MediaEntry = {
@@ -148,6 +144,7 @@ export class TimelinePreview {
   private liveMedia = new WeakSet<HTMLMediaElement | HTMLImageElement>()
   private preloadAll = false
   private filterRenderer?: ClipFilterRenderer
+  private textLayoutCache = new TextLayoutCache()
   private blurCanvas?: HTMLCanvasElement
   private blurRenderer?: CanvasBlurRenderer
   private transitionCanvas?: HTMLCanvasElement
@@ -604,7 +601,7 @@ export class TimelinePreview {
       const blurred = (this.blurRenderer ??= new CanvasBlurRenderer()).render(snapshot, clip.overlay.blurRadius * Math.max(scaleX, scaleY))
       ctx.drawImage(blurred, 0, 0, blurred.width, blurred.height, 0, 0, this.project.width, this.project.height)
     } else if (track.kind === 'text' || clip.text !== undefined) {
-      drawTextClip(ctx, clip)
+      drawTextClip(ctx, clip, this.textLayoutCache)
     } else if (track.kind !== 'audio') {
       const media = this.entries.get(clip.id)?.media
       const imageReady = media instanceof HTMLImageElement && media.complete && media.naturalWidth > 0
@@ -681,6 +678,7 @@ export class TimelinePreview {
     this.entries.clear()
     this.filterRenderer?.dispose()
     this.filterRenderer = undefined
+    this.textLayoutCache.dispose()
     this.blurRenderer?.dispose()
     this.blurRenderer = undefined
     if (this.transitionCanvas) this.transitionCanvas.width = this.transitionCanvas.height = 1

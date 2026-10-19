@@ -1,0 +1,171 @@
+name: Verify application functions and performance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['perf/runtime-performance-*']
+    paths: ['src/**', 'src-tauri/**', 'tests/**', 'scripts/**', '.github/workflows/performance-audit.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Application functions and browser measurements
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      BROWSER_ARTIFACTS: test-results/performance/browser
+      OPEN_MEDIA_PERFORMANCE_REPORT: test-results/performance/metrics
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - run: npm ci
+      - name: Check project, media, editing, storage and protocol logic
+        run: |
+          mkdir -p test-results/performance
+          npm test 2>&1 | tee test-results/performance/unit.log
+          python3 tests/speech-voice-adapter.test.py
+          python3 scripts/test-speech-device-runtime.py
+          python3 tests/speech-device-native.test.py
+          python3 tests/speech-runtime-parts.test.py
+          python3 tests/native-speech-gpu-runtime.test.py
+          python3 scripts/test-optional-speech-catalog.py
+          python3 -B tests/verify-installed-speech.test.py
+      - run: npx playwright install --with-deps chromium
+      - name: Select the tested browser runtime
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          import { chromium } from '@playwright/test';
+          const executablePath = chromium.executablePath();
+          const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
+          console.log(`Browser version: ${browser.version()}`);
+          await browser.close();
+          for (const name of ['BROWSER_EXECUTABLE', 'CHROMIUM_PATH', 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH']) {
+            appendFileSync(process.env.GITHUB_ENV, `${name}=${executablePath}\n`);
+          }
+          NODE
+      - name: Verify native media and the real remote editing protocol
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib 2>&1 | tee test-results/performance/native-linux.log
+          npm install --prefix "$RUNNER_TEMP/open-media-mcp-client" --no-package-lock --ignore-scripts @modelcontextprotocol/sdk@1.32.1
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib --no-run --message-format=json > "$RUNNER_TEMP/open-media-native-tests.jsonl"
+          test_binary=$(node --input-type=module -e 'import fs from "node:fs"; const messages=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").map(line=>JSON.parse(line)); const artifact=messages.find(item=>item.reason==="compiler-artifact" && item.target?.name==="open_media_lib" && item.profile?.test && item.executable); if(!artifact) throw new Error("Native test executable missing"); console.log(artifact.executable);' "$RUNNER_TEMP/open-media-native-tests.jsonl")
+          node scripts/verify-mcp-protocol.mjs --server-test-binary "$test_binary" --sdk-directory "$RUNNER_TEMP/open-media-mcp-client" 2>&1 | tee test-results/performance/mcp-protocol.log
+          node scripts/verify-mcp-editor-protocol.mjs --server-test-binary "$test_binary" --sdk-directory "$RUNNER_TEMP/open-media-mcp-client" 2>&1 | tee test-results/performance/mcp-editor.log
+      - name: Check all workspaces and real generated media
+        id: browser
+        run: |
+          npm run test:browser 2>&1 | tee test-results/performance/browser.log
+          node tests/browser/preview-composite.cjs --app 2>&1 | tee -a test-results/performance/browser.log
+          node tests/browser/preview-blur.cjs 2>&1 | tee -a test-results/performance/browser.log
+          node tests/browser/preview-blur.cjs --native 2>&1 | tee -a test-results/performance/browser.log
+      - name: Measure preview and image editing separately
+        run: |
+          node tests/browser/text-layout.cjs 2>&1 | tee test-results/performance/text-layout.log
+          node tests/browser/preview-performance.cjs 2>&1 | tee test-results/performance/preview.log
+          node tests/browser/image-performance.cjs 2>&1 | tee test-results/performance/image.log
+          node --experimental-strip-types tests/performance/mcp-history.mjs 2>&1 | tee test-results/performance/mcp-history.log
+          node --experimental-strip-types tests/performance/timeline-state.mjs 2>&1 | tee test-results/performance/timeline-state.log
+      - name: Report functional failures
+        if: failure() && steps.browser.outcome == 'failure'
+        run: node scripts/report-build-failure.mjs test-results/performance/browser.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: application-performance-${{ github.run_id }}
+          path: test-results/performance
+          if-no-files-found: warn
+
+  native:
+    name: Native media checks (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            suffix: .exe
+          - platform: macos-arm64
+            runner: macos-26
+            target: aarch64-apple-darwin
+            suffix: ''
+          - platform: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: ''
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ matrix.suffix }}
+      OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ matrix.suffix }}
+      OPEN_MEDIA_SPEECH_ROOT: ${{ github.workspace }}/src-tauri/resources/speech
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+          cache-on-failure: true
+      - name: Restore the previously verified media runtime
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            src-tauri/resources/media
+            .media-runtime/downloads
+          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/media-runtime-capabilities.mjs', 'scripts/build-media-runtime.sh') }}
+          fail-on-cache-miss: true
+      - name: Restore the previously verified bundled voice
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            src-tauri/resources/speech
+            .speech-runtime/downloads
+          key: speech-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/speech-runtime.lock.json', 'scripts/speech-runtime.mjs', 'scripts/speech-runtime-runner.c', 'scripts/speech-runtime-runner.manifest', 'scripts/audio-asr-runner.c', 'licenses/speech-runtime/manifest.json') }}
+          fail-on-cache-miss: true
+      - name: Verify executables and record the test environment
+        run: |
+          mkdir -p test-results/performance
+          node scripts/media-runtime.mjs verify
+          node scripts/speech-runtime.mjs verify
+          node -e 'const os=require("node:os"); console.log(JSON.stringify({commit:process.env.GITHUB_SHA,platform:process.platform,arch:process.arch,cpus:os.cpus().map(c=>c.model),memory:os.totalmem(),scope:"Hosted test runner; generated media only; no microphone access or installer packaging"},null,2))' | tee test-results/performance/environment.json
+      - name: Verify native operations with the shipped runtime
+        id: native
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib 2>&1 | tee test-results/performance/native.log
+      - name: Verify the bundled offline voice
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib speech::tests::real_offline_speech_round_trip -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee test-results/performance/speech.log
+      - name: Measure late ranges and repeated-source planning without competing encoders
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib tests::media_performance_tests::late_segments_and_repeated_source_planning -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee test-results/performance/media-benchmark.log
+      - name: Report native failures
+        if: failure() && steps.native.outcome == 'failure'
+        run: node scripts/report-build-failure.mjs test-results/performance/native.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-performance-${{ matrix.platform }}-${{ github.run_id }}
+          path: test-results/performance
+          if-no-files-found: warn

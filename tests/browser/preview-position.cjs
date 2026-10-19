@@ -56,6 +56,17 @@ async function installEditor(page, url) {
   })
   await expect(page.locator('[data-clip-id="subtitle"].timeline-clip')).toBeVisible()
   await expect.poll(() => subtitleBackgroundPixel(page, 60, 40)).toEqual([204, 34, 51, 255])
+  await page.getByTestId('video-preview').evaluate(canvas => {
+    window.positionFixture.canvasResets = []
+    for (const dimension of ['width', 'height']) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, dimension)
+      Object.defineProperty(canvas, dimension, {
+        get() { return descriptor.get.call(this) },
+        set(value) { window.positionFixture.canvasResets.push({ dimension, value }); descriptor.set.call(this, value) },
+        configurable: true,
+      })
+    }
+  })
 }
 
 async function pixel(page, x, y) {
@@ -141,6 +152,7 @@ async function liveAndHistoryChecks(page) {
   await page.evaluate(() => window.positionFixture.redo())
   coordinate((await clip(page)).x, 240)
   await expect.poll(() => subtitleBackgroundPixel(page, 240, 160)).toEqual([204, 34, 51, 255])
+  assert.deepEqual(await page.evaluate(() => window.positionFixture.canvasResets), [], '尺寸不变的拖动、提交和撤销不能清空并重建预览画布')
   console.log('PASS 字幕选框和真实预览随拖动更新；画布中心吸附及参考线正确；一次拖动只提交一次，撤销/重做恢复像素与坐标')
 }
 

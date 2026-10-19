@@ -6,6 +6,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[path = "media_performance_tests.rs"]
+mod media_performance_tests;
 fn runtime() -> Runtime {
     Runtime::discover(None, None).expect("Media runtime required for integration checks")
 }

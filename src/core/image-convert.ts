@@ -141,6 +141,7 @@ export async function convertImage(source: string | Blob, options: ImageConvertO
   const ownedUrl = typeof source !== 'string'
   const url = ownedUrl ? URL.createObjectURL(source) : source
   const image = new Image()
+  const canvases: HTMLCanvasElement[] = []
   image.decoding = 'async'
   image.crossOrigin = 'anonymous'
   image.src = url
@@ -153,6 +154,7 @@ export async function convertImage(source: string | Blob, options: ImageConvertO
     const iconSize = iconSizes?.at(-1)
     const dimensions = imageDimensions(crop.width, crop.height, iconSize ? { ...options, width: iconSize, height: iconSize, keepAspect: true } : options)
     const canvas = document.createElement('canvas')
+    canvases.push(canvas)
     canvas.width = dimensions.width
     canvas.height = dimensions.height
     const context = canvas.getContext('2d', { willReadFrequently: ['bmp', 'gif', 'tiff'].includes(options.format) })
@@ -193,6 +195,7 @@ export async function convertImage(source: string | Blob, options: ImageConvertO
       for (const size of iconSizes) {
         signal?.throwIfAborted()
         const icon = document.createElement('canvas')
+        canvases.push(icon)
         icon.width = size
         icon.height = size
         const iconContext = icon.getContext('2d')
@@ -218,6 +221,8 @@ export async function convertImage(source: string | Blob, options: ImageConvertO
     signal?.throwIfAborted()
     return { blob, width: iconSize ?? canvas.width, height: iconSize ?? canvas.height, format: options.format, ...(previewBlob ? { previewBlob } : {}), ...(iconSizes ? { iconSizes } : {}) }
   } finally {
+    image.src = ''
+    for (const canvas of canvases) { canvas.width = 0; canvas.height = 0 }
     if (ownedUrl) URL.revokeObjectURL(url)
   }
 }

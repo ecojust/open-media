@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, toRaw, watch } from 'vue'
 import Icon from './Icon.vue'
 import type { ImageCrop } from '../core/image-crop'
 import { cloneImageAnnotations, drawImageAnnotations, hitImageAnnotation, imageAnnotationBounds, MAX_IMAGE_ANNOTATION_POINTS, MAX_IMAGE_ANNOTATION_TEXT, type ImageAnnotation } from '../core/image-annotations'
 
 const props = defineProps<{ source: string; width: number; height: number; crop?: ImageCrop; modelValue: ImageAnnotation[]; initialTool: 'text' | 'stroke' }>()
 const emit = defineEmits<{ 'update:modelValue': [value: ImageAnnotation[]] }>()
-const items = ref<ImageAnnotation[]>(cloneImageAnnotations(props.modelValue))
+const items = ref<ImageAnnotation[]>(cloneImageAnnotations(toRaw(props.modelValue)))
 const selectedId = ref('')
 const selected = computed(() => items.value.find(item => item.id === selectedId.value))
 const textItem = computed(() => selected.value?.kind === 'text' ? selected.value : undefined)
@@ -20,28 +20,37 @@ const imageReady = ref(false)
 const imageError = ref(false)
 const editNotice = ref('')
 const pointCount = computed(() => items.value.reduce((count, item) => count + (item.kind === 'stroke' ? item.points.length : 0), 0))
-const past = ref<ImageAnnotation[][]>([])
-const future = ref<ImageAnnotation[][]>([])
+const past = shallowRef<ImageAnnotation[][]>([])
+const future = shallowRef<ImageAnnotation[][]>([])
 const stageStyle = computed(() => ({ width: `${props.width * scale.value}px`, height: `${props.height * scale.value}px` }))
 let observer: ResizeObserver | undefined
+let paintFrame = 0
+let gestureLayers: { before?: HTMLCanvasElement; after?: HTMLCanvasElement } | undefined
 let fieldBefore: ImageAnnotation[] | undefined
 let gesture: { pointer: number; start: { x: number; y: number }; before: ImageAnnotation[]; item: ImageAnnotation; kind: 'stroke' | 'move' } | undefined
 
-function publish() { emit('update:modelValue', cloneImageAnnotations(items.value)) }
+function publish() { scheduleDraw(); emit('update:modelValue', cloneImageAnnotations(toRaw(items.value))) }
+function scheduleDraw() {
+  if (!paintFrame) paintFrame = requestAnimationFrame(() => { paintFrame = 0; draw() })
+}
+function releaseGestureLayers() {
+  for (const layer of [gestureLayers?.before, gestureLayers?.after]) if (layer) { layer.width = 0; layer.height = 0 }
+  gestureLayers = undefined
+}
 function remember(before: ImageAnnotation[]) {
-  if (JSON.stringify(before) === JSON.stringify(items.value)) return
-  past.value = [...past.value.slice(-79), cloneImageAnnotations(before)]
+  if (JSON.stringify(before) === JSON.stringify(toRaw(items.value))) return
+  past.value = [...past.value.slice(-79), before]
   future.value = []
 }
 function change(update: () => void) {
   cancelGesture()
   finishField()
-  const before = cloneImageAnnotations(items.value)
+  const before = cloneImageAnnotations(toRaw(items.value))
   update()
   remember(before)
   publish()
 }
-function beginField() { if (!fieldBefore) fieldBefore = cloneImageAnnotations(items.value) }
+function beginField() { if (!fieldBefore) fieldBefore = cloneImageAnnotations(toRaw(items.value)) }
 function finishField() { if (fieldBefore) { remember(fieldBefore); fieldBefore = undefined } }
 function patchSelected(patch: Record<string, unknown>) {
   if (!selected.value) return
@@ -98,9 +107,9 @@ function undo() {
   finishField()
   const previous = past.value.at(-1)
   if (!previous) return
-  future.value.push(cloneImageAnnotations(items.value))
+  future.value = [...future.value, cloneImageAnnotations(toRaw(items.value))]
   items.value = cloneImageAnnotations(previous)
-  past.value.pop()
+  past.value = past.value.slice(0, -1)
   if (!items.value.some(item => item.id === selectedId.value)) selectedId.value = ''
   publish()
 }
@@ -109,9 +118,9 @@ function redo() {
   finishField()
   const next = future.value.at(-1)
   if (!next) return
-  past.value.push(cloneImageAnnotations(items.value))
+  past.value = [...past.value, cloneImageAnnotations(toRaw(items.value))]
   items.value = cloneImageAnnotations(next)
-  future.value.pop()
+  future.value = future.value.slice(0, -1)
   publish()
 }
 function fit() {
@@ -120,20 +129,49 @@ function fit() {
   const nextScale = Math.min(1, Math.max(1, element.clientWidth - 32) / props.width, Math.max(140, Math.min(520, innerHeight * 0.5)) / props.height)
   if (Math.abs(nextScale - scale.value) > 0.000001) cancelGesture()
   scale.value = nextScale
-  void nextTick(draw)
+  void nextTick(scheduleDraw)
 }
 function resize() { cancelGesture(); fit() }
 function draw() {
   const element = canvas.value
   if (!element) return
   const ratio = Math.min(2, window.devicePixelRatio || 1)
-  element.width = Math.max(1, Math.round(props.width * scale.value * ratio))
-  element.height = Math.max(1, Math.round(props.height * scale.value * ratio))
+  const width = Math.max(1, Math.round(props.width * scale.value * ratio))
+  const height = Math.max(1, Math.round(props.height * scale.value * ratio))
+  if (element.width !== width || element.height !== height) { element.width = width; element.height = height; releaseGestureLayers() }
   const context = element.getContext('2d')
   if (!context) return
   const renderedScale = element.width / props.width
-  context.scale(renderedScale, element.height / props.height)
-  drawImageAnnotations(context, items.value)
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.clearRect(0, 0, width, height)
+  context.setLineDash([])
+  const annotations = toRaw(items.value)
+  const activeIndex = gesture ? annotations.findIndex(item => item.id === gesture!.item.id) : -1
+  if (activeIndex >= 0 && !gestureLayers) {
+    const layer = (contents: ImageAnnotation[]) => {
+      if (!contents.length) return undefined
+      const result = document.createElement('canvas'); result.width = width; result.height = height
+      const layerContext = result.getContext('2d')
+      if (!layerContext) { result.width = 0; result.height = 0; return undefined }
+      layerContext.scale(renderedScale, height / props.height)
+      drawImageAnnotations(layerContext, contents)
+      return result
+    }
+    // Preserve the selected annotation's position between the unchanged layers.
+    gestureLayers = { before: layer(annotations.slice(0, activeIndex)), after: layer(annotations.slice(activeIndex + 1)) }
+    if ((activeIndex > 0 && !gestureLayers.before) || (activeIndex < annotations.length - 1 && !gestureLayers.after)) releaseGestureLayers()
+  }
+  if (activeIndex >= 0 && gestureLayers) {
+    if (gestureLayers.before) context.drawImage(gestureLayers.before, 0, 0)
+    context.setTransform(renderedScale, 0, 0, height / props.height, 0, 0)
+    drawImageAnnotations(context, [annotations[activeIndex]!])
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    if (gestureLayers.after) context.drawImage(gestureLayers.after, 0, 0)
+  } else {
+    context.setTransform(renderedScale, 0, 0, height / props.height, 0, 0)
+    drawImageAnnotations(context, annotations)
+  }
+  context.setTransform(renderedScale, 0, 0, height / props.height, 0, 0)
   if (props.crop) {
     const region = props.crop
     context.fillStyle = '#0b132b80'
@@ -146,7 +184,7 @@ function draw() {
     context.strokeRect(region.x, region.y, region.width, region.height)
   }
   if (selected.value) {
-    const bounds = imageAnnotationBounds(selected.value, context)
+    const bounds = imageAnnotationBounds(toRaw(selected.value), context)
     context.strokeStyle = '#3267f6'
     context.lineWidth = 1.5 / renderedScale
     context.setLineDash([5 / renderedScale, 3 / renderedScale])
@@ -164,7 +202,7 @@ function pointerDown(event: PointerEvent) {
   finishField()
   canvas.value.focus({ preventScroll: true })
   const point = pointerPoint(event)
-  const before = cloneImageAnnotations(items.value)
+  const before = cloneImageAnnotations(toRaw(items.value))
   let item: ImageAnnotation | undefined
   if (tool.value === 'stroke') {
     if (items.value.length >= 200) { editNotice.value = '最多添加 200 个标注，请先删除不需要的内容。'; return }
@@ -175,9 +213,9 @@ function pointerDown(event: PointerEvent) {
   if (!item) { selectedId.value = ''; return }
   selectedId.value = item.id
   if (item.kind === 'stroke') Object.assign(brush, { color: item.color, width: item.width, opacity: item.opacity, style: item.style })
-  gesture = { pointer: event.pointerId, start: point, before, item: cloneImageAnnotations([item])[0]!, kind: tool.value === 'stroke' ? 'stroke' : 'move' }
+  gesture = { pointer: event.pointerId, start: point, before, item: cloneImageAnnotations([toRaw(item)])[0]!, kind: tool.value === 'stroke' ? 'stroke' : 'move' }
   canvas.value.setPointerCapture(event.pointerId)
-  publish()
+  scheduleDraw()
 }
 function pointerMove(event: PointerEvent) {
   if (!gesture || gesture.pointer !== event.pointerId) return
@@ -198,13 +236,14 @@ function pointerMove(event: PointerEvent) {
     if (item.kind === 'text' && original.kind === 'text') { item.x = original.x + dx; item.y = original.y + dy }
     else if (item.kind === 'stroke' && original.kind === 'stroke') item.points = original.points.map(value => ({ x: value.x + dx, y: value.y + dy }))
   }
-  publish()
+  scheduleDraw()
 }
 function pointerEnd(event: PointerEvent, cancelled = false) {
   if (!gesture || gesture.pointer !== event.pointerId) return
   if (!cancelled) pointerMove(event)
   const before = gesture.before
   gesture = undefined
+  releaseGestureLayers()
   if (canvas.value?.hasPointerCapture(event.pointerId)) canvas.value.releasePointerCapture(event.pointerId)
   if (cancelled) items.value = cloneImageAnnotations(before)
   else remember(before)
@@ -214,6 +253,7 @@ function cancelGesture() {
   if (!gesture) return false
   const current = gesture
   gesture = undefined
+  releaseGestureLayers()
   if (canvas.value?.hasPointerCapture(current.pointer)) canvas.value.releasePointerCapture(current.pointer)
   items.value = cloneImageAnnotations(current.before)
   if (!items.value.some(item => item.id === selectedId.value)) selectedId.value = ''
@@ -226,7 +266,7 @@ function keyboard(event: KeyboardEvent) {
   else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); event.stopPropagation(); redo() }
   else if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); event.stopPropagation(); removeSelected() }
 }
-watch([items, selectedId], draw, { deep: true, flush: 'post' })
+watch(selectedId, scheduleDraw, { flush: 'post' })
 onMounted(() => {
   window.addEventListener('blur', cancelGesture)
   window.addEventListener('resize', resize)
@@ -235,7 +275,7 @@ onMounted(() => {
   fit()
   if (props.initialTool === 'text') addText()
 })
-onBeforeUnmount(() => { observer?.disconnect(); gesture = undefined; window.removeEventListener('blur', cancelGesture); window.removeEventListener('resize', resize) })
+onBeforeUnmount(() => { observer?.disconnect(); gesture = undefined; cancelAnimationFrame(paintFrame); releaseGestureLayers(); window.removeEventListener('blur', cancelGesture); window.removeEventListener('resize', resize) })
 </script>
 
 <template>
