@@ -1703,7 +1703,9 @@ fn timeline_plan(
                 if fade_in>0.0 { gain += &format!("*clip(({clock})/{fade_in},0,1)"); }
                 if fade_out>0.0 { gain += &format!("*clip(({duration}-({clock}))/{fade_out},0,1)"); }
             }
-            let mut chain=format!("{timing},apad=whole_dur={audio_duration},atrim=duration={audio_duration},volume='{gain}':eval=frame");
+            // Bound automation latency independently of source packet size or sample rate.
+            let automation_frames = if crate::clip_animation::has_keyframe(clip, "volume") { ",aresample=48000,asetnsamples=n=240:p=0" } else { "" };
+            let mut chain=format!("{timing},apad=whole_dur={audio_duration},atrim=duration={audio_duration}{automation_frames},volume='{gain}':eval=frame");
             if !windowed && fade_in > 0.0 { chain += &format!(",afade=t=in:st=0:d={fade_in}"); }
             if !windowed && fade_out > 0.0 { chain += &format!(",afade=t=out:st={}:d={fade_out}", duration-fade_out); }
             let delay=if windowed {

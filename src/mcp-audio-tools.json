@@ -774,5 +774,98 @@
         "responseType": "result"
       }
     }
+  },
+  {
+    "name": "open_media_audio_balance",
+    "description": "批量平衡旁白与背景音乐。测量人声片段响度并调整音量，用可重复更新的时间线音量关键帧压低音乐，保留原始素材；全部处理成功后一次提交并可整体撤销。手动音量关键帧与锁定轨道会阻止对应修改。默认目标 -16 LUFS、真峰值 -1 dBTP、音乐压低 12 dB、进入 0.15 秒、恢复 0.6 秒；未达目标的受限片段会在结果列出。\n执行方式：异步返回 jobId，使用 open_media_job_get 查询最终结果，支持取消。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "speechTrackIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "musicTrackIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "normalize": {
+          "type": "boolean"
+        },
+        "ducking": {
+          "type": "boolean"
+        },
+        "targetLufs": {
+          "type": "number",
+          "minimum": -36,
+          "maximum": -5
+        },
+        "truePeak": {
+          "type": "number",
+          "minimum": -9,
+          "maximum": 0
+        },
+        "reductionDb": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 36
+        },
+        "attack": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 5
+        },
+        "release": {
+          "type": "number",
+          "minimum": 0.01,
+          "maximum": 5
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "speechTrackIds"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
   }
 ]

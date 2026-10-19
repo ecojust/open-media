@@ -188,6 +188,11 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
         if (kind === 'transition') throw new Error('请使用转场参数设置转场动画。')
         clip.keyframes = validateKeyframes(c.keyframes, MAX_PROJECT_DURATION)
       }
+      if (c.audioBalance !== undefined) {
+        if (kind !== 'audio') throw new Error('声音平衡设置只能用于音频轨道。')
+        const balance = record(c.audioBalance, '声音平衡'), ducking = record(balance.ducking, '背景音乐自动压低')
+        clip.audioBalance = { ducking: { keyframes: validateKeyframes({ volume: ducking.keyframes }, MAX_PROJECT_DURATION).volume! } }
+      }
       if (duration < 1 / 1000 || clip.start + duration > MAX_PROJECT_DURATION + 1e-6) throw new Error('片段时长无效或时间线超过 24 小时。')
       if (clip.fadeIn > duration + 1e-6 || clip.fadeOut > duration + 1e-6) throw new Error('淡入淡出时间不能超过片段时长。')
       if (c.transition !== undefined && kind !== 'transition') throw new Error('转场信息只能用于转场轨道。')

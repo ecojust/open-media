@@ -24,7 +24,7 @@ async function main(){
   const cropPixel=await render(crop,.5)
   const move=run(p,'clip_keyframes_set',{clipId:'clip',keyframes:{x:[{time:0,value:0},{time:1,value:80}],opacity:[{time:0,value:1},{time:1,value:.5}]}}).project
   await render(move,1);const movePixels=[pixel(20,45),pixel(100,45)]
-  const focus=run(p,'focus_region',{clipId:'clip',region:{x:.5,y:0,width:.5,height:1},duration:1}).project;const focusPixel=await render(focus,1)
+  const focus=run(p,'focus_region',{clipId:'clip',region:{x:.5,y:.25,width:.5,height:.5},duration:1}).project;const focusPixel=await render(focus,1)
   const mask=run(p,'overlay_add',{kind:'mask',start:0,duration:2,x:20,y:20,width:40,height:40,color:'#00ff00'}).project;await render(mask,1);const maskPixel=pixel(30,30)
   const blur=run(p,'overlay_add',{kind:'blur',start:0,duration:2,x:50,y:5,width:60,height:80,blurRadius:10}).project;await render(blur,1);const blurPixel=pixel(80,45)
   const spotlight=run(p,'overlay_add',{kind:'spotlight',start:0,duration:2,x:100,y:20,width:30,height:30,opacity:1}).project;await render(spotlight,1);const spotlightPixels=[pixel(20,20),pixel(110,30)]

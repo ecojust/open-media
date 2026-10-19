@@ -2,7 +2,7 @@
 
 Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。视频剪辑顶部“项目设置”左侧的 **M** 按钮打开简洁的服务弹窗，显示连接地址、Token 和“复制配置”按钮，通过服务开关启停。有已认证的客户端连接时，M 按钮显示青紫色流动荧光；连接断开或服务停止后恢复普通样式。自动化任务的进度和取消操作位于“处理任务”中。
 
-服务直接使用界面中的工程、撤销历史和保存位置。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场、背景音乐、片头片尾、配音、模型管理和视频导出，共 **84 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
+服务直接使用界面中的工程、撤销历史和保存位置。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场、背景音乐、片头片尾、配音、模型管理和视频导出，共 **85 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
 
 ## 连接
 
@@ -111,6 +111,7 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_speech_alignment_set` | 设置后续配音对齐策略：subtitle只调整字幕；ripple顺延后续字幕及配音；extend_visual延长覆盖画面（视频减速）并顺延后文 |
 | `open_media_subtitle_import_export` | 导入或导出SRT、VTT、ASS字幕，支持按句分段和自动换行 |
 | `open_media_audio_loudness_analyze` | 实际测量选中音频片段的综合响度LUFS、响度范围及真峰值dBTP，返回可取消任务 |
+| `open_media_audio_balance` | 批量实测人声响度并调整片段音量，为背景音乐生成自动压低关键帧；保留原素材，一次提交并可整体撤销 |
 | `open_media_audio_normalize` | 按目标LUFS及真峰值做双遍响度归一，生成新本地音频并替换片段，保留原素材供撤销 |
 | `open_media_audio_process` | 离线处理音频片段：降噪、三段EQ、动态压缩、去齿音、峰值限制 |
 | `open_media_audio_ducking` | 在人声轨道片段时段压低选中背景音频，含渐入和恢复；基于时间线区间烘焙新音频，非实时说话检测 |
@@ -129,7 +130,7 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_project_snapshot` | 管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id |
 | `open_media_clip_keyframes_set` | 设置片段关键帧 |
 | `open_media_clip_crop` | 裁剪视频或图片的源画面，坐标及宽高为0..1归一化值 |
-| `open_media_focus_region` | 聚焦画面区域：在指定片段内时间生成从完整源画面平滑放大到区域的关键帧，保留源图像 |
+| `open_media_focus_region` | 在当前片段显示矩形内框定归一化区域，生成等比放大、停留与恢复关键帧；保留位置、裁切与画面比例，保护已有动画 |
 | `open_media_overlay_add` | 新增可编辑视觉标注 |
 | `open_media_title_add` | 添加可编辑标题 |
 | `open_media_template_customize` | 统一定制指定片段的透明度、布局和时长；可编辑文字与标注另支持颜色、字体和背景 |
@@ -144,6 +145,10 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 桌面端 `timeline_get_frame` 使用原生合成并经内部通信返回 PNG，不从原生媒体画布读取像素。失败任务的 `errorDetails` 保留结构化错误，其中 `details.stage` 标明具体阶段，能定位到素材或字幕时返回 `details.resource` 的标识与名称；`details.relatedResources` 仅表示相关输入，并不表示它们全部出错。`details.context` 保留请求时间和宽度，便于复现。
 
 创建动画标题时，可在 `title_add` 中直接指定 `x`、`y`、`width`、`height`，进入动画以最终位置为基准。移动已有动画片段时，在 `clip_update` 顶层传 `translatePositionKeyframes: true`，按基础位置变化量同步平移 X/Y 关键帧；省略或设为 false 时保留已有关键帧绝对坐标。该选项不能与显式替换 `patch.keyframes` 同时使用。
+
+`focus_region` 的 `duration` 表示放大时间，`holdDuration` 与 `returnDuration` 分别表示停留和恢复时间；省略恢复时间时保持放大。`maxScale` 默认 3，`strength` 可调整强度。已有位置或缩放曲线需明确设置 `replaceExisting: true` 才能替换；聚焦生效期间存在动态旋转时会提示冲突。
+
+`audio_balance` 接受人声 `speechTrackIds`、音乐 `musicTrackIds`，可分别启用 `normalize` 与 `ducking`。默认目标 -16 LUFS、真峰值上限 -1 dBTP、音乐压低 12 dB，进入 0.15 秒、恢复 0.6 秒；短停顿合并以避免音乐忽大忽小。返回每段实测响度、调整后预计响度和受峰值或音量上限限制的情况。音乐按人声片段区间压低，不检测片段内部的停顿；手动音量曲线受到保护，自动生成的曲线可重新计算。
 
 `timeline_batch_edit` 只接受工具清单中的同步工程编辑操作，最多 100 项；可先 dryRun，带 expectedRevision 校验，任何一项失败都不会写入部分修改，成功后共用一个撤销步骤。`project_snapshot` 保存包含素材的命名版本，可比较、恢复、删除；本地最多 100 个版本、总容量 1 GiB，恢复也可撤销。
 

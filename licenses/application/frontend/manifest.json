@@ -5,13 +5,13 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "cf19f7a705ab88951b9b78c58bbafc8b30966237f3f7674ae312bc850e19ef89",
-      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives. Only the browser regression command changed; dependency declarations and build commands are unchanged from the audited inputs. Release version updated to 0.2.4; dependency declarations, locked dependency entries, build commands and original notice bytes are unchanged."
+      "sha256": "69865e2f6b395ef3ff96a4ba7db7f6d7c0a5ba91aeb508eb70325f1b7580d70f",
+      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives. Only the browser regression command changed; dependency declarations and build commands are unchanged from the audited inputs. Release version updated to 0.2.5; dependency declarations, locked dependency entries, build commands and original notice bytes are unchanged."
     },
     {
       "path": "package-lock.json",
-      "sha256": "8631e57e1b67dc77411e07b71fb3782d26dd67bf1718df4813decb87c4a2b9be",
-      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives. Release version updated to 0.2.4; dependency declarations, locked dependency entries, build commands and original notice bytes are unchanged."
+      "sha256": "1e08603114fe1ab26c391159ac590c4dea2476e8b78e0d8812629966e85ed381",
+      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives. Release version updated to 0.2.5; dependency declarations, locked dependency entries, build commands and original notice bytes are unchanged."
     },
     {
       "path": "vite.config.ts",

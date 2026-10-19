@@ -11,7 +11,7 @@ import { getSpeechAlignment, setSpeechAlignment, speechTimingPlan, validateSpeec
 import { exportSubtitles, importSubtitles, importSubtitleCues, type SubtitleFormat, type SubtitleFileOptions } from './subtitle-files.ts'
 import { voiceReady } from './voice-downloads.ts'
 
-const NAMES = new Set(['speech_generate_preview', 'speech_pronunciation_get', 'speech_pronunciation_set', 'speech_timing_plan', 'speech_alignment_get', 'speech_alignment_set', 'subtitle_import_export', 'audio_loudness_analyze', 'audio_normalize', 'audio_ducking', 'audio_process', 'music_fit_duration', 'audio_transcribe'])
+const NAMES = new Set(['speech_generate_preview', 'speech_pronunciation_get', 'speech_pronunciation_set', 'speech_timing_plan', 'speech_alignment_get', 'speech_alignment_set', 'subtitle_import_export', 'audio_loudness_analyze', 'audio_normalize', 'audio_ducking', 'audio_process', 'music_fit_duration', 'audio_transcribe', 'audio_balance'])
 export function isAudioEditorTool(name: string): boolean { return NAMES.has(name.replace(/^open_media_/, '')) }
 export interface AudioEditorDependencies {
   native: Pick<typeof native, 'getSpeechStatus' | 'beginSpeechJob' | 'getSpeechJob' | 'cancelSpeechJob' | 'discardSpeechJob' | 'acceptSpeechJobs' | 'importBlobAsset'>
@@ -141,6 +141,11 @@ export async function prepareAudioEditorTool(toolName: string, args: Record<stri
   if (name === 'speech_alignment_set') { const policy = validateSpeechAlignment({ mode: args.mode, gap: args.gap ?? 0 }); return { data: policy, accept: async () => { setSpeechAlignment(policy) } } }
   if (name === 'speech_timing_plan') return { data: speechTimingPlan(context.project, args as { clipIds?: string[]; rate?: number }) }
   if (name === 'speech_generate_preview') return previewSpeech(args, context, dependencies ?? await defaults())
+  if (name === 'audio_balance') {
+    const { prepareAudioBalance } = await import('./audio-balance.ts')
+    const deps = dependencies ?? await defaults()
+    return prepareAudioBalance(context.project, args as unknown as import('./audio-balance.ts').AudioBalanceOptions, context, (clipId, child) => processAudio('audio_loudness_analyze', { clipId }, child, deps))
+  }
   if (name === 'subtitle_import_export') {
     const format = textArg(args, 'format') as SubtitleFormat
     const options = args as SubtitleFileOptions & { trackId?: string }

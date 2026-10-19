@@ -1,7 +1,7 @@
 import { cloneProject, createClip, createTrack, MAX_ASSETS, MAX_CLIPS, MAX_PROJECT_DURATION, MAX_TRACKS, validateProject } from './project.ts'
 import { clipDuration, clipEnd, findClip } from './timeline.ts'
 import type { Clip, MediaAsset, Project, Track } from './types.ts'
-import { applySpeechAlignment } from './speech-alignment.ts'
+import { alignSpeechSubtitle, applySpeechAlignment } from './speech-alignment.ts'
 import type { SpeechAlignmentSettings } from './speech-timing.ts'
 
 export const MAX_SPEECH_TEXT_CHARS = 4000
@@ -118,15 +118,6 @@ export function validateSpeechPlanCapacity(project: Project, plan: SpeechPlan, k
   }
 }
 
-function alignText(clip: Clip, start: number, duration: number): void {
-  clip.start = start
-  clip.trimIn = 0
-  clip.trimOut = duration
-  clip.speed = 1
-  clip.fadeIn = Math.min(clip.fadeIn, duration)
-  clip.fadeOut = Math.min(clip.fadeOut, duration)
-}
-
 function overlaps(project: Project, changedText: Set<string>, changedSpeech: Set<string>): SpeechOverlap[] {
   const result: SpeechOverlap[] = []
   const groups = [
@@ -184,7 +175,7 @@ export function applySpeechResults(project: Project, results: SpeechResult[], op
     track.clips.push(clip)
     audioClipIds.push(clip.id)
     if (options.alignText !== false) {
-      alignText(source.clip, source.clip.start, asset.duration)
+      alignSpeechSubtitle(source.clip, source.clip.start, asset.duration)
       changedText.add(source.clip.id)
     }
   }
@@ -206,7 +197,7 @@ export function alignTextToSpeech(project: Project, clipIds?: string[]): SpeechE
     const audio = linkedSpeech(copy, id)
     if (!audio) throw new Error(`字幕“${source.name}”还没有关联的配音。`)
     if (audio.clip.speech!.text !== source.text) throw new Error(`字幕“${source.name}”的文字已更改，请重新生成配音。`)
-    alignText(findClip(copy, id)!.clip, audio.clip.start, clipDuration(audio.clip))
+    alignSpeechSubtitle(findClip(copy, id)!.clip, audio.clip.start, clipDuration(audio.clip))
     audioClipIds.push(audio.clip.id)
   }
   copy.updatedAt = new Date().toISOString()

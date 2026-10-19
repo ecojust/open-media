@@ -41,6 +41,7 @@ const paths: Record<string, string> = {
   'chevron-left': 'm15 6-6 6 6 6',
   settings: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z',
   sliders: 'M4 5h16M4 12h16M4 19h16M8 2v6M16 9v6M10 16v6',
+  'align-center': 'M12 3v18M4 6h16M7 12h10M4 18h16',
   sun: 'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1 1M18 18l1 1M5 19l1-1M18 6l1-1',
   moon: 'M21 14A9 9 0 0 1 10 3a8 8 0 1 0 11 11z',
   clock: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M12 6v6l4 2',

@@ -252,7 +252,7 @@ impl AudioToolsManager {
             }
             "process" => format!("{base}{}", processing_chain(spec)?),
             "ducking" => format!(
-                "{base},volume='{}':eval=frame",
+                "{base},asetnsamples=n=240:p=0,volume='{}':eval=frame",
                 ducking_expression(spec, duration)?
             ),
             "music_fit" => {
@@ -725,6 +725,70 @@ mod tests {
         assert!(chain.contains("atrim=duration=4"));
         assert!(chain.contains("size=192000"));
         assert!(chain.contains("st=11"));
+    }
+    #[test]
+    fn real_ducking_reaches_speech_boundaries_without_packet_delay() {
+        let Ok(runtime) = Runtime::discover(None, None) else { return; };
+        let root = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(root.path()).unwrap();
+        let source = root.path().join("steady.wav");
+        let status = engine::process(&runtime.encoder)
+            .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", "aevalsrc=0.5:d=2:s=48000", "-c:a", "pcm_s24le"])
+            .arg(&source).status().unwrap();
+        assert!(status.success());
+        let asset = serde_json::to_value(store.import(&runtime, &source, Some("steady.wav")).unwrap()).unwrap();
+        let manager = AudioToolsManager::default();
+        let started = manager.begin(&runtime, &store, json!({"action":"ducking", "asset":asset, "intervals":[{"start":0.5,"end":1.2}], "attack":0.02,"release":0.02,"reductionDb":12})).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let completed = loop {
+            let job = manager.get(&started.id).unwrap();
+            if job.state != "running" { break job; }
+            assert!(Instant::now() < deadline, "ducking job timeout");
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(completed.state, "completed", "{:?}", completed.error);
+        let result = completed.result.unwrap();
+        let output = engine::process(&runtime.encoder)
+            .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i", result["asset"]["nativePath"].as_str().unwrap(), "-ac", "1", "-f", "f32le", "-"])
+            .output().unwrap();
+        assert!(output.status.success());
+        let samples: Vec<f32> = output.stdout.chunks_exact(4).map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap())).collect();
+        let sample = |time: f64| samples[(time * 48000.0).round() as usize] as f64;
+        let base = sample(0.1);
+        let ratio = |time| sample(time) / base;
+        assert!((ratio(0.50) - 10.0_f64.powf(-12.0 / 20.0)).abs() < 0.015, "music must be low at speech start");
+        assert!((ratio(1.22) - 1.0).abs() < 0.015, "music must recover at the configured release boundary");
+        assert!(ratio(0.49) > 0.4 && ratio(0.49) < 0.85, "attack should be gradual");
+        assert!(ratio(1.21) > 0.4 && ratio(1.21) < 0.85, "release should be gradual");
+        manager.discard(&started.id).unwrap();
+    }
+    #[test]
+    fn real_timeline_music_automation_uses_bounded_frames_at_source_sample_rates() {
+        let Ok(runtime) = Runtime::discover(None, None) else { return; };
+        for sample_rate in [16000, 44100] {
+            let root = tempfile::tempdir().unwrap();
+            let store = MediaStore::new(root.path()).unwrap();
+            let source = root.path().join("music.wav");
+            assert!(engine::process(&runtime.encoder)
+                .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-f", "lavfi", "-i", &format!("aevalsrc=0.25:d=2:s={sample_rate}"), "-c:a", "pcm_s24le"])
+                .arg(&source).status().unwrap().success());
+            let asset = serde_json::to_value(store.import(&runtime, &source, Some("music.wav")).unwrap()).unwrap();
+            let spec = json!({"kind":"timeline","project":{"width":64,"height":48,"fps":20,"background":"#000000","assets":[asset],"tracks":[{"kind":"audio","muted":false,"clips":[{"id":"bed","assetId":asset["id"],"start":0,"trimIn":0,"trimOut":2,"speed":1,"volume":1,"fadeIn":0,"fadeOut":0,"keyframes":{"volume":[{"time":0,"value":1},{"time":0.48,"value":1},{"time":0.5,"value":0.25},{"time":1.2,"value":0.25},{"time":1.22,"value":1},{"time":2,"value":1}]}}]}]},"config":{"format":"mov","width":64,"height":48,"fps":20,"quality":"high"}});
+            let plan = engine::build_plan(&store, &runtime, &spec).unwrap();
+            let output = root.path().join("render.mov");
+            let result = engine::process(&runtime.encoder).args(["-v", "error", "-y", "-filter_complex_threads", "1"])
+                .args(&plan.args).args(["-threads", "1", "-c:a", "pcm_s24le"]).arg(&output).output().unwrap();
+            assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+            let decoded = engine::process(&runtime.encoder).args(["-v", "error", "-i"]).arg(&output)
+                .args(["-vn", "-ac", "1", "-ar", "48000", "-f", "f32le", "-"]).output().unwrap();
+            assert!(decoded.status.success());
+            let samples: Vec<f32> = decoded.stdout.chunks_exact(4).map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap())).collect();
+            let sample = |time: f64| samples[(time * 48000.0).round() as usize] as f64;
+            let base = sample(0.1);
+            // The final limiter adds its existing five millisecond lookahead delay.
+            assert!((sample(0.511) / base - 0.25).abs() < 0.04, "source {sample_rate}: music attack was delayed");
+            assert!((sample(1.231) / base - 1.0).abs() < 0.04, "source {sample_rate}: music release was delayed");
+        }
     }
     #[test]
     fn real_loudness_normalize_duck_and_loop() {

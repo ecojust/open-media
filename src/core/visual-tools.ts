@@ -1,9 +1,10 @@
 import { cloneProject, createClip, createTextClip, createTrack, newId, validateProject } from './project.ts'
 import { clipDuration, findClip } from './timeline.ts'
 import { reconcileTransitions } from './transitions.ts'
-import { OVERLAY_PRESETS, ANIMATION_EASINGS, validateKeyframes, validateNormalizedRect, validateSpeedRamp, validateTransitionParameters, visualChoice, visualColor, visualNumber, visualRecord } from './visual-animation.ts'
+import { OVERLAY_PRESETS, validateKeyframes, validateNormalizedRect, validateSpeedRamp, validateTransitionParameters, visualChoice, visualColor, visualNumber, visualRecord } from './visual-animation.ts'
 import { applyVisualMotionPreset, VISUAL_MOTION_PRESETS } from './visual-motion-presets.ts'
-import type { Clip, ClipKeyframes, Project, Track } from './types.ts'
+import { buildFocusAnimation } from './focus-region.ts'
+import type { Clip, Project, Track } from './types.ts'
 
 export interface VisualToolResult { project: Project; data: Record<string, unknown>; label: string; selection?: string }
 export type TitlePreset = 'chapter' | 'lower-third' | 'corner' | 'subtitle'
@@ -56,14 +57,9 @@ export function executeVisualTool(project: Project, name: string, value: unknown
       label = '裁剪源画面'
     } else if (tool === 'focus_region') {
       if (track.kind !== 'video') throw new Error('请选择视频或图片片段。')
-      const r = validateNormalizedRect(args.region), length = clipDuration(clip)
-      const start = visualNumber(args.start ?? 0, '聚焦开始时间', 0, length)
-      const duration = visualNumber(args.duration ?? Math.min(1, length - start), '聚焦时长', 0.01, length - start)
-      const easing = visualChoice(args.easing ?? 'ease-in-out', ANIMATION_EASINGS, '缓动')
-      clip.x = 0; clip.y = 0; clip.width = next.width; clip.height = next.height; clip.fit = 'fill'; delete clip.crop
-      const endX = next.width * ((1 / r.width - 1) / 2 - r.x / r.width), endY = next.height * ((1 / r.height - 1) / 2 - r.y / r.height)
-      const frames = (from: number, to: number) => [{ time: start + (clip.animationOffset ?? 0), value: from, easing }, { time: start + duration + (clip.animationOffset ?? 0), value: to }]
-      clip.keyframes = { ...clip.keyframes, x: frames(0, endX), y: frames(0, endY), scaleX: frames(1, 1 / r.width), scaleY: frames(1, 1 / r.height) }
+      const focus = buildFocusAnimation(clip, args)
+      clip.keyframes = focus.keyframes
+      data = { focus: { region: focus.region, start: focus.start, end: focus.end, scale: focus.scale } }
       label = '聚焦画面区域'
     } else if (tool === 'clip_freeze_frame') {
       const asset = next.assets.find(a => a.id === clip.assetId)
@@ -89,7 +85,7 @@ export function executeVisualTool(project: Project, name: string, value: unknown
       if (args.clear === true) clip.transition = { effect: clip.transition.effect, fromClipId: clip.transition.fromClipId, toClipId: clip.transition.toClipId }
       Object.assign(clip.transition, validateTransitionParameters(args)); label = '设置转场参数'
     }
-    data = { clipId: clip.id, duration: clipDuration(clip) }
+    data = { ...data, clipId: clip.id, duration: clipDuration(clip) }
   } else if (tool === 'overlay_add') {
     const kind = visualChoice(args.kind, OVERLAY_PRESETS.map(item => item.id), '标注类型')
     const x = visualNumber(args.x, '横坐标', -65536, 65536), y = visualNumber(args.y, '纵坐标', -65536, 65536)

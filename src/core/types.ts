@@ -125,6 +125,8 @@ export interface Clip {
   /** Local animation time retained when a clip is split or trimmed. */
   animationOffset?: number
   keyframes?: ClipKeyframes
+  /** Ownership snapshot for generated music automation; manual changes are protected. */
+  audioBalance?: { ducking: { keyframes: ClipKeyframe[] } }
   crop?: NormalizedRect
   overlay?: ClipOverlay
   freezeFrame?: ClipFreezeFrame

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import AssetVideoThumbnail from './AssetVideoThumbnail.vue'
-import type { Clip, MediaAsset, Project, Track, TrackKind } from '../core/types'
+import type { Clip, MediaAsset, NormalizedRect, Project, Track, TrackKind } from '../core/types'
 import { cloneProject, createClip, createSubtitleClip, createTrack, MAX_PROJECT_DURATION, newId, validateProject } from '../core/project'
 import { projectSizeError, videoClipSourceSize } from '../core/project-size'
 import { addEditorAssetToTimeline, projectSourceAssets } from '../core/editor-assets'
@@ -38,11 +38,13 @@ import SpeechToolsPanel from './editor-tools/SpeechToolsPanel.vue'
 import ProjectToolsPanel from './editor-tools/ProjectToolsPanel.vue'
 import VisualElementsPanel from './editor-tools/VisualElementsPanel.vue'
 import PreviewToolsPanel from './editor-tools/PreviewToolsPanel.vue'
+import EditingAssistPanel from './editor-tools/EditingAssistPanel.vue'
 import type { AssetToolAction, EditorToolRunner } from './editor-tools/types'
 import OverlayProperties from './editor-tools/OverlayProperties.vue'
 import MotionPresetControls from './editor-tools/MotionPresetControls.vue'
 import ChromaKeyPanel from './ChromaKeyPanel.vue'
 import PreviewSelection from './PreviewSelection.vue'
+import PreviewFocusRegion from './PreviewFocusRegion.vue'
 import type { PreviewPosition } from '../core/preview-position'
 import { addTextWatermark, addWatermark, type TextWatermarkOptions } from '../core/watermark-track'
 import type { WatermarkMaterial } from '../core/watermark-library'
@@ -80,7 +82,9 @@ const assetFilter = ref('all')
 const native = isDesktop()
 const assetSource = ref<'recordings' | 'imported'>(native ? 'recordings' : 'imported')
 const search = ref('')
-const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | 'asset-tools' | 'subtitle-tools' | 'project-tools' | 'visual-elements' | 'preview-tools' | null>(null)
+const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | 'asset-tools' | 'subtitle-tools' | 'project-tools' | 'visual-elements' | 'preview-tools' | 'editing-assist' | null>(null)
+const assistOpened = ref(false), focusPicking = ref(false)
+const focusRegion = shallowRef<NormalizedRect>()
 const modalOpen = computed(() => editorDialog.value !== null)
 const dialogReturnFocus = ref<HTMLElement | null>(null)
 const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
@@ -316,12 +320,49 @@ async function saveRecording(audio: RecordedMicrophoneAudio, start: number, proj
 }
 function openEditorDialog(kind: NonNullable<typeof editorDialog.value>): void {
   if (editingBusy.value) return
+  focusPicking.value = false
+  if (kind === 'editing-assist') assistOpened.value = true
   const focused = document.activeElement
   if (!(focused instanceof HTMLElement && focused.closest('.editor-dialog'))) dialogReturnFocus.value = focused instanceof HTMLElement && !focused.closest('.clip-context-menu') ? focused : menuReturnFocus
   pause(); cancelGesture(); closeMenus(); finishTrackRename(); editorDialog.value = kind
 }
 function openSpeech(): void { openEditorDialog('speech') }
 function closeEditorDialog(): void { if (!editingBusy.value) editorDialog.value = null }
+function applyAssistChange(next: Project, label: string): void {
+  if (editingBusy.value || props.exportDisabled || next.id !== props.project.id) return
+  pause(); cancelGesture()
+  commit(() => validateProject(next, { trusted: true }), label)
+}
+async function locateAssistResult(time: number, clipId?: string): Promise<void> {
+  if (editingBusy.value || !Number.isFinite(time)) return
+  closeEditorDialog(); pause()
+  if (clipId && findClip(props.project, clipId)) { selectedId.value = clipId; inspectorTab.value = 'properties' }
+  seek(time)
+  await nextTick()
+  if (editorDialog.value) return
+  const scroll = timelineScroll.value
+  if (scroll) scroll.scrollLeft = Math.max(0, time * zoom.value - Math.max(0, scroll.clientWidth - 140) / 3)
+  const item = [...(scroll?.querySelectorAll<HTMLElement>('[data-clip-id]') || [])].find(element => element.dataset.clipId === clipId)
+  item?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  item?.focus({ preventScroll: true })
+}
+async function startFocusPick(clipId = selectedId.value): Promise<void> {
+  if (editingBusy.value || props.exportDisabled || !props.runTool) return
+  const found = findClip(props.project, clipId)
+  if (!found || found.track.kind !== 'video' || found.track.locked || found.track.muted || found.clip.overlay) return
+  pause(); cancelGesture(); closeMenus(); closeEditorDialog()
+  selectedId.value = clipId; inspectorTab.value = 'properties'; focusRegion.value = undefined
+  if (playhead.value < found.clip.start || playhead.value >= clipEnd(found.clip) - 1 / props.project.fps) seek(found.clip.start)
+  await nextTick()
+  if (selectedId.value !== clipId || editingBusy.value || modalOpen.value) return
+  focusPicking.value = true
+}
+function selectFocusRegion(region: NormalizedRect): void {
+  if (!focusPicking.value || editingBusy.value) return
+  focusRegion.value = { ...region }; focusPicking.value = false
+  emit('status', '已选中重点区域，请在右侧设置聚焦动画并应用。')
+  void nextTick(() => editorRoot.value?.querySelector<HTMLElement>('[data-focus-settings]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }))
+}
 function setToolBusy(value: boolean): void {
   toolBusy.value = value
   if (value) { pause(); cancelGesture(); closeMenus() }
@@ -978,7 +1019,7 @@ function getPlayback(): EditorPlayback {
 function getInteractionBusy(): boolean {
   const focused = document.activeElement
   const editingField = focused instanceof HTMLElement && editorRoot.value?.contains(focused) && focused.matches('input:not([readonly]):not(:disabled),textarea:not([readonly]):not(:disabled),select:not(:disabled),[contenteditable="true"]')
-  return !!(editorDestroyed || localEditingBusy.value || preparingPlayback.value || gesture || previewPositionGesture || trackDrag || renamingTrackId.value || pendingTrackDelete.value || modalOpen.value || clipMenu.value || trackMenu.value || assetMenu.value || editingField || editorRoot.value?.querySelector('.timeline-divider.dragging'))
+  return !!(editorDestroyed || localEditingBusy.value || preparingPlayback.value || focusPicking.value || gesture || previewPositionGesture || trackDrag || renamingTrackId.value || pendingTrackDelete.value || modalOpen.value || clipMenu.value || trackMenu.value || assetMenu.value || editingField || editorRoot.value?.querySelector('.timeline-divider.dragging'))
 }
 async function setPlayback(patch: Partial<EditorPlayback>): Promise<EditorPlayback> {
   if (editorDestroyed) throw new Error('剪辑界面已关闭。')
@@ -1303,6 +1344,7 @@ function timelineWheel(event: WheelEvent): void {
 }
 function fitTimeline(): void { zoom.value = Math.max(6, Math.min(160, ((timelineScroll.value?.clientWidth || 900) - 160) / Math.max(10, duration.value + 2))) }
 function keyboard(event: KeyboardEvent): void {
+  if (focusPicking.value) { if (event.key === 'Escape') { event.preventDefault(); focusPicking.value = false }; return }
   if (previewPositionGesture) { if (event.key === 'Escape') { event.preventDefault(); cancelPreviewPosition() }; return }
   if (trackDrag) { if (event.key === 'Escape') { event.preventDefault(); cancelTrackDrag() }; return }
   if (event.defaultPrevented || document.querySelector('[role="dialog"][aria-modal="true"]')) return
@@ -1334,6 +1376,7 @@ watch(activeProject, project => {
   }
 })
 watch(() => props.project, project => {
+  focusPicking.value = false; focusRegion.value = undefined
   if (previewPositionGesture && project !== previewPositionGesture.base) cancelPreviewPosition()
   if (gesture && project !== gesture.base) cancelGesture()
   if (trackDrag && project !== trackDrag.base) cancelTrackDrag()
@@ -1341,10 +1384,10 @@ watch(() => props.project, project => {
   if (clipMenu.value && !findClip(project, clipMenu.value.clipId)) closeMenus()
   if (trackMenu.value && !project.tracks.some(track => track.id === trackMenu.value?.trackId)) closeMenus()
 })
-watch(() => props.project.id, () => { cancelTimelineWheelZoom(); cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); musicAssets.clear(); segmentAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
-watch([editingBusy, modalOpen, () => props.exportDisabled], values => { if (values.some(Boolean)) { cancelTrackDrag(); cancelPreviewPosition() } }, { flush: 'sync' })
+watch(() => props.project.id, () => { assistOpened.value = false; cancelTimelineWheelZoom(); cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); musicAssets.clear(); segmentAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
+watch([editingBusy, modalOpen, playing, () => props.exportDisabled], values => { if (values.some(Boolean)) { focusPicking.value = false; cancelTrackDrag(); cancelPreviewPosition() } }, { flush: 'sync' })
 watch(() => props.automationBusy, busy => { if (busy) { pause(); cancelGesture(); closeMenus() } }, { flush: 'sync' })
-watch(selectedId, () => { cancelPreviewPosition(); clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
+watch(selectedId, () => { focusPicking.value = false; focusRegion.value = undefined; cancelPreviewPosition(); clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
 onMounted(() => {
   if (canvas.value) {
     canvas.value.width = Math.min(1280, props.project.width)
@@ -1382,6 +1425,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
       <div class="tool-group" :inert="editingBusy || undefined">
         <button class="editor-primary" title="导入素材" aria-label="导入素材" @click="importEditorAssets()"><Icon name="import" :size="16" /><span>导入素材</span></button>
         <button title="文字转语音" aria-label="文字转语音" :class="{ 'editor-primary': editorDialog === 'speech' }" @click="openSpeech"><Icon name="audio" :size="16" /><span>配音</span></button>
+        <button title="检查节奏、对齐讲解与平衡声音" aria-label="剪辑优化" aria-haspopup="dialog" data-testid="editing-assist-open" :disabled="!!exportDisabled" @click="openEditorDialog('editing-assist')"><Icon name="sliders" :size="16" /><span>剪辑优化</span></button>
       </div>
       <div class="editor-output-actions">
         <button class="mcp-service-button" :class="{ connected: mcpConnected }" :title="mcpConnected ? 'MCP 服务 · 客户端已连接' : 'MCP 服务 · 暂无客户端连接'" :aria-label="mcpConnected ? 'MCP 服务，客户端已连接' : 'MCP 服务，暂无客户端连接'" aria-haspopup="dialog" data-testid="editor-mcp-open" @click="emit('openMcp')"><Icon name="mcp" :size="18" /></button>
@@ -1413,7 +1457,8 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
         <div class="preview-stage">
           <div class="preview-frame" :style="{ aspectRatio: ratio }">
             <canvas ref="canvas" aria-label="视频合成预览" data-testid="video-preview" />
-            <PreviewSelection ref="previewSelection" :project="activeProject" :clip-id="selectedId" :time="playhead" :disabled="editingBusy || !!exportDisabled || modalOpen || playing || preparingPlayback || !!pendingTrackDelete" @start="startPreviewPosition" @move="movePreviewPosition" @finish="endPreviewPosition" @cancel="clearPreviewPosition" @nudge="nudgePreviewPosition" />
+            <PreviewSelection ref="previewSelection" :project="activeProject" :clip-id="selectedId" :time="playhead" :disabled="editingBusy || !!exportDisabled || modalOpen || playing || preparingPlayback || !!pendingTrackDelete || focusPicking" @start="startPreviewPosition" @move="movePreviewPosition" @finish="endPreviewPosition" @cancel="clearPreviewPosition" @nudge="nudgePreviewPosition" />
+            <PreviewFocusRegion :project="activeProject" :clip-id="selectedId" :time="playhead" :active="focusPicking" :disabled="editingBusy || !!exportDisabled || modalOpen || playing || preparingPlayback" @select="selectFocusRegion" @cancel="focusPicking = false" />
             <div v-if="!duration" class="preview-empty"><Icon name="video" :size="38" /><strong>你的故事，从这里开始</strong><span>将素材放入下方时间线</span></div>
           </div>
         </div>
@@ -1473,7 +1518,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
             <ClipFilterPanel :key="selected.clip.id" :filters="selected.clip.filters" :disabled="selectedLocked" @change="(filters, label) => updateSelected({ filters }, label)" />
           </section>
           </template>
-          <VisualClipTools v-if="runTool && (selected.clip.transition || inspectorTab === 'properties')" :key="`visual-${project.id}-${selected.clip.id}`" :clip="selected.clip" :kind="selectedToolKind" :time="playhead" :run="runTool" :disabled="selectedLocked || editingBusy || !!exportDisabled" @busy="setToolBusy" />
+          <VisualClipTools v-if="runTool && (selected.clip.transition || inspectorTab === 'properties')" :key="`visual-${project.id}-${selected.clip.id}`" :clip="selected.clip" :kind="selectedToolKind" :time="playhead" :focus-region="focusRegion" :picking-focus="focusPicking" :run="runTool" :disabled="selectedLocked || editingBusy || !!exportDisabled" @pick-focus="startFocusPick()" @busy="setToolBusy" />
           <AudioClipTools v-if="runTool && selectedSupportsAudioPlayback && inspectorTab === 'properties'" :key="`audio-${project.id}-${selected.clip.id}`" :clip="selected.clip" :project="project" :native="native" :run="runTool" :disabled="selectedLocked || editingBusy || !!exportDisabled" @busy="setToolBusy" />
           <TranscriptionTools v-if="runTool && ['audio', 'video'].includes(selectedToolKind) && inspectorTab === 'properties'" :key="`transcription-${project.id}-${selected.clip.id}`" :clip-id="selected.clip.id" :native="native" :run="runTool" :disabled="editingBusy || !!exportDisabled" @busy="setToolBusy" />
         </div>
@@ -1553,6 +1598,9 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
     <EditorDialog :open="editorDialog === 'project-tools'" title="项目工具" icon="settings" wide :busy="toolBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><ProjectToolsPanel v-if="runTool && editorDialog === 'project-tools'" :project="project" :time="playhead" :run="runTool" :initial-tab="projectToolTab" @busy="setToolBusy" /></EditorDialog>
     <EditorDialog :open="editorDialog === 'visual-elements'" title="标注与标题" icon="sticker" wide :busy="toolBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><VisualElementsPanel v-if="runTool && editorDialog === 'visual-elements'" :project="project" :time="playhead" :selected-clip-id="selectedId || undefined" :run="runTool" @busy="setToolBusy" /></EditorDialog>
     <EditorDialog :open="editorDialog === 'preview-tools'" title="预览与试听" icon="play" wide :busy="toolBusy" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><PreviewToolsPanel v-if="runTool && editorDialog === 'preview-tools'" :project="project" :time="playhead" :selected-clip-id="selectedId || undefined" :run="runTool" @busy="setToolBusy" /></EditorDialog>
+    <EditorDialog :open="editorDialog === 'editing-assist'" title="剪辑优化" icon="sliders" wide :busy="toolBusy" busy-message="正在处理，请等待完成或取消任务。" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+      <EditingAssistPanel v-if="assistOpened" :key="project.id" :native="native" :project="project" :selected-clip-id="selectedId || undefined" :run-tool="runTool" :disabled="editingBusy || !!exportDisabled" @busy="setToolBusy" @change="applyAssistChange" @seek="locateAssistResult" @status="emit('status', $event)" @focus="startFocusPick" @chapters="openProjectTools('markers')" @titles="openEditorDialog('visual-elements')" />
+    </EditorDialog>
     <EditorDialog :open="editorDialog === 'project'" title="项目设置" icon="settings" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
         <div class="property-content project-settings-content">
           <h3>画面</h3>
