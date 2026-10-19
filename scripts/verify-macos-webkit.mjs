@@ -43,7 +43,10 @@ try {
   subprocess(encoder, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=160x90:r=25:d=4,drawbox=x=80:y=0:w=80:h=90:color=white:t=fill', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-threads', '1', '-movflags', '+faststart', '-y', join(directory, 'contrast.mp4')]);
   await copyFile(join(root, 'public/watermarks/loading-dots.mp4'), join(directory, 'loading-dots.mp4'));
   const png = await readFile(join(directory, 'frame.png'));
-  await writeFile(join(directory, 'fixture.json'), JSON.stringify({ csp, pngSha256: sha(png), pngBytes: png.length }));
+  const decodedFrame = execFileSync(encoder, ['-hide_banner', '-loglevel', 'error', '-ss', '0.25', '-i', join(directory, 'source.mp4'), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { timeout: 15000, maxBuffer: 1024 * 1024 });
+  const decodedSourceRgb = [...decodedFrame.subarray((5 * 160 + 5) * 3, (5 * 160 + 5) * 3 + 3)];
+  if (decodedSourceRgb.length !== 3 || decodedSourceRgb[0] < 120 || decodedSourceRgb[0] <= decodedSourceRgb[1] + 80 || decodedSourceRgb[0] <= decodedSourceRgb[2] + 80) throw new Error('Independent FFmpeg source color reference is invalid.');
+  await writeFile(join(directory, 'fixture.json'), JSON.stringify({ csp, pngSha256: sha(png), pngBytes: png.length, decodedSourceRgb }));
   if (values['prepare-only']) {
     console.log(JSON.stringify({ preparedOnly: true, directory, explanation: 'The fixture bundle was prepared. No system WKWebView verification was performed.' }));
   } else {
@@ -61,6 +64,7 @@ try {
     proof.productionCsp = csp;
     proof.fixturePngSha256 = sha(png);
     proof.fixtureVideoSha256 = sha(await readFile(join(directory, 'source.mp4')));
+    proof.fixtureDecodedSourceRgb = decodedSourceRgb;
     proof.fixtureContrastVideoSha256 = sha(await readFile(join(directory, 'contrast.mp4')));
     proof.verificationBundleSha256 = sha(await readFile(join(directory, 'verification.js')));
     proof.sourceHashes = Object.fromEntries(await Promise.all([

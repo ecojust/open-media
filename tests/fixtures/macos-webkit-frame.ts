@@ -3,7 +3,7 @@ import type { EditorToolContext } from '../../src/core/editor-tool-service'
 
 declare global {
   interface Window {
-    __verification: { pngSha256: string; pngBytes: number }
+    __verification: { pngSha256: string; pngBytes: number; decodedSourceRgb: number[] }
     __captureRealtimeCanvas: (rect: { x: number; y: number; width: number; height: number }) => Promise<{ pngBase64: string }>
     webkit: { messageHandlers: { proof: { postMessage: (value: unknown) => void } } }
   }
@@ -129,7 +129,8 @@ async function verifyRealtimeComposition() {
     preview.seek(target, true)
   }
   const samples: { label: string; time: number; sourceTime: number; motionHash: number; watermarkTime?: number; watermarkHash?: number }[] = []
-  let filteredSource = false, keyedWatermark = false
+  type SampleExpectation = Readonly<{ filteredSource: boolean; keyedWatermark: boolean }>
+  const basicExpectation: SampleExpectation = Object.freeze({ filteredSource: false, keyedWatermark: false })
   let canvasReadbackAllowed = true
   let sourceReference: number[] | undefined
   const snapshotCanvas = document.createElement('canvas'); snapshotCanvas.width = canvas.width; snapshotCanvas.height = canvas.height
@@ -155,7 +156,8 @@ async function verifyRealtimeComposition() {
     return clean.getImageData(0, 0, target.width, target.height)
   }
   const near = (actual: number[], expected: number[], label: string, tolerance = 9) => assert(actual.slice(0, 3).every((value, index) => Math.abs(value - expected[index]!) <= tolerance), `${label}: actual=${actual}, expected=${expected}`)
-  const sample = async (label: string, time: number) => {
+  const sample = async (label: string, time: number, expected: SampleExpectation) => {
+    const { filteredSource, keyedWatermark } = expected
     const media = videos.filter(video => video.getAttribute('src')).map(video => ({ source: video.currentSrc || video.src, currentTime: video.currentTime, paused: video.paused, seeking: video.seeking, readyState: video.readyState, width: video.videoWidth }))
     if (!sourceReference) {
       const sourceVideo = videos.find(video => (video.currentSrc || video.src).includes('/source.mp4') && !video.paused && video.readyState >= 2)
@@ -180,11 +182,26 @@ async function verifyRealtimeComposition() {
     // The upper source band is a fixed encoded color; the lower band has real motion.
     // Expectations are independent of the renderer's keyframe/transition helpers.
     const visibility = time >= 2.5 && time < 3.5 ? Math.min(1, Math.abs(time - 3) * 2) : 1
-    const gray = sourceReference.reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index]!, 0)
-    const background = [16, 32, 48], original = filteredSource ? [gray, gray, gray] : sourceReference
+    const videoPixel = pixel(10, 10)
+    let original = sourceReference
+    let filterDecodeReference: Record<string, unknown> | undefined
+    if (filteredSource) {
+      const references = [
+        { path: 'independent Canvas2D video decode', rgb: sourceReference },
+        { path: 'independent FFmpeg RGB decode', rgb: window.__verification.decodedSourceRgb },
+      ].map(reference => ({ ...reference, gray: reference.rgb.reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index]!, 0) }))
+      const matched = references.reduce((closest, reference) => Math.abs(reference.gray - videoPixel[0]!) < Math.abs(closest.gray - videoPixel[0]!) ? reference : closest)
+      filterDecodeReference = { references, matchedPath: matched.path, note: 'System video textures and Canvas2D can use different RGB conversion paths; only these independently measured grayscale results are accepted.' }
+      emit('realtime-filter-decode-reference', { label, ...filterDecodeReference, actual: videoPixel })
+      assert(Math.max(...videoPixel.slice(0, 3)) - Math.min(...videoPixel.slice(0, 3)) <= 2, `${label}: saturation=0 must remove source color`)
+      assert(Math.abs(videoPixel[0]! - matched.gray) <= 3, `${label}: gray level is outside both independently decoded references`)
+      assert(Math.abs(videoPixel[0]! - sourceReference[0]!) > 60, `${label}: filtered video must differ from the colored source`)
+      original = [matched.gray, matched.gray, matched.gray]
+    }
+    const background = [16, 32, 48]
     const underlying = original.map((value, index) => value * visibility + background[index]! * (1 - visibility))
     const x = 80 + Math.min(time, 2) * 50, opacity = 1 - Math.min(time, 2) * .25
-    const videoPixel = pixel(10, 10), textPixel = pixel(x + 4, 24), imagePixel = pixel(270, 24)
+    const textPixel = pixel(x + 4, 24), imagePixel = pixel(270, 24)
     const expectedText = underlying.map((value, index) => value * (1 - opacity) + [0, 255, 0][index]! * opacity)
     const expectedImage = underlying.map((value, index) => value * .5 + [255, 0, 0][index]! * .5)
     let glyphPixels = 0
@@ -204,11 +221,12 @@ async function verifyRealtimeComposition() {
     }
     const active = media.find(video => video.source.includes('/source.mp4') && !video.paused && video.readyState >= 2 && video.width > 0)
     const activeWatermark = media.find(video => video.source.includes('/loading-dots.mp4') && !video.paused && video.readyState >= 2 && video.width > 0)
-    emit('realtime-sample', { label, time, pixelReadback: canvasReadbackAllowed ? 'canvas' : 'WKWebView.takeSnapshot', readbackMilliseconds, videoPixel, expectedVideo: underlying, textPixel, expectedText, imagePixel, expectedImage, glyphPixels, motionHash, filteredSource, keyedWatermark, greenPixels, darkForegroundPixels, colorfulForegroundPixels, watermarkHash, media })
+    emit('realtime-sample', { label, time, pixelReadback: canvasReadbackAllowed ? 'canvas' : 'WKWebView.takeSnapshot', readbackMilliseconds, videoPixel, expectedVideo: underlying, textPixel, expectedText, imagePixel, expectedImage, glyphPixels, motionHash, filteredSource, keyedWatermark, filterDecodeReference, greenPixels, darkForegroundPixels, colorfulForegroundPixels, watermarkHash, media })
     assert(errors.length === 0, `Realtime renderer reported errors: ${errors.join('; ')}`)
     near(videoPixel, underlying, `${label}: video and transition`)
     near(textPixel, expectedText, `${label}: moving text background and opacity`)
     near(imagePixel, expectedImage, `${label}: image watermark alpha`)
+    assert([videoPixel, textPixel, imagePixel].every(rgba => rgba[3] === 255), `${label}: composed video, text and watermark must retain opaque canvas alpha`)
     assert(glyphPixels >= 8, `${label}: actual text glyphs are absent (${glyphPixels} pixels)`)
     if (keyedWatermark) {
       near(pixel(14, 14), underlying, `${label}: green background must reveal the source video`)
@@ -219,7 +237,8 @@ async function verifyRealtimeComposition() {
     assert(active && Math.abs(active.currentTime - time) < .4, `${label}: decoded video did not follow the live timeline`)
     samples.push({ label, time, sourceTime: active!.currentTime, motionHash, ...(keyedWatermark ? { watermarkTime: activeWatermark!.currentTime, watermarkHash } : {}) })
   }
-  const playThrough = (start: number, checkpoints: { label: string; time: number; maxLateness?: number }[], capture = sample) => {
+  const captureBasic = (label: string, time: number) => sample(label, time, basicExpectation)
+  const playThrough = (start: number, checkpoints: { label: string; time: number; maxLateness?: number }[], capture = captureBasic) => {
     const generation = ++segmentGeneration
     return bounded(new Promise<void>((resolve, reject) => {
       const started = performance.now()
@@ -282,9 +301,9 @@ async function verifyRealtimeComposition() {
     const { DEFAULT_CLIP_FILTERS } = await import('../../src/core/clip-filters')
     for (const effect of ['color-filter', 'chroma-watermark'] as const) {
       errors.length = 0
-      filteredSource = effect === 'color-filter'; keyedWatermark = effect === 'chroma-watermark'
+      const expected: SampleExpectation = Object.freeze({ filteredSource: effect === 'color-filter', keyedWatermark: effect === 'chroma-watermark' })
       const effectProject = structuredClone(project)
-      if (filteredSource) {
+      if (expected.filteredSource) {
         for (const track of effectProject.tracks) for (const clip of track.clips) {
           if (clip.assetId === source.id) clip.filters = { ...DEFAULT_CLIP_FILTERS, saturation: 0 }
         }
@@ -298,8 +317,8 @@ async function verifyRealtimeComposition() {
       try {
         preview.setProject(effectProject)
         await bounded(preview.playReady(.2, abort.signal), 18000, `${effect} video startup`)
-        await playThrough(.2, [{ label: effect, time: .7 }, ...(keyedWatermark ? [{ label: 'chroma-watermark-motion', time: 1.4 }] : [])])
-        if (keyedWatermark) {
+        await playThrough(.2, [{ label: effect, time: .7 }, ...(expected.keyedWatermark ? [{ label: 'chroma-watermark-motion', time: 1.4 }] : [])], (label, time) => sample(label, time, expected))
+        if (expected.keyedWatermark) {
           const before = samples.at(-2)!, after = samples.at(-1)!
           assert(after.watermarkTime! - before.watermarkTime! > .5, 'The actual video watermark clock remained frozen')
           assert(after.watermarkHash !== before.watermarkHash, 'The keyed video watermark pixels remained frozen')

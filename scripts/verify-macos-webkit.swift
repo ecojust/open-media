@@ -75,7 +75,7 @@ final class Harness: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         configuration.userContentController.add(self, name: "proof")
         configuration.userContentController.add(self, name: "fixtureIPC")
         configuration.userContentController.add(self, name: "realtimeSnapshot")
-        let parameters = try json(["pngSha256": fixture["pngSha256"]!, "pngBytes": fixture["pngBytes"]!])
+        let parameters = try json(["pngSha256": fixture["pngSha256"]!, "pngBytes": fixture["pngBytes"]!, "decodedSourceRgb": fixture["decodedSourceRgb"]!])
         let bootstrap = """
         window.__verification = \(parameters);
         (() => {
