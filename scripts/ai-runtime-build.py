@@ -200,4 +200,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        detail = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1?[redacted]", str(error))
+        detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=AI runtime::{detail}", flush=True)
+        raise

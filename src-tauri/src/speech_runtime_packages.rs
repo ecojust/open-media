@@ -597,7 +597,17 @@ pub(crate) fn install(
     root: &Path,
     runtime: &SelectedRuntime,
     cancelled: &AtomicBool,
+    download: impl FnMut(&ModelFile, &Path, u64) -> Result<()>,
+) -> Result<Vec<FileStamp>> {
+    install_with_probe(root, runtime, cancelled, download, self_test)
+}
+
+fn install_with_probe(
+    root: &Path,
+    runtime: &SelectedRuntime,
+    cancelled: &AtomicBool,
     mut download: impl FnMut(&ModelFile, &Path, u64) -> Result<()>,
+    mut probe: impl FnMut(&Path, &SelectedRuntime, &AtomicBool) -> Result<()>,
 ) -> Result<Vec<FileStamp>> {
     let installed = path(root, runtime);
     if let Ok(stamps) = verify(&installed, runtime, cancelled) {
@@ -619,7 +629,7 @@ pub(crate) fn install(
         download_archive(&runtime.archive, &archive_path, cancelled, &mut download)?;
         extract(&archive_path, staging.path(), runtime, cancelled)?;
         verify(staging.path(), runtime, cancelled)?;
-        self_test(staging.path(), runtime, cancelled)?;
+        probe(staging.path(), runtime, cancelled)?;
         check_cancelled(cancelled)?;
         remove_package(&installed)?;
         fs::rename(staging.path(), &installed).map_err(|e| format!("无法安装语音运行环境：{e}"))?;
@@ -644,6 +654,29 @@ pub(crate) fn install_with_download(
             .collect();
         download(&file.path, &urls, file.size, &file.sha256, destination, offset)
     })
+}
+
+/// A process-owning application service may register and reap its validation
+/// process through this hook, including during synchronous application exit.
+pub(crate) fn install_with_download_and_probe(
+    root: &Path,
+    runtime: &SelectedRuntime,
+    cancelled: &AtomicBool,
+    mut download: impl FnMut(&str, &[String], u64, &str, &Path, u64) -> Result<()>,
+    probe: impl FnMut(&Path, &SelectedRuntime, &AtomicBool) -> Result<()>,
+) -> Result<Vec<FileStamp>> {
+    install_with_probe(
+        root,
+        runtime,
+        cancelled,
+        |file, destination, offset| {
+            let urls: Vec<String> = std::iter::once(file.url.clone())
+                .chain(file.mirrors.iter().cloned())
+                .collect();
+            download(&file.path, &urls, file.size, &file.sha256, destination, offset)
+        },
+        probe,
+    )
 }
 
 /// Only reuse stamps obtained from a successful verification in this process.

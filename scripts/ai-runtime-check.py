@@ -37,7 +37,7 @@ def main() -> None:
     from acestep.inference import generate_music
     from acestep.models.common.configuration_acestep_v15 import AceStepConfig
     from acestep.models.turbo.modeling_acestep_v15_turbo import AceStepConditionGenerationModel as TurboModel
-    from acestep.models.sft.modeling_acestep_v15_sft import AceStepConditionGenerationModel as StandardModel
+    from acestep.models.sft.modeling_acestep_v15_base import AceStepConditionGenerationModel as StandardModel
     from PIL import Image
 
     assert torch.__version__.split("+")[0] == "2.9.1"
