@@ -12,6 +12,7 @@ on:
       - 'src/core/visual-animation.ts'
       - 'src/core/transitions.ts'
       - 'src/core/filter-renderer.ts'
+      - 'src/core/canvas-blur.ts'
       - 'src/core/clip-filters.ts'
       - 'src/core/chroma-key.ts'
       - 'src/core/timeline.ts'
@@ -71,7 +72,7 @@ jobs:
             console.log('No composition proof was produced; inspect the preceding failed step.');
           } else {
             const proof = JSON.parse(readFileSync(path, 'utf8'));
-            const fields = ['passed', 'engine', 'operatingSystem', 'arch', 'commit', 'realtimeCompositionVerified', 'nativeFrameArtifactVerified', 'nativeCompositionVerified', 'realtimeIpcCalls', 'realtimeAssetRequests', 'realtimeSnapshotReads', 'error', 'realtimeError', 'harnessError', 'events', 'nativeStages'];
+            const fields = ['passed', 'engine', 'operatingSystem', 'arch', 'commit', 'realtimeCompositionVerified', 'realtimeBlurVerified', 'nativeFrameArtifactVerified', 'nativeCompositionVerified', 'realtimeIpcCalls', 'realtimeAssetRequests', 'realtimeSnapshotReads', 'error', 'realtimeError', 'harnessError', 'events', 'nativeStages'];
             console.log(JSON.stringify(Object.fromEntries(fields.filter(key => key in proof).map(key => [key, proof[key]])), null, 2));
           }
           NODE

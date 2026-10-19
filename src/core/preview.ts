@@ -2,6 +2,7 @@ import type { Clip, MediaAsset, Project, Track } from './types.ts'
 import { isClipFilterIdentity } from './clip-filters.ts'
 import { isChromaKeyEnabled } from './chroma-key.ts'
 import { ClipFilterRenderer } from './filter-renderer.ts'
+import { CanvasBlurRenderer } from './canvas-blur.ts'
 import { audioSourceDistance, audioSourceTime } from './audio-loop.ts'
 import { animatedClipAt, drawClipOverlay, playbackSpeedAt } from './visual-animation.ts'
 import { transitionBlindRects, transitionVisualAt } from './transitions.ts'
@@ -147,8 +148,8 @@ export class TimelinePreview {
   private preloadAll = false
   private filterRenderer?: ClipFilterRenderer
   private blurCanvas?: HTMLCanvasElement
+  private blurRenderer?: CanvasBlurRenderer
   private transitionCanvas?: HTMLCanvasElement
-  private transitionBlurCanvas?: HTMLCanvasElement
   private context: CanvasRenderingContext2D
   private audioContext?: AudioContext
   private destination?: MediaStreamAudioDestinationNode
@@ -532,8 +533,8 @@ export class TimelinePreview {
       // transform and clipping region constrain only where the blur is painted.
       const scaleX = this.canvas.width / this.project.width, scaleY = this.canvas.height / this.project.height
       ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0)
-      ctx.filter = `blur(${clip.overlay.blurRadius * Math.max(scaleX, scaleY)}px)`
-      ctx.drawImage(snapshot, 0, 0, snapshot.width, snapshot.height, 0, 0, this.project.width, this.project.height)
+      const blurred = (this.blurRenderer ??= new CanvasBlurRenderer()).render(snapshot, clip.overlay.blurRadius * Math.max(scaleX, scaleY))
+      ctx.drawImage(blurred, 0, 0, blurred.width, blurred.height, 0, 0, this.project.width, this.project.height)
     } else if (track.kind === 'text' || clip.text !== undefined) {
       drawTextClip(ctx, clip)
     } else if (track.kind !== 'audio') {
@@ -565,18 +566,19 @@ export class TimelinePreview {
         const rect = fitRect(width * crop.width, height * crop.height, clip.width, clip.height, clip.fit)
         rect[0] += width * crop.x; rect[1] += height * crop.y
         if (transition && ((transition.blur && transition.blurStrength) || (transition.color && ['fade', 'flash-white'].includes(transition.effect)))) {
-          const layer = this.transitionCanvas ??= document.createElement('canvas'), blurred = this.transitionBlurCanvas ??= document.createElement('canvas')
+          const layer = this.transitionCanvas ??= document.createElement('canvas')
           const canvasScale = Math.max(this.canvas.width / this.project.width, this.canvas.height / this.project.height) * Math.max(animated.width / clip.width, animated.height / clip.height)
           const factor = Math.min(1, canvasScale, 2048 / Math.max(clip.width, clip.height)), w = Math.max(1, Math.ceil(clip.width * factor)), h = Math.max(1, Math.ceil(clip.height * factor))
-          if (layer.width !== w || layer.height !== h) { layer.width = blurred.width = w; layer.height = blurred.height = h }
-          const original = layer.getContext('2d')!, softened = blurred.getContext('2d')!
+          if (layer.width !== w || layer.height !== h) { layer.width = w; layer.height = h }
+          const original = layer.getContext('2d')!
           original.setTransform(1, 0, 0, 1, 0, 0); original.clearRect(0, 0, w, h); original.save(); original.scale(factor, factor)
           if (transition.color && ['fade', 'flash-white'].includes(transition.effect)) { original.fillStyle = transition.color; original.fillRect(0, 0, clip.width, clip.height); original.globalAlpha = transition.opacity }
           original.drawImage(source, ...rect); original.restore()
           if (transition.blur && transition.blurStrength) {
-            softened.clearRect(0, 0, w, h); softened.save(); softened.filter = `blur(${transition.blur * factor}px)`; softened.drawImage(layer, 0, 0); softened.restore()
-            // Compose two complete RGBA layers before applying clip opacity.
-            original.save(); original.globalAlpha = transition.blurStrength; original.drawImage(blurred, 0, 0); original.restore()
+            const blurred = (this.blurRenderer ??= new CanvasBlurRenderer()).render(layer, transition.blur * factor)
+            // Interpolate premultiplied RGBA before applying clip opacity once.
+            original.save(); original.globalCompositeOperation = 'destination-in'; original.globalAlpha = 1 - transition.blurStrength; original.fillStyle = '#fff'; original.fillRect(0, 0, w, h)
+            original.globalCompositeOperation = 'lighter'; original.globalAlpha = transition.blurStrength; original.drawImage(blurred, 0, 0, blurred.width, blurred.height, 0, 0, w, h); original.restore()
           }
           ctx.drawImage(layer, 0, 0, w, h, 0, 0, clip.width, clip.height)
         } else ctx.drawImage(source, ...rect)
@@ -607,8 +609,10 @@ export class TimelinePreview {
     this.entries.clear()
     this.filterRenderer?.dispose()
     this.filterRenderer = undefined
-    for (const layer of [this.transitionCanvas, this.transitionBlurCanvas]) if (layer) layer.width = layer.height = 1
-    this.transitionCanvas = this.transitionBlurCanvas = undefined
+    this.blurRenderer?.dispose()
+    this.blurRenderer = undefined
+    if (this.transitionCanvas) this.transitionCanvas.width = this.transitionCanvas.height = 1
+    this.transitionCanvas = undefined
     if (this.blurCanvas) { this.blurCanvas.width = this.blurCanvas.height = 1; this.blurCanvas = undefined }
     void this.audioContext?.close().catch(() => {})
   }

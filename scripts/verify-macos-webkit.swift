@@ -11,7 +11,7 @@ final class FixtureScheme: NSObject, WKURLSchemeHandler {
     init(directory: URL, csp: String) { self.directory = directory; self.csp = csp; super.init() }
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url else { return }
-        let allowed = url.scheme == "asset" ? ["/source.mp4", "/frame.png", "/loading-dots.mp4"] : ["/index.html", "/verification.js"]
+        let allowed = url.scheme == "asset" ? ["/source.mp4", "/contrast.mp4", "/frame.png", "/loading-dots.mp4"] : ["/index.html", "/verification.js"]
         guard url.host == "localhost", allowed.contains(url.path) else {
             urlSchemeTask.didFailWithError(NSError(domain: "OpenMediaWebKitProof", code: 404, userInfo: [NSLocalizedDescriptionKey: "Unexpected fixture URL: \(url)"]))
             return

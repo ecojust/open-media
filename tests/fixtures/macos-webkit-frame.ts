@@ -11,6 +11,7 @@ declare global {
 
 const events: Record<string, unknown>[] = []
 let realtimeCompositionVerified = false
+let realtimeBlurVerified = false
 let nativeFrameArtifactVerified = false
 const emit = (stage: string, data: Record<string, unknown> = {}) => {
   const event = { stage, at: Date.now(), ...data }; events.push(event)
@@ -122,6 +123,11 @@ async function verifyRealtimeComposition() {
   const preview = new TimelinePreview(canvas, project, message => { errors.push(message); emit('realtime-render-error', { message }) })
   const abort = new AbortController()
   let frame = 0, segmentGeneration = 0
+  let pendingSeek: { label: string; target: number; started: number } | undefined
+  const seekPlaying = (label: string, target: number) => {
+    pendingSeek = { label, target, started: performance.now() }
+    preview.seek(target, true)
+  }
   const samples: { label: string; time: number; sourceTime: number; motionHash: number; watermarkTime?: number; watermarkHash?: number }[] = []
   let filteredSource = false, keyedWatermark = false
   let canvasReadbackAllowed = true
@@ -213,7 +219,7 @@ async function verifyRealtimeComposition() {
     assert(active && Math.abs(active.currentTime - time) < .4, `${label}: decoded video did not follow the live timeline`)
     samples.push({ label, time, sourceTime: active!.currentTime, motionHash, ...(keyedWatermark ? { watermarkTime: activeWatermark!.currentTime, watermarkHash } : {}) })
   }
-  const playThrough = (start: number, checkpoints: { label: string; time: number }[]) => {
+  const playThrough = (start: number, checkpoints: { label: string; time: number; maxLateness?: number }[], capture = sample) => {
     const generation = ++segmentGeneration
     return bounded(new Promise<void>((resolve, reject) => {
       const started = performance.now()
@@ -224,10 +230,18 @@ async function verifyRealtimeComposition() {
           abort.signal.throwIfAborted()
           const time = start + (performance.now() - started) / 1000
           preview.render(time, true)
+          if (pendingSeek) {
+            const recovered = videos.find(video => (video.currentSrc || video.src).includes('/source.mp4') && !video.paused && !video.seeking && video.readyState >= 2 && Math.abs(video.currentTime - time) < .4)
+            if (recovered) {
+              emit('realtime-seek-recovered', { label: pendingSeek.label, target: pendingSeek.target, recoveryMilliseconds: performance.now() - pendingSeek.started, time, sourceTime: recovered.currentTime })
+              pendingSeek = undefined
+            }
+          }
           const checkpoint = checkpoints[index]!
-          if (time >= checkpoint.time) {
-            assert(time - checkpoint.time < .2, `${checkpoint.label}: RAF missed the sampling window`)
-            await sample(checkpoint.label, time)
+          if (time >= checkpoint.time && !pendingSeek) {
+            emit('realtime-checkpoint-timing', { label: checkpoint.label, requestedTime: checkpoint.time, time, delayMilliseconds: (time - checkpoint.time) * 1000 })
+            if (checkpoint.maxLateness !== undefined) assert(time - checkpoint.time < checkpoint.maxLateness, `${checkpoint.label}: RAF missed the transition sampling window`)
+            await capture(checkpoint.label, time)
             if (generation !== segmentGeneration) return
             abort.signal.throwIfAborted()
             index++
@@ -248,18 +262,18 @@ async function verifyRealtimeComposition() {
     await bounded(preview.playReady(0, abort.signal), 18000, 'realtime video startup')
     await playThrough(0, [
       { label: 'initial-composite', time: .25 }, { label: 'moved-text', time: 1.5 },
-      { label: 'fade-out', time: 2.75 }, { label: 'fade-in', time: 3.25 },
+      { label: 'fade-out', time: 2.75, maxLateness: .2 }, { label: 'fade-in', time: 3.25, maxLateness: .2 },
       { label: 'after-cut', time: 3.8 },
     ])
     assert(samples[1]!.sourceTime - samples[0]!.sourceTime > 1, 'Video playback time did not advance independently of RAF')
     assert(samples[0]!.motionHash !== samples[1]!.motionHash, 'The actual video motion region remained frozen')
     // An explicit playing seek uses the same synchronous path as VideoEditor.seek.
-    preview.seek(4.5, true)
+    seekPlaying('forward-seek', 4.5)
     await playThrough(4.5, [{ label: 'forward-seek', time: 4.95 }])
-    preview.seek(.2, true)
-    await playThrough(.2, [{ label: 'backward-seek', time: .7 }])
-    preview.seek(2.5, true)
-    await playThrough(2.5, [{ label: 'transition-after-seek', time: 2.75 }])
+    seekPlaying('backward-seek', .2)
+    await playThrough(.2, [{ label: 'backward-seek', time: 1.7 }])
+    seekPlaying('transition-after-seek', 2.5)
+    await playThrough(2.5, [{ label: 'transition-after-seek', time: 2.75, maxLateness: .2 }])
     emit('realtime-basic-complete', { success: true, sampleCount: samples.length })
     // Both use actual asset:// video, exercising WebGL texture upload and CPU
     // readback. Snapshot fallback validates the visible result only; renderer
@@ -297,6 +311,84 @@ async function verifyRealtimeComposition() {
         emit('realtime-effect-failed', { effect, error, rendererErrors: [...errors] })
       }
     }
+    const detail = { id: 'blur-detail', name: 'contrast.mp4', kind: 'video' as const, nativePath: '/fixture/contrast.mp4', url: 'asset://localhost/contrast.mp4?realtime=1', duration: 4, width: 160, height: 90, size: 4096, mime: 'video/mp4' }
+    const sharp = createProject('WebKit real blur pixels', { width: 320, height: 180, fps: 25, background: '#102030' })
+    sharp.assets = [detail]
+    const sharpTrack = sharp.tracks.find(track => track.kind === 'video')!
+    sharpTrack.clips = [createClip(detail, sharp, { id: 'detail-whole', trimOut: 4, volume: 0 })]
+    const localBlur = structuredClone(sharp)
+    localBlur.tracks.find(track => track.kind === 'text')!.clips = [createTextClip(localBlur, {
+      id: 'local-blur', textRole: 'watermark', text: '', trimOut: 4, x: 120, y: 40, width: 80, height: 100,
+      overlay: { kind: 'blur', color: '#ffffff', strokeWidth: 1, blurRadius: 12 },
+    })]
+    const splitDetail = structuredClone(sharp)
+    splitDetail.tracks.find(track => track.id === sharpTrack.id)!.clips = [
+      createClip(detail, sharp, { id: 'detail-before', trimOut: 2, volume: 0 }),
+      createClip(detail, sharp, { id: 'detail-after', start: 2, trimIn: 2, trimOut: 4, volume: 0 }),
+    ]
+    const blurPoints = { insideLeft: [156, 90], insideRight: [164, 90], aboveLeft: [156, 20], aboveRight: [164, 20], belowLeft: [156, 160], belowRight: [164, 160], farLeft: [20, 90], farRight: [300, 90], upperLeft: [156, 45], upperRight: [164, 45], lowerLeft: [156, 135], lowerRight: [164, 135] } as const
+    type BlurPixels = Record<keyof typeof blurPoints, number[]>
+    let sharpPixels: BlurPixels | undefined
+    let fadeNormalized: BlurPixels | undefined
+    let blurFailures = 0
+    const captureBlur = async (label: string, time: number) => {
+      const active = videos.find(video => (video.currentSrc || video.src).includes('/contrast.mp4') && !video.paused && video.readyState >= 2)
+      const mediaTime = active?.currentTime
+      const pixels = await readPixels()
+      const points = Object.fromEntries(Object.entries(blurPoints).map(([name, [x, y]]) => {
+        const offset = (y * canvas.width + x) * 4
+        return [name, [...pixels.data.slice(offset, offset + 4)]]
+      })) as BlurPixels
+      const visibility = label === 'blur-fade-reference' || label === 'blur-defocus' ? Math.abs(time - 2) * 2 : 1
+      // Undo the transition's independently calculated source-over opacity so
+      // small RAF timing differences cannot masquerade as a change in blur.
+      const normalized = Object.fromEntries(Object.entries(points).map(([name, rgba]) => [name, rgba.slice(0, 3).map((value, channel) => (value - [16, 32, 48][channel]! * (1 - visibility)) / visibility)])) as BlurPixels
+      emit('realtime-blur-sample', { label, time, mediaTime, visibility, points, normalized, pixelReadback: canvasReadbackAllowed ? 'canvas' : 'WKWebView.takeSnapshot', rendererErrors: [...errors] })
+      assert(errors.length === 0, `${label}: renderer errors: ${errors.join('; ')}`)
+      assert(active && mediaTime !== undefined && Math.abs(mediaTime - time) < .4, `${label}: contrast video is not playing at the requested time`)
+      if (label === 'blur-sharp-reference') {
+        assert(points.insideLeft[3] === 255 && points.insideRight[3] === 255 && points.insideLeft[0]! < 40 && points.insideRight[0]! > 210, 'Real contrast video must have an opaque, sharp black/white edge')
+        sharpPixels = points
+        return
+      }
+      assert(sharpPixels, `${label}: sharp source reference is missing`)
+      if (label === 'blur-local-mask') {
+        assert(points.insideLeft[0]! > sharpPixels!.insideLeft[0]! + 30 && points.insideRight[0]! < sharpPixels!.insideRight[0]! - 30, 'Local blur must soften both sides of the actual video edge')
+        for (const point of ['aboveLeft', 'aboveRight', 'belowLeft', 'belowRight', 'farLeft', 'farRight'] as const) near(points[point], sharpPixels![point], `Local blur must leave ${point} outside the mask unchanged`, 4)
+      } else {
+        assert(visibility > .1 && visibility < .9, `${label}: transition sample must have meaningful visible opacity`)
+        const edgePoints = ['insideLeft', 'insideRight', 'upperLeft', 'upperRight', 'lowerLeft', 'lowerRight'] as const
+        if (label === 'blur-fade-reference') {
+          for (const point of edgePoints) near(normalized[point], sharpPixels![point], `Fade must retain a sharp edge at ${point}`)
+          fadeNormalized = normalized
+        } else {
+          assert(fadeNormalized, 'Defocus requires an independently rendered fade reference')
+          for (const [left, right] of [['insideLeft', 'insideRight'], ['upperLeft', 'upperRight'], ['lowerLeft', 'lowerRight']] as const) {
+            assert(normalized[left][0]! > fadeNormalized![left][0]! + 25 && normalized[right][0]! < fadeNormalized![right][0]! - 25, `Defocus must soften the actual video edge at ${left}/${right}, beyond opacity changes`)
+          }
+        }
+      }
+    }
+    for (const phase of [
+      { label: 'blur-sharp-reference', project: sharp, start: .2, time: .7 },
+      { label: 'blur-local-mask', project: localBlur, start: .2, time: .7 },
+      { label: 'blur-fade-reference', project: addTransition(splitDetail, 2, 'fade', 1, sharpTrack.id), start: 1.3, time: 1.75 },
+      { label: 'blur-defocus', project: addTransition(splitDetail, 2, 'defocus', 1, sharpTrack.id), start: 1.3, time: 1.75 },
+    ]) {
+      errors.length = 0
+      try {
+        preview.setProject(phase.project)
+        await bounded(preview.playReady(phase.start, abort.signal), 18000, `${phase.label} video startup`)
+        await playThrough(phase.start, [{ label: phase.label, time: phase.time, ...(phase.start === 1.3 ? { maxLateness: .2 } : {}) }], captureBlur)
+        emit('realtime-effect-complete', { effect: phase.label, success: true })
+      } catch (cause) {
+        blurFailures++
+        const error = errorData(cause)
+        effectFailures.push(`${phase.label}: ${error.message}`)
+        emit('realtime-effect-failed', { effect: phase.label, error, rendererErrors: [...errors] })
+      }
+    }
+    realtimeBlurVerified = blurFailures === 0
     assert(effectFailures.length === 0, effectFailures.join('; '))
     realtimeCompositionVerified = true
     emit('realtime-complete', { success: true, sampleCount: samples.length, errors, lazyLoading: true, canvasReadbackAllowed })
@@ -352,9 +444,9 @@ async function run() {
   assert(stored.metadata.sha256 === frame.sha256, 'Stored SHA-256 changed')
   emit('cache-read-complete', { chunks, bytes: offset })
   nativeFrameArtifactVerified = true
-  return { passed: realtimeCompositionVerified, realtimeCompositionVerified, nativeFrameArtifactVerified, realtimeError, evidence: 'Real asset video, animated text, image watermark, transition, playing seeks, color filter and chroma-key video watermark are composited by TimelinePreview in system WKWebView. Restricted canvas readback uses visible WKWebView snapshots. The separate native frame artifact path uses fixture PNG IPC; native FFmpeg composition is not verified.', events }
+  return { passed: realtimeCompositionVerified, realtimeCompositionVerified, realtimeBlurVerified, nativeFrameArtifactVerified, realtimeError, evidence: 'Real asset video, animated text, image watermark, transition, playing seeks, color filter, chroma-key video watermark, masked local blur and defocus are composited by TimelinePreview in system WKWebView. Restricted canvas readback uses visible WKWebView snapshots. The separate native frame artifact path uses fixture PNG IPC; native FFmpeg composition is not verified.', events }
 }
 
 void run().then(result => window.webkit.messageHandlers.proof.postMessage({ type: 'result', ...result }), cause => {
-  window.webkit.messageHandlers.proof.postMessage({ type: 'result', passed: false, realtimeCompositionVerified, nativeFrameArtifactVerified, error: errorData(cause), events })
+  window.webkit.messageHandlers.proof.postMessage({ type: 'result', passed: false, realtimeCompositionVerified, realtimeBlurVerified, nativeFrameArtifactVerified, error: errorData(cause), events })
 })

@@ -40,6 +40,7 @@ try {
   const encoder = process.env.OPEN_MEDIA_FFMPEG || 'ffmpeg';
   subprocess(encoder, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=160x90:r=25', '-frames:v', '1', '-threads', '1', '-y', join(directory, 'frame.png')]);
   subprocess(encoder, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=160x90:r=25:d=6,drawbox=x=0:y=0:w=160:h=50:color=0xc82828:t=fill', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-threads', '1', '-movflags', '+faststart', '-y', join(directory, 'source.mp4')]);
+  subprocess(encoder, ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=160x90:r=25:d=4,drawbox=x=80:y=0:w=80:h=90:color=white:t=fill', '-an', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-threads', '1', '-movflags', '+faststart', '-y', join(directory, 'contrast.mp4')]);
   await copyFile(join(root, 'public/watermarks/loading-dots.mp4'), join(directory, 'loading-dots.mp4'));
   const png = await readFile(join(directory, 'frame.png'));
   await writeFile(join(directory, 'fixture.json'), JSON.stringify({ csp, pngSha256: sha(png), pngBytes: png.length }));
@@ -60,18 +61,19 @@ try {
     proof.productionCsp = csp;
     proof.fixturePngSha256 = sha(png);
     proof.fixtureVideoSha256 = sha(await readFile(join(directory, 'source.mp4')));
+    proof.fixtureContrastVideoSha256 = sha(await readFile(join(directory, 'contrast.mp4')));
     proof.verificationBundleSha256 = sha(await readFile(join(directory, 'verification.js')));
     proof.sourceHashes = Object.fromEntries(await Promise.all([
       'tests/fixtures/macos-webkit-frame.ts', 'scripts/verify-macos-webkit.swift', 'scripts/verify-macos-webkit.mjs',
       'src/core/editor-preview-tools.ts', 'src/native-preview-tools.ts', 'src/core/tool-artifacts.ts', 'src-tauri/tauri.conf.json',
-      'src/core/preview.ts', 'src/core/visual-animation.ts', 'src/core/transitions.ts', 'src/core/filter-renderer.ts', 'src/core/project.ts',
+      'src/core/preview.ts', 'src/core/visual-animation.ts', 'src/core/transitions.ts', 'src/core/filter-renderer.ts', 'src/core/canvas-blur.ts', 'src/core/project.ts',
       'public/watermarks/loading-dots.mp4',
     ].map(async path => [path, sha(await readFile(join(root, path)))])));
     await writeFile(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
     if (executionError) throw executionError;
-    if (proof.passed !== true || proof.engine !== 'System WKWebView' || proof.realtimeCompositionVerified !== true || proof.realtimeIpcCalls !== 0 || proof.nativeFrameArtifactVerified !== true || proof.fixtureIPC !== true || proof.nativeCompositionVerified !== false) throw new Error('System WebKit verification did not provide valid, separate realtime composition and native artifact proof.');
+    if (proof.passed !== true || proof.engine !== 'System WKWebView' || proof.realtimeCompositionVerified !== true || proof.realtimeBlurVerified !== true || proof.realtimeIpcCalls !== 0 || proof.nativeFrameArtifactVerified !== true || proof.fixtureIPC !== true || proof.nativeCompositionVerified !== false) throw new Error('System WebKit verification did not provide valid, separate realtime composition and native artifact proof.');
     verified = true;
-    console.log(`PASS Actual ${process.arch} WKWebView realtime video/text/watermark/transition/filter/chroma composition and playing seeks; separate fixture PNG IPC, artifact hash and chunk readback. Proof: ${proofPath}`);
+    console.log(`PASS Actual ${process.arch} WKWebView realtime video/text/watermark/transition/filter/chroma/blur composition and playing seeks; separate fixture PNG IPC, artifact hash and chunk readback. Proof: ${proofPath}`);
   }
 } catch (cause) {
   console.error(cause instanceof Error ? cause.stack : cause);
