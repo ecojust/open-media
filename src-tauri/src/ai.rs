@@ -276,7 +276,7 @@ fn speech_models(status: SpeechStatus) -> Vec<AiModel> {
             download_transferred_bytes: None,
             download_phase: None,
             active_source: voice.download_source.clone(),
-            download_session: None,
+            download_session: voice.download_session,
             download_speed_bytes_per_second: None,
             remaining_seconds: None,
             state: state.into(),
@@ -324,8 +324,8 @@ fn video_models(status: VideoGenerationStatus) -> Vec<AiModel> {
             download_total_bytes: None,
             download_transferred_bytes: None,
             download_phase: None,
-            active_source: None,
-            download_session: None,
+            active_source: model.active_source,
+            download_session: model.download_session,
             download_speed_bytes_per_second: None,
             remaining_seconds: None,
             state: model.state,
@@ -411,7 +411,8 @@ mod tests {
             "id":"matcha_zh_en_female","name":"配音","language":"zh-CN","speakerId":0,
             "modelId":"bundled","status":"bundled","modelSize":100,
             "runtimeDownloadId":"native-gpu","runtimeStatus":"upgrade-downloading",
-            "runtimeSize":40,"downloadSize":40,"downloadedBytes":20
+            "runtimeSize":40,"downloadSize":40,"downloadedBytes":20,
+            "downloadSource":"https://mirror.example","downloadSession":23
         }))
         .unwrap();
         let status = SpeechStatus {
@@ -431,5 +432,23 @@ mod tests {
         assert_eq!(models[0].state, "downloading");
         assert_eq!(models[0].size, 140);
         assert_eq!(models[0].downloaded_bytes, 120);
+        assert_eq!(models[0].active_source.as_deref(), Some("https://mirror.example"));
+        assert_eq!(models[0].download_session, Some(23));
+    }
+
+    #[test]
+    fn video_download_session_reaches_the_shared_estimator() {
+        let model = serde_json::from_value(json!({
+            "id":"video","name":"视频模型","version":"1","modes":["prompt"],
+            "size":200,"downloadedBytes":40,"state":"downloading","hardware":"测试",
+            "licenseUrl":"https://example.org/license","activeSource":"https://mirror.example","downloadSession":31
+        })).unwrap();
+        let models = video_models(VideoGenerationStatus {
+            supported: true, reason: None, runtime_ready: true, runtime_version: "test".into(),
+            device: "test".into(), memory_bytes: None, models: vec![model],
+        });
+        assert_eq!(models[0].active_source.as_deref(), Some("https://mirror.example"));
+        assert_eq!(models[0].download_session, Some(31));
+        assert_eq!(models[0].downloaded_bytes, 40);
     }
 }

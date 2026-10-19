@@ -1,9 +1,12 @@
 //! Download estimates use measured transfer bytes, never model-loading progress.
 use crate::ai_types::AiModel;
-use std::{collections::HashMap, time::{Duration, Instant}};
+use std::{collections::HashMap, sync::atomic::{AtomicU64, Ordering}, time::{Duration, Instant}};
 
 const WARMUP: Duration = Duration::from_secs(3);
 const STALLED: Duration = Duration::from_secs(15);
+static SESSION: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) fn next_session() -> u64 { SESSION.fetch_add(1, Ordering::Relaxed) }
 
 struct Sample {
     bytes: u64,
