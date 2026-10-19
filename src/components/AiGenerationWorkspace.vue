@@ -25,7 +25,7 @@ const unavailable = computed(() => !props.native ? '本地生成需要桌面端�
 const invalid = computed(() => !prompt.value.trim() ? '请描述你想生成的内容。' : prompt.value.length > (image.value ? 6000 : 4096) ? '内容描述超过模型支持的长度。' : lyrics.value.length > 6000 ? '歌词不能超过 6000 字。' : !Number.isInteger(steps.value) || steps.value < 1 || steps.value > 100 ? '生成步数应为 1–100 的整数。' : !Number.isInteger(seed.value) || seed.value < 0 || seed.value > 4294967295 ? '随机种子无效。' : !image.value && (!Number.isFinite(seconds.value) || seconds.value < 10 || seconds.value > 180) ? '歌曲时长应为 10–180 秒。' : image.value && imageMode.value === 'image' && !inputAsset.value ? '请选择作为起点的图片。' : !image.value && !instrumental.value && !lyrics.value.trim() ? '请输入歌词，或切换为纯音乐。' : '')
 const canGenerate = computed(() => !props.disabled && !working.value && !unavailable.value && !invalid.value)
 const draftKey = computed(() => `open-media:ai-${props.provider}-draft:v1`)
-watch(models, values => { if (!modelId.value && values[0]) { modelId.value = values[0].id; chooseModel() } })
+watch(models, values => { if (!modelId.value && values[0]) { modelId.value = (values.find(item=>item.state==='ready') ?? values.find(item=>item.id==='z-image-turbo') ?? values[0]).id; chooseModel() } })
 function chooseModel(): void { steps.value = image.value ? modelId.value === 'qwen-image' ? 30 : 9 : modelId.value.includes('sft') ? 50 : 8 }
 watch(() => props.active, active => { if (!active) document.querySelectorAll<HTMLMediaElement>(`[data-ai-provider="${props.provider}"] audio`).forEach(element=>element.pause()) })
 function persist(): void {

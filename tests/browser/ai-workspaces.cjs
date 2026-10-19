@@ -53,6 +53,8 @@ async function main(){
     browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']})
     const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',cause=>errors.push(cause.message));page.setDefaultTimeout(12000)
     await mount(page,server.resolvedUrls.local[0])
+    await expect(page.getByLabel('生成模型',{exact:true})).toHaveValue('z-image-turbo')
+    await page.getByLabel('生成模型',{exact:true}).selectOption('qwen-image')
     await page.getByLabel('图像提示词',{exact:true}).fill('山谷里的一座安静的小屋')
     await page.evaluate(()=>window.dispatchEvent(new Event('open-media:save-generation-drafts')))
     assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('open-media:ai-image-draft:v1')).prompt),'山谷里的一座安静的小屋')
