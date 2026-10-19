@@ -1639,7 +1639,9 @@ fn timeline_plan(
                 let timing = crate::clip_animation::video_timing(clip)?;
                 // Restore the source clock before applying the existing trim
                 // and speed mapping, preserving fractional split boundaries.
-                if input_seek > 0.0 { format!("setpts=PTS+{input_seek}/TB,{timing}") } else { timing }
+                // Input seeking rounds to source ticks, including AVI clocks
+                // such as 1001/30000 where one second is not an integral tick.
+                if input_seek > 0.0 { format!("setpts=PTS+round({input_seek}/TB),{timing}") } else { timing }
             };
             let mut chain=format!("[{index}:v]{timing}");
             chain += &crate::clip_animation::crop_filter(clip)?;

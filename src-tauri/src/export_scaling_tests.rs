@@ -351,10 +351,29 @@ fn static_text_with_nonzero_trim_preserves_exclusive_boundaries_and_gaps() {
 
 #[test]
 fn fractional_millisecond_mkv_slices_keep_every_source_frame() {
+    source_clock_slices_keep_every_source_frame(
+        "millisecond-clock.mkv", "30", "1/1000", 30.0, &[7.0 / 6.0, 37.0 / 6.0],
+    );
+}
+
+#[test]
+fn fractional_avi_time_base_slices_keep_every_source_frame() {
+    source_clock_slices_keep_every_source_frame(
+        "fractional-clock.avi", "30000/1001", "1001/30000", 30000.0 / 1001.0, &[2.002, 6.006],
+    );
+}
+
+fn source_clock_slices_keep_every_source_frame(
+    name: &str,
+    source_rate: &str,
+    time_base: &str,
+    fps: f64,
+    trims: &[f64],
+) {
     let root = tempfile::tempdir().unwrap();
     let store = MediaStore::new(root.path()).unwrap();
     let runtime = runtime();
-    let source = store.root.join("millisecond-clock.mkv");
+    let source = store.root.join(name);
     let mut command = engine::process(&runtime.encoder);
     command
         .args([
@@ -364,7 +383,7 @@ fn fractional_millisecond_mkv_slices_keep_every_source_frame() {
             "-f",
             "lavfi",
             "-i",
-            "nullsrc=s=64x48:r=30:d=8,format=gbrp,geq=r='30+180*mod(N,2)':g='25*floor(N/30)':b='0'",
+            &format!("nullsrc=s=64x48:r={source_rate}:d=8,format=gbrp,geq=r='30+180*mod(N,2)':g='25*floor(N/30)':b='0'"),
             "-c:v",
             "ffv1",
             "-threads",
@@ -372,25 +391,28 @@ fn fractional_millisecond_mkv_slices_keep_every_source_frame() {
         ])
         .arg(&source);
     bounded_output(command, Duration::from_secs(30));
-    let asset = store
-        .probe(&runtime, &source, "millisecond-clock.mkv")
-        .unwrap();
-    for trim in [7.0 / 6.0, 37.0 / 6.0] {
+    let mut command = engine::process(&runtime.probe);
+    command.args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=time_base", "-of", "default=nw=1:nk=1"]).arg(&source);
+    let clock = bounded_output(command, Duration::from_secs(30));
+    assert_eq!(String::from_utf8_lossy(&clock.stdout).trim(), time_base);
+    let asset = store.probe(&runtime, &source, name).unwrap();
+    let duration = 30.0 / fps;
+    for &trim in trims {
         let spec = json!({"kind":"timeline","project":{
-            "width":64,"height":48,"fps":30,"assets":[asset],"tracks":[{"kind":"video","clips":[{
-                "id":"fractional","assetId":asset.id,"start":0,"trimIn":trim,"trimOut":trim+1.0,
+            "width":64,"height":48,"fps":fps,"assets":[asset],"tracks":[{"kind":"video","clips":[{
+                "id":"fractional","assetId":asset.id,"start":0,"trimIn":trim,"trimOut":trim+duration,
                 "speed":1,"width":64,"height":48,"volume":0,"opacity":1,
-            }]}]},"config":{"width":64,"height":48,"fps":30,"format":"mp4","quality":"high"}});
+            }]}]},"config":{"width":64,"height":48,"fps":fps,"format":"mp4","quality":"high"}});
         let output = root.path().join(format!("fractional-{trim}.mp4"));
         let job = export(&runtime, &store, &spec, &output);
         assert_eq!(job.encoded_frames, 30);
         let actual = pixels_at(&runtime, &output, 32, 24);
         // Independent reference deliberately decodes from the beginning, then
-        // trims on the source's millisecond time base. Alternating frame colors
-        // expose a single-frame shift caused by fractional input seeking.
+        // trims on the source clock. Alternating frame colors expose a one-frame
+        // shift caused by rounding the input seek or restoring source ticks.
         let mut command = engine::process(&runtime.encoder);
         command.args(["-v", "error", "-i"]).arg(&source).args([
-            "-vf", &format!("trim=start={trim}:end={},setpts=PTS-STARTPTS,fps=30,format=rgb24,crop=1:1:32:24:exact=1", trim+1.0),
+            "-vf", &format!("trim=start={trim}:end={},setpts=PTS-STARTPTS,fps={fps},format=rgb24,crop=1:1:32:24:exact=1", trim+duration),
             "-frames:v", "30", "-threads", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
         ]);
         let reference = bounded_output(command, Duration::from_secs(30)).stdout;
@@ -407,6 +429,25 @@ fn fractional_millisecond_mkv_slices_keep_every_source_frame() {
                 (i16::from(actual[1]) - i16::from(expected[1])).abs() < 10,
                 "wrong source second at trim={trim}, frame={frame}: {actual:?} vs {expected:?}"
             );
+        }
+        // Sample just before successive source-frame boundaries. Restoring a
+        // rounded AVI seek as exact seconds used to show the next frame early.
+        for frame_time in [0.033, 0.066] {
+            let mut still = spec.clone();
+            still["frameOnly"] = json!(true);
+            still["frameTime"] = json!(frame_time);
+            let output = root.path().join(format!("clock-still-{trim}-{frame_time}.mp4"));
+            let mut plan = engine::build_plan(&store, &runtime, &still).unwrap();
+            plan.args.extend(["-frames:v".into(), "1".into()]);
+            let job = export_plan(&runtime, plan, &output, Duration::from_secs(30), Duration::from_secs(60));
+            assert_eq!(job.encoded_frames, 1);
+            let pixels = pixels_at(&runtime, &output, 32, 24);
+            assert_eq!(pixels.len(), 1);
+            let source_frame = ((trim + frame_time) * fps).floor() as u64;
+            assert_eq!(pixels[0][0] > 120, source_frame % 2 == 1,
+                "window source-frame shift at trim={trim}, time={frame_time}: {:?}, expected frame {source_frame}", pixels[0]);
+            assert!((i16::from(pixels[0][1]) - (source_frame / 30 * 25) as i16).abs() < 10,
+                "window chose wrong source second at trim={trim}, time={frame_time}: {:?}", pixels[0]);
         }
     }
 }

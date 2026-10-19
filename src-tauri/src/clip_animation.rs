@@ -337,19 +337,22 @@ pub(crate) fn source_time(clip: &Value, time: f64) -> Result<f64> {
 }
 /// Decode only the source interval, retaining the clip's original local clock.
 pub(crate) fn video_timing_window(clip: &Value, from: f64, to: f64, input_seek: f64) -> Result<String> {
+    // Undo input seeking on the original source time base before converting to
+    // microseconds. The demuxer rounds seeks to ticks, which may span a frame.
+    let restore = if input_seek > 0.0 { format!("setpts=PTS+round({input_seek}/TB),") } else { String::new() };
     if clip.get("freezeFrame").is_some() {
-        let source = source_time(clip, from)? - input_seek;
-        return Ok(format!("trim=start={source},trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={},trim=duration={},settb=AVTB,setpts=PTS+{from}/TB",to-from,to-from));
+        let source = source_time(clip, from)?;
+        return Ok(format!("{restore}trim=start={source},trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={},trim=duration={},settb=AVTB,setpts=PTS+{from}/TB",to-from,to-from));
     }
-    let source_from = source_time(clip,from)? - input_seek;
-    let source_to = source_time(clip,to)? - input_seek;
+    let source_from = source_time(clip,from)?;
+    let source_to = source_time(clip,to)?;
     let segments = speed_segments(clip)?;
     let last = segments.last().ok_or("片段时间无效。")?;
-    let mut mapping = format!("{}+(T+{input_seek}-{})/{}",last.time_start,last.source_start,last.speed);
+    let mut mapping = format!("{}+(T-{})/{}",last.time_start,last.source_start,last.speed);
     for segment in segments.iter().rev().skip(1) {
-        mapping = format!("if(lt(T+{input_seek},{}),{}+(T+{input_seek}-{})/{},{mapping})",segment.source_end,segment.time_start,segment.source_start,segment.speed);
+        mapping = format!("if(lt(T,{}),{}+(T-{})/{},{mapping})",segment.source_end,segment.time_start,segment.source_start,segment.speed);
     }
-    Ok(format!("trim=start={source_from}:end={source_to},settb=AVTB,setpts='({mapping})/TB'"))
+    Ok(format!("{restore}trim=start={source_from}:end={source_to},settb=AVTB,setpts='({mapping})/TB'"))
 }
 pub(crate) fn window_clip(clip: &Value, from: f64, to: f64) -> Result<Value> {
     let mut trimmed = clip.clone();
