@@ -14,6 +14,8 @@ import { getSpeechSettings, updateSpeechSettings } from './speech-settings.ts'
 import { McpBusyError, mcpBlockingJob, mcpJobResponse, mcpSynchronousResponse, serializeMcpError, type McpBlockingOperation, type McpJobProtocol } from './mcp-response.ts'
 import { beginVideoGeneration, beginVideoModelDownload, cancelVideoGeneration, cancelVideoModelDownload, getVideoGenerationJob, getVideoGenerationStatus } from '../native-video-generation.ts'
 import { applyMcpVideoGeneration, prepareMcpVideoGeneration } from './mcp-video-generation.ts'
+import { beginAiGeneration, cancelAiJob, cancelAiModelDownload, downloadAiModel, getAiJob, getAiStatus, repairAiModel } from '../native-ai.ts'
+import { applyMcpAiGeneration, prepareMcpAiGeneration, publicAiJob, publicAiStatus } from './mcp-ai-generation.ts'
 
 export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
 export interface McpAutomationHost {
@@ -260,6 +262,71 @@ export function createMcpAutomation(host: McpAutomationHost) {
           cancel: { tool: 'open_media_speech_model', arguments: { action: 'cancel', modelId } } }
       }
       case 'open_media_video_generation_status': return getVideoGenerationStatus()
+      case 'open_media_ai_status': return publicAiStatus(await getAiStatus(args.probeRuntime === true))
+      case 'open_media_ai_job_get': return publicAiJob(await getAiJob(args.id as string))
+      case 'open_media_ai_job_cancel': {
+        const job = await getAiJob(args.id as string)
+        if (job.cancelable) await cancelAiJob(job.id)
+        return { cancelRequested: job.cancelable, job: publicAiJob(await getAiJob(job.id)) }
+      }
+      case 'open_media_ai_model_download':
+      case 'open_media_ai_model_repair':
+        return startTool('ai-model-download', name.endsWith('_repair') ? '修复 AI 模型' : '下载 AI 模型', async operation => {
+          const modelId = args.modelId as string
+          let modelStatus = await getAiStatus()
+          check(operation)
+          const initial = modelStatus.models.find(model => model.id === modelId)
+          if (!initial) throw new Error('模型不在全局 AI 模型目录中，请先查询 ai_status。')
+          if (initial.state === 'unsupported') throw new Error(initial.error || initial.runtime.reason || '当前设备不支持所选模型。')
+          operation.cancelNative = async () => { await cancelAiModelDownload(modelId) }
+          modelStatus = await (name.endsWith('_repair') ? repairAiModel : downloadAiModel)(modelId, args.acceptedLicense === true)
+          while (true) {
+            check(operation)
+            const model = modelStatus.models.find(item => item.id === modelId)
+            if (!model) throw new Error('模型已不在全局目录中。')
+            changed(operation, model.state === 'verifying' ? `正在校验 ${model.name}` : model.state === 'ready' && model.runtime.state !== 'ready' ? '正在准备 AI 推理环境' : `正在下载 ${model.name}`, model.size > 0 ? Math.min(1, model.downloadedBytes / model.size) : undefined)
+            if (model.state === 'ready' && model.runtime.state === 'ready') return { modelId, model }
+            if (model.state === 'failed' || model.state === 'unsupported' || ['failed', 'unsupported', 'unavailable'].includes(model.runtime.state)) throw new Error(model.error || model.runtime.reason || '模型或运行环境安装失败。')
+            if (model.state === 'not-downloaded') throw new DOMException('模型下载已取消。', 'AbortError')
+            await wait(operation)
+            modelStatus = await getAiStatus()
+          }
+        })
+      case 'open_media_image_generate':
+      case 'open_media_music_generate': {
+        const provider = name === 'open_media_image_generate' ? 'image' : 'music'
+        const prepared = prepareMcpAiGeneration(host.getProject(), provider, args)
+        return startTool(`${provider}-generation`, provider === 'image' ? '生成图片' : '生成歌曲', async operation => {
+          const modelStatus = await getAiStatus()
+          check(operation)
+          const model = modelStatus.models.find(item => item.id === prepared.request.request.modelId)
+          if (!model || model.provider !== provider) throw new Error('所选模型不支持此生成类型，请查询 ai_status。')
+          if (model.state !== 'ready' || model.runtime.state !== 'ready') throw new Error(model.error || model.runtime.reason || '请先下载或修复所选模型与推理环境。')
+          changed(operation, provider === 'image' ? '正在启动图像生成' : '正在启动歌曲生成')
+          operation.cancelNative = () => cancelAiJob(prepared.request.request.requestId)
+          let nativeJob = await beginAiGeneration(prepared.request)
+          operation.cancelNative = () => cancelAiJob(nativeJob.id)
+          if (operation.controller.signal.aborted) await operation.cancelNative()
+          while (true) {
+            check(operation)
+            changed(operation, nativeJob.stage, nativeJob.progress)
+            if (nativeJob.warning) operation.job.warning = nativeJob.warning
+            if (nativeJob.state === 'completed') {
+              const result = applyMcpAiGeneration(operation.source, nativeJob, prepared)
+              if (result.project) {
+                commit(operation, result.project, provider === 'image' ? '添加生成图片' : '添加生成歌曲')
+                result.assets.forEach(asset => host.ownAsset(asset))
+                if (result.result.clipIds[0]) void host.setPlayback({ selectedClipId: result.result.clipIds[0] }).catch(() => {})
+              }
+              return { ...result.result, projectId: host.getProject().id, revision: host.getRevision() }
+            }
+            if (nativeJob.state === 'failed') throw new Error(nativeJob.error || 'AI 生成失败。')
+            if (nativeJob.state === 'cancelled') throw new DOMException('AI 生成已取消。', 'AbortError')
+            await wait(operation)
+            nativeJob = await getAiJob(nativeJob.id)
+          }
+        })
+      }
       case 'open_media_video_model_download':
         return startTool('video-model-download', '下载视频生成模型', async operation => {
           const modelId = args.modelId as string

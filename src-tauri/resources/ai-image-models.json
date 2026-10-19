@@ -1,0 +1,488 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "id": "qwen-image",
+      "name": "Qwen-Image",
+      "kind": "image",
+      "engine": "diffusers",
+      "version": "75e0b4be04f60ec59a75f475837eced720f823b6",
+      "runtimeId": "ai-generation-v1",
+      "modes": [
+        "text-to-image",
+        "image-to-image"
+      ],
+      "license": {
+        "name": "Apache-2.0",
+        "url": "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/LICENSE",
+        "notice": "模型权重来源：Qwen/Qwen-Image。许可证原文与模型说明随应用保留。"
+      },
+      "hardware": "完整半精度权重约54GiB；建议96GB系统或统一内存。优先CUDA或Apple GPU，低显存可按层卸载；CPU全精度可能需要128GB以上内存。完整模型性能尚未实测。",
+      "description": "文生图与参考图片重绘；中文文字表现为模型的主要能力之一。图生图不是指令式图片编辑。",
+      "defaultParameters": {
+        "steps": 50,
+        "guidance": 4,
+        "width": 1024,
+        "height": 1024,
+        "strength": 0.75
+      },
+      "downloadBytes": 57704575013,
+      "repository": "Qwen/Qwen-Image",
+      "files": [
+        {
+          "path": "model_index.json",
+          "size": 443,
+          "sha256": "9fb9557c1e5bafb3a582af8407b5a7ad8a8bcbdb20dde4d248bbb4718e1654bd",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/model_index.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/model_index.json"
+          ]
+        },
+        {
+          "path": "scheduler/scheduler_config.json",
+          "size": 485,
+          "sha256": "069f27554bc5155c1d60672e606dc072bc8b65f9afdd17f3be3b38c38c07c25a",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/scheduler/scheduler_config.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/scheduler/scheduler_config.json"
+          ]
+        },
+        {
+          "path": "text_encoder/config.json",
+          "size": 3217,
+          "sha256": "081d41bae4c75815afde340b5cee39d9c71febe3fc3146e0366a75a45da0c04b",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/config.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/config.json"
+          ]
+        },
+        {
+          "path": "text_encoder/generation_config.json",
+          "size": 244,
+          "sha256": "45b75d70ff5862fddbedd7d32e3d0965a894eceb67a2b9fe53192555124f965e",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/generation_config.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/generation_config.json"
+          ]
+        },
+        {
+          "path": "text_encoder/model-00001-of-00004.safetensors",
+          "size": 4968243304,
+          "sha256": "d725335e4ea2399be706469e4b8807716a8fa64bd03468252e9f7acf2415fee4",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00001-of-00004.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00001-of-00004.safetensors"
+          ]
+        },
+        {
+          "path": "text_encoder/model-00002-of-00004.safetensors",
+          "size": 4991495816,
+          "sha256": "b1830db6908dcc76df3a71492acbcf2b8cac130114cf1f3c2d9edae8de8c6de3",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00002-of-00004.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00002-of-00004.safetensors"
+          ]
+        },
+        {
+          "path": "text_encoder/model-00003-of-00004.safetensors",
+          "size": 4932751040,
+          "sha256": "09c1807c6d00d7cab94f7db39d4c02ebb8537225ccde383861ac48db97945aa6",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00003-of-00004.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00003-of-00004.safetensors"
+          ]
+        },
+        {
+          "path": "text_encoder/model-00004-of-00004.safetensors",
+          "size": 1691924384,
+          "sha256": "5dd068336d14d45ffb43cef374d286cc6ba9d8741b028f90a7d040d847961f4a",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00004-of-00004.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model-00004-of-00004.safetensors"
+          ]
+        },
+        {
+          "path": "text_encoder/model.safetensors.index.json",
+          "size": 57655,
+          "sha256": "4be35310ddc165e46e88de4c3fec8c1210014b0b8717f4544d82cc740814ae0c",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model.safetensors.index.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/text_encoder/model.safetensors.index.json"
+          ]
+        },
+        {
+          "path": "tokenizer/added_tokens.json",
+          "size": 605,
+          "sha256": "58b54bbe36fc752f79a24a271ef66a0a0830054b4dfad94bde757d851968060b",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/added_tokens.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/added_tokens.json"
+          ]
+        },
+        {
+          "path": "tokenizer/chat_template.jinja",
+          "size": 2427,
+          "sha256": "44d5f08f3f72b837eaad09f13a54c1f9f4eb58d75240334548b7fd52a5437fa5",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/chat_template.jinja",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/chat_template.jinja"
+          ]
+        },
+        {
+          "path": "tokenizer/merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/merges.txt",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/merges.txt"
+          ]
+        },
+        {
+          "path": "tokenizer/special_tokens_map.json",
+          "size": 613,
+          "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/special_tokens_map.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/special_tokens_map.json"
+          ]
+        },
+        {
+          "path": "tokenizer/tokenizer_config.json",
+          "size": 4686,
+          "sha256": "0a04a9d7d4a62b28482bdfe726c122756de85714fb64166ace92ae75b8f57614",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/tokenizer_config.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/tokenizer_config.json"
+          ]
+        },
+        {
+          "path": "tokenizer/vocab.json",
+          "size": 3383407,
+          "sha256": "87a257b04b17642a0688c98cd1df89c398bda4fee532d6f88b38a659ecb4ac8d",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/vocab.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/tokenizer/vocab.json"
+          ]
+        },
+        {
+          "path": "transformer/config.json",
+          "size": 371,
+          "sha256": "1bd1ef23f159b4eb3c894eaecc2ac2b9ab5ad31ca1bf8ecc0b0f71081f0730b5",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/config.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/config.json"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00001-of-00009.safetensors",
+          "size": 4989364312,
+          "sha256": "9f33a59093af3abcc2836d4cf4b7bd122c238ca70a26c70f34fdde64646b3bcd",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00001-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00001-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00002-of-00009.safetensors",
+          "size": 4984214160,
+          "sha256": "49d580e85b932e15c226e68a9d5549629878d3a128da7662d28401956cee0238",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00002-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00002-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00003-of-00009.safetensors",
+          "size": 4946470000,
+          "sha256": "0d72f0cbd0d6c2bdc2e1e73e41ac143452fc9e4570d1362203498832302de69f",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00003-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00003-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00004-of-00009.safetensors",
+          "size": 4984213736,
+          "sha256": "ee87991bfa1bc8e7553034b07099151532524101ca1581c4f3a86292814e9f0d",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00004-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00004-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00005-of-00009.safetensors",
+          "size": 4946471896,
+          "sha256": "83291a65be26fe688db4cf81383749831b623a6fcb1a71c851bafb55ddc0058d",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00005-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00005-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00006-of-00009.safetensors",
+          "size": 4946451560,
+          "sha256": "61e936a995e7f4ce08d44b9d6ffb56dc65dd61200288876ee2fda72da322583d",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00006-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00006-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00007-of-00009.safetensors",
+          "size": 4908690520,
+          "sha256": "854bc9e4a65c11c256f2fef31606a6407e9a425e8bde394db8be71416c515ead",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00007-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00007-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00008-of-00009.safetensors",
+          "size": 4984232856,
+          "sha256": "caedc7cc2914ab113cfbb3684cf072350201182ae8de1a7308e419385987ae40",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00008-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00008-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00009-of-00009.safetensors",
+          "size": 1170918840,
+          "sha256": "ae0fef149890f61d54572baa1e806de97156c7ec5b7bbbbbbf27a2d87f33af61",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00009-of-00009.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model-00009-of-00009.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+          "size": 198887,
+          "sha256": "adeb4aa7230a3940cdfb4f6d7be4131a13cd5275d612fb9f8be90ede8d965b29",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model.safetensors.index.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/transformer/diffusion_pytorch_model.safetensors.index.json"
+          ]
+        },
+        {
+          "path": "vae/config.json",
+          "size": 730,
+          "sha256": "e4e61b7553f930e9eabf8935f0a77e6d004cc3ee67a601a56ef03cc41ccada68",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/vae/config.json",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/vae/config.json"
+          ]
+        },
+        {
+          "path": "vae/diffusion_pytorch_model.safetensors",
+          "size": 253806966,
+          "sha256": "0c8bc8b758c649abef9ea407b95408389a3b2f610d0d10fcb054fe171d0a8344",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/vae/diffusion_pytorch_model.safetensors",
+            "https://hf-mirror.com/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/vae/diffusion_pytorch_model.safetensors"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "z-image-turbo",
+      "name": "Z-Image-Turbo",
+      "kind": "image",
+      "engine": "diffusers",
+      "version": "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      "runtimeId": "ai-generation-v1",
+      "modes": [
+        "text-to-image",
+        "image-to-image"
+      ],
+      "license": {
+        "name": "Apache-2.0",
+        "url": "https://raw.githubusercontent.com/Tongyi-MAI/Z-Image/26f23eda626ffadda020b04ff79488e1d72004cd/LICENSE",
+        "notice": "模型权重来源：Tongyi-MAI/Z-Image-Turbo。许可证原文与模型说明随应用保留。"
+      },
+      "hardware": "建议32GB系统或统一内存；支持CUDA和Apple GPU。官方说明16GB显存可用，低显存选择按层卸载；CPU全精度建议48GB以上内存。完整模型性能尚未实测。",
+      "description": "少步数文生图与参考图片重绘。默认9步、不使用负向提示词；图生图不是指令式图片编辑。",
+      "defaultParameters": {
+        "steps": 9,
+        "guidance": 0,
+        "width": 1024,
+        "height": 1024,
+        "strength": 0.75
+      },
+      "downloadBytes": 32848305533,
+      "repository": "Tongyi-MAI/Z-Image-Turbo",
+      "files": [
+        {
+          "path": "model_index.json",
+          "size": 467,
+          "sha256": "18a90e1bc117a29a8b7961bb200c86ff0b9704609e87c7171511dc724fcdc9d3",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/model_index.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/model_index.json"
+          ]
+        },
+        {
+          "path": "scheduler/scheduler_config.json",
+          "size": 173,
+          "sha256": "3b979ab0956e4f5e8d02ec409ac6a4ece1555191d15bd10788fdc85fea5d13fc",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/scheduler/scheduler_config.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/scheduler/scheduler_config.json"
+          ]
+        },
+        {
+          "path": "text_encoder/config.json",
+          "size": 726,
+          "sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/config.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/config.json"
+          ]
+        },
+        {
+          "path": "text_encoder/generation_config.json",
+          "size": 239,
+          "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/generation_config.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/generation_config.json"
+          ]
+        },
+        {
+          "path": "text_encoder/model-00001-of-00003.safetensors",
+          "size": 3957900840,
+          "sha256": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00001-of-00003.safetensors",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00001-of-00003.safetensors"
+          ]
+        },
+        {
+          "path": "text_encoder/model-00002-of-00003.safetensors",
+          "size": 3987450520,
+          "sha256": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00002-of-00003.safetensors",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00002-of-00003.safetensors"
+          ]
+        },
+        {
+          "path": "text_encoder/model-00003-of-00003.safetensors",
+          "size": 99630640,
+          "sha256": "7ca841ee75b9c61267c0c6148fd8d096d3d21b6d3e161256a9b878154f91fc52",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00003-of-00003.safetensors",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model-00003-of-00003.safetensors"
+          ]
+        },
+        {
+          "path": "text_encoder/model.safetensors.index.json",
+          "size": 32819,
+          "sha256": "6dc0981b8829fead746441f68f38f24c5ca4a3a66351f652c26c6df0efc43ab2",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model.safetensors.index.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/text_encoder/model.safetensors.index.json"
+          ]
+        },
+        {
+          "path": "tokenizer/merges.txt",
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/merges.txt",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/merges.txt"
+          ]
+        },
+        {
+          "path": "tokenizer/tokenizer.json",
+          "size": 11422654,
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer.json"
+          ]
+        },
+        {
+          "path": "tokenizer/tokenizer_config.json",
+          "size": 9732,
+          "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer_config.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/tokenizer_config.json"
+          ]
+        },
+        {
+          "path": "tokenizer/vocab.json",
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/vocab.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/tokenizer/vocab.json"
+          ]
+        },
+        {
+          "path": "transformer/config.json",
+          "size": 473,
+          "sha256": "06d49d1ae533f825c4704cc616fc8bc7826e9d449dde292cc7a95163c69af24a",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/config.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/config.json"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+          "size": 9973693184,
+          "sha256": "95facd593e2549e8252acb571c653d57f7ddb7f1060d4e81712f152555a88804",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00001-of-00003.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+          "size": 9973714824,
+          "sha256": "a4bbe43ee184a1fb5af4b412d27555f532893bdc3165b1149e304ed82b5d7015",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00002-of-00003.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+          "size": 4672282880,
+          "sha256": "aba4e37a590e63210878160a718d916d80398f4e1f78ab6c9b2b2a00d92769fa",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model-00003-of-00003.safetensors"
+          ]
+        },
+        {
+          "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+          "size": 48969,
+          "sha256": "182a119d8018bfc61c9a62685a384af3b7d4a2f8aabbe766e07c9e1eda5b97ab",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model.safetensors.index.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/transformer/diffusion_pytorch_model.safetensors.index.json"
+          ]
+        },
+        {
+          "path": "vae/config.json",
+          "size": 805,
+          "sha256": "e80af1e64a71883a9d10c3159d2e493e5934508da57852f6a180ae6ae63b14bd",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/config.json",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/config.json"
+          ]
+        },
+        {
+          "path": "vae/diffusion_pytorch_model.safetensors",
+          "size": 167666902,
+          "sha256": "f5b59a26851551b67ae1fe58d32e76486e1e812def4696a4bea97f16604d40a3",
+          "urls": [
+            "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors",
+            "https://hf-mirror.com/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/vae/diffusion_pytorch_model.safetensors"
+          ]
+        }
+      ]
+    }
+  ]
+}

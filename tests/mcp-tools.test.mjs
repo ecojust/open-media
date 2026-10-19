@@ -5,6 +5,7 @@ import { createClip, createProject, createSubtitleClip, validateProject } from '
 import { addAsset, addClip, findClip, setTrack, projectDuration } from '../src/core/timeline.ts'
 import { addTransition, TRANSITION_PRESETS } from '../src/core/transitions.ts'
 import { applySpeechResults, planSpeech } from '../src/core/speech.ts'
+import aiTools from '../src/mcp-ai-tools.json' with { type: 'json' }
 
 function fixture() {
   let project = createProject('MCP 编辑', { width: 640, height: 360, fps: 30 })
@@ -27,7 +28,7 @@ function assertUnchangedAfterFailure(project, tool, args, regex) {
 }
 
 test('MCP catalog is unique, restrictive and contains the declared runtime and editing operations', () => {
-  assert.equal(MCP_TOOLS.length, 88)
+  assert.equal(MCP_TOOLS.length, 95)
   assert.equal(new Set(MCP_TOOLS.map(tool => tool.name)).size, MCP_TOOLS.length)
   assert.equal(MCP_TOOLS.filter(tool => isProjectTool(tool.name)).length, 38)
   for (const tool of MCP_TOOLS) {
@@ -39,6 +40,15 @@ test('MCP catalog is unique, restrictive and contains the declared runtime and e
     assert.throws(() => validateMcpToolArguments(tool.name, { undocumented: true }), /不支持参数|缺少必填/)
   }
   assert.equal(isProjectTool('open_media_export_start'), false)
+})
+
+test('shared AI tool contracts are identical to the published aggregate catalog', () => {
+  assert.equal(aiTools.length, 7)
+  for (const tool of aiTools) assert.deepEqual(MCP_TOOLS.find(item => item.name === tool.name), tool)
+  for (const tool of aiTools.filter(item => item._meta['openmedia/execution'].mode === 'asynchronous')) {
+    assert.equal(tool._meta['openmedia/execution'].pollingTool, 'open_media_job_get')
+    assert.equal(tool._meta['openmedia/execution'].cancelTool, 'open_media_job_cancel')
+  }
 })
 
 test('project inspection returns IDs and timing while omitting private asset capabilities', () => {

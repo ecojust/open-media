@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "qwen-image",
+      "repository": "Qwen/Qwen-Image",
+      "revision": "75e0b4be04f60ec59a75f475837eced720f823b6",
+      "license": {
+        "url": "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/LICENSE",
+        "file": "qwen-image-LICENSE",
+        "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e"
+      },
+      "modelCard": {
+        "url": "https://huggingface.co/Qwen/Qwen-Image/resolve/75e0b4be04f60ec59a75f475837eced720f823b6/README.md",
+        "file": "qwen-image-MODEL_CARD.md",
+        "sha256": "c70f9851b364e5d6209305d6f07e065086126132ecc24805c652de45d3d92ca8"
+      },
+      "weightsDownloaded": false,
+      "fileHashes": "LFS metadata for weights; SHA-256 of retrieved bytes for small config/tokenizer files"
+    },
+    {
+      "id": "z-image-turbo",
+      "repository": "Tongyi-MAI/Z-Image-Turbo",
+      "revision": "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      "license": {
+        "url": "https://raw.githubusercontent.com/Tongyi-MAI/Z-Image/26f23eda626ffadda020b04ff79488e1d72004cd/LICENSE",
+        "file": "z-image-turbo-LICENSE",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+      },
+      "modelCard": {
+        "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo/resolve/f332072aa78be7aecdf3ee76d5c247082da564a6/README.md",
+        "file": "z-image-turbo-MODEL_CARD.md",
+        "sha256": "87af5e1d7933dbfe091c4048a20805541130690ee813b8039b7f396b47e64338"
+      },
+      "weightsDownloaded": false,
+      "fileHashes": "LFS metadata for weights; SHA-256 of retrieved bytes for small config/tokenizer files"
+    }
+  ]
+}

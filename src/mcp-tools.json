@@ -5903,5 +5903,485 @@
         ]
       }
     }
+  },
+  {
+    "name": "open_media_ai_status",
+    "description": "查询主应用共享的所有 AI 模型、体积、许可、硬件要求、下载/运行环境状态及全局任务。包括已有语音与视频模型，不重复下载已有安装；忙碌时仍可查询。任务中的素材仅返回公开元数据。\n执行方式：同步返回本次查询或操作结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "probeRuntime": {
+          "type": "boolean"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
+    }
+  },
+  {
+    "name": "open_media_ai_model_download",
+    "description": "按需安装全局目录中的模型及对应隔离运行环境；必须先向用户说明许可和下载体积并获得同意。完成后返回模型状态；下载字节与校验阶段通过统一任务查询。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "从 open_media_ai_status 获取的模型 ID，覆盖语音、视频、图像和音乐模型。"
+        },
+        "acceptedLicense": {
+          "type": "boolean",
+          "enum": [
+            true
+          ],
+          "description": "用户已了解模型大小及许可，并同意安装；不得代替用户自动同意。"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "modelId",
+        "acceptedLicense"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
+  },
+  {
+    "name": "open_media_ai_model_repair",
+    "description": "校验并修复全局模型或运行环境，解决旧版本已下载但当前版本无法使用的情况。必须先获得用户对许可和下载的同意。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "从 open_media_ai_status 获取的模型 ID，覆盖语音、视频、图像和音乐模型。"
+        },
+        "acceptedLicense": {
+          "type": "boolean",
+          "enum": [
+            true
+          ],
+          "description": "用户已了解模型大小及许可，并同意安装；不得代替用户自动同意。"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "modelId",
+        "acceptedLicense"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
+  },
+  {
+    "name": "open_media_image_generate",
+    "description": "使用已下载的图像模型文生图或基础图生图。参考图片仅从当前工程 inputAssetId 解析；图生图不等同于指令式编辑。默认只生成，destination 可加入素材或时间线；图片插入视频轨道，默认展示5秒。快速模型不支持负面提示词，guidance 必须省略或为0，默认9步；另一模型默认50步，guidance映射到真实CFG。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "modelId": {
+          "type": "string",
+          "enum": [
+            "qwen-image",
+            "z-image-turbo"
+          ]
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 6000
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "lowMemory": {
+          "type": "boolean"
+        },
+        "destination": {
+          "type": "string",
+          "enum": [
+            "generated",
+            "assets",
+            "timeline"
+          ],
+          "description": "默认 generated：结果保存在全局任务历史，不修改工程；assets：加入工程素材；timeline：加入素材并插入轨道。工程修改一次提交并可撤销，失败或取消不留下半成品。"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "text-to-image",
+            "image-to-image"
+          ]
+        },
+        "inputAssetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "图生图参考图片的当前工程素材 ID；不接受文件路径或 URL。"
+        },
+        "negativePrompt": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 6000
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 2048,
+          "description": "默认1024，必须为16的倍数。"
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 2048,
+          "description": "默认1024，必须为16的倍数。"
+        },
+        "strength": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "guidance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "insert": {
+          "type": "object",
+          "properties": {
+            "trackId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "省略时新建对应类型轨道；已有轨道必须未锁定。"
+            },
+            "start": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "duration": {
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 86400
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "modelId",
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
+  },
+  {
+    "name": "open_media_music_generate",
+    "description": "使用已下载的音乐模型生成纯音乐或有歌词歌曲。无歌词默认纯音乐，有歌词默认歌曲；显式 instrumental=true 不能同时填写歌词。默认30秒；快速模型默认8步且guidance仅支持1，另一模型默认50步、guidance=7。默认只生成，destination 可加入素材或音频轨道，片段使用真实生成时长。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "modelId": {
+          "type": "string",
+          "enum": [
+            "ace-step-1.5-turbo",
+            "ace-step-1.5-sft"
+          ]
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "lowMemory": {
+          "type": "boolean"
+        },
+        "destination": {
+          "type": "string",
+          "enum": [
+            "generated",
+            "assets",
+            "timeline"
+          ],
+          "description": "默认 generated：结果保存在全局任务历史，不修改工程；assets：加入工程素材；timeline：加入素材并插入轨道。工程修改一次提交并可撤销，失败或取消不留下半成品。"
+        },
+        "lyrics": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 6000
+        },
+        "instrumental": {
+          "type": "boolean"
+        },
+        "seconds": {
+          "type": "number",
+          "minimum": 10,
+          "maximum": 600
+        },
+        "bpm": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 300
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "keyScale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "guidance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "insert": {
+          "type": "object",
+          "properties": {
+            "trackId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "省略时新建对应类型轨道；已有轨道必须未锁定。"
+            },
+            "start": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "modelId",
+        "prompt"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
+  },
+  {
+    "name": "open_media_ai_job_get",
+    "description": "查询全局 AI 原生任务，包括从界面发起的任务；id取自 ai_status.jobs 或生成结果 nativeJobId。此查询同步返回任务快照，state=completed 才表示生成完成；本工具的final只表示本次查询已返回。MCP 异步包装任务仍使用 open_media_job_get。\n执行方式：同步返回本次查询或操作结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
+    }
+  },
+  {
+    "name": "open_media_ai_job_cancel",
+    "description": "取消指定全局 AI 原生任务，包括界面创建的任务；返回 cancelRequested 和当前任务快照，实际结束以 state 为准。MCP 发起的任务优先通过原响应的 open_media_job_cancel 链接取消。\n执行方式：同步返回本次查询或操作结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
+      }
+    }
   }
 ]

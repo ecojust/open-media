@@ -11,6 +11,7 @@ const boundaryExports = {
   '../src/native.ts': ['acceptSpeechJobs', 'beginSpeechJob', 'beginSpeechModelDownload', 'cancelMediaJob', 'cancelSpeechJob', 'cancelSpeechModelDownload', 'discardSpeechJob', 'getMediaJobs', 'getSpeechJob', 'getSpeechStatus', 'repairSpeechModel', 'revealMediaJobOutput'],
   '../src/native-mcp-files.ts': ['beginMcpMediaJob', 'importMcpMediaPaths', 'openMcpProjectFile', 'saveMcpProjectFile'],
   '../src/native-video-generation.ts': ['getVideoGenerationStatus', 'beginVideoModelDownload', 'cancelVideoModelDownload', 'beginVideoGeneration', 'getVideoGenerationJob', 'cancelVideoGeneration'],
+  '../src/native-ai.ts': ['beginAiGeneration', 'cancelAiJob', 'cancelAiModelDownload', 'downloadAiModel', 'getAiJob', 'getAiStatus', 'repairAiModel'],
   '../src/core/native-project.ts': ['prepareNativeProject'],
   '../src/core/project-file.ts': ['exportProjectFile', 'importProjectFile'],
   '../src/core/mcp-materials.ts': ['listMcpMaterials', 'prepareMcpMaterial'],
@@ -43,6 +44,15 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
   let playback = { time: 2.5, playing: false, selectedClipId: '' }
   const calls = [], announcements = [], assets = [], commits = [], blobs = new Map()
   const io = {
+    async getAiStatus() { return { busy: false, jobs: [], models: [
+      ...['qwen-image', 'z-image-turbo'].map(id => ({ id, provider: 'image' })),
+      ...['ace-step-1.5-turbo', 'ace-step-1.5-sft'].map(id => ({ id, provider: 'music' })),
+      { id: 'f5-v1-base-fp32', provider: 'speech' }, { id: 'h3-base-fl2va', provider: 'video' },
+    ].map(model => ({ ...model, name: model.id, state: 'ready', runtime: { state: 'ready' }, size: 100, downloadedBytes: 100 })) } },
+    async downloadAiModel() { return io.getAiStatus() }, async repairAiModel() { return io.getAiStatus() }, async cancelAiModelDownload() { return io.getAiStatus() },
+    async beginAiGeneration({ provider, request }) { return { id: request.requestId, provider, modelId: request.modelId, kind: 'generation', state: 'completed', stage: '完成', progress: 1, startedAt: Date.now(), elapsedSeconds: 1, cancelable: false,
+      assets: [{ ...video(`generated-${request.requestId}`), kind: provider === 'image' ? 'image' : 'audio', name: provider === 'image' ? '生成.png' : '生成.wav', mime: provider === 'image' ? 'image/png' : 'audio/wav', duration: provider === 'image' ? 0 : 30, provenance: { kind: 'url', url: 'https://private.example/secret', sha256: 'a'.repeat(64), importedAt: 1 } }] } },
+    async getAiJob() { throw new Error('unexpected AI generation polling') }, async cancelAiJob() {},
     async getVideoGenerationStatus() { return { supported: true, runtimeReady: true, models: [{ id: 'h3-base-fl2va', name: '视频生成', modes: ['prompt', 'image', 'storyboard'], state: 'ready', size: 100, downloadedBytes: 100 }, { id: 'h3-base-ref2va', name: '参考生成', modes: ['reference'], state: 'ready', size: 100, downloadedBytes: 100 }] } },
     async beginVideoModelDownload() { return io.getVideoGenerationStatus() },
     async cancelVideoModelDownload() { return io.getVideoGenerationStatus() },
@@ -663,5 +673,129 @@ test('model polling reports byte progress and unsupported platforms cannot start
   assert.equal(f.calls.filter(call => call.name === 'beginVideoModelDownload').length, 1)
   await assert.rejects(f.run('video_generation_start', generation({ expectedRevision: 6 })), /版本已变化/)
   assert.equal(f.calls.some(call => call.name === 'beginVideoGeneration'), false)
+  await f.controller.dispose()
+})
+
+// Unified AI native boundaries are fixtures; these test actual MCP transactions, not inference quality.
+const aiImage = (patch = {}) => ({ modelId: 'qwen-image', prompt: '夜色中的城市', ...patch })
+const aiMusic = (patch = {}) => ({ modelId: 'ace-step-1.5-turbo', prompt: '柔和钢琴与弦乐', ...patch })
+for (const kind of ['image', 'music']) test(`${kind} generation has explicit destinations and inserts in one undo transaction`, async () => {
+  for (const destination of ['generated', 'assets', 'timeline']) {
+    const f = fixture(), original = clone(f.project)
+    const options = { destination, expectedRevision: 7, ...(destination === 'timeline' ? { insert: { start: 4, ...(kind === 'image' ? { duration: 7 } : {}) } } : {}) }
+    const result = await finished(f.controller, await f.run(`${kind}_generate`, (kind === 'image' ? aiImage : aiMusic)(options)))
+    assert.equal(result.state, 'completed', result.error)
+    assert.equal(result.result.destination, destination)
+    assert.equal(f.commits.length, destination === 'generated' ? 0 : 1)
+    assert.equal(f.assets.length, destination === 'generated' ? 0 : 1)
+    assert.equal(result.result.assets[0].kind, kind === 'image' ? 'image' : 'audio')
+    for (const privateValue of ['/private/', 'blob:', 'private.example', 'nativePath', 'sourceUrl']) assert.ok(!JSON.stringify(result.result).includes(privateValue))
+    if (destination === 'generated') assert.deepEqual(f.project, original)
+    if (destination === 'timeline') {
+      assert.equal(result.result.clipIds.length, 1)
+      const { clip, track } = findClip(f.project, result.result.clipIds[0])
+      assert.equal(track.kind, kind === 'image' ? 'video' : 'audio')
+      assert.equal(clip.start, 4)
+      assert.equal(clip.trimOut, kind === 'image' ? 7 : 30)
+    }
+    if (destination !== 'generated') { await f.run('project_history', { direction: 'undo' }); assert.deepEqual(f.project, original) }
+    await f.controller.dispose()
+  }
+})
+
+test('AI generation resolves references only from project assets and rejects invalid combinations before starting native work', async () => {
+  const project = createProject('AI 参考'), source = { ...video('source-image'), kind: 'image', duration: 0, mime: 'image/png' }
+  project.assets = [source, video()]
+  const f = fixture(project)
+  for (const args of [aiImage({ modelId: 'unknown' }), aiImage({ mode: 'image-to-image' }), aiImage({ inputAssetId: 'missing' }), aiImage({ inputAssetId: 'source-video' }), aiImage({ nativePath: '/private/reference.png' }), aiImage({ mode: 'text-to-image', inputAssetId: source.id }), aiImage({ width: 513 }), aiImage({ strength: 0 }), aiImage({ modelId: 'z-image-turbo', negativePrompt: 'blur' }), aiImage({ insert: { start: 1 } }), aiImage({ destination: 'timeline', insert: { trackId: project.tracks[0].id } }), aiImage({ expectedRevision: 6 })]) await assert.rejects(f.run('image_generate', args))
+  for (const args of [aiMusic({ instrumental: false }), aiMusic({ instrumental: true, lyrics: '测试歌词' }), aiMusic({ guidance: 5 }), aiMusic({ inputAssetId: source.id }), aiMusic({ seconds: 601 }), aiMusic({ negativePrompt: 'noise' })]) await assert.rejects(f.run('music_generate', args))
+  assert.equal(f.calls.filter(call => call.name === 'beginAiGeneration').length, 0)
+  const result = await finished(f.controller, await f.run('image_generate', aiImage({ inputAssetId: source.id, strength: .5 })))
+  assert.equal(result.state, 'completed')
+  const sent = f.calls.find(call => call.name === 'beginAiGeneration').args[0]
+  assert.equal(sent.provider, 'image')
+  assert.deepEqual(sent.request.inputAsset, source)
+  sent.request.inputAsset.name = '不能改写原素材'
+  assert.equal(f.project.assets[0].name, source.name)
+  await f.controller.dispose()
+})
+
+test('global model downloads and repairs use the shared facade, require license consent and make no project edits', async () => {
+  const f = fixture()
+  for (const tool of ['ai_model_download', 'ai_model_repair']) {
+    await assert.rejects(f.run(tool, { modelId: 'qwen-image' }), /acceptedLicense/)
+    await assert.rejects(f.run(tool, { modelId: 'qwen-image', acceptedLicense: false }))
+    for (const modelId of ['qwen-image', 'f5-v1-base-fp32', 'h3-base-fl2va']) {
+      const result = await finished(f.controller, await f.run(tool, { modelId, acceptedLicense: true }))
+      assert.equal(result.state, 'completed', result.error)
+      assert.equal(result.result.modelId, modelId)
+      assert.equal(result.poll.tool, 'open_media_job_get')
+    }
+  }
+  assert.equal(f.calls.filter(call => call.name === 'downloadAiModel').length, 3)
+  assert.equal(f.calls.filter(call => call.name === 'repairAiModel').length, 3)
+  assert.equal(f.calls.filter(call => ['beginSpeechModelDownload', 'beginVideoModelDownload'].includes(call.name)).length, 0)
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('AI jobs retain global status access while busy and cancel or fail without partial project mutations', async () => {
+  for (const outcome of ['cancel', 'stale', 'failed', 'incomplete']) {
+    const f = fixture(), pending = deferred(), original = clone(f.project), complete = f.io.beginAiGeneration
+    f.io.beginAiGeneration = () => pending.promise
+    const job = await f.run('image_generate', aiImage({ destination: 'timeline' }))
+    await until(() => f.calls.some(call => call.name === 'beginAiGeneration'))
+    assert.ok((await f.run('ai_status')).models.length)
+    await assert.rejects(f.run('project_update', { patch: { title: 'blocked' } }), cause => cause.blockingJob?.jobId === job.id && cause.blockingJob.cancel.tool === 'open_media_job_cancel')
+    if (outcome === 'cancel') await f.run('job_cancel', { id: job.id })
+    if (outcome === 'stale') f.externalChange()
+    const request = f.calls.find(call => call.name === 'beginAiGeneration').args[0]
+    const native = await complete(request)
+    if (outcome === 'cancel') native.id = 'native-id-resolved-after-cancellation'
+    pending.resolve(outcome === 'failed' ? { ...native, state: 'failed', error: 'fixture failure' } : outcome === 'incomplete' ? { ...native, assets: [] } : native)
+    const result = await finished(f.controller, job)
+    assert.equal(result.state, outcome === 'cancel' ? 'cancelled' : 'failed')
+    assert.equal(f.commits.length, 0)
+    assert.equal(f.assets.length, 0)
+    assert.deepEqual(f.project.tracks, original.tracks)
+    assert.ok(f.calls.some(call => call.name === 'cancelAiJob'))
+    if (outcome === 'cancel') assert.ok(f.calls.some(call => call.name === 'cancelAiJob' && call.args[0] === 'native-id-resolved-after-cancellation'))
+    await f.controller.dispose()
+  }
+})
+
+test('global AI job queries redact native capabilities and can cancel a task created in the GUI', async () => {
+  const f = fixture()
+  const native = { ...(await f.io.beginAiGeneration({ provider: 'image', request: { requestId: 'gui-task', modelId: 'qwen-image' } })), state: 'running', cancelable: true, stage: '正在生成', progress: .5 }
+  f.io.getAiJob = async () => clone(native)
+  const oldStatus = f.io.getAiStatus
+  f.io.getAiStatus = async () => ({ ...await oldStatus(), jobs: [native], busy: true })
+  const status = await f.run('ai_status')
+  assert.equal(status.jobs[0].progress, .5)
+  assert.equal(status.jobs[0].poll.tool, 'open_media_ai_job_get')
+  const result = await f.run('ai_job_get', { id: 'gui-task' })
+  assert.equal(result.state, 'running')
+  for (const privateValue of ['/private/', 'private.example', 'nativePath', 'sourceUrl']) assert.ok(!JSON.stringify(result).includes(privateValue))
+  assert.equal((await f.run('ai_job_cancel', { id: 'gui-task' })).cancelRequested, true)
+  assert.deepEqual(f.calls.find(call => call.name === 'cancelAiJob').args, ['gui-task'])
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('AI generation reports measured native progress and preserves model warnings', async () => {
+  const f = fixture(), complete = f.io.beginAiGeneration, pending = deferred()
+  let final
+  f.io.beginAiGeneration = async request => { final = await complete(request); return { ...final, state: 'running', assets: [], stage: '采样 3/9', progress: 1 / 3, cancelable: true } }
+  f.io.getAiJob = () => pending.promise
+  const job = await f.run('image_generate', aiImage())
+  await until(() => f.controller.status(job.id).progress === 1 / 3)
+  assert.equal(f.controller.status(job.id).stage, '采样 3/9')
+  assert.equal(f.commits.length, 0)
+  await new Promise(resolve => setTimeout(resolve, 450))
+  pending.resolve({ ...final, warning: '已回退 CPU' })
+  const result = await finished(f.controller, job)
+  assert.equal(result.state, 'completed')
+  assert.equal(result.warning, '已回退 CPU')
+  assert.equal(f.commits.length, 0)
   await f.controller.dispose()
 })
