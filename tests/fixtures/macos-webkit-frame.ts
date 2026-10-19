@@ -311,7 +311,10 @@ async function verifyRealtimeComposition() {
       { label: 'fade-out', time: 2.75, maxLateness: .2 }, { label: 'fade-in', time: 3.25, maxLateness: .2 },
       { label: 'after-cut', time: 3.8 },
     ])
-    assert(samples[1]!.sourceTime - samples[0]!.sourceTime > 1, 'Video playback time did not advance independently of RAF')
+    // Each sample permits 0.4s of decoder drift from its actual RAF time.
+    // Compare the clock delta against those same bounds, including late samples.
+    const minimumVideoAdvance = Math.max(.1, samples[1]!.time - samples[0]!.time - .8)
+    assert(samples[1]!.sourceTime - samples[0]!.sourceTime > minimumVideoAdvance, 'Video playback time did not advance independently of RAF')
     assert(samples[0]!.motionHash !== samples[1]!.motionHash, 'The actual video motion region remained frozen')
     // An explicit playing seek uses the same synchronous path as VideoEditor.seek.
     seekPlaying('forward-seek', 4.5)
