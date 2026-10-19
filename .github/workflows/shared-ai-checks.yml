@@ -103,15 +103,23 @@ jobs:
         run: |
           set -euo pipefail
           cargo check --manifest-path src-tauri/Cargo.toml --locked --lib 2>&1 | tee test-results/shared-ai/desktop-check.log
+      - name: Verify mirror failover and resumable downloads for existing model providers
+        id: mirrors
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib speech_models:: -- --nocapture 2>&1 | tee test-results/shared-ai/speech-downloads.log
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib video_generation::download:: -- --nocapture 2>&1 | tee test-results/shared-ai/video-downloads.log
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib audio_tools_asr:: -- --nocapture 2>&1 | tee test-results/shared-ai/recognition-downloads.log
       - name: Report validation failures
         if: failure()
         shell: bash
-        run: node scripts/report-build-failure.mjs test-results/shared-ai/image-contracts.log test-results/shared-ai/music-contracts.log test-results/shared-ai/native-contracts.log test-results/shared-ai/service-contracts.log test-results/shared-ai/desktop-check.log
+        run: node scripts/report-build-failure.mjs test-results/shared-ai/*.log
       - name: Preserve native validation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: shared-ai-${{ matrix.platform }}-${{ github.run_id }}-adapters_${{ steps.adapters.outcome }}-native_${{ steps.native.outcome }}-service_${{ steps.service.outcome }}-desktop_${{ steps.desktop.outcome }}
+          name: shared-ai-${{ matrix.platform }}-${{ github.run_id }}-adapters_${{ steps.adapters.outcome }}-native_${{ steps.native.outcome }}-service_${{ steps.service.outcome }}-desktop_${{ steps.desktop.outcome }}-mirrors_${{ steps.mirrors.outcome }}
           path: test-results/shared-ai/
           retention-days: 14
           if-no-files-found: warn
@@ -124,6 +132,7 @@ jobs:
           NATIVE_OUTCOME: ${{ steps.native.outcome }}
           SERVICE_OUTCOME: ${{ steps.service.outcome }}
           DESKTOP_OUTCOME: ${{ steps.desktop.outcome }}
+          MIRRORS_OUTCOME: ${{ steps.mirrors.outcome }}
         with:
           script: |
             const fs = require('node:fs');
@@ -132,19 +141,20 @@ jobs:
               native: process.env.NATIVE_OUTCOME,
               service: process.env.SERVICE_OUTCOME,
               desktop: process.env.DESKTOP_OUTCOME,
+              mirrors: process.env.MIRRORS_OUTCOME,
             };
             const values = Object.values(outcomes);
             const conclusion = values.every(value => value === 'success') ? 'success'
               : values.includes('failure') ? 'failure'
               : values.includes('cancelled') ? 'cancelled' : 'neutral';
-            const logs = ['image-contracts', 'music-contracts', 'native-contracts', 'service-contracts', 'desktop-check'];
+            const logs = ['image-contracts', 'music-contracts', 'native-contracts', 'service-contracts', 'desktop-check', 'speech-downloads', 'video-downloads', 'recognition-downloads'];
             const sanitize = value => value.replace(/\u001b\[[0-9;]*m/g, '')
               .replace(/https?:\/\/[^\s"<>]+/g, url => url.split('?')[0])
               .replace(/(Bearer\s+|(?:token|password|secret|authorization)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]');
             const text = logs.map(name => {
               const file = `test-results/shared-ai/${name}.log`;
               if (!fs.existsSync(file)) return `### ${name}\nNo log produced; see step outcomes.`;
-              const tail = sanitize(fs.readFileSync(file, 'utf8')).trim().split(/\r?\n/).slice(-45).join('\n').slice(-9000);
+              const tail = sanitize(fs.readFileSync(file, 'utf8')).trim().split(/\r?\n/).slice(-45).join('\n').slice(-6000);
               return `### ${name}\n\n\`\`\`text\n${tail}\n\`\`\``;
             }).join('\n\n');
             await github.rest.checks.create({

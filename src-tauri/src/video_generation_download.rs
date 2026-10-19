@@ -185,7 +185,7 @@ pub(super) fn install_model(
     let mut completed = 0;
     for file in &unique {
         check_cancelled(cancelled)?;
-        ensure_blob(
+        ensure_blob_with_source(
             &worker.root,
             &client,
             file,
@@ -201,6 +201,18 @@ pub(super) fn install_model(
                     },
                     completed + bytes,
                 )
+            },
+            |url| {
+                if let Ok(mut state) = worker.shared.lock() {
+                    if let Some(status) =
+                        state.models.iter_mut().find(|status| status.id == model.id)
+                    {
+                        status.active_source = reqwest::Url::parse(url)
+                            .ok()
+                            .map(|url| url.origin().ascii_serialization());
+                        status.download_session = Some(crate::ai_download::next_session());
+                    }
+                }
             },
         )?;
         completed += file.size;
@@ -328,12 +340,13 @@ fn remember_blob(root: &Path, file: &ModelFile) -> Result<()> {
     )
 }
 
-fn ensure_blob(
+fn ensure_blob_with_source(
     root: &Path,
     client: &reqwest::blocking::Client,
     file: &ModelFile,
     cancelled: &AtomicBool,
     mut progress: impl FnMut(u64, bool),
+    mut source: impl FnMut(&str),
 ) -> Result<()> {
     safe_directory(root, "blobs")?;
     safe_directory(root, "parts")?;
@@ -361,7 +374,15 @@ fn ensure_blob(
     for attempt in 0..3 {
         for url in &file.urls {
             check_cancelled(cancelled)?;
-            let result = download_attempt(root, client, file, url, cancelled, &mut progress);
+            let result = download_attempt_with_source(
+                root,
+                client,
+                file,
+                url,
+                cancelled,
+                &mut progress,
+                &mut source,
+            );
             match result {
                 Ok(()) => {
                     check_cancelled(cancelled)?;
@@ -392,6 +413,7 @@ fn ensure_blob(
     ))
 }
 
+#[cfg(test)]
 fn download_attempt(
     root: &Path,
     client: &reqwest::blocking::Client,
@@ -399,6 +421,18 @@ fn download_attempt(
     url: &str,
     cancelled: &AtomicBool,
     progress: &mut impl FnMut(u64, bool),
+) -> Result<()> {
+    download_attempt_with_source(root, client, file, url, cancelled, progress, &mut |_| {})
+}
+
+fn download_attempt_with_source(
+    root: &Path,
+    client: &reqwest::blocking::Client,
+    file: &ModelFile,
+    url: &str,
+    cancelled: &AtomicBool,
+    progress: &mut impl FnMut(u64, bool),
+    source: &mut impl FnMut(&str),
 ) -> Result<()> {
     let part = partial(root, file);
     let mut offset = if part.exists() {
@@ -432,6 +466,7 @@ fn download_attempt(
     if offset > 0 {
         request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
     }
+    source(url);
     let mut response = request.send().map_err(|e| {
         if e.is_timeout() {
             "模型下载连接超时。".to_owned()
@@ -616,7 +651,10 @@ mod tests {
         let elapsed = start.elapsed();
         server.join().unwrap();
         result.unwrap();
-        assert!(elapsed > read_timeout * 2, "stream finished after {elapsed:?}");
+        assert!(
+            elapsed > read_timeout * 2,
+            "stream finished after {elapsed:?}"
+        );
         assert_eq!(fs::read(partial(&root, &file)).unwrap(), bytes);
     }
     #[test]
@@ -812,3 +850,6 @@ mod tests {
         assert!(!cached(&root, &file));
     }
 }
+
+#[cfg(test)]
+include!("model_download_fallback_tests.rs");

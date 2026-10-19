@@ -72,9 +72,16 @@ impl AiGenerationManager {
         for path in ["blobs", "parts", "models", "jobs", "runtime"] {
             models::safe_directory(&root, path)?;
         }
+        let mut runtime_states = HashMap::new();
         let model_states = catalog
             .iter()
-            .map(|m| model_state(&root, m, &runtimes))
+            .map(|model| {
+                let runtime = runtime_states
+                    .entry(model.runtime_id.clone())
+                    .or_insert_with(|| runtime_status(&root, model, &runtimes))
+                    .clone();
+                model_state_with_runtime(&root, model, runtime)
+            })
             .collect();
         let mut jobs: Vec<AiJob> = models::read_json(&root.join("jobs.json")).unwrap_or_default();
         jobs.truncate(MAX_HISTORY);
@@ -390,9 +397,21 @@ impl Worker {
                 if !cancelling {
                     model.state = phase.into();
                     model.downloaded_bytes = bytes.min(model.size);
-                    model.download_phase = Some(if phase == "verifying" { "verifying" } else { "model" }.into());
+                    model.download_phase = Some(
+                        if phase == "verifying" {
+                            "verifying"
+                        } else {
+                            "model"
+                        }
+                        .into(),
+                    );
                     let total = model.download_total_bytes.unwrap_or(model.size);
-                    model.download_transferred_bytes = Some(total.saturating_sub(model.size).saturating_add(bytes.min(model.size)).min(total));
+                    model.download_transferred_bytes = Some(
+                        total
+                            .saturating_sub(model.size)
+                            .saturating_add(bytes.min(model.size))
+                            .min(total),
+                    );
                 }
             }
         }
@@ -411,16 +430,47 @@ impl Worker {
                 model.runtime.reason = reason;
                 if matches!(phase, "downloading" | "verifying") {
                     model.state = phase.into();
-                    model.download_phase = Some(if phase == "verifying" { "verifying" } else { "runtime" }.into());
+                    model.download_phase = Some(
+                        if phase == "verifying" {
+                            "verifying"
+                        } else {
+                            "runtime"
+                        }
+                        .into(),
+                    );
                 }
             }
         }
     }
     fn transfer_progress(&self, id: &str, bytes: u64, total: u64) {
         if let Ok(mut state) = self.shared.lock() {
+            if state
+                .download
+                .as_ref()
+                .is_some_and(|download| download.cancelled.load(Ordering::SeqCst))
+            {
+                return;
+            }
             if let Some(model) = state.models.iter_mut().find(|model| model.id == id) {
                 model.download_total_bytes = Some(total);
                 model.download_transferred_bytes = Some(bytes.min(total));
+            }
+        }
+    }
+    fn download_source(&self, id: &str, url: &str) {
+        if let Ok(mut state) = self.shared.lock() {
+            if state
+                .download
+                .as_ref()
+                .is_some_and(|download| download.cancelled.load(Ordering::SeqCst))
+            {
+                return;
+            }
+            if let Some(model) = state.models.iter_mut().find(|model| model.id == id) {
+                model.active_source = reqwest::Url::parse(url)
+                    .ok()
+                    .map(|url| url.origin().ascii_serialization());
+                model.download_session = Some(crate::ai_download::next_session());
             }
         }
     }
@@ -441,7 +491,15 @@ impl Worker {
         models::check_cancelled(cancelled)?;
         let cached_weights = models::cached_bytes(&self.root, model);
         let transfer_total = models::model_size(model).saturating_add(runtime.archive.size);
-        self.transfer_progress(&model.id, cached_weights.saturating_add(if runtime_ready { runtime.archive.size } else { 0 }), transfer_total);
+        self.transfer_progress(
+            &model.id,
+            cached_weights.saturating_add(if runtime_ready {
+                runtime.archive.size
+            } else {
+                0
+            }),
+            transfer_total,
+        );
         self.runtime_progress(
             &model.id,
             if runtime_ready {
@@ -483,13 +541,17 @@ impl Worker {
                         size,
                         sha256: sha256.into(),
                     };
-                    models::ensure_blob(
+                    models::ensure_blob_with_source(
                         &self.root,
                         &client,
                         &file,
                         cancelled,
                         |bytes, verifying| {
-                            self.transfer_progress(&model.id, cached_weights.saturating_add(offset).saturating_add(bytes), transfer_total);
+                            self.transfer_progress(
+                                &model.id,
+                                cached_weights.saturating_add(offset).saturating_add(bytes),
+                                transfer_total,
+                            );
                             self.runtime_progress(
                                 &model.id,
                                 if verifying {
@@ -500,6 +562,7 @@ impl Worker {
                                 Some(runtime_file_progress(name, bytes, size, verifying)),
                             )
                         },
+                        |url| self.download_source(&model.id, url),
                     )?;
                     fs::hard_link(self.root.join("blobs").join(sha256), destination)
                         .map_err(|e| format!("无法共享 AI 运行环境下载文件：{e}"))?;
@@ -521,10 +584,18 @@ impl Worker {
             }
         }
         self.runtime_progress(&model.id, "ready", None);
-        self.transfer_progress(&model.id, cached_weights.saturating_add(runtime.archive.size), transfer_total);
-        models::install_model(&self.root, model, cancelled, |phase, bytes| {
-            self.model_progress(&model.id, phase, bytes)
-        })
+        self.transfer_progress(
+            &model.id,
+            cached_weights.saturating_add(runtime.archive.size),
+            transfer_total,
+        );
+        models::install_model_with_source(
+            &self.root,
+            model,
+            cancelled,
+            |phase, bytes| self.model_progress(&model.id, phase, bytes),
+            |url| self.download_source(&model.id, url),
+        )
     }
     fn probe_runtime(
         &self,
@@ -607,6 +678,28 @@ impl Worker {
             .insert(directory, stamps);
         Ok(())
     }
+    fn runtime_needs_repair(&self, runtime: &runtime_packages::SelectedRuntime, error: &str) {
+        if let Ok(mut state) = self.shared.lock() {
+            state
+                .verified_runtimes
+                .remove(&runtime_packages::path(&self.root.join("runtime"), runtime));
+            for entry in &mut state.models {
+                if self
+                    .catalog
+                    .iter()
+                    .any(|model| model.id == entry.id && model.runtime_id == runtime.id)
+                {
+                    entry.runtime.state = "update-available".into();
+                    entry.runtime.reason =
+                        Some(format!("推理环境文件缺失或已变化，请修复模型：{error}"));
+                    if entry.state != "unsupported" {
+                        entry.state = "update-available".into();
+                        entry.error = entry.runtime.reason.clone();
+                    }
+                }
+            }
+        }
+    }
     fn generate(
         &self,
         runtime: &Runtime,
@@ -632,8 +725,12 @@ impl Worker {
         self.update(id, "校验运行环境", None, None);
         let selected = select_runtime(model, &self.runtimes)?;
         let runtime_root = runtime_packages::path(&self.root.join("runtime"), &selected);
-        self.verify_runtime(&selected, cancelled)
-            .map_err(|e| format!("AI 运行环境不可用，请下载或修复模型：{e}"))?;
+        if let Err(error) = self.verify_runtime(&selected, cancelled) {
+            if !cancelled.load(Ordering::SeqCst) {
+                self.runtime_needs_repair(&selected, &error);
+            }
+            return Err(format!("AI 运行环境不可用，请下载或修复模型：{error}"));
+        }
         let python = runtime_root.join(&selected.archive.executable);
         models::require_space(&self.root, 512 * 1024 * 1024)?;
         let job_dir = models::safe_directory(&self.root, &format!("jobs/{}", engine::new_id()))?;
@@ -992,14 +1089,23 @@ fn runtime_status(
         },
         Ok(runtime) => {
             let directory = runtime_packages::path(&root.join("runtime"), &runtime);
-            let ready = models::checked_file(&directory, &directory.join("manifest.json")).is_ok()
-                && models::checked_file(&directory, &directory.join(&runtime.archive.executable))
-                    .is_ok();
+            let validation = runtime_packages::verify_layout(&directory, &runtime);
+            let ready = validation.is_ok();
+            let installed = directory.exists();
             AiRuntimeStatus {
-                state: if ready { "ready" } else { "not-downloaded" }.into(),
+                state: if ready {
+                    "ready"
+                } else if installed {
+                    "update-available"
+                } else {
+                    "not-downloaded"
+                }
+                .into(),
                 device: Some("auto".into()),
                 reason: if ready {
                     None
+                } else if installed {
+                    Some(format!("推理环境需要修复：{}", validation.unwrap_err()))
                 } else {
                     Some("下载模型时一并安装隔离的推理环境。".into())
                 },
@@ -1013,6 +1119,9 @@ fn model_state(
     runtimes: &[runtime_packages::RuntimeDefinition],
 ) -> AiModel {
     let runtime = runtime_status(root, model, runtimes);
+    model_state_with_runtime(root, model, runtime)
+}
+fn model_state_with_runtime(root: &Path, model: &Model, runtime: AiRuntimeStatus) -> AiModel {
     let ready = models::installed_ready(root, model);
     let size = models::model_size(model);
     AiModel {

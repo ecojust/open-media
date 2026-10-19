@@ -303,6 +303,25 @@ fn manifest(
     Ok(manifest)
 }
 
+/// Check the locked file set and sizes once when constructing model status.
+/// This is deliberately separate from the full content verification before use.
+pub(crate) fn verify_layout(root: &Path, runtime: &SelectedRuntime) -> Result<()> {
+    let metadata = fs::symlink_metadata(root).map_err(|_| "推理环境未安装，请下载或修复。")?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err("推理环境目录无效，请修复。".into());
+    }
+    let manifest = manifest(root, &runtime.archive, &AtomicBool::new(false))?;
+    for file in manifest.files {
+        let path = checked_path(root, &file.path, false)?;
+        let metadata =
+            fs::metadata(path).map_err(|_| format!("推理环境缺少 {}，请修复。", file.path))?;
+        if metadata.len() != file.size {
+            return Err(format!("推理环境文件 {} 不完整，请修复。", file.path));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn verify(
     root: &Path,
     runtime: &SelectedRuntime,
@@ -656,7 +675,14 @@ pub(crate) fn install_with_download_and_probe(
             let urls: Vec<String> = std::iter::once(file.url.clone())
                 .chain(file.mirrors.iter().cloned())
                 .collect();
-            download(&file.path, &urls, file.size, &file.sha256, destination, offset)
+            download(
+                &file.path,
+                &urls,
+                file.size,
+                &file.sha256,
+                destination,
+                offset,
+            )
         },
         probe,
     )

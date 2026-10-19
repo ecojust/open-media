@@ -184,15 +184,39 @@ fn runtime_download_progress_does_not_change_model_weight_bytes() {
     );
     assert_eq!(shared.lock().unwrap().models[0].state, "verifying");
     worker.runtime_progress(&definition.id, "ready", None);
+    worker.transfer_progress(&definition.id, 1_800_012_345, 2_000_000_000);
+    worker.download_source(&definition.id, "https://example.test/model?token=private");
+    let first_session = shared.lock().unwrap().models[0].download_session.unwrap();
+    worker.download_source(&definition.id, "https://backup.test/model");
     {
         let state = shared.lock().unwrap();
         assert_eq!(state.models[0].runtime.state, "ready");
         assert!(state.models[0].runtime.reason.is_none());
         assert_eq!(state.models[0].downloaded_bytes, 12345);
+        assert_eq!(
+            state.models[0].download_transferred_bytes,
+            Some(1_800_012_345)
+        );
+        assert_eq!(state.models[0].download_total_bytes, Some(2_000_000_000));
+        assert_eq!(
+            state.models[0].active_source.as_deref(),
+            Some("https://backup.test")
+        );
+        assert!(state.models[0].download_session.unwrap() > first_session);
     }
     cancelled.store(true, Ordering::SeqCst);
     worker.runtime_progress(&definition.id, "downloading", Some("late event".into()));
+    worker.transfer_progress(&definition.id, 0, 1);
+    worker.download_source(&definition.id, "https://late.test/model");
     assert_eq!(shared.lock().unwrap().models[0].runtime.state, "ready");
+    assert_eq!(
+        shared.lock().unwrap().models[0].active_source.as_deref(),
+        Some("https://backup.test")
+    );
+    assert_eq!(
+        shared.lock().unwrap().models[0].download_total_bytes,
+        Some(2_000_000_000)
+    );
 }
 
 #[test]
@@ -221,12 +245,9 @@ fn restoring_shared_runtime_updates_all_intact_models_without_redownloading() {
     missing.id = "missing-model".into();
     let mut finished = installed.clone();
     finished.id = "finished-model".into();
-    let archive: runtime_packages::RuntimeArchive = serde_json::from_value(json!({"url":"https://github.com/ecojust/open-media/releases/download/test/runtime.zip", "size":10,"unpackedSize":10,"sha256":"a".repeat(64),"manifestSha256":"b".repeat(64),"executable":"python", "script":"check.py"})).unwrap();
-    let definitions = vec![runtime_packages::RuntimeDefinition {
-        id: installed.runtime_id.clone(),
-        version: 1,
-        platforms: HashMap::from([(runtime_packages::platform().into(), archive)]),
-    }];
+    let (definitions, selected) = runtime_fixture(&root, &installed.runtime_id);
+    let directory = runtime_packages::path(&root.join("runtime"), &selected);
+    fs::remove_file(directory.join("check.py")).unwrap();
     let mut entries: Vec<_> = [&installed, &missing, &finished]
         .into_iter()
         .map(|model| model_state(&root, model, &definitions))
@@ -235,13 +256,7 @@ fn restoring_shared_runtime_updates_all_intact_models_without_redownloading() {
     entries[0].error = Some("旧运行环境需要更新".into());
     entries[2].state = "failed".into();
     entries[2].error = Some("下载已失败".into());
-    let selected = runtime_packages::select(&installed.runtime_id, &definitions)
-        .unwrap()
-        .unwrap();
-    let directory = runtime_packages::path(&root.join("runtime"), &selected);
-    fs::create_dir_all(&directory).unwrap();
-    fs::write(directory.join("manifest.json"), b"{}").unwrap();
-    fs::write(directory.join("python"), b"runtime metadata fixture").unwrap();
+    fs::write(directory.join("check.py"), b"check fixture").unwrap();
     let catalog = vec![installed.clone(), missing, finished.clone()];
     refresh_shared_runtime_models(&root, &catalog, &definitions, &mut entries, &finished.id);
     assert_eq!(entries[0].state, "ready");
@@ -347,4 +362,94 @@ fn generation_protocol_retains_stdout_errors_without_cpu_retry_for_invalid_model
         .unwrap()
         .process
         .is_none());
+}
+
+fn runtime_fixture(
+    root: &Path,
+    runtime_id: &str,
+) -> (
+    Vec<runtime_packages::RuntimeDefinition>,
+    runtime_packages::SelectedRuntime,
+) {
+    use sha2::{Digest, Sha256};
+    let files = [
+        ("python", b"python fixture".as_slice()),
+        ("check.py", b"check fixture".as_slice()),
+        ("library.py", b"library fixture".as_slice()),
+    ];
+    let manifest = serde_json::to_vec(&json!({"schema":1,"files":files.iter().map(|(path, data)| json!({"path":path,"size":data.len(),"sha256":format!("{:x}",Sha256::digest(data))})).collect::<Vec<_>>()})).unwrap();
+    let archive: runtime_packages::RuntimeArchive = serde_json::from_value(json!({"url":"https://github.com/ecojust/open-media/releases/download/test/runtime.zip","size":10,"unpackedSize":manifest.len()+files.iter().map(|(_,data)|data.len()).sum::<usize>(),"sha256":"a".repeat(64),"manifestSha256":format!("{:x}",Sha256::digest(&manifest)),"executable":"python","script":"check.py"})).unwrap();
+    let definitions = vec![runtime_packages::RuntimeDefinition {
+        id: runtime_id.into(),
+        version: 1,
+        platforms: HashMap::from([(runtime_packages::platform().into(), archive)]),
+    }];
+    let selected = runtime_packages::select(runtime_id, &definitions)
+        .unwrap()
+        .unwrap();
+    let directory = runtime_packages::path(&root.join("runtime"), &selected);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("manifest.json"), manifest).unwrap();
+    for (name, data) in files {
+        fs::write(directory.join(name), data).unwrap();
+    }
+    (definitions, selected)
+}
+
+#[test]
+fn runtime_layout_rejects_missing_runner_or_library_and_updates_all_sharing_models() {
+    let temp = tempfile::tempdir().unwrap();
+    let model = catalog_model("qwen-image");
+    let (definitions, selected) = runtime_fixture(temp.path(), &model.runtime_id);
+    let directory = runtime_packages::path(&temp.path().join("runtime"), &selected);
+    assert_eq!(
+        runtime_status(temp.path(), &model, &definitions).state,
+        "ready"
+    );
+    for (name, content) in [
+        ("check.py", b"check fixture".as_slice()),
+        ("library.py", b"library fixture".as_slice()),
+    ] {
+        fs::remove_file(directory.join(name)).unwrap();
+        let status = runtime_status(temp.path(), &model, &definitions);
+        assert_eq!(status.state, "update-available");
+        assert!(status.reason.unwrap().contains("修复"));
+        fs::write(directory.join(name), content).unwrap();
+    }
+    let mut second = model.clone();
+    second.id = "another-model".into();
+    let shared = Arc::new(Mutex::new(State {
+        models: vec![
+            model_state(temp.path(), &model, &definitions),
+            model_state(temp.path(), &second, &definitions),
+        ],
+        jobs: vec![],
+        tasks: HashMap::new(),
+        download: None,
+        closing: false,
+        verified_runtimes: HashMap::new(),
+    }));
+    let worker = Worker {
+        root: temp.path().to_owned(),
+        catalog: Arc::new(vec![model, second]),
+        runtimes: Arc::new(definitions),
+        shared: shared.clone(),
+        gate: AiExecutionGate::default(),
+    };
+    worker
+        .verify_runtime(&selected, &AtomicBool::new(false))
+        .unwrap();
+    fs::remove_file(directory.join("library.py")).unwrap();
+    let error = worker
+        .verify_runtime(&selected, &AtomicBool::new(false))
+        .unwrap_err();
+    worker.runtime_needs_repair(&selected, &error);
+    let state = shared.lock().unwrap();
+    assert!(state
+        .models
+        .iter()
+        .all(|model| model.state == "update-available"
+            && model.runtime.state == "update-available"
+            && model.error.is_some()));
+    assert!(state.verified_runtimes.is_empty());
 }

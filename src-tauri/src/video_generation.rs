@@ -1,6 +1,6 @@
 //! Optional local video generation. Model bytes are installed separately from the app.
-use crate::engine::{self, Asset, MediaStore, Result, Runtime};
 use crate::ai_execution::AiExecutionGate;
+use crate::engine::{self, Asset, MediaStore, Result, Runtime};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -74,6 +74,10 @@ pub struct VideoGenerationModel {
     pub(crate) modes: Vec<String>,
     pub(crate) size: u64,
     pub(crate) downloaded_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) active_source: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) download_session: Option<u64>,
     pub(crate) state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) error: Option<String>,
@@ -231,7 +235,7 @@ impl VideoGenerationManager {
                 id: model.id.clone(), name: model.name.clone(), version: catalog.revision.clone(), modes: model.modes.clone(), size,
                 downloaded_bytes: if ready { size } else { download::cached_bytes(&root, &files) },
                 state: if unsupported.is_some() { "unsupported" } else if ready { "ready" } else if installed.exists() || root.join("models").join(&model.id).exists() { "update-available" } else { "not-downloaded" }.into(),
-                error: None, license_url: catalog.license.url.clone(),
+                error: None, active_source: None, download_session: None, license_url: catalog.license.url.clone(),
                 hardware: "Apple 芯片 Mac · macOS 15 或更新版本；建议 64 GB 以上统一内存。低内存模式使用 SSD，生成较慢，需预留模型与输出空间。".into(),
             }
         }).collect();
@@ -510,9 +514,14 @@ impl VideoGenerationManager {
         if let Err(error) = thread::Builder::new()
             .name("video-generation".into())
             .spawn(move || {
-                let result = worker.gate.acquire(&format!("video:{}", request.request_id), &cancelled, |_| {
-                    worker.update_job(&request.request_id, |job| { job.stage = "正在等待其他 AI 任务释放设备".into(); });
-                }).and_then(|_permit| worker.generate(&runtime, &store, &request, &cancelled));
+                let result = worker
+                    .gate
+                    .acquire(&format!("video:{}", request.request_id), &cancelled, |_| {
+                        worker.update_job(&request.request_id, |job| {
+                            job.stage = "正在等待其他 AI 任务释放设备".into();
+                        });
+                    })
+                    .and_then(|_permit| worker.generate(&runtime, &store, &request, &cancelled));
                 worker.update_job(&request.request_id, |job| {
                     if cancelled.load(Ordering::SeqCst) {
                         job.state = "cancelled".into();
