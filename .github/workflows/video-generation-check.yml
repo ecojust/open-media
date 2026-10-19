@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: never
+
 jobs:
   host-contracts:
     strategy:

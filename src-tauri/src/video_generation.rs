@@ -290,7 +290,25 @@ impl VideoGenerationManager {
             if let Some(reason) = &self.unsupported {
                 Err(reason.clone())
             } else {
-                install_runtime(&self.worker.root, &self.worker.catalog)
+                let runner = install_runtime(&self.worker.root, &self.worker.catalog)?;
+                let mut command = Command::new(&runner);
+                command
+                    .arg("--probe")
+                    .current_dir(runner.parent().ok_or("视频生成引擎目录无效。")?)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped());
+                isolate_process(&mut command);
+                self.worker
+                    .run_child_bounded(
+                        command,
+                        "runtime-probe",
+                        0,
+                        1,
+                        &AtomicBool::new(false),
+                        Some(Duration::from_secs(8)),
+                    )
+                    .map_err(|error| format!("视频生成引擎设备检查失败：{error}"))?;
+                Ok(runner)
             }
         })
     }
@@ -765,11 +783,22 @@ impl Worker {
 
     fn run_child(
         &self,
+        command: Command,
+        id: &str,
+        index: usize,
+        count: usize,
+        cancelled: &AtomicBool,
+    ) -> Result<()> {
+        self.run_child_bounded(command, id, index, count, cancelled, None)
+    }
+    fn run_child_bounded(
+        &self,
         mut command: Command,
         id: &str,
         index: usize,
         count: usize,
         cancelled: &AtomicBool,
+        timeout: Option<Duration>,
     ) -> Result<()> {
         // Spawn and register under the shutdown lock: exiting cannot miss a
         // helper between process creation and registration, or start another one.
@@ -822,6 +851,7 @@ impl Worker {
             tail
         });
         let mut reported_error = None;
+        let started = Instant::now();
         let exit = loop {
             for line in receiver.try_iter() {
                 if let Ok(value) = serde_json::from_str::<Value>(&line) {
@@ -849,6 +879,10 @@ impl Worker {
             if cancelled.load(Ordering::SeqCst) {
                 terminate(&mut child.lock().unwrap_or_else(|e| e.into_inner()));
                 break Err(CANCELLED.into());
+            }
+            if timeout.is_some_and(|timeout| started.elapsed() >= timeout) {
+                terminate(&mut child.lock().unwrap_or_else(|e| e.into_inner()));
+                break Err("视频生成引擎设备检查超时。".into());
             }
             let waited = child.lock().unwrap_or_else(|e| e.into_inner()).try_wait();
             match waited {
@@ -1396,37 +1430,7 @@ fn install_runtime(root: &Path, catalog: &Catalog) -> Result<PathBuf> {
             file.as_file().sync_all().map_err(|e| e.to_string())?;
             file.persist(&path).map_err(|e| e.to_string())?;
         }
-        let runner = folder.join(&catalog.engine.executable);
-        let mut child = Command::new(&runner)
-            .arg("--probe")
-            .current_dir(&folder)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("无法检查本地视频生成引擎：{e}"))?;
-        let start = Instant::now();
-        loop {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    if !status.success() {
-                        return Err(
-                            "视频生成引擎无法访问可用的图形设备，请确认系统版本及完整安装包。"
-                                .into(),
-                        );
-                    }
-                    break;
-                }
-                Ok(None) if start.elapsed() < Duration::from_secs(8) => {
-                    thread::sleep(Duration::from_millis(40))
-                }
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err("视频生成引擎设备检查超时或失败。".into());
-                }
-            }
-        }
-        Ok(runner)
+        Ok(folder.join(&catalog.engine.executable))
     }
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {

@@ -730,31 +730,33 @@ mod tests {
     #[test]
     fn receipts_reject_replaced_files_without_reading_model_bytes() {
         let dir = tempfile::tempdir().unwrap();
-        safe_directory(dir.path(), "blobs").unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        safe_directory(&root, "blobs").unwrap();
         let file = ModelFile {
             path: "FL2VA/model.bin".into(),
             size: 4,
             sha256: format!("{:x}", Sha256::digest(b"test")),
             urls: vec!["https://example.org/model".into()],
         };
-        fs::write(blob(dir.path(), &file), b"test").unwrap();
-        remember_blob(dir.path(), &file).unwrap();
-        assert!(cached(dir.path(), &file));
-        fs::write(blob(dir.path(), &file), b"changed").unwrap();
-        assert!(!cached(dir.path(), &file));
+        fs::write(blob(&root, &file), b"test").unwrap();
+        remember_blob(&root, &file).unwrap();
+        assert!(cached(&root, &file));
+        fs::write(blob(&root, &file), b"changed").unwrap();
+        assert!(!cached(&root, &file));
     }
     #[test]
     fn partial_bytes_are_bounded_and_shared_hashes_count_once() {
         let dir = tempfile::tempdir().unwrap();
-        safe_directory(dir.path(), "parts").unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        safe_directory(&root, "parts").unwrap();
         let file = ModelFile {
             path: "FL2VA/a".into(),
             size: 10,
             sha256: "a".repeat(64),
             urls: vec![],
         };
-        fs::write(partial(dir.path(), &file), b"12345").unwrap();
-        assert_eq!(cached_bytes(dir.path(), &[file.clone(), file]), 5);
+        fs::write(partial(&root, &file), b"12345").unwrap();
+        assert_eq!(cached_bytes(&root, &[file.clone(), file]), 5);
     }
     #[test]
     fn installation_is_atomic_shared_and_version_checked() {
