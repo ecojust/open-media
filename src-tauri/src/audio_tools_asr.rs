@@ -74,6 +74,8 @@ struct ModelState {
     downloaded: u64,
     error: Option<String>,
     job_id: Option<String>,
+    active_source: Option<String>,
+    download_session: Option<u64>,
 }
 struct Inner {
     root: PathBuf,
@@ -109,6 +111,8 @@ impl AsrManager {
                 downloaded: 0,
                 error: None,
                 job_id: None,
+                active_source: None,
+                download_session: None,
             }),
         }));
         if manager.model_path().join("ready.json").is_file() {
@@ -137,12 +141,29 @@ impl AsrManager {
         job_id: Option<String>,
     ) {
         if let Ok(mut current) = self.0.model_state.lock() {
-            *current = ModelState {
-                state: state.into(),
-                downloaded,
-                error,
-                job_id,
-            };
+            let same_download = job_id.is_some()
+                && current.job_id == job_id
+                && matches!(state, "downloading" | "verifying");
+            current.state = state.into();
+            current.downloaded = downloaded;
+            current.error = error;
+            current.job_id = job_id;
+            if !same_download {
+                current.active_source = None;
+                current.download_session = None;
+            }
+        }
+    }
+
+    fn begin_download_attempt(&self, id: &str, url: &str, downloaded: u64) {
+        if let Ok(mut current) = self.0.model_state.lock() {
+            if current.job_id.as_deref() == Some(id) && current.state == "downloading" {
+                current.active_source = reqwest::Url::parse(url)
+                    .ok()
+                    .map(|url| url.origin().ascii_serialization());
+                current.download_session = Some(crate::ai_download::next_session());
+                current.downloaded = downloaded;
+            }
         }
     }
 
@@ -156,16 +177,30 @@ impl AsrManager {
             "models": [{ "id": model.id, "name": model.name, "status": state.state,
                 "downloadSize": model.download_size, "modelSize": model.installed_size,
                 "downloadedBytes": state.downloaded, "progress": (state.downloaded as f64 / model.download_size as f64).clamp(0.0, 1.0),
+                "activeSource": state.active_source, "downloadSession": state.download_session,
                 "hardware": model.hardware, "language": "多语，包含中文和英文", "error": state.error, "jobId": state.job_id }],
         })
     }
 
     pub(crate) fn ai_models(&self) -> Vec<AiModel> {
         let model = &self.0.model;
-        let (state, downloaded_bytes, error) = match self.0.model_state.lock() {
-            Ok(state) => (state.state.clone(), state.downloaded, state.error.clone()),
-            Err(_) => ("failed".into(), 0, Some("识别模型状态不可用。".into())),
-        };
+        let (state, downloaded_bytes, error, active_source, download_session) =
+            match self.0.model_state.lock() {
+                Ok(state) => (
+                    state.state.clone(),
+                    state.downloaded,
+                    state.error.clone(),
+                    state.active_source.clone(),
+                    state.download_session,
+                ),
+                Err(_) => (
+                    "failed".into(),
+                    0,
+                    Some("识别模型状态不可用。".into()),
+                    None,
+                    None,
+                ),
+            };
         let runtime_ready = self.0.helper.as_ref().is_some_and(|path| path.is_file());
         vec![AiModel {
             id: model.id.clone(),
@@ -178,8 +213,8 @@ impl AsrManager {
             download_total_bytes: None,
             download_transferred_bytes: None,
             download_phase: None,
-            active_source: None,
-            download_session: None,
+            active_source,
+            download_session,
             download_speed_bytes_per_second: None,
             remaining_seconds: None,
             state: if !runtime_ready && !matches!(state.as_str(), "downloading" | "verifying") {
@@ -429,6 +464,7 @@ impl AsrManager {
             let mut downloaded = false;
             for url in &file.urls {
                 control.check()?;
+                self.begin_download_attempt(id, url, completed);
                 let result = network.block_on(download_file(
                     &client,
                     url,
@@ -1230,6 +1266,50 @@ mod tests {
         assert_eq!(model.downloaded_bytes, 4096);
         manager.set_model_state("failed", 0, Some("校验失败".into()), None);
         assert_eq!(manager.ai_models()[0].error.as_deref(), Some("校验失败"));
+    }
+
+    #[test]
+    fn download_sources_reset_sessions_and_survive_progress_without_exposing_urls() {
+        let directory = tempfile::tempdir().unwrap();
+        let manager = AsrManager::new(directory.path(), None).unwrap();
+        manager.set_model_state("downloading", 0, None, Some("first".into()));
+        manager.begin_download_attempt("first", "https://primary.example/model?token=secret", 0);
+        let first = manager.ai_models().remove(0);
+        assert_eq!(
+            first.active_source.as_deref(),
+            Some("https://primary.example")
+        );
+        assert!(first.download_session.is_some());
+        manager.set_model_state("downloading", 100, None, Some("first".into()));
+        let progress = manager.ai_models().remove(0);
+        assert_eq!(progress.active_source, first.active_source);
+        assert_eq!(progress.download_session, first.download_session);
+        manager.begin_download_attempt("first", "https://mirror.example/model", 0);
+        let mirror = manager.ai_models().remove(0);
+        assert_eq!(
+            mirror.active_source.as_deref(),
+            Some("https://mirror.example")
+        );
+        assert!(mirror.download_session > first.download_session);
+        assert_eq!(mirror.downloaded_bytes, 0);
+        manager.begin_download_attempt("first", "https://mirror.example/model", 0);
+        let retry = manager.ai_models().remove(0);
+        assert!(retry.download_session > mirror.download_session);
+        manager.set_model_state("verifying", 200, None, Some("first".into()));
+        assert_eq!(
+            manager.ai_models()[0].download_session,
+            retry.download_session
+        );
+        manager.set_model_state("ready", manager.0.model.download_size, None, None);
+        assert_eq!(manager.ai_models()[0].active_source, None);
+        manager.set_model_state("downloading", 0, None, Some("second".into()));
+        assert_eq!(manager.ai_models()[0].download_session, None);
+        manager.begin_download_attempt("second", "https://primary.example/model", 0);
+        assert!(manager.ai_models()[0].download_session > retry.download_session);
+        assert_eq!(
+            manager.status()["models"][0]["activeSource"],
+            "https://primary.example"
+        );
     }
 
     #[test]
