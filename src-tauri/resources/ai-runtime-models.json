@@ -1,4 +1,67 @@
 {
   "schemaVersion": 1,
-  "runtimes": []
+  "runtimes": [
+    {
+      "id": "ai-generation-v1",
+      "version": 1,
+      "platforms": {
+        "macos-arm64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip",
+          "size": 157800568,
+          "unpackedSize": 610245264,
+          "sha256": "e9ebdf102941e94923fb3bf22e36138f3980e44df4ca4e6bff50fb737b0b365e",
+          "manifestSha256": "053d4d08dafbd5e2415c6de36555e2586d9b2f4155296a46bbe667404b13afe8",
+          "executable": "python/bin/python3",
+          "script": "runner/check.py"
+        },
+        "windows-x64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip",
+          "size": 2960791014,
+          "unpackedSize": 4842952067,
+          "sha256": "42b2cb4daddcacec1ab64645d7310f25c0112bc9e3bf6af51f39033e29ffe167",
+          "manifestSha256": "87f509f875df02e54d6629e150e1da86a6a22504df21b3766b53c557d12e720e",
+          "executable": "python/python.exe",
+          "script": "runner/check.py",
+          "parts": [
+            {
+              "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part001",
+              "size": 1800000000,
+              "sha256": "0b7c5623db8db16035603515128d16182121f7def36371d9bfe7f2df12a7e66a"
+            },
+            {
+              "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part002",
+              "size": 1160791014,
+              "sha256": "4101c3d10cd5379d568974a8db2204d7df59e3f7c1a41c7c236dc996362391ff"
+            }
+          ]
+        },
+        "linux-x64": {
+          "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip",
+          "size": 4196248351,
+          "unpackedSize": 7361879727,
+          "sha256": "0d4d63c46393c8e75f19da733fc147f091fb44edd46c9327870ba3f2b3437e5f",
+          "manifestSha256": "e2163608718594d586c7985756f4fca72da4ec8b702fa183c3bd09a42b21361b",
+          "executable": "python/bin/python3",
+          "script": "runner/check.py",
+          "parts": [
+            {
+              "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part001",
+              "size": 1800000000,
+              "sha256": "eb75cfb6dcdf8390bcf58c03e8576bb3c438bbcb0a6f04be6ff6487cb65c693f"
+            },
+            {
+              "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part002",
+              "size": 1800000000,
+              "sha256": "db55e16c5550fba92f914d151bac45e885140c1a6add498fcce7a39cbf6e5375"
+            },
+            {
+              "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part003",
+              "size": 596248351,
+              "sha256": "568f08b5eab26cb668faa460cb734ed0c313c1283b08add4952f59178ac96f25"
+            }
+          ]
+        }
+      }
+    }
+  ]
 }
