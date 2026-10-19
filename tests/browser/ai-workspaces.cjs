@@ -47,7 +47,7 @@ async function mount(page, base) {
 }
 
 async function main(){
-  const {createServer}=await import('vite'),server=await createServer({server:{host:'127.0.0.1',port:0,hmr:false,watch:{ignored:['**']}},logLevel:'error'})
+  const {createServer}=await import('vite'),server=await createServer({server:{host:'127.0.0.1',port:0,strictPort:false,hmr:false,watch:{ignored:['**']}},logLevel:'error'})
   await server.listen();let browser
   try{
     browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||(existsSync('/usr/bin/chromium')?'/usr/bin/chromium':undefined),args:['--no-sandbox']})
