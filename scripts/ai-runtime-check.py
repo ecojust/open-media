@@ -35,6 +35,9 @@ def main() -> None:
     from diffusers import QwenImagePipeline, QwenImageImg2ImgPipeline, ZImagePipeline, ZImageImg2ImgPipeline
     from acestep.handler import AceStepHandler
     from acestep.inference import generate_music
+    from acestep.models.common.configuration_acestep_v15 import AceStepConfig
+    from acestep.models.turbo.modeling_acestep_v15_turbo import AceStepConditionGenerationModel as TurboModel
+    from acestep.models.sft.modeling_acestep_v15_sft import AceStepConditionGenerationModel as StandardModel
     from PIL import Image
 
     assert torch.__version__.split("+")[0] == "2.9.1"

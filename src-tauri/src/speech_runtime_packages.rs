@@ -646,6 +646,12 @@ pub(crate) fn install_with_download(
     })
 }
 
+/// Only reuse stamps obtained from a successful verification in this process.
+/// Changed or missing files require a fresh full-content verification.
+pub(crate) fn verified_files_unchanged(stamps: &[FileStamp]) -> bool {
+    super::stamps_unchanged(stamps)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
