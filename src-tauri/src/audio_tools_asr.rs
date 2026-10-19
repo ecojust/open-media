@@ -28,6 +28,11 @@ const HELPER: &str = if cfg!(windows) {
 };
 const MAX_JOBS: usize = 32;
 const MAX_RESULT: usize = 4 * 1024 * 1024;
+#[path = "audio_tools_asr_download.rs"]
+mod download;
+#[cfg(test)]
+use download::download_file;
+use download::download_file_from_mirrors;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -457,43 +462,35 @@ impl AsrManager {
             .user_agent("Open-Media-offline-recognition")
             .build()
             .map_err(|error| error.to_string())?;
+        let cache = crate::ai_models::safe_directory(&self.0.root, "download-parts")?;
+        let _cache_lock = crate::ai_models::operation_lock(&cache)?;
         let mut completed = 0;
         for file in &self.0.model.files {
+            let partial = cache.join(&file.sha256);
+            network.block_on(download_file_from_mirrors(
+                &client,
+                &partial,
+                file,
+                control,
+                |bytes| {
+                    self.progress(
+                        id,
+                        (completed + bytes) as f64 / self.0.model.download_size as f64 * 0.95,
+                        "正在下载识别模型",
+                    );
+                    self.set_model_state(
+                        "downloading",
+                        completed + bytes,
+                        None,
+                        Some(id.to_owned()),
+                    );
+                },
+                |url, bytes| self.begin_download_attempt(id, url, completed + bytes),
+            ))?;
             let destination = temporary.path().join(&file.name);
-            let mut errors = Vec::new();
-            let mut downloaded = false;
-            for url in &file.urls {
-                control.check()?;
-                self.begin_download_attempt(id, url, completed);
-                let result = network.block_on(download_file(
-                    &client,
-                    url,
-                    &destination,
-                    file,
-                    control,
-                    |bytes| {
-                        self.progress(
-                            id,
-                            (completed + bytes) as f64 / self.0.model.download_size as f64 * 0.95,
-                            "正在下载识别模型",
-                        );
-                        self.set_model_state(
-                            "downloading",
-                            completed + bytes,
-                            None,
-                            Some(id.to_owned()),
-                        );
-                    },
-                ));
-                if result.is_ok() {
-                    downloaded = true;
-                    break;
-                }
-                errors.push(result.unwrap_err());
-            }
-            if !downloaded {
-                return Err(format!("识别模型所有下载地址均失败：{}", errors.join("；")));
-            }
+            fs::hard_link(&partial, &destination)
+                .or_else(|_| fs::copy(&partial, &destination).map(|_| ()))
+                .map_err(|error| format!("无法保存已验证识别模型：{error}"))?;
             completed += file.bytes;
         }
         self.progress(id, 0.96, "正在校验识别模型");
@@ -516,6 +513,9 @@ impl AsrManager {
         }
         if had_previous {
             let _ = fs::remove_dir_all(backup);
+        }
+        for file in &self.0.model.files {
+            let _ = fs::remove_file(cache.join(&file.sha256));
         }
         Ok(json!({"modelId":self.0.model.id,"ready":true,"downloadedBytes":completed}))
     }
@@ -872,69 +872,6 @@ fn verify_model(path: &Path, model: &Model, control: &TaskControl) -> Result<()>
         return Err("识别模型需要重新下载更新。".into());
     }
     verify_files(path, model, control)
-}
-
-async fn download_file(
-    client: &reqwest::Client,
-    url: &str,
-    destination: &Path,
-    expected: &ModelFile,
-    control: &TaskControl,
-    progress: impl Fn(u64),
-) -> Result<()> {
-    let mut request = Box::pin(client.get(url).send());
-    let started = Instant::now();
-    let response = loop {
-        control.check()?;
-        match tokio::time::timeout(Duration::from_millis(250), &mut request).await {
-            Ok(result) => break result.map_err(|error| format!("下载连接失败：{error}"))?,
-            Err(_) if started.elapsed() > Duration::from_secs(30) => {
-                return Err("下载连接超时。".into())
-            }
-            Err(_) => (),
-        }
-    };
-    let mut response = response
-        .error_for_status()
-        .map_err(|error| format!("下载服务返回错误：{error}"))?;
-    if response
-        .content_length()
-        .is_some_and(|bytes| bytes != expected.bytes)
-    {
-        return Err("下载文件大小与固定清单不符。".into());
-    }
-    let mut output = File::create(destination).map_err(|error| error.to_string())?;
-    let mut size = 0;
-    let mut hash = Sha256::new();
-    let mut received = Instant::now();
-    loop {
-        control.check()?;
-        match tokio::time::timeout(Duration::from_millis(250), response.chunk()).await {
-            Ok(Ok(Some(chunk))) => {
-                received = Instant::now();
-                size += chunk.len() as u64;
-                if size > expected.bytes {
-                    return Err("下载内容超过固定文件大小。".into());
-                }
-                output
-                    .write_all(&chunk)
-                    .map_err(|error| error.to_string())?;
-                hash.update(&chunk);
-                progress(size);
-            }
-            Ok(Ok(None)) => break,
-            Ok(Err(error)) => return Err(format!("下载中断：{error}")),
-            Err(_) if received.elapsed() > Duration::from_secs(30) => {
-                return Err("下载读取超时。".into())
-            }
-            Err(_) => (),
-        }
-    }
-    if size != expected.bytes || format!("{:x}", hash.finalize()) != expected.sha256 {
-        return Err("下载内容未通过大小与 SHA256 校验。".into());
-    }
-    output.sync_all().map_err(|error| error.to_string())?;
-    control.check()
 }
 
 fn validate_language(language: &str) -> Result<()> {
@@ -1591,7 +1528,8 @@ mod tests {
             &TaskControl::new(Duration::from_secs(60)),
         )
         .unwrap();
-        assert_eq!(fs::read_dir(&manager.0.root).unwrap().count(), 1);
+        assert!(manager.model_path().is_dir());
+        assert!(manager.0.root.join("download-parts").is_dir());
         println!(
             "Verified native model download: {} bytes in {:.2} seconds",
             manager.0.model.download_size,
