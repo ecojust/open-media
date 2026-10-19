@@ -71,7 +71,7 @@ jobs:
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib export_scaling_tests::ten_minute_split_recording_fifty_texts_and_1080p_startup -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee test-results/export-scaling/benchmark.log
       - name: Compare native encoder output
-        if: always() && runner.os == 'macOS'
+        if: failure() && runner.os == 'macOS'
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib export_scaling_tests::macos_ten_minute_encoder_variants_diagnostic -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee test-results/export-scaling/encoder-comparison.log
       - name: Report measured output progress
