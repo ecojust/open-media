@@ -5,11 +5,12 @@ const path = require('node:path')
 const { tmpdir } = require('node:os')
 const { chromium, webkit } = require('@playwright/test')
 
-// Exercise actual decoded media and TimelinePreview while Canvas2D.filter is absent.
+// Exercise actual decoded media in the fallback path, or native Canvas2D.filter with --native.
 // The 1280×720 timing sample measures this browser process, not macOS application performance.
 async function main() {
   const root = path.resolve(__dirname, '../..'), browserName = process.env.OPEN_MEDIA_BROWSER || 'chromium'
-  const directory = process.env.BROWSER_ARTIFACTS ? path.join(process.env.BROWSER_ARTIFACTS, 'preview-blur', browserName) : path.join(tmpdir(), 'open-media-preview-blur', browserName)
+  const nativeMode = process.argv.includes('--native'), mode = nativeMode ? 'native' : 'fallback'
+  const directory = process.env.BROWSER_ARTIFACTS ? path.join(process.env.BROWSER_ARTIFACTS, 'preview-blur', browserName, mode) : path.join(tmpdir(), 'open-media-preview-blur', browserName, mode)
   fs.mkdirSync(directory, { recursive: true })
   const sources = {
     checker: "nullsrc=s=160x96:r=24:d=2,geq=lum='if(mod(floor(X/8)+floor(Y/8),2),235,16)':cb=128:cr=128",
@@ -29,12 +30,12 @@ async function main() {
     browser = await (browserName === 'webkit' ? webkit.launch({ headless: true }) : chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || process.env.CHROMIUM_PATH || chromium.executablePath(), headless: true, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'] }))
     const page = await browser.newPage(), errors = []
     page.on('pageerror', error => errors.push(error.message))
-    await page.addInitScript(() => {
+    await page.addInitScript(preserveNative => {
       const prototype = CanvasRenderingContext2D.prototype
       window.originalCanvasFilterSupport = 'filter' in prototype
-      delete prototype.filter
+      if (!preserveNative) delete prototype.filter
       window.forcedCanvasFilterUnsupported = !('filter' in document.createElement('canvas').getContext('2d'))
-    })
+    }, nativeMode)
     await page.route('**/__blur__', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><title>模糊预览验证</title>' }))
     for (const name of Object.keys(sources)) await page.route(`**/blur-${name}.webm`, route => route.fulfill({ contentType: 'video/webm', body: fs.readFileSync(path.join(directory, `${name}.webm`)) }))
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__blur__`)
@@ -142,7 +143,7 @@ async function main() {
       restored.getContext('2d').drawImage(softened, 0, 0, softened.width, softened.height, 0, 0, 96, 64)
       const rgbaData = pixels(restored); let alphaSum = 0, weightedX = 0, weightedY = 0, featherCount = 0, minimumFeatherRed = 255, maximumFeatherOther = 0
       for (let i = 0; i < rgbaData.length; i += 4) { const a = rgbaData[i + 3]; alphaSum += a; weightedX += (i / 4 % 96) * a; weightedY += Math.floor(i / 4 / 96) * a; if (a > 8 && a < 100) { featherCount++; minimumFeatherRed = Math.min(minimumFeatherRed, rgbaData[i]); maximumFeatherOther = Math.max(maximumFeatherOther, rgbaData[i + 1], rgbaData[i + 2]) } }
-      const rgbaResult = { center: at(rgbaData, 48, 32, 96), feather: at(rgbaData, 28, 32, 96), alphaMassRatio: alphaSum / (32 * 32 * 128), centroid: { x: weightedX / alphaSum, y: weightedY / alphaSum }, featherCount, minimumFeatherRed, maximumFeatherOther, buffer: { width: softened.width, height: softened.height } }
+      const rgbaResult = { rendererMode: blurRenderer.nativeBlur ? 'native' : 'fallback', center: at(rgbaData, 48, 32, 96), feather: at(rgbaData, 28, 32, 96), alphaMassRatio: alphaSum / (32 * 32 * 128), centroid: { x: weightedX / alphaSum, y: weightedY / alphaSum }, featherCount, minimumFeatherRed, maximumFeatherOther, buffer: { width: softened.width, height: softened.height } }
       keep('rgba-alpha-blur', restored); blurRenderer.dispose(); URL.revokeObjectURL(pngUrl)
 
       const performanceProject = withBlur(base(assets.checker, { width: 1280, height: 720 }), { x: 280, y: 140, width: 720, height: 440, overlay: { kind: 'blur', color: '#ffffff', strokeWidth: 1, blurRadius: 16 } })
@@ -166,12 +167,13 @@ async function main() {
       return { originalCanvasFilterSupport: window.originalCanvasFilterSupport, forcedCanvasFilterUnsupported: window.forcedCanvasFilterUnsupported, local, transitions, alpha, rgba: rgbaResult, performance: performanceSample, notices, images }
     })
     for (const [name, data] of Object.entries(report.images)) fs.writeFileSync(path.join(directory, `${name}.png`), Buffer.from(data.split(',')[1], 'base64'))
-    delete report.images; report.errors = errors
+    delete report.images; report.errors = errors; report.requestedMode = mode
     fs.writeFileSync(path.join(directory, 'report.json'), JSON.stringify(report, null, 2))
-    assert.equal(report.forcedCanvasFilterUnsupported, true, '必须实际禁用 Canvas2D.filter 才能验证兼容路径')
+    assert.equal(report.forcedCanvasFilterUnsupported, !nativeMode, nativeMode ? '原生模式必须保留浏览器的 Canvas2D.filter 能力' : '必须实际禁用 Canvas2D.filter 才能验证兼容路径')
+    assert.equal(report.rgba.rendererMode, mode, '实际渲染分支必须符合当前验证模式')
     assert.equal(errors.length, 0, `脚本异常：${errors.join('; ')}`)
     assert.deepEqual(report.notices, [], '真实素材应成功解码和绘制')
-    assert(report.local.blurredContrast < report.local.sharpContrast * .35, '兼容路径必须降低局部棋盘对比度，不能静默跳过模糊')
+    assert(report.local.blurredContrast < report.local.sharpContrast * .35, '当前模糊路径必须降低局部棋盘对比度，不能静默跳过模糊')
     assert(report.local.difference.inside > 2000 && report.local.difference.maximumOutside <= 2, '只应模糊指定区域，框外保持真实源画面')
     assert(report.local.halfOpacityError <= 3, '局部模糊片段透明度只能施加一次')
     assert(Math.abs(report.local.displacement - 32) < 1, '动画位移必须移动模糊区域而非错位背景')
@@ -192,8 +194,8 @@ async function main() {
     assert(report.rgba.center[3] > 105 && report.rgba.center[3] < 135 && report.rgba.feather[3] > 5 && report.rgba.feather[3] < 100, '半透明中心及羽边必须保留正确alpha')
     assert(report.rgba.alphaMassRatio > .85 && report.rgba.alphaMassRatio < 1.12 && Math.abs(report.rgba.centroid.x - 47.5) < 2 && Math.abs(report.rgba.centroid.y - 31.5) < 2, '模糊不得偏移图像或明显重复叠加透明度')
     assert(report.performance.buffers.length > 0 && report.performance.uniqueOutputCanvases <= 2, '连续模糊应复用缓冲画布')
-    console.log(JSON.stringify({ local: report.local, alpha: report.alpha, rgba: report.rgba, performance: report.performance, directory }))
-    console.log(`PASS 无Canvas滤镜时的真实局部模糊、位移、透明边界及连续模糊转场；报告 ${directory}`)
+    console.log(JSON.stringify({ mode, local: report.local, alpha: report.alpha, rgba: report.rgba, performance: report.performance, directory }))
+    console.log(`PASS ${nativeMode ? '原生' : '兼容'}Canvas模糊：真实局部模糊、位移、透明边界及连续模糊转场；报告 ${directory}`)
   } finally { await browser?.close(); await server.close(); fs.rmSync(cacheDir, { recursive: true, force: true }) }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
