@@ -1,0 +1,798 @@
+{
+  "date": "2026-10-19",
+  "baselineCommit": "963c567239a41eac1288bc6db9e73dee7a7498dd",
+  "optimizedCommit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+  "scope": "Isolated Linux container measurements, not end-to-end desktop or GPU measurements. Browser/video benchmarks ran serially. Tests use generated media.",
+  "previewBefore": {
+    "scenario": "1080p 动态视频、70 片段、12 个同时显示字幕及标题、碎片转场",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36",
+    "clips": 70,
+    "startupMs": 136,
+    "frameMs": {
+      "mean": 5.020923077280705,
+      "p50": 5.0999999940395355,
+      "p95": 9.400000005960464,
+      "max": 12.5
+    },
+    "intervalMs": {
+      "mean": 16.64369230769231,
+      "p50": 16.699999999999818,
+      "p95": 16.799999999999727,
+      "max": 16.800000000000182
+    },
+    "frames": 325,
+    "measureCalls": 324057,
+    "measureCallsPerFrame": 997.0984615384615,
+    "idleDraws": 0,
+    "pauseSettlingMs": 402.5,
+    "maxResident": 2,
+    "remaining": 0,
+    "liveMediaTimes": [
+      [
+        0.522815
+      ],
+      [
+        1.522579
+      ],
+      [
+        2.535461
+      ],
+      [
+        3.522512
+      ],
+      [
+        4.522432
+      ],
+      [
+        5.522435
+      ]
+    ],
+    "hashes": [
+      {
+        "time": 1,
+        "hash": 1368274052,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 1.007958,
+            "presentedTime": 0
+          }
+        ]
+      },
+      {
+        "time": 2.6,
+        "hash": 2413909906,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 2.6,
+            "presentedTime": 2.6
+          }
+        ]
+      },
+      {
+        "time": 2.95,
+        "hash": 1162965337,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 2.95,
+            "presentedTime": 2.933
+          }
+        ]
+      },
+      {
+        "time": 3.05,
+        "hash": 2171558794,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 3.05,
+            "presentedTime": 3.033
+          }
+        ]
+      },
+      {
+        "time": 3.4,
+        "hash": 1433062574,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 3.4,
+            "presentedTime": 3.4
+          }
+        ]
+      },
+      {
+        "time": 4.5,
+        "hash": 748906435,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 4.504933,
+            "presentedTime": 4.5
+          }
+        ]
+      }
+    ],
+    "messages": [],
+    "environment": {
+      "revision": "963c567",
+      "commit": "963c567239a41eac1288bc6db9e73dee7a7498dd",
+      "platform": "linux",
+      "arch": "x64",
+      "node": "v24.19.0",
+      "browser": "141.0.7390.37",
+      "cpu": "AMD EPYC 9V74 80-Core Processor"
+    }
+  },
+  "previewAfter": {
+    "scenario": "1080p 动态视频、70 片段、12 个同时显示字幕及标题、碎片转场",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36",
+    "clips": 70,
+    "startupMs": 120.90000000596046,
+    "frameMs": {
+      "mean": 3.957361963537573,
+      "p50": 3.9000000059604645,
+      "p95": 8.400000005960464,
+      "max": 13
+    },
+    "intervalMs": {
+      "mean": 16.610429447834477,
+      "p50": 16.699999999999818,
+      "p95": 16.700000000000728,
+      "max": 16.800000000000182
+    },
+    "frames": 326,
+    "measureCalls": 0,
+    "measureCallsPerFrame": 0,
+    "idleDraws": 0,
+    "pauseSettlingMs": 251.79999999701977,
+    "maxResident": 2,
+    "remaining": 0,
+    "liveMediaTimes": [
+      [
+        0.523041
+      ],
+      [
+        1.523025
+      ],
+      [
+        2.522996
+      ],
+      [
+        3.522954
+      ],
+      [
+        4.522931
+      ],
+      [
+        5.522823
+      ]
+    ],
+    "hashes": [
+      {
+        "time": 1,
+        "hash": 1368274052,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 1.005779,
+            "presentedTime": 1
+          }
+        ]
+      },
+      {
+        "time": 2.6,
+        "hash": 2413909906,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 2.6,
+            "presentedTime": 2.6
+          }
+        ]
+      },
+      {
+        "time": 2.95,
+        "hash": 2750027345,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 2.963614,
+            "presentedTime": 2.933
+          }
+        ]
+      },
+      {
+        "time": 3.05,
+        "hash": 2171558794,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 3.05,
+            "presentedTime": 3.033
+          }
+        ]
+      },
+      {
+        "time": 3.4,
+        "hash": 1433062574,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 3.4,
+            "presentedTime": 3.4
+          }
+        ]
+      },
+      {
+        "time": 4.5,
+        "hash": 748906435,
+        "mismatches": 0,
+        "presented": [
+          {
+            "currentTime": 4.502612,
+            "presentedTime": 4.5
+          }
+        ]
+      }
+    ],
+    "messages": [],
+    "environment": {
+      "revision": "current",
+      "commit": "963c567239a41eac1288bc6db9e73dee7a7498dd",
+      "platform": "linux",
+      "arch": "x64",
+      "node": "v24.19.0",
+      "browser": "141.0.7390.37",
+      "cpu": "AMD EPYC 9V74 80-Core Processor"
+    }
+  },
+  "textLayout": {
+    "cases": [
+      {
+        "name": "首次绘制",
+        "mismatches": 0,
+        "hash": 2492576242,
+        "visiblePixels": 38157
+      },
+      {
+        "name": "left-top",
+        "mismatches": 0,
+        "hash": 1519851636,
+        "visiblePixels": 37829
+      },
+      {
+        "name": "left-middle",
+        "mismatches": 0,
+        "hash": 657223795,
+        "visiblePixels": 38080
+      },
+      {
+        "name": "left-bottom",
+        "mismatches": 0,
+        "hash": 3073895567,
+        "visiblePixels": 37702
+      },
+      {
+        "name": "center-top",
+        "mismatches": 0,
+        "hash": 555253510,
+        "visiblePixels": 37906
+      },
+      {
+        "name": "center-middle",
+        "mismatches": 0,
+        "hash": 2492576242,
+        "visiblePixels": 38157
+      },
+      {
+        "name": "center-bottom",
+        "mismatches": 0,
+        "hash": 2423749808,
+        "visiblePixels": 37778
+      },
+      {
+        "name": "right-top",
+        "mismatches": 0,
+        "hash": 2669511246,
+        "visiblePixels": 37936
+      },
+      {
+        "name": "right-middle",
+        "mismatches": 0,
+        "hash": 3993978560,
+        "visiblePixels": 38188
+      },
+      {
+        "name": "right-bottom",
+        "mismatches": 0,
+        "hash": 2139577640,
+        "visiblePixels": 37809
+      },
+      {
+        "name": "编辑文本",
+        "mismatches": 0,
+        "hash": 2398117769,
+        "visiblePixels": 11796
+      },
+      {
+        "name": "缩窄框",
+        "mismatches": 0,
+        "hash": 3705874766,
+        "visiblePixels": 37557
+      },
+      {
+        "name": "拉高框",
+        "mismatches": 0,
+        "hash": 3066694832,
+        "visiblePixels": 37778
+      },
+      {
+        "name": "字体字号",
+        "mismatches": 0,
+        "hash": 377407658,
+        "visiblePixels": 65484
+      },
+      {
+        "name": "文字颜色",
+        "mismatches": 0,
+        "hash": 2940839942,
+        "visiblePixels": 38157
+      },
+      {
+        "name": "透明背景",
+        "mismatches": 0,
+        "hash": 3956159826,
+        "visiblePixels": 12649
+      },
+      {
+        "name": "水印底板",
+        "mismatches": 0,
+        "hash": 2369498073,
+        "visiblePixels": 120000
+      },
+      {
+        "name": "撤销修改",
+        "mismatches": 0,
+        "hash": 2492576242,
+        "visiblePixels": 38157
+      },
+      {
+        "name": "字体加载前",
+        "mismatches": 0,
+        "hash": 2095156825,
+        "visiblePixels": 42220
+      },
+      {
+        "name": "字体加载后",
+        "mismatches": 0,
+        "hash": 2950531653,
+        "visiblePixels": 35900
+      },
+      {
+        "name": "已加载字体原位调整尺寸",
+        "mismatches": 0,
+        "hash": 2950531653,
+        "visiblePixels": 35900
+      },
+      {
+        "name": "已加载字体原位替换",
+        "mismatches": 0,
+        "hash": 1408985822,
+        "visiblePixels": 32078
+      },
+      {
+        "name": "移除字体恢复后备",
+        "mismatches": 0,
+        "hash": 2095156825,
+        "visiblePixels": 42220
+      }
+    ],
+    "reusedMeasurements": 0,
+    "fallbackHash": 2095156825,
+    "loadedHash": 2950531653,
+    "adjustedHash": 2950531653,
+    "adjustmentMeasurements": 56,
+    "replacementHash": 1408985822,
+    "environment": {
+      "platform": "linux",
+      "arch": "x64",
+      "node": "v24.19.0",
+      "browser": "141.0.7390.37"
+    }
+  },
+  "imageBefore": {
+    "emits": 24,
+    "strokes": 2400,
+    "widthWrites": 24,
+    "frameMs": [
+      924.5999999940395,
+      956.7000000029802,
+      879.5,
+      1421.5999999940395,
+      1575.800000011921,
+      1486.2999999970198,
+      1604.0999999940395,
+      1407.5,
+      1409.7000000029802,
+      1319.2000000029802,
+      1208.5,
+      1207.4000000059605,
+      808.2999999970198,
+      771.2000000029802,
+      808.5999999940395,
+      812.2999999970198,
+      817.5999999940395,
+      819.1000000089407,
+      747.5999999940395,
+      766.9000000059605,
+      737.4000000059605,
+      792.2999999970198,
+      793.0999999940395,
+      826.1000000089407
+    ],
+    "medianMs": 879.5,
+    "p95Ms": 1575.800000011921,
+    "totalMs": 24901.40000000596,
+    "latest": {
+      "annotations": 101,
+      "text": {
+        "id": "selected-text",
+        "kind": "text",
+        "text": "性能测试",
+        "x": 2007.3632400506258,
+        "y": 1850,
+        "fontSize": 96,
+        "fontFamily": "sans-serif",
+        "fontWeight": 600,
+        "color": "#ffffff",
+        "opacity": 1
+      },
+      "points": 100000
+    },
+    "canvasDigest": "5159888abbf5b6f732f214c1de6f671686ad1262776b5ef1ca6b5bfe91ff7e06"
+  },
+  "imageAfter": {
+    "scenario": "4K image / 100000 stroke points / 24 text drag samples",
+    "environment": {
+      "platform": "linux",
+      "arch": "x64",
+      "cpus": 3,
+      "browser": "141.0.7390.37"
+    },
+    "emits": 0,
+    "strokes": 100,
+    "widthWrites": 1,
+    "frameMs": [
+      25.599999994039536,
+      4.299999997019768,
+      9.900000005960464,
+      16.900000005960464,
+      16.599999994039536,
+      16.599999994039536,
+      16.700000002980232,
+      16.700000002980232,
+      16.700000002980232,
+      16.599999994039536,
+      16.700000002980232,
+      16.700000002980232,
+      16.599999994039536,
+      16.700000002980232,
+      16.700000002980232,
+      16.700000002980232,
+      16.599999994039536,
+      16.599999994039536,
+      16.600000008940697,
+      16.899999991059303,
+      17,
+      16.200000002980232,
+      16.700000002980232,
+      16.700000002980232
+    ],
+    "medianMs": 16.700000002980232,
+    "p95Ms": 17,
+    "totalMs": 390,
+    "latest": {
+      "annotations": 101,
+      "text": {
+        "id": "selected-text",
+        "kind": "text",
+        "text": "性能测试",
+        "x": 2007.3632400506258,
+        "y": 1850,
+        "fontSize": 96,
+        "fontFamily": "sans-serif",
+        "fontWeight": 600,
+        "color": "#ffffff",
+        "opacity": 1
+      },
+      "points": 100000,
+      "emits": 1
+    },
+    "conversion": {
+      "decoded": {
+        "width": 1080,
+        "height": 1920
+      },
+      "iconSizes": [
+        [
+          32,
+          32
+        ],
+        [
+          64,
+          64
+        ]
+      ],
+      "pngReleased": true,
+      "iconReleased": true,
+      "invalid": true,
+      "invalidReleased": true,
+      "cancelled": true,
+      "cancelledReleased": true,
+      "temporaryCanvases": 5
+    },
+    "initialDigest": "6b388fc733ee03e9b261cd444b95677074cc5dbcf400e71ce54f7a6bfac906e0",
+    "movedDigest": "5159888abbf5b6f732f214c1de6f671686ad1262776b5ef1ca6b5bfe91ff7e06",
+    "checks": [
+      "commit",
+      "undo",
+      "redo",
+      "pointercancel",
+      "blur",
+      "layer-order",
+      "unmount"
+    ]
+  },
+  "timelineState": {
+    "environment": "Node v24.19.0; Vue reactive-state and immutable editing microbenchmark, not browser UI latency",
+    "sizes": {
+      "70": {
+        "before": {
+          "notifications": 17,
+          "updateClip": {
+            "medianMs": 0.6874870000000044,
+            "p95Ms": 1.4643880000000138,
+            "maximumMs": 1.4643880000000138
+          },
+          "watcher": {
+            "medianMs": 4.5911940000000016,
+            "p95Ms": 9.174106999999992,
+            "maximumMs": 9.174106999999992
+          },
+          "completeUpdate": {
+            "medianMs": 5.08520900000002,
+            "p95Ms": 10.638495000000006,
+            "maximumMs": 10.638495000000006
+          }
+        },
+        "after": {
+          "notifications": 17,
+          "updateClip": {
+            "medianMs": 0.7616489999999771,
+            "p95Ms": 7.007920000000013,
+            "maximumMs": 7.007920000000013
+          },
+          "watcher": {
+            "medianMs": 0.01715599999999995,
+            "p95Ms": 0.03803800000002866,
+            "maximumMs": 0.03803800000002866
+          },
+          "completeUpdate": {
+            "medianMs": 0.7771730000000048,
+            "p95Ms": 7.041269999999997,
+            "maximumMs": 7.041269999999997
+          }
+        }
+      },
+      "1000": {
+        "before": {
+          "notifications": 17,
+          "updateClip": {
+            "medianMs": 8.112500000000011,
+            "p95Ms": 27.134619000000043,
+            "maximumMs": 27.134619000000043
+          },
+          "watcher": {
+            "medianMs": 67.66495999999995,
+            "p95Ms": 144.52498400000013,
+            "maximumMs": 144.52498400000013
+          },
+          "completeUpdate": {
+            "medianMs": 80.10478899999998,
+            "p95Ms": 151.60232199999996,
+            "maximumMs": 151.60232199999996
+          }
+        },
+        "after": {
+          "notifications": 17,
+          "updateClip": {
+            "medianMs": 7.027863000000025,
+            "p95Ms": 19.727264000000105,
+            "maximumMs": 19.727264000000105
+          },
+          "watcher": {
+            "medianMs": 0.02492800000004536,
+            "p95Ms": 0.22356700000000274,
+            "maximumMs": 0.22356700000000274
+          },
+          "completeUpdate": {
+            "medianMs": 7.0512690000000475,
+            "p95Ms": 19.950831000000107,
+            "maximumMs": 19.950831000000107
+          }
+        }
+      },
+      "5000": {
+        "before": {
+          "notifications": 17,
+          "updateClip": {
+            "medianMs": 60.51686500000005,
+            "p95Ms": 81.60437199999978,
+            "maximumMs": 81.60437199999978
+          },
+          "watcher": {
+            "medianMs": 406.3345280000003,
+            "p95Ms": 792.2174190000005,
+            "maximumMs": 792.2174190000005
+          },
+          "completeUpdate": {
+            "medianMs": 487.6421310000005,
+            "p95Ms": 832.9451369999997,
+            "maximumMs": 832.9451369999997
+          }
+        },
+        "after": {
+          "notifications": 17,
+          "updateClip": {
+            "medianMs": 36.3144280000015,
+            "p95Ms": 60.31357899999966,
+            "maximumMs": 60.31357899999966
+          },
+          "watcher": {
+            "medianMs": 0.06643000000076427,
+            "p95Ms": 0.1741730000012467,
+            "maximumMs": 0.1741730000012467
+          },
+          "completeUpdate": {
+            "medianMs": 36.37390800000139,
+            "p95Ms": 60.375302000000374,
+            "maximumMs": 60.375302000000374
+          }
+        }
+      }
+    }
+  },
+  "mcpHistory": {
+    "environment": {
+      "node": "v24.19.0",
+      "platform": "linux",
+      "arch": "x64",
+      "osRelease": "6.18.55",
+      "cpu": "AMD EPYC 9V74 80-Core Processor",
+      "availableParallelism": 2,
+      "totalMemory": 10452471808,
+      "cpuQuota": "200000 100000",
+      "memoryLimit": "8589934592"
+    },
+    "scenario": {
+      "boundary": "synthetic PNG payload; real controller and protocol",
+      "historyCount": 30,
+      "payloadBytesPerJob": 524288,
+      "iterations": 20
+    },
+    "results": [
+      {
+        "label": "full-history-previous-ui-path",
+        "medianMs": 7.792348000000004,
+        "p95Ms": 10.194700000000012,
+        "maxMs": 13.948119999999989,
+        "serializedBytes": 15752798
+      },
+      {
+        "label": "status-summary-current-ui-path",
+        "medianMs": 0.12240499999998633,
+        "p95Ms": 0.2372479999999939,
+        "maxMs": 0.23765800000001036,
+        "serializedBytes": 19247
+      }
+    ],
+    "assertions": {
+      "summariesOmitResult": true,
+      "fullProtocolRetainsResults": true,
+      "returnedResultsAreIsolated": true
+    }
+  },
+  "bundledSpeech": {
+    "model": "bundled Matcha",
+    "platform": "Linux",
+    "machine": "x86_64",
+    "cpuQuota": "200000 100000",
+    "memoryLimit": "8589934592",
+    "text": "Open Media 支持录屏、视频剪辑、字幕配音和图片编辑，让创作更简单。",
+    "results": [
+      {
+        "run": 1,
+        "elapsedSeconds": 1.9534994209971046,
+        "audioSeconds": 7.152875,
+        "realtimeFactor": 0.2731068865312346,
+        "rms": 0.1370281162158661,
+        "stages": [
+          {
+            "line": "stage=device,device=cpu,engine=matcha",
+            "seconds": 0.012108449009247124
+          },
+          {
+            "line": "stage=loading",
+            "seconds": 0.012115780002204701
+          },
+          {
+            "line": "stage=generating, speakers=1, text_bytes=92",
+            "seconds": 1.3822845469985623
+          },
+          {
+            "line": "stage=writing",
+            "seconds": 1.865851141003077
+          },
+          {
+            "line": "stage=complete",
+            "seconds": 1.9411713860026794
+          }
+        ],
+        "sha256": "430fb6ea637bfcbe4a093f7e4cdd6ebf6f288ab138b260d76b61329da3371e19"
+      },
+      {
+        "run": 2,
+        "elapsedSeconds": 1.9063779080024688,
+        "audioSeconds": 7.153375,
+        "realtimeFactor": 0.2665004851559535,
+        "rms": 0.13325310333602816,
+        "stages": [
+          {
+            "line": "stage=device,device=cpu,engine=matcha",
+            "seconds": 0.002989707005326636
+          },
+          {
+            "line": "stage=loading",
+            "seconds": 0.002991159009980038
+          },
+          {
+            "line": "stage=generating, speakers=1, text_bytes=92",
+            "seconds": 1.265990715008229
+          },
+          {
+            "line": "stage=writing",
+            "seconds": 1.8629656210105168
+          },
+          {
+            "line": "stage=complete",
+            "seconds": 1.8960532830096781
+          }
+        ],
+        "sha256": "1ab7ff0dc4387eb330bf7be30ed12d22eb60ee31493b16117715540bd2bcd08c"
+      }
+    ]
+  },
+  "nativeMedia": {
+    "runtime": "8.0.1",
+    "source": "Generated 60-second 640x360/30fps video and AAC audio",
+    "rounds": 3,
+    "secondsMedian": {
+      "lateConvert": {
+        "before": 2.735212,
+        "after": 0.524583
+      },
+      "lateGif": {
+        "before": 0.667496,
+        "after": 0.306109
+      },
+      "repeatedSourcePlan": {
+        "before": 0.32407,
+        "after": 0.007367
+      }
+    },
+    "correctness": "Exact decoded RGB/PCM equality against previous implementation: variable frame rate, long GOP, 125ms audio offset, zero and nonzero timestamps, MP4/WAV/PNG conversion and unordered/repeated GIF segments."
+  }
+}

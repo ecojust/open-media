@@ -1,0 +1,830 @@
+{
+  "date": "2026-10-19",
+  "sourceCommit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+  "runs": [
+    {
+      "name": "Function and performance audit",
+      "url": "https://github.com/ecojust/open-media/actions/runs/39200471904",
+      "conclusion": "success"
+    },
+    {
+      "name": "macOS system preview",
+      "url": "https://github.com/ecojust/open-media/actions/runs/39200471762",
+      "conclusion": "success"
+    },
+    {
+      "name": "Windows capture",
+      "url": "https://github.com/ecojust/open-media/actions/runs/39200487265",
+      "conclusion": "success"
+    }
+  ],
+  "application": {
+    "unitTests": {
+      "passed": 628,
+      "failed": 0,
+      "skipped": 0
+    },
+    "standardBrowserScenarioExecutions": 67,
+    "standardBrowserDistinctScripts": 66,
+    "additionalBrowserChecks": 6,
+    "nodePerformanceBenchmarks": 2,
+    "linuxNativeTests": {
+      "passed": 273,
+      "failed": 0,
+      "ignored": 13
+    },
+    "mcpSdkTransportAndEditor": "passed",
+    "singleVideoStress": {
+      "sourceSize": [
+        3024,
+        1896
+      ],
+      "videoClips": 16,
+      "textClips": 46,
+      "transitions": 8,
+      "playbackSeconds": 41,
+      "checks": [
+        "open project",
+        "playback with autosave",
+        "track selection and seek",
+        "quota failure and recovery",
+        "media hashes and project integrity"
+      ],
+      "conclusion": "success"
+    },
+    "mixed60AssetSaveStress": "passed"
+  },
+  "nativePlatforms": {
+    "runId": 39200471904,
+    "scope": "Hosted platform runners, post-change native media benchmark; before/after improvement measured separately on local Linux, not inferred across platforms",
+    "platforms": {
+      "macos-x64": {
+        "platform": "macos-x64",
+        "tests": {
+          "Verify native operations with the shipped runtime": {
+            "passed": 273,
+            "failed": 0,
+            "ignored": 13,
+            "measured": 0,
+            "filtered": 0,
+            "seconds": 36.83
+          },
+          "Verify the bundled offline voice": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered": 285,
+            "seconds": 17.33
+          },
+          "Measure late ranges and repeated-source planning without competing encoders": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered": 285,
+            "seconds": 3.61
+          }
+        },
+        "benchmarks": {
+          "late-convert": {
+            "samplesSeconds": [
+              0.33826,
+              0.210436,
+              0.319394
+            ],
+            "medianSeconds": 0.319394
+          },
+          "late-gif": {
+            "samplesSeconds": [
+              0.339141,
+              0.270803,
+              0.415783
+            ],
+            "medianSeconds": 0.339141
+          },
+          "repeated-source-plan": {
+            "samplesSeconds": [
+              0.021035,
+              0.019622,
+              0.019233
+            ],
+            "medianSeconds": 0.019622
+          }
+        },
+        "environment": {
+          "commit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+          "platform": "darwin",
+          "arch": "x64",
+          "cpus": [
+            "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+            "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+            "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz",
+            "Intel(R) Core(TM) i7-8700B CPU @ 3.20GHz"
+          ],
+          "memory": 15032385536,
+          "scope": "Hosted test runner; generated media only; no microphone access or installer packaging",
+          "operatingSystem": "macOS 15.7.9"
+        },
+        "voiceVerification": [
+          "Verified voice 0 (中文, 1x): 4.877 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (中英混合, 1x): 5.412 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (英文, 1x): 3.219 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (慢速, 0.8x): 6.005 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (快速, 1.2x): 4.041 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified)."
+        ],
+        "exactSeekDecodedRgbAndPcmPassed": true
+      },
+      "windows-x64": {
+        "platform": "windows-x64",
+        "tests": {
+          "Verify native operations with the shipped runtime": {
+            "passed": 262,
+            "failed": 0,
+            "ignored": 13,
+            "measured": 0,
+            "filtered": 0,
+            "seconds": 34.97
+          },
+          "Verify the bundled offline voice": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered": 274,
+            "seconds": 5.44
+          },
+          "Measure late ranges and repeated-source planning without competing encoders": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered": 274,
+            "seconds": 3.88
+          }
+        },
+        "benchmarks": {
+          "late-convert": {
+            "samplesSeconds": [
+              0.366921,
+              0.395785,
+              0.36656
+            ],
+            "medianSeconds": 0.366921
+          },
+          "late-gif": {
+            "samplesSeconds": [
+              0.365297,
+              0.361714,
+              0.361592
+            ],
+            "medianSeconds": 0.361714
+          },
+          "repeated-source-plan": {
+            "samplesSeconds": [
+              0.044277,
+              0.042879,
+              0.044245
+            ],
+            "medianSeconds": 0.044245
+          }
+        },
+        "environment": {
+          "commit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+          "platform": "win32",
+          "arch": "x64",
+          "cpus": [
+            "AMD EPYC 7763 64-Core Processor                ",
+            "AMD EPYC 7763 64-Core Processor                ",
+            "AMD EPYC 7763 64-Core Processor                ",
+            "AMD EPYC 7763 64-Core Processor                "
+          ],
+          "memory": 17174360064,
+          "scope": "Hosted test runner; generated media only; no microphone access or installer packaging",
+          "operatingSystem": "Windows Server 2022"
+        },
+        "voiceVerification": [
+          "Verified voice 0 (中文, 1x): 4.880 s, audible PCM, UTF-8 input intact. Backend: cpu.",
+          "Verified voice 0 (中英混合, 1x): 5.418 s, audible PCM, UTF-8 input intact. Backend: cpu.",
+          "Verified voice 0 (英文, 1x): 3.226 s, audible PCM, UTF-8 input intact. Backend: cpu.",
+          "Verified voice 0 (慢速, 0.8x): 6.009 s, audible PCM, UTF-8 input intact. Backend: cpu.",
+          "Verified voice 0 (快速, 1.2x): 4.043 s, audible PCM, UTF-8 input intact. Backend: cpu."
+        ],
+        "exactSeekDecodedRgbAndPcmPassed": true
+      },
+      "macos-arm64": {
+        "platform": "macos-arm64",
+        "tests": {
+          "Verify native operations with the shipped runtime": {
+            "passed": 273,
+            "failed": 0,
+            "ignored": 13,
+            "measured": 0,
+            "filtered": 0,
+            "seconds": 50.48
+          },
+          "Verify the bundled offline voice": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered": 285,
+            "seconds": 12.4
+          },
+          "Measure late ranges and repeated-source planning without competing encoders": {
+            "passed": 1,
+            "failed": 0,
+            "ignored": 0,
+            "measured": 0,
+            "filtered": 285,
+            "seconds": 6.62
+          }
+        },
+        "benchmarks": {
+          "late-convert": {
+            "samplesSeconds": [
+              1.052368,
+              0.925682,
+              1.06024
+            ],
+            "medianSeconds": 1.052368
+          },
+          "late-gif": {
+            "samplesSeconds": [
+              0.539432,
+              0.43492,
+              0.477454
+            ],
+            "medianSeconds": 0.477454
+          },
+          "repeated-source-plan": {
+            "samplesSeconds": [
+              0.022267,
+              0.039298,
+              0.013157
+            ],
+            "medianSeconds": 0.022267
+          }
+        },
+        "environment": {
+          "commit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+          "platform": "darwin",
+          "arch": "arm64",
+          "cpus": [
+            "Apple M1 (Virtual)",
+            "Apple M1 (Virtual)",
+            "Apple M1 (Virtual)"
+          ],
+          "memory": 7516192768,
+          "scope": "Hosted test runner; generated media only; no microphone access or installer packaging",
+          "operatingSystem": "macOS 26.6.2"
+        },
+        "voiceVerification": [
+          "Verified voice 0 (中文, 1x): 4.874 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (中英混合, 1x): 5.420 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (英文, 1x): 3.214 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (慢速, 0.8x): 6.013 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified).",
+          "Verified voice 0 (快速, 1.2x): 4.042 s, audible PCM, UTF-8 input intact. Backend: cpu (CoreML failed; CPU fallback succeeded, GPU inference was not verified)."
+        ],
+        "exactSeekDecodedRgbAndPcmPassed": true
+      }
+    }
+  },
+  "macosSystemPreview": {
+    "macos-arm64": {
+      "passed": true,
+      "engine": "System WKWebView",
+      "operatingSystem": "Version 26.6.2 (Build 25G83)",
+      "arch": "arm64",
+      "commit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+      "realtimeCompositionVerified": true,
+      "realtimeBlurVerified": true,
+      "nativeFrameArtifactVerified": true,
+      "nativeCompositionVerified": false,
+      "realtimeIpcCalls": 0,
+      "realtimeAssetRequests": 1510,
+      "realtimeSnapshotReads": 0,
+      "eventCount": 63,
+      "completedStages": [
+        "crypto-sha256",
+        "indexeddb-open",
+        "indexeddb-write",
+        "indexeddb-read",
+        "asset-image-canvas",
+        "asset-video-canvas",
+        "realtime-basic-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-complete"
+      ],
+      "scope": "System WebView real-time composition and native frame artifact; nativeCompositionVerified is not exercised by this harness.",
+      "nativeStageCount": 63,
+      "nativeStageSummary": [
+        {
+          "stage": "origin"
+        },
+        {
+          "stage": "crypto-sha256",
+          "success": true
+        },
+        {
+          "stage": "indexeddb-open",
+          "success": true
+        },
+        {
+          "stage": "indexeddb-write",
+          "success": true
+        },
+        {
+          "stage": "indexeddb-read",
+          "success": true
+        },
+        {
+          "stage": "asset-image-canvas",
+          "success": true
+        },
+        {
+          "stage": "asset-video-canvas",
+          "success": true
+        },
+        {
+          "stage": "realtime-start"
+        },
+        {
+          "stage": "realtime-capabilities"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-source-color-reference"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-seek-recovered"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-seek-recovered"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-seek-recovered"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-basic-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-filter-decode-reference"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-complete",
+          "success": true
+        },
+        {
+          "stage": "import-start"
+        },
+        {
+          "stage": "import-complete"
+        },
+        {
+          "stage": "run-start"
+        },
+        {
+          "stage": "正在准备预览素材"
+        },
+        {
+          "stage": "正在建立区间合成任务"
+        },
+        {
+          "stage": "预览已就绪"
+        },
+        {
+          "stage": "run-complete"
+        },
+        {
+          "stage": "cache-save-start"
+        },
+        {
+          "stage": "cache-save-complete"
+        },
+        {
+          "stage": "cache-read-start"
+        },
+        {
+          "stage": "cache-read-complete"
+        }
+      ]
+    },
+    "macos-x64": {
+      "passed": true,
+      "engine": "System WKWebView",
+      "operatingSystem": "Version 15.7.9 (Build 24G830)",
+      "arch": "x64",
+      "commit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+      "realtimeCompositionVerified": true,
+      "realtimeBlurVerified": true,
+      "nativeFrameArtifactVerified": true,
+      "nativeCompositionVerified": false,
+      "realtimeIpcCalls": 0,
+      "realtimeAssetRequests": 1341,
+      "realtimeSnapshotReads": 0,
+      "eventCount": 63,
+      "completedStages": [
+        "crypto-sha256",
+        "indexeddb-open",
+        "indexeddb-write",
+        "indexeddb-read",
+        "asset-image-canvas",
+        "asset-video-canvas",
+        "realtime-basic-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-effect-complete",
+        "realtime-complete"
+      ],
+      "scope": "System WebView real-time composition and native frame artifact; nativeCompositionVerified is not exercised by this harness.",
+      "nativeStageCount": 63,
+      "nativeStageSummary": [
+        {
+          "stage": "origin"
+        },
+        {
+          "stage": "crypto-sha256",
+          "success": true
+        },
+        {
+          "stage": "indexeddb-open",
+          "success": true
+        },
+        {
+          "stage": "indexeddb-write",
+          "success": true
+        },
+        {
+          "stage": "indexeddb-read",
+          "success": true
+        },
+        {
+          "stage": "asset-image-canvas",
+          "success": true
+        },
+        {
+          "stage": "asset-video-canvas",
+          "success": true
+        },
+        {
+          "stage": "realtime-start"
+        },
+        {
+          "stage": "realtime-capabilities"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-source-color-reference"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-seek-recovered"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-seek-recovered"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-seek-recovered"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-basic-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-filter-decode-reference"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-checkpoint-timing"
+        },
+        {
+          "stage": "realtime-blur-sample"
+        },
+        {
+          "stage": "realtime-effect-complete",
+          "success": true
+        },
+        {
+          "stage": "realtime-complete",
+          "success": true
+        },
+        {
+          "stage": "import-start"
+        },
+        {
+          "stage": "import-complete"
+        },
+        {
+          "stage": "run-start"
+        },
+        {
+          "stage": "正在准备预览素材"
+        },
+        {
+          "stage": "正在建立区间合成任务"
+        },
+        {
+          "stage": "预览已就绪"
+        },
+        {
+          "stage": "run-complete"
+        },
+        {
+          "stage": "cache-save-start"
+        },
+        {
+          "stage": "cache-save-complete"
+        },
+        {
+          "stage": "cache-read-start"
+        },
+        {
+          "stage": "cache-read-complete"
+        }
+      ]
+    }
+  },
+  "windowsCapture": {
+    "runId": 39200487265,
+    "commit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+    "conclusion": "success",
+    "uniquePassedTests": 41,
+    "testExecutions": 42,
+    "environment": {
+      "commit": "7f333f01c8b89abdc6f4946313f1fcb09865e01e",
+      "runner": "GitHub Actions 1000005057",
+      "runnerImage": "win22",
+      "runnerImageVersion": "20261012.333.1",
+      "operatingSystem": "Microsoft Windows Server 2022 Datacenter",
+      "operatingSystemVersion": "10.0.20348",
+      "architecture": "AMD64",
+      "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "scope": "Hosted runner; synthetic test windows and generated media only. No microphone access. These timings are not measurements of a user computer or the packaged application."
+    },
+    "screenshot": {
+      "architecture": "x86_64",
+      "encoderAndProbeAvailable": false,
+      "path": "GDI single frame + PNG encode + validated import",
+      "pixelValidationPassed": true,
+      "platform": "windows",
+      "sourceListingMs": 29.4939,
+      "timings": [
+        {
+          "elapsedMs": 106.1925,
+          "height": 240,
+          "mode": "window",
+          "width": 360
+        },
+        {
+          "elapsedMs": 53.5131,
+          "height": 240,
+          "mode": "region",
+          "width": 360
+        },
+        {
+          "elapsedMs": 591.5628,
+          "height": 768,
+          "mode": "screen",
+          "width": 1024
+        }
+      ]
+    },
+    "limitations": [
+      "Hosted synthetic desktop and windows, not user hardware",
+      "No microphone capture",
+      "No installer packaging or complete screenshot-to-editor latency measurement",
+      "Separate synthetic recording checks use workflow-resolved system encoder"
+    ]
+  },
+  "limitations": [
+    "Generated fixtures and hosted runners; no capture of the user screen or microphone.",
+    "No installer packaging or release for this audit.",
+    "Optional large speech model per-voice inference remains disabled.",
+    "Bundled speech on macOS exercised accelerator failure and successful CPU fallback; successful GPU inference performance was not verified.",
+    "Cross-platform benchmark values are post-change measurements; before/after comparisons use the same local Linux environment."
+  ]
+}
