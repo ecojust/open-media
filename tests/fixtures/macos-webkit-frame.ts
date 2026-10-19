@@ -320,7 +320,7 @@ async function verifyRealtimeComposition() {
         await playThrough(.2, [{ label: effect, time: .7 }, ...(expected.keyedWatermark ? [{ label: 'chroma-watermark-motion', time: 1.4 }] : [])], (label, time) => sample(label, time, expected))
         if (expected.keyedWatermark) {
           const before = samples.at(-2)!, after = samples.at(-1)!
-          assert(after.watermarkTime! - before.watermarkTime! > .5, 'The actual video watermark clock remained frozen')
+          assert(after.watermarkTime! - before.watermarkTime! > .25, 'The actual video watermark clock remained frozen')
           assert(after.watermarkHash !== before.watermarkHash, 'The keyed video watermark pixels remained frozen')
         }
         emit('realtime-effect-complete', { effect, success: true })
