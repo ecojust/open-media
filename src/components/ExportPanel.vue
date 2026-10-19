@@ -25,6 +25,14 @@ const job = ref<MediaJob>()
 const duration = computed(() => projectDuration(props.project))
 const showAdjustedSize = computed(() => config.value.width !== props.project.width || config.value.height !== props.project.height)
 const dimensionError = computed(() => config.value.width > 7680 || config.value.height > 7680 ? '导出尺寸最大支持 7680 × 7680，请在预览上方调整画面尺寸。' : '')
+const outputProgress = computed(() => {
+  const idle = job.value?.outputIdleSeconds
+  if (typeof idle !== 'number' || !Number.isFinite(idle) || idle < 0) return undefined
+  const frames = job.value?.encodedFrames, time = job.value?.outputTime
+  const encodedFrames = typeof frames === 'number' && Number.isFinite(frames) && frames >= 0 ? Math.floor(frames) : undefined
+  const outputTime = typeof time === 'number' && Number.isFinite(time) && time >= 0 ? time : undefined
+  return { idleSeconds: Math.floor(idle), encodedFrames, outputTime, hasOutput: (encodedFrames ?? 0) > 0 || (outputTime ?? 0) > 0 }
+})
 const elapsedLabel = computed(() => {
   const seconds = Math.max(0, Math.floor(elapsedSeconds.value))
   const parts = [Math.floor(seconds / 60) % 60, seconds % 60].map(value => String(value).padStart(2, '0'))
@@ -131,7 +139,20 @@ onBeforeUnmount(() => { destroyed = true; controller?.abort(); clearTimeout(time
         <p v-if="showAdjustedSize" class="note" role="status" data-testid="export-dimension-adjustment">导出尺寸已按偶数要求调整：源 {{ project.width }} × {{ project.height }} → 导出 {{ config.width }} × {{ config.height }}。项目尺寸保持不变。</p>
         <p v-if="!native" class="note"><Icon name="info" :size="15"/>网页按播放时长实时生成 WebM，请保持当前窗口在前台。桌面端可导出更多格式。</p>
         <p v-if="config.format==='gif'" class="note">GIF 不包含声音。</p>
-        <div v-if="exporting" class="export-progress" role="status"><div class="progress-track"><i :style="{ width: `${Math.max(0, Math.min(1, progress)) * 100}%` }"/></div><span>{{ cancelling ? (native && !job ? '正在取消，请关闭尚未结束的文件选择窗口…' : '正在取消…') : job || !native ? `正在导出 ${Math.round(progress * 100)}%` : '正在准备素材与字幕…' }}</span><span v-if="job?.stage" class="export-stage" data-testid="export-stage">{{ job.stage }}<template v-if="job.backend"> · {{ job.backend }}</template></span><span v-else-if="job?.backend" class="export-stage" data-testid="export-stage">{{ job.backend }}</span><span v-if="job?.fallbackReason" class="export-fallback" data-testid="export-fallback">{{ job.fallbackReason }}</span><span role="timer" aria-live="off" data-testid="export-elapsed">已用时 {{ elapsedLabel }}</span></div>
+        <div v-if="exporting" class="export-progress" role="status">
+          <div class="progress-track"><i :style="{ width: `${Math.max(0, Math.min(1, progress)) * 100}%` }"/></div>
+          <span>{{ cancelling ? (native && !job ? '正在取消，请关闭尚未结束的文件选择窗口…' : '正在取消…') : job || !native ? `正在导出 ${Math.round(progress * 100)}%` : '正在准备素材与字幕…' }}</span>
+          <span v-if="job?.stage" class="export-stage" data-testid="export-stage">{{ job.stage }}<template v-if="job.backend"> · {{ job.backend }}</template></span>
+          <span v-else-if="job?.backend" class="export-stage" data-testid="export-stage">{{ job.backend }}</span>
+          <div v-if="outputProgress" class="export-output-progress" data-testid="export-output-progress">
+            <span v-if="outputProgress.hasOutput" data-testid="export-output-count">已输出 {{ outputProgress.encodedFrames ?? '—' }} 帧 · 媒体时间 {{ outputProgress.outputTime?.toFixed(2) ?? '—' }} 秒</span>
+            <span v-else data-testid="export-output-count">尚未输出首帧</span>
+            <span v-if="outputProgress.idleSeconds >= 1" data-testid="export-output-idle">{{ outputProgress.hasOutput ? `已 ${outputProgress.idleSeconds} 秒没有新的输出进度` : `已等待 ${outputProgress.idleSeconds} 秒` }}</span>
+            <span v-if="outputProgress.idleSeconds >= 60 && !cancelling" class="export-output-hint" data-testid="export-output-hint">请检查素材是否可正常读取；也可取消导出后重试。</span>
+          </div>
+          <span v-if="job?.fallbackReason" class="export-fallback" data-testid="export-fallback">{{ job.fallbackReason }}</span>
+          <span role="timer" aria-live="off" data-testid="export-elapsed">已用时 {{ elapsedLabel }}</span>
+        </div>
         <p v-if="error" class="error-message" role="alert">{{ error }}</p>
         <div v-if="completed" class="export-completion" role="status"><p class="success-message"><Icon name="check"/>{{ completed }}</p><span data-testid="export-completed-elapsed">耗时 {{ elapsedLabel }}</span><span v-if="job?.backend" class="export-stage">{{ job.backend }}</span><p v-if="job?.fallbackReason" class="export-fallback" data-testid="export-fallback">{{ job.fallbackReason }}</p><button v-if="native && job?.state === 'completed' && job.outputPath" type="button" :disabled="revealing" @click="revealOutput"><Icon name="folder" :size="15" />{{ revealing ? '正在打开…' : '打开文件夹' }}</button></div>
       </div>
@@ -143,4 +164,5 @@ onBeforeUnmount(() => { destroyed = true; controller?.abort(); clearTimeout(time
 <style scoped>
 .export-dialog{width:480px}.export-progress{display:grid;gap:8px;font-size:12px;color:var(--ui-muted);margin-top:20px}.success-message{display:flex;gap:8px;align-items:flex-start;overflow-wrap:anywhere;font-size:12px;color:var(--ui-success)}
 .export-stage,.export-fallback{overflow-wrap:anywhere;line-height:1.6}.export-fallback{color:var(--ui-muted)}.export-completion{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-top:16px;font-size:11px;color:var(--ui-muted)}.export-completion .success-message,.export-completion .export-fallback{flex-basis:100%;margin:0}.export-completion button{font-size:11px}.export-progress [role=timer],.export-completion>span{font-variant-numeric:tabular-nums}.form-grid input[readonly]{color:var(--ui-muted);background:var(--ui-surface-2);cursor:text}
+.export-output-progress{display:grid;gap:3px;line-height:1.5;font-variant-numeric:tabular-nums}.export-output-hint{font-size:11px;overflow-wrap:anywhere}
 </style>

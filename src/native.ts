@@ -8,7 +8,7 @@ export type MediaJobSpec =
   | { kind: 'timeline'; project: Project; config: ExportConfig; textAssets?: Record<string, MediaAsset> }
   | { kind: 'convert'; asset: MediaAsset; format: string; width?: number; height?: number; fps?: number; quality?: 'draft' | 'balanced' | 'high'; audioOnly?: boolean; sampleRate?: number; videoBitrate?: number; audioBitrate?: number; trimStart?: number; trimEnd?: number }
   | { kind: 'gif'; asset: MediaAsset; segments: { start: number; end: number }[]; width: number; fps: number; loop?: boolean }
-export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress: number; name: string; outputPath?: string; error?: string; startedAt?: number; elapsedSeconds?: number; encodedFrames?: number; outputTime?: number; backend?: string; stage?: string; fallbackReason?: string }
+export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress: number; name: string; outputPath?: string; error?: string; startedAt?: number; elapsedSeconds?: number; encodedFrames?: number; outputTime?: number; outputIdleSeconds?: number | null; backend?: string; stage?: string; fallbackReason?: string }
 export interface CaptureSize { width: number; height: number }
 export interface CaptureRegion extends CaptureSize { x: number; y: number }
 export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }

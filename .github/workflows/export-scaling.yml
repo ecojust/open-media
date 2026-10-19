@@ -1,0 +1,78 @@
+name: Verify long timeline exports
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fix/windows-long-export-*']
+    paths: ['src-tauri/**', 'scripts/media-runtime*', '.github/workflows/export-scaling.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: export-scaling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Long export (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            suffix: .exe
+          - platform: macos-arm64
+            runner: macos-26
+            target: aarch64-apple-darwin
+            suffix: ''
+          - platform: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            suffix: ''
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg${{ matrix.suffix }}
+      OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe${{ matrix.suffix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
+          cache-on-failure: true
+      - name: Restore the previously verified media runtime
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            src-tauri/resources/media
+            .media-runtime/downloads
+          key: media-runtime-v1-${{ matrix.platform }}-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/media-runtime-capabilities.mjs', 'scripts/build-media-runtime.sh') }}
+          fail-on-cache-miss: true
+      - name: Verify the runtime and record the measurement environment
+        run: |
+          mkdir -p test-results/export-scaling
+          node scripts/media-runtime.mjs verify
+          node -e 'const os=require("node:os"); console.log(JSON.stringify({commit:process.env.GITHUB_SHA,platform:process.platform,arch:process.arch,cpus:os.cpus().map(c=>c.model),memory:os.totalmem(),scope:"Generated media: full 600 seconds at 160x90/10fps and first 3 seconds of the complete graph at 1920x1080/30fps"},null,2))' | tee test-results/export-scaling/environment.json
+      - name: Verify split recordings, audio and text boundaries
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib export_scaling_tests:: -- --nocapture --test-threads=1 2>&1 | tee test-results/export-scaling/correctness.log
+      - name: Measure the complete long graph with real media
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib export_scaling_tests::ten_minute_split_recording_fifty_texts_and_1080p_startup -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee test-results/export-scaling/benchmark.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: export-scaling-${{ matrix.platform }}-${{ github.run_id }}
+          path: test-results/export-scaling
+          if-no-files-found: warn

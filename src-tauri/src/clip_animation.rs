@@ -303,7 +303,9 @@ pub(crate) fn video_timing(clip: &Value) -> Result<String> {
     if let Some(freeze) = clip.get("freezeFrame") {
         let time = number(freeze, "sourceTime", 0.0, 0.0, 86400.0)?;
         let duration = duration(clip)?;
-        return Ok(format!("trim=start={time},setpts=PTS-STARTPTS,select='eq(n,0)',tpad=stop_mode=clone:stop_duration={duration},trim=duration={duration},setpts=PTS-STARTPTS"));
+        // End the decoder branch after the chosen frame. A select filter would
+        // discard every remaining source frame before tpad could observe EOF.
+        return Ok(format!("trim=start={time},setpts=PTS-STARTPTS,trim=end_frame=1,tpad=stop_mode=clone:stop_duration={duration},trim=duration={duration},setpts=PTS-STARTPTS"));
     }
     let first = segments.first().ok_or("片段时间无效。")?;
     let last = segments.last().unwrap();
@@ -337,7 +339,7 @@ pub(crate) fn source_time(clip: &Value, time: f64) -> Result<f64> {
 pub(crate) fn video_timing_window(clip: &Value, from: f64, to: f64, input_seek: f64) -> Result<String> {
     if clip.get("freezeFrame").is_some() {
         let source = source_time(clip, from)? - input_seek;
-        return Ok(format!("trim=start={source},select='eq(n,0)',setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={},trim=duration={},settb=AVTB,setpts=PTS+{from}/TB",to-from,to-from));
+        return Ok(format!("trim=start={source},trim=end_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration={},trim=duration={},settb=AVTB,setpts=PTS+{from}/TB",to-from,to-from));
     }
     let source_from = source_time(clip,from)? - input_seek;
     let source_to = source_time(clip,to)? - input_seek;
@@ -370,13 +372,6 @@ fn tempo(mut speed: f64) -> String {
     }
     filters.push(format!("atempo={speed}"));
     filters.join(",")
-}
-pub(crate) fn audio_timing(
-    clip: &Value,
-    index: usize,
-    filters: &mut Vec<String>,
-) -> Result<String> {
-    audio_timing_seek(clip,index,filters,0.0)
 }
 pub(crate) fn audio_timing_seek(clip: &Value, index: usize, filters: &mut Vec<String>, input_seek: f64) -> Result<String> {
     let input = if input_seek > 0.0 {

@@ -514,11 +514,13 @@ pub struct MediaJob {
     pub fallback_reason: Option<String>,
     pub encoded_frames: u64,
     pub output_time: f64,
+    pub output_idle_seconds: Option<f64>,
 }
 struct JobEntry {
     job: MediaJob,
     cancelled: Arc<AtomicBool>,
     started: std::time::Instant,
+    output_progress_at: Option<std::time::Instant>,
 }
 #[derive(Clone, Default)]
 pub struct JobManager {
@@ -549,6 +551,9 @@ impl JobManager {
                 let mut job = entry.job.clone();
                 if job.state == "running" {
                     job.elapsed_seconds = entry.started.elapsed().as_secs_f64();
+                    job.output_idle_seconds = entry
+                        .output_progress_at
+                        .map(|updated| updated.elapsed().as_secs_f64());
                 }
                 job
             })
@@ -616,6 +621,7 @@ impl JobManager {
             fallback_reason: None,
             encoded_frames: 0,
             output_time: 0.0,
+            output_idle_seconds: None,
         };
         let cancelled = Arc::new(AtomicBool::new(false));
         {
@@ -634,6 +640,7 @@ impl JobManager {
                     job: job.clone(),
                     cancelled: cancelled.clone(),
                     started,
+                    output_progress_at: None,
                 },
             );
         }
@@ -665,7 +672,7 @@ impl JobManager {
                     }
                     update_export_job(&jobs, &id, |job| {
                         job.backend = Some(encoder.label().into());
-                        job.stage = "正在解码并合成画面".into();
+                        job.stage = "正在等待首帧输出".into();
                     });
                     loop {
                         if cancelled.load(Ordering::SeqCst) {
@@ -710,7 +717,7 @@ impl JobManager {
                                 job.encoded_frames = 0;
                                 job.output_time = 0.0;
                                 job.backend = Some("CPU".into());
-                                job.stage = "硬件编码不可用，正在使用 CPU 导出".into();
+                                job.stage = "正在等待首帧输出".into();
                                 job.fallback_reason = Some(reason);
                             });
                             continue;
@@ -760,7 +767,7 @@ impl JobManager {
                             } else {
                                 format!(
                                     "导出失败：{}",
-                                    detail.chars().take(1800).collect::<String>()
+                                    export_log_tail(&detail, 1800)
                                 )
                             });
                         }
@@ -783,6 +790,96 @@ fn update_export_job(
     if let Some(entry) = jobs.lock().unwrap().get_mut(id) {
         update(&mut entry.job);
     }
+}
+
+fn reset_export_output(jobs: &Mutex<HashMap<String, JobEntry>>, id: &str) {
+    if let Some(entry) = jobs.lock().unwrap().get_mut(id) {
+        entry.job.progress = 0.0;
+        entry.job.encoded_frames = 0;
+        entry.job.output_time = 0.0;
+        entry.job.output_idle_seconds = Some(0.0);
+        entry.job.stage = "正在等待首帧输出".into();
+        entry.output_progress_at = Some(std::time::Instant::now());
+    }
+}
+
+// Only advancing media counters count as activity; repeated zero reports do not.
+fn apply_export_progress(
+    job: &mut MediaJob,
+    line: &str,
+    duration: f64,
+    frame_rate: Option<f64>,
+) -> bool {
+    let mut advanced = false;
+    if let Some(frames) = line
+        .strip_prefix("frame=")
+        .and_then(|value| value.trim().parse::<u64>().ok())
+    {
+        advanced = frames > job.encoded_frames;
+        job.encoded_frames = job.encoded_frames.max(frames);
+        if let Some(rate) = frame_rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
+            job.progress = job.progress.max(
+                (job.encoded_frames as f64 / (duration * rate).max(1.0)).clamp(0.0, 0.99),
+            );
+        }
+    }
+    if let Some(time) = line
+        .strip_prefix("out_time_us=")
+        .and_then(|value| value.trim().parse::<f64>().ok())
+        .filter(|value| value.is_finite())
+    {
+        let seconds = (time / 1_000_000.0).max(0.0);
+        advanced = seconds > job.output_time;
+        job.output_time = job.output_time.max(seconds);
+        if duration > 0.0 {
+            job.progress = job.progress.max((job.output_time / duration).clamp(0.0, 0.99));
+        }
+    }
+    if advanced {
+        job.stage = "正在编码输出".into();
+    }
+    advanced
+}
+
+fn record_export_progress(
+    jobs: &Mutex<HashMap<String, JobEntry>>,
+    id: &str,
+    line: &str,
+    duration: f64,
+    frame_rate: Option<f64>,
+) {
+    if let Some(entry) = jobs.lock().unwrap().get_mut(id) {
+        if apply_export_progress(&mut entry.job, line, duration, frame_rate) {
+            entry.output_progress_at = Some(std::time::Instant::now());
+            entry.job.output_idle_seconds = Some(0.0);
+        }
+    }
+}
+
+fn export_log_tail(text: &str, limit: usize) -> String {
+    if limit == 0 {
+        return String::new();
+    }
+    let start = text.char_indices().rev().nth(limit - 1).map_or(0, |(index, _)| index);
+    text[start..].to_owned()
+}
+
+fn read_export_log(reader: impl BufRead) -> String {
+    let mut tail = std::collections::VecDeque::new();
+    for line in reader.split(b'\n') {
+        let line = match line {
+            Ok(bytes) => export_log_tail(&String::from_utf8_lossy(&bytes), 1600),
+            Err(error) => {
+                tail.push_back(format!("读取导出日志失败：{error}"));
+                break;
+            }
+        };
+        tail.push_back(line);
+        if tail.len() > 30 {
+            tail.pop_front();
+        }
+    }
+    tail.into_iter().collect::<Vec<_>>().join("\n")
 }
 
 struct ExportAttempt {
@@ -834,45 +931,20 @@ fn run_export_attempt(
             .spawn()
             .map_err(|error| format!("无法启动导出：{error}"))?,
     );
+    reset_export_output(jobs, id);
     let stderr = child.0.stderr.take().ok_or("无法读取导出日志。")?;
-    let errors = thread::spawn(move || {
-        let mut tail = std::collections::VecDeque::new();
-        for line in BufReader::new(stderr)
-            .lines()
-            .map_while(std::result::Result::ok)
-        {
-            tail.push_back(line.chars().take(1600).collect::<String>());
-            if tail.len() > 30 {
-                tail.pop_front();
-            }
-        }
-        tail.into_iter().collect::<Vec<_>>().join("\n")
-    });
+    let errors = thread::spawn(move || read_export_log(BufReader::new(stderr)));
     let stdout = child.0.stdout.take().ok_or("无法读取导出进度。")?;
     let progress_jobs = jobs.clone();
     let progress_id = id.to_owned();
     let progress_thread = thread::spawn(move || {
-        for line in BufReader::new(stdout)
-            .lines()
-            .map_while(std::result::Result::ok)
-        {
-            if let Some(frames) = line.strip_prefix("frame=").and_then(|value|value.trim().parse::<u64>().ok()) {
-                update_export_job(&progress_jobs,&progress_id,|job| {
-                    job.encoded_frames=frames;
-                    if frames>0 { job.stage="正在编码输出".into(); }
-                    if let Some(rate)=frame_rate.filter(|rate|*rate>0.0) {
-                        job.progress=job.progress.max((frames as f64/(duration*rate).max(1.0)).clamp(0.0,0.99));
-                    }
-                });
-            }
-            if let Some(time) = line.strip_prefix("out_time_us=").and_then(|value|value.parse::<f64>().ok()).filter(|value|value.is_finite()) {
-                update_export_job(&progress_jobs,&progress_id,|job| {
-                    job.output_time=(time/1_000_000.0).max(0.0);
-                    if job.output_time>0.0 { job.stage="正在编码输出".into(); }
-                    if duration>0.0 { job.progress=job.progress.max((job.output_time/duration).clamp(0.0,0.99)); }
-                });
-            }
+        for line in BufReader::new(stdout).split(b'\n') {
+            let bytes = line.map_err(|error| format!("读取导出进度失败：{error}"))?;
+            record_export_progress(
+                &progress_jobs, &progress_id, &String::from_utf8_lossy(&bytes), duration, frame_rate,
+            );
         }
+        Ok::<(), String>(())
     });
     let outcome = loop {
         if cancelled.load(Ordering::SeqCst) {
@@ -890,14 +962,128 @@ fn run_export_attempt(
             _ => thread::sleep(Duration::from_millis(50)),
         }
     };
-    let _ = progress_thread.join();
-    let detail = errors.join().unwrap_or_default();
+    let progress_result = progress_thread
+        .join()
+        .unwrap_or_else(|_| Err("导出进度读取线程意外退出。".into()));
+    let mut detail = errors.join().unwrap_or_else(|_| "导出日志读取线程意外退出。".into());
+    if let Err(error) = progress_result {
+        detail.push_str(&format!("\n{error}"));
+    }
+    if let Some(entry) = jobs.lock().unwrap().get_mut(id) {
+        entry.job.output_idle_seconds = None;
+        entry.output_progress_at = None;
+    }
     let status = outcome?;
     Ok(ExportAttempt {
         success: status.success(),
         abnormal_exit: status.code().is_none_or(|code| (code as u32) >= 0xc0000000),
         detail,
     })
+}
+
+#[cfg(test)]
+mod export_progress_tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn manager() -> JobManager {
+        let jobs = JobManager::default();
+        jobs.jobs.lock().unwrap().insert("export".into(), JobEntry {
+            job: MediaJob {
+                id: "export".into(), state: "running".into(), progress: 0.0,
+                name: "video.mp4".into(), output_path: None, error: None, started_at: 0,
+                elapsed_seconds: 0.0, backend: Some("CPU".into()),
+                stage: "正在等待首帧输出".into(), fallback_reason: None,
+                encoded_frames: 0, output_time: 0.0, output_idle_seconds: None,
+            },
+            cancelled: Arc::new(AtomicBool::new(false)),
+            started: Instant::now(), output_progress_at: None,
+        });
+        jobs
+    }
+
+    fn mark_idle(jobs: &JobManager) -> Instant {
+        let updated = Instant::now() - Duration::from_secs(125);
+        jobs.jobs.lock().unwrap().get_mut("export").unwrap().output_progress_at = Some(updated);
+        updated
+    }
+
+    #[test]
+    fn repeated_zero_or_unchanged_reports_do_not_hide_output_stalls() {
+        let jobs = manager();
+        assert_eq!(jobs.list()[0].output_idle_seconds, None);
+        reset_export_output(&jobs.jobs, "export");
+        let original = mark_idle(&jobs);
+        for line in ["frame=0", "out_time_us=0", "out_time_us=N/A", "out_time_us=NaN", "progress=continue"] {
+            record_export_progress(&jobs.jobs, "export", line, 600.0, Some(25.0));
+        }
+        assert_eq!(jobs.jobs.lock().unwrap()["export"].output_progress_at, Some(original));
+        let waiting = &jobs.list()[0];
+        assert_eq!(waiting.progress, 0.0);
+        assert!(waiting.output_idle_seconds.unwrap() >= 125.0);
+        assert_eq!(waiting.stage, "正在等待首帧输出");
+
+        record_export_progress(&jobs.jobs, "export", "frame=25\r", 600.0, Some(25.0));
+        assert_eq!(jobs.list()[0].encoded_frames, 25);
+        assert_eq!(jobs.list()[0].stage, "正在编码输出");
+        assert!(jobs.jobs.lock().unwrap()["export"].output_progress_at.unwrap() > original);
+        let unchanged = mark_idle(&jobs);
+        for line in ["frame=25", "frame=24", "out_time_us=-1"] {
+            record_export_progress(&jobs.jobs, "export", line, 600.0, Some(25.0));
+        }
+        assert_eq!(jobs.jobs.lock().unwrap()["export"].output_progress_at, Some(unchanged));
+        record_export_progress(&jobs.jobs, "export", "out_time_us=1000000\r", 600.0, Some(25.0));
+        assert!(jobs.jobs.lock().unwrap()["export"].output_progress_at.unwrap() > unchanged);
+        let unchanged_time = mark_idle(&jobs);
+        for line in ["out_time_us=1000000", "out_time_us=500000"] {
+            record_export_progress(&jobs.jobs, "export", line, 600.0, Some(25.0));
+        }
+        assert_eq!(jobs.jobs.lock().unwrap()["export"].output_progress_at, Some(unchanged_time));
+        let progressing = &jobs.list()[0];
+        assert_eq!(progressing.encoded_frames, 25);
+        assert_eq!(progressing.output_time, 1.0);
+        assert_eq!(progressing.progress, 1.0 / 600.0);
+    }
+
+    #[test]
+    fn retry_starts_new_output_counters_and_waiting_clock() {
+        let jobs = manager();
+        record_export_progress(&jobs.jobs, "export", "frame=250", 600.0, Some(25.0));
+        record_export_progress(&jobs.jobs, "export", "out_time_us=10000000", 600.0, Some(25.0));
+        let previous = mark_idle(&jobs);
+        reset_export_output(&jobs.jobs, "export");
+        let retry = &jobs.list()[0];
+        assert_eq!(retry.encoded_frames, 0);
+        assert_eq!(retry.output_time, 0.0);
+        assert_eq!(retry.progress, 0.0);
+        assert_eq!(retry.stage, "正在等待首帧输出");
+        assert!(retry.output_idle_seconds.unwrap() < 1.0);
+        assert!(jobs.jobs.lock().unwrap()["export"].output_progress_at.unwrap() > previous);
+    }
+
+    #[test]
+    fn error_tail_preserves_last_failure_after_invalid_utf8() {
+        let mut log = (0..35).map(|index| format!("message {index}\n")).collect::<String>().into_bytes();
+        log.extend_from_slice(b"invalid path: \xff\n");
+        log.extend_from_slice("最终错误：输出文件写入失败".as_bytes());
+        let detail = read_export_log(std::io::Cursor::new(log));
+        assert!(!detail.contains("message 0\n"));
+        assert!(detail.contains("invalid path: \u{fffd}"));
+        assert!(detail.ends_with("最终错误：输出文件写入失败"));
+        assert_eq!(export_log_tail(&detail, 8), "输出文件写入失败");
+        assert_eq!(export_log_tail("短日志", 1800), "短日志");
+    }
+
+    #[test]
+    fn log_read_errors_are_retained() {
+        struct BrokenReader;
+        impl std::io::Read for BrokenReader {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("closed stream"))
+            }
+        }
+        assert!(read_export_log(BufReader::new(BrokenReader)).contains("读取导出日志失败：closed stream"));
+    }
 }
 
 pub fn number(v: &Value, key: &str, default: f64, min: f64, max: f64) -> Result<f64> {
@@ -1367,12 +1553,20 @@ fn timeline_plan(
             clip,
             track["kind"] == "video" && (asset["kind"] == "video" || asset["kind"] == "image"),
         )?;
+        // Static text is already rasterized. Decode its PNG once and let the
+        // compositor retain that frame; looping every subtitle creates many
+        // concurrent decoders and repeats identical scaling work.
+        let single_frame_text = text
+            && number(clip, "fadeIn", 0.0, 0.0, *duration)? == 0.0
+            && number(clip, "fadeOut", 0.0, 0.0, *duration)? == 0.0
+            && !crate::clip_animation::transformed(clip)
+            && !crate::clip_animation::has_keyframe(clip, "opacity");
         if loop_audio || (image && asset["mime"] == "image/gif") {
             arg(
                 &mut args,
                 &["-stream_loop", "-1", "-t", &trim_out.to_string()],
             );
-        } else if image {
+        } else if image && !single_frame_text {
             arg(
                 &mut args,
                 &[
@@ -1385,14 +1579,30 @@ fn timeline_plan(
                 ],
             );
         }
-        let input_seek = if windowed && !image && !loop_audio {
-            (crate::clip_animation::source_time(clip,local_from)? - 0.25).max(0.0)
+        // Full exports need the same source seeking as range previews. Each
+        // late timeline slice otherwise decodes the entire preceding source
+        // before framesync can produce even the first composition frame.
+        // Pitch-preserving speed ramps need surrounding audio samples for
+        // their tempo windows and crossfades, including at high source speeds.
+        let source_padding = if !image && !loop_audio && clip.get("speedRamp").is_some()
+            && clip["speedRamp"]["preservePitch"] != false {
+            crate::clip_animation::speed_segments(clip)?.iter()
+                .map(|segment| segment.speed * 0.3).fold(0.25_f64, f64::max)
+        } else { 0.25 };
+        let input_seek = if !image && !loop_audio {
+            // Whole-second seeking avoids different rounding of fractional
+            // timestamps in demuxer and filter time bases. Exact trimming is
+            // still done below, so no boundary frame or audio sample is lost.
+            (crate::clip_animation::source_time(clip,local_from)? - source_padding).max(0.0).floor()
         } else { 0.0 };
         if input_seek > 0.0 { arg(&mut args, &["-ss",&input_seek.to_string()]); }
-        if windowed && !image && !loop_audio {
+        if !image && !loop_audio && clip.get("freezeFrame").is_none() {
             let source_to = crate::clip_animation::source_time(clip,local_to)?;
-            arg(&mut args, &["-t", &(source_to-input_seek+0.5).max(0.5).to_string()]);
+            arg(&mut args, &["-t", &(source_to-input_seek+source_padding+0.5).max(0.5).to_string()]);
         }
+        // Codec options apply to the next input, not every input in the job.
+        // Bound each decoder instead of spawning a CPU-sized pool per clip.
+        arg(&mut args, &["-threads", if image { "1" } else { "2" }]);
         arg(&mut args, &["-i", &path.to_string_lossy()]);
         input_count += 1;
         let index = input_count;
@@ -1419,9 +1629,18 @@ fn timeline_plan(
             }
             let fit = clip["fit"].as_str().unwrap_or("contain");
             let scale=match fit{"cover"=>format!("scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}:exact=1,format=rgba"),"fill"=>format!("scale={cw}:{ch},format=rgba"),_=>format!("scale={cw}:{ch}:force_original_aspect_ratio=decrease,format=rgba,pad={cw}:{ch}:(ow-iw)/2:(oh-ih)/2:color=0x00000000")};
-            let timing=if windowed && image && asset["mime"] != "image/gif" {
+            let timing=if single_frame_text {
+                // A trimmed text clip still displays the same raster. Its
+                // single source frame must not be discarded by trimIn.
+                "settb=AVTB,setpts=PTS-STARTPTS".to_string()
+            } else if windowed && image && asset["mime"] != "image/gif" {
                 format!("trim=duration={},settb=AVTB,setpts=PTS-STARTPTS+{local_from}/TB",local_to-local_from)
-            } else if windowed { crate::clip_animation::video_timing_window(clip,local_from,local_to,input_seek)? } else { crate::clip_animation::video_timing(clip)? };
+            } else if windowed { crate::clip_animation::video_timing_window(clip,local_from,local_to,input_seek)? } else {
+                let timing = crate::clip_animation::video_timing(clip)?;
+                // Restore the source clock before applying the existing trim
+                // and speed mapping, preserving fractional split boundaries.
+                if input_seek > 0.0 { format!("setpts=PTS+{input_seek}/TB,{timing}") } else { timing }
+            };
             let mut chain=format!("[{index}:v]{timing}");
             chain += &crate::clip_animation::crop_filter(clip)?;
             if let Some(filter) = &chroma_key {
@@ -1472,7 +1691,7 @@ fn timeline_plan(
             let timing=if windowed {
                 let trimmed=crate::clip_animation::window_clip(clip,local_from,local_to)?;
                 crate::clip_animation::audio_timing_seek(&trimmed,index,&mut filters,input_seek)?
-            } else { crate::clip_animation::audio_timing(clip,index,&mut filters)? };
+            } else { crate::clip_animation::audio_timing_seek(clip,index,&mut filters,input_seek)? };
             let audio_duration=if windowed { local_to-local_from } else { *duration };
             let mut gain=format!("({volume})*{fade_peak}");
             if windowed {

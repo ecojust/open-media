@@ -35,6 +35,8 @@ pub mod recording_controls;
 mod tests;
 #[cfg(test)]
 mod recording_store_tests;
+#[cfg(test)]
+mod export_scaling_tests;
 
 #[cfg(feature = "desktop")]
 mod desktop {

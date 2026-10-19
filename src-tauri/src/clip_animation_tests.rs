@@ -268,6 +268,45 @@ fn audio_samples(rt: &Runtime, path: &Path) -> Vec<f32> {
         .collect()
 }
 #[test]
+fn native_freeze_stops_decoding_after_its_source_frame() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let path = temp.path().join("long-freeze.mkv");
+    let made = process(&rt.encoder)
+        .args([
+            "-v", "error", "-y", "-f", "lavfi", "-i",
+            "color=red:s=32x24:r=20:d=12,drawbox=x=0:y=0:w=iw:h=ih:color=blue:t=fill:enable='lt(t,2)'",
+            "-c:v", "ffv1", "-threads", "1",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let frozen = json!({"trimIn":0,"trimOut":2,"speed":1,"freezeFrame":{"sourceTime":2.2}});
+    let full = format!("setpts=PTS+1/TB,{}", video_timing(&frozen).unwrap());
+    let window = video_timing_window(&frozen, 0.5, 1.5, 1.0).unwrap();
+    for (name, timing) in [("full", full), ("window", window)] {
+        let rendered = process(&rt.encoder)
+            .args(["-v", "debug", "-threads", "1", "-ss", "1", "-i"])
+            .arg(&path)
+            .args(["-vf", &timing, "-an", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb24", "-threads", "1", "-"])
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&rendered.stderr);
+        assert!(rendered.status.success(), "{name}: {log}");
+        assert!(rendered.stdout.len() >= 32 * 24 * 3, "{name}: missing freeze frame");
+        assert!(rendered.stdout.chunks_exact(3).all(|pixel| pixel[0] > 240 && pixel[1] < 10 && pixel[2] < 10), "{name}: freeze chose the earlier blue frame");
+        let decoded = log.lines()
+            .flat_map(|line| line.split(';'))
+            .find_map(|part| part.trim().strip_suffix(" frames decoded").and_then(|value| value.parse::<usize>().ok()))
+            .expect("FFmpeg should report decoded input frames");
+        // The old select filter decoded through the full 12-second source tail.
+        // Leave room for decoder and demuxer queues without depending on timing.
+        assert!(decoded < 120, "{name}: decoded {decoded} frames after freezing: {log}");
+    }
+}
+
+#[test]
 fn native_ramp_audio_preserves_or_changes_pitch_and_has_no_silent_bins() {
     let temp = tempfile::tempdir().unwrap();
     let rt = runtime();

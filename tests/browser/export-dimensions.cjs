@@ -24,7 +24,7 @@ async function mount(page, baseURL, native, width = 853, height = 479) {
     const asset = { id: 'source', name: 'source.webm', kind: 'video', duration: 1, width, height, size: 1, mime: 'video/webm', url: '', nativePath: '/fixture/source.webm' }
     project = addAsset(project, asset)
     project = addClip(project, project.tracks.find(track => track.kind === 'video').id, createClip(asset, project))
-    const state = window.exportDimensions = { project, specs: [], calls: [], open: ref(true), errors: [], busy: [], currentJob: null, holdBegin: false, releaseBegin: null, revealError: '' }
+    const state = window.exportDimensions = { project, specs: [], calls: [], open: ref(true), errors: [], busy: [], currentJob: null, holdBegin: false, releaseBegin: null, holdCancel: false, releaseCancel: null, revealError: '' }
     if (native) {
       window.__TAURI_INTERNALS__ = {
         invoke: async (command, args) => {
@@ -32,7 +32,7 @@ async function mount(page, baseURL, native, width = 853, height = 479) {
           if (command === 'get_runtime_status') return { ready: true, source: 'fixture', version: 'fixture' }
           if (command === 'begin_media_job') { state.specs.push(structuredClone(args.spec)); if (state.holdBegin) await new Promise(resolve => { state.releaseBegin = resolve }); return structuredClone(state.currentJob) }
           if (command === 'get_media_jobs') return state.currentJob ? [structuredClone(state.currentJob)] : []
-          if (command === 'cancel_media_job') { if (state.currentJob) state.currentJob.state = 'cancelled'; return }
+          if (command === 'cancel_media_job') { if (state.holdCancel) await new Promise(resolve => { state.releaseCancel = resolve }); if (state.currentJob) state.currentJob.state = 'cancelled'; return }
           if (command === 'reveal_media_job_output') { if (state.revealError) throw new Error(state.revealError); return }
           throw new Error(`未预期命令：${command}`)
         },
@@ -135,6 +135,76 @@ async function main() {
       const page = await browser.newPage(), errors = []
       page.on('pageerror', error => errors.push(error.message))
       await mount(page, baseURL, true, 640, 360)
+      await page.evaluate(() => {
+        window.exportDimensions.currentJob = { id: 'output-diagnostics', kind: 'timeline', state: 'running', progress: 0, createdAt: Date.now(), backend: 'GPU（NVENC）', stage: '正在检查硬件编码', encodedFrames: 0, outputTime: 0, outputIdleSeconds: null }
+      })
+      await page.getByTestId('start-export').click()
+      await expect(page.getByTestId('export-stage')).toHaveText('正在检查硬件编码 · GPU（NVENC）')
+      await expect(page.getByTestId('export-output-progress')).toHaveCount(0)
+      await page.evaluate(() => Object.assign(window.exportDimensions.currentJob, { stage: '正在等待首帧输出', outputIdleSeconds: 0 }))
+      await expect(page.getByTestId('export-output-count')).toHaveText('尚未输出首帧')
+      await expect(page.getByTestId('export-output-idle')).toHaveCount(0)
+      await expect(page.getByTestId('export-output-hint')).toHaveCount(0)
+      await expect(page.locator('.export-progress')).toContainText('正在导出 0%')
+      await expect(page.locator('.progress-track>i')).toHaveAttribute('style', 'width: 0%;')
+      await page.evaluate(() => { window.exportDimensions.currentJob.outputIdleSeconds = 1 })
+      await expect(page.getByTestId('export-output-idle')).toHaveText('已等待 1 秒')
+      await expect(page.getByTestId('export-output-hint')).toHaveCount(0)
+      await page.evaluate(() => { window.exportDimensions.currentJob.outputIdleSeconds = 59 })
+      await expect(page.getByTestId('export-output-idle')).toHaveText('已等待 59 秒')
+      await expect(page.getByTestId('export-output-hint')).toHaveCount(0)
+      await page.evaluate(() => { window.exportDimensions.currentJob.outputIdleSeconds = 65.9 })
+      await expect(page.getByTestId('export-output-idle')).toHaveText('已等待 65 秒')
+      await expect(page.getByTestId('export-output-hint')).toContainText('取消导出后重试')
+      await expect(page.locator('.export-progress')).toContainText('正在导出 0%')
+      await expect(page.locator('.progress-track>i')).toHaveAttribute('style', 'width: 0%;')
+      assert.equal(await page.evaluate(() => window.exportDimensions.calls.some(call => call.command === 'cancel_media_job')), false, '等待首帧超过 60 秒仍由用户决定取消')
+      await page.evaluate(() => Object.assign(window.exportDimensions.currentJob, { stage: '正在编码输出帧', encodedFrames: 60, outputTime: 2, outputIdleSeconds: 0, progress: 0.002 }))
+      await expect(page.getByTestId('export-output-count')).toHaveText('已输出 60 帧 · 媒体时间 2.00 秒')
+      await expect(page.getByTestId('export-output-idle')).toHaveCount(0)
+      await expect(page.getByTestId('export-output-hint')).toHaveCount(0)
+      await expect(page.locator('.export-progress')).toContainText('正在导出 0%')
+      await expect(page.locator('.progress-track>i')).toHaveAttribute('style', 'width: 0.2%;')
+      await page.evaluate(() => { window.exportDimensions.currentJob.outputIdleSeconds = 60 })
+      await expect(page.getByTestId('export-output-idle')).toHaveText('已 60 秒没有新的输出进度')
+      await expect(page.getByTestId('export-output-hint')).toBeVisible()
+      await page.evaluate(() => Object.assign(window.exportDimensions.currentJob, { encodedFrames: 90, outputTime: 3, outputIdleSeconds: 0, progress: 0.003 }))
+      await expect(page.getByTestId('export-output-count')).toHaveText('已输出 90 帧 · 媒体时间 3.00 秒')
+      await expect(page.getByTestId('export-output-idle')).toHaveCount(0)
+      await expect(page.getByTestId('export-output-hint')).toHaveCount(0)
+      await page.evaluate(() => { window.exportDimensions.currentJob.outputIdleSeconds = 70 })
+      await expect(page.getByTestId('export-output-idle')).toHaveText('已 70 秒没有新的输出进度')
+      await page.evaluate(() => Object.assign(window.exportDimensions.currentJob, { backend: 'CPU', stage: '正在等待首帧输出', fallbackReason: '硬件编码不可用，已自动回退 CPU', encodedFrames: 0, outputTime: 0, outputIdleSeconds: 0, progress: 0 }))
+      await expect(page.getByTestId('export-stage')).toHaveText('正在等待首帧输出 · CPU')
+      await expect(page.getByTestId('export-output-count')).toHaveText('尚未输出首帧')
+      await expect(page.getByTestId('export-output-idle')).toHaveCount(0)
+      await expect(page.getByTestId('export-output-hint')).toHaveCount(0)
+      await expect(page.locator('.progress-track>i')).toHaveAttribute('style', 'width: 0%;')
+      await page.waitForTimeout(1100)
+      await expect(page.getByTestId('export-output-idle')).toHaveCount(0)
+      for (const [index, idle] of [null, undefined, NaN, Infinity, -1, '65'].entries()) {
+        await page.evaluate(({ index, idle }) => Object.assign(window.exportDimensions.currentJob, { stage: `兼容字段检查 ${index}`, outputIdleSeconds: idle }), { index, idle })
+        await expect(page.getByTestId('export-stage')).toHaveText(`兼容字段检查 ${index} · CPU`)
+        await expect(page.getByTestId('export-output-progress')).toHaveCount(0)
+      }
+      await page.evaluate(() => { window.exportDimensions.currentJob.outputIdleSeconds = 65; window.exportDimensions.holdCancel = true })
+      await expect(page.getByTestId('export-output-hint')).toBeVisible()
+      await page.getByRole('button', { name: '取消导出', exact: true }).click()
+      await expect(page.getByRole('button', { name: '正在取消', exact: true })).toBeDisabled()
+      await expect(page.getByTestId('export-output-hint')).toHaveCount(0)
+      await expect(page.getByTestId('export-output-count')).toHaveText('尚未输出首帧')
+      await expect.poll(() => page.evaluate(() => typeof window.exportDimensions.releaseCancel)).toBe('function')
+      await page.evaluate(() => { window.exportDimensions.holdCancel = false; window.exportDimensions.releaseCancel() })
+      await expect(page.getByRole('alert')).toContainText('已取消导出')
+      assert.equal(await page.evaluate(() => window.exportDimensions.calls.filter(call => call.command === 'cancel_media_job').length), 1)
+      assert.deepEqual(errors, [])
+      await page.close()
+      console.log('PASS 首帧等待保持真实 0%，帧数/媒体时间随输出更新，停滞提示恢复及 CPU 回退重置，缺失/无效字段兼容，取消时收起重试提示')
+    }
+    {
+      const page = await browser.newPage(), errors = []
+      page.on('pageerror', error => errors.push(error.message))
+      await mount(page, baseURL, true, 640, 360)
       const start = page.getByTestId('start-export')
       await page.evaluate(() => {
         const state = window.exportDimensions
@@ -180,6 +250,7 @@ async function main() {
       await start.click()
       await expect(timer).toHaveText(/已用时 00:0[1-9]/)
       await expect(page.getByTestId('export-stage')).toHaveCount(0)
+      await expect(page.getByTestId('export-output-progress')).toHaveCount(0)
       await page.getByRole('button', { name: '取消导出', exact: true }).click()
       await expect(page.getByRole('alert')).toContainText('已取消导出')
       assert.equal(await page.evaluate(() => window.exportIntervals.size), 0)
