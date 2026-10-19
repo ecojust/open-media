@@ -234,3 +234,70 @@ fn video_generation_cancellation_terminates_process_group() {
     assert!(start.elapsed() < Duration::from_secs(3));
     cancel_thread.join().unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn video_generation_shutdown_synchronously_terminates_and_reaps_helper() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = VideoGenerationManager::new(temp.path()).unwrap();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    manager.owner.shared.lock().unwrap().active = Some(Active {
+        id: "exit-check".into(),
+        download: false,
+        cancelled: cancelled.clone(),
+    });
+    let worker = manager.worker.clone();
+    let signal = cancelled.clone();
+    let running = thread::spawn(move || {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "sleep 20 & wait"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        isolate_process(&mut command);
+        worker.run_child(command, "exit-check", 0, 1, &signal)
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let handle = loop {
+        if let Some(handle) = manager.owner.shared.lock().unwrap().process.clone() {
+            break handle;
+        }
+        assert!(Instant::now() < deadline, "helper was not registered");
+        thread::sleep(Duration::from_millis(10));
+    };
+    let pid = handle.lock().unwrap().id();
+    manager.shutdown();
+    assert!(cancelled.load(Ordering::SeqCst));
+    assert!(
+        handle.lock().unwrap().try_wait().unwrap().is_some(),
+        "shutdown returned while helper was alive"
+    );
+    unsafe extern "C" {
+        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+    }
+    let mut status = 0;
+    assert_eq!(
+        unsafe { waitpid(pid as i32, &mut status, 1) },
+        -1,
+        "shutdown must reap the helper, not leave a zombie"
+    );
+    assert_eq!(running.join().unwrap().unwrap_err(), CANCELLED);
+    let state = manager.owner.shared.lock().unwrap();
+    assert!(state.closing);
+    assert!(state.process.is_none());
+    assert!(require_idle(&state).is_err());
+    drop(state);
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "exit 0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    assert_eq!(
+        manager
+            .worker
+            .run_child(command, "after-exit", 0, 1, &AtomicBool::new(false))
+            .unwrap_err(),
+        CANCELLED
+    );
+    manager.shutdown();
+}

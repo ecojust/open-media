@@ -1086,6 +1086,7 @@ mod desktop {
                 handle.state::<ImageClipboard>().shutdown();
                 state.capture_starts.cancel_all();
                 state.speech.shutdown();
+                state.video_generation.shutdown();
                 state.jobs.shutdown();
                 state.asset_tools.shutdown();
                 state.audio_tools.shutdown();

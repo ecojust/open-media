@@ -64,7 +64,7 @@ async function main() {
       const order = ['record', 'gif', 'edit', 'generate', 'video', 'image']
       assert.deepEqual(await page.locator('[data-testid^="nav-"]').evaluateAll(nodes => nodes.map(n => n.dataset.testid.replace('nav-', ''))), order)
       assert.deepEqual(await page.locator('.workspace-cards [data-testid^="create-"]').evaluateAll(nodes => nodes.map(n => n.dataset.testid.replace('create-', ''))), order)
-      for (const workspace of ['record', 'gif', 'video', 'image']) {
+      for (const workspace of ['record', 'gif', 'generate', 'video', 'image']) {
         await page.getByTestId(`nav-${workspace}`).click()
         await inspect(page, `${theme} ${workspace}`)
       }

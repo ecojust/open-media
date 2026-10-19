@@ -161,17 +161,15 @@ struct State {
     jobs: Vec<VideoGenerationJob>,
     active: Option<Active>,
     early_cancelled: HashSet<String>,
+    closing: bool,
+    process: Option<Arc<Mutex<Child>>>,
 }
 struct Owner {
     shared: Arc<Mutex<State>>,
 }
 impl Drop for Owner {
     fn drop(&mut self) {
-        if let Ok(state) = self.shared.lock() {
-            if let Some(active) = &state.active {
-                active.cancelled.store(true, Ordering::SeqCst);
-            }
-        }
+        shutdown_shared(&self.shared);
     }
 }
 #[derive(Clone)]
@@ -235,6 +233,8 @@ impl VideoGenerationManager {
             jobs,
             active: None,
             early_cancelled: HashSet::new(),
+            closing: false,
+            process: None,
         }));
         let manager = Self {
             worker: Worker {
@@ -552,6 +552,11 @@ impl VideoGenerationManager {
         }
         Ok(())
     }
+
+    pub fn shutdown(&self) {
+        shutdown_shared(&self.owner.shared);
+        self.worker.persist_jobs();
+    }
 }
 
 impl Worker {
@@ -766,11 +771,28 @@ impl Worker {
         count: usize,
         cancelled: &AtomicBool,
     ) -> Result<()> {
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("无法启动视频生成引擎：{e}"))?;
-        let stdout = child.stdout.take().ok_or("生成引擎没有输出流。")?;
-        let stderr = child.stderr.take().ok_or("生成引擎没有错误流。")?;
+        // Spawn and register under the shutdown lock: exiting cannot miss a
+        // helper between process creation and registration, or start another one.
+        let (child, stdout, stderr) = {
+            let mut state = self.shared.lock().map_err(|_| "视频任务状态不可用。")?;
+            if state.closing {
+                return Err(CANCELLED.into());
+            }
+            let mut process = command
+                .spawn()
+                .map_err(|e| format!("无法启动视频生成引擎：{e}"))?;
+            let Some(stdout) = process.stdout.take() else {
+                terminate(&mut process);
+                return Err("生成引擎没有输出流。".into());
+            };
+            let Some(stderr) = process.stderr.take() else {
+                terminate(&mut process);
+                return Err("生成引擎没有错误流。".into());
+            };
+            let child = Arc::new(Mutex::new(process));
+            state.process = Some(child.clone());
+            (child, stdout, stderr)
+        };
         let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(128);
         let output_thread = thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
@@ -825,10 +847,11 @@ impl Worker {
                 }
             }
             if cancelled.load(Ordering::SeqCst) {
-                terminate(&mut child);
+                terminate(&mut child.lock().unwrap_or_else(|e| e.into_inner()));
                 break Err(CANCELLED.into());
             }
-            match child.try_wait() {
+            let waited = child.lock().unwrap_or_else(|e| e.into_inner()).try_wait();
+            match waited {
                 Ok(Some(status)) => {
                     break if status.success() {
                         Ok(())
@@ -838,11 +861,20 @@ impl Worker {
                 }
                 Ok(None) => thread::sleep(Duration::from_millis(80)),
                 Err(error) => {
-                    terminate(&mut child);
+                    terminate(&mut child.lock().unwrap_or_else(|e| e.into_inner()));
                     break Err(format!("无法读取生成进程：{error}"));
                 }
             }
         };
+        if let Ok(mut state) = self.shared.lock() {
+            if state
+                .process
+                .as_ref()
+                .is_some_and(|process| Arc::ptr_eq(process, &child))
+            {
+                state.process = None;
+            }
+        }
         let _ = output_thread.join();
         let errors = error_thread.join().unwrap_or_default();
         if cancelled.load(Ordering::SeqCst) {
@@ -870,6 +902,9 @@ fn stage_label(stage: &str) -> &'static str {
     }
 }
 fn require_idle(state: &State) -> Result<()> {
+    if state.closing {
+        return Err("应用正在退出，无法开始视频生成任务。".into());
+    }
     if let Some(active) = &state.active {
         Err(format!(
             "正在{}（{}），请等待完成或取消后再试。",
@@ -882,6 +917,29 @@ fn require_idle(state: &State) -> Result<()> {
         ))
     } else {
         Ok(())
+    }
+}
+fn shutdown_shared(shared: &Mutex<State>) {
+    let process = {
+        let mut state = shared.lock().unwrap_or_else(|error| error.into_inner());
+        state.closing = true;
+        if let Some(active) = &state.active {
+            active.cancelled.store(true, Ordering::SeqCst);
+        }
+        for job in &mut state.jobs {
+            if job.state == "running" {
+                job.state = "cancelled".into();
+                job.stage = "应用退出，已完成的分镜已保留".into();
+                job.progress = None;
+                job.elapsed_seconds = now_ms().saturating_sub(job.started_at) as f64 / 1000.0;
+            }
+        }
+        state.process.take()
+    };
+    if let Some(process) = process {
+        // Synchronous wait is required here: the application may exit as soon
+        // as this callback returns, before the worker can observe cancellation.
+        terminate(&mut process.lock().unwrap_or_else(|error| error.into_inner()));
     }
 }
 fn now_ms() -> u64 {

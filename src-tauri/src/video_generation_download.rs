@@ -779,6 +779,8 @@ mod tests {
                 jobs: vec![],
                 active: None,
                 early_cancelled: HashSet::new(),
+                closing: false,
+                process: None,
             })),
             runner: Arc::new(OnceLock::new()),
         };
