@@ -123,9 +123,16 @@ async function verifyRealtimeComposition() {
   const preview = new TimelinePreview(canvas, project, message => { errors.push(message); emit('realtime-render-error', { message }) })
   const abort = new AbortController()
   let frame = 0, segmentGeneration = 0
-  let pendingSeek: { label: string; target: number; started: number } | undefined
-  const seekPlaying = (label: string, target: number) => {
-    pendingSeek = { label, target, started: performance.now() }
+  type SeekPresentation = { media: HTMLVideoElement; readyAt: number; frames: number; request?: number; presentedAt?: number; presentedMediaTime?: number; method: string }
+  let pendingSeek: { label: string; target: number; started: number; waitForPresentation: boolean; presentation?: SeekPresentation } | undefined
+  const cancelSeekPresentation = () => {
+    const presentation = pendingSeek?.presentation
+    if (presentation?.request !== undefined) presentation.media.cancelVideoFrameCallback(presentation.request)
+    if (pendingSeek) pendingSeek.presentation = undefined
+  }
+  const seekPlaying = (label: string, target: number, waitForPresentation = true) => {
+    cancelSeekPresentation()
+    pendingSeek = { label, target, started: performance.now(), waitForPresentation }
     preview.seek(target, true)
   }
   const samples: { label: string; time: number; sourceTime: number; motionHash: number; watermarkTime?: number; watermarkHash?: number }[] = []
@@ -250,9 +257,28 @@ async function verifyRealtimeComposition() {
           const time = start + (performance.now() - started) / 1000
           preview.render(time, true)
           if (pendingSeek) {
+            const seek = pendingSeek
             const recovered = videos.find(video => (video.currentSrc || video.src).includes('/source.mp4') && !video.paused && !video.seeking && video.readyState >= 2 && Math.abs(video.currentTime - time) < .4)
-            if (recovered) {
-              emit('realtime-seek-recovered', { label: pendingSeek.label, target: pendingSeek.target, recoveryMilliseconds: performance.now() - pendingSeek.started, time, sourceTime: recovered.currentTime })
+            if (seek.waitForPresentation) {
+              if (!recovered || seek.presentation?.media !== recovered) cancelSeekPresentation()
+              if (recovered && !seek.presentation) {
+                const now = performance.now(), hasFrameCallback = typeof recovered.requestVideoFrameCallback === 'function'
+                const presentation: SeekPresentation = { media: recovered, readyAt: now, frames: 0, method: hasFrameCallback ? 'requestVideoFrameCallback + 100ms' : 'two animation frames + 100ms', ...(!hasFrameCallback ? { presentedAt: now } : {}) }
+                seek.presentation = presentation
+                if (hasFrameCallback) presentation.request = recovered.requestVideoFrameCallback((_now, metadata) => {
+                  if (pendingSeek !== seek || seek.presentation !== presentation) return
+                  presentation.request = undefined
+                  presentation.presentedAt = performance.now()
+                  presentation.presentedMediaTime = metadata.mediaTime
+                })
+              }
+              if (seek.presentation) seek.presentation.frames++
+            }
+            const presentation = seek.presentation
+            const presented = !seek.waitForPresentation || presentation?.presentedAt !== undefined && presentation.frames >= 2 && performance.now() - presentation.presentedAt >= 100
+            if (recovered && presented) {
+              emit('realtime-seek-recovered', { label: seek.label, target: seek.target, recoveryMilliseconds: performance.now() - seek.started, decoderReadyMilliseconds: presentation ? presentation.readyAt - seek.started : undefined, presentationMethod: presentation?.method, presentedMediaTime: presentation?.presentedMediaTime, presentationWaitMilliseconds: presentation?.presentedAt !== undefined ? performance.now() - presentation.presentedAt : undefined, time, sourceTime: recovered.currentTime })
+              cancelSeekPresentation()
               pendingSeek = undefined
             }
           }
@@ -273,6 +299,7 @@ async function verifyRealtimeComposition() {
     }), 12000, 'realtime playback samples').finally(() => {
       if (generation === segmentGeneration) segmentGeneration++
       cancelAnimationFrame(frame)
+      cancelSeekPresentation()
     })
   }
   try {
@@ -291,7 +318,7 @@ async function verifyRealtimeComposition() {
     await playThrough(4.5, [{ label: 'forward-seek', time: 4.95 }])
     seekPlaying('backward-seek', .2)
     await playThrough(.2, [{ label: 'backward-seek', time: 1.7 }])
-    seekPlaying('transition-after-seek', 2.5)
+    seekPlaying('transition-after-seek', 2.5, false)
     await playThrough(2.5, [{ label: 'transition-after-seek', time: 2.75, maxLateness: .2 }])
     emit('realtime-basic-complete', { success: true, sampleCount: samples.length })
     // Both use actual asset:// video, exercising WebGL texture upload and CPU
@@ -413,6 +440,7 @@ async function verifyRealtimeComposition() {
     emit('realtime-complete', { success: true, sampleCount: samples.length, errors, lazyLoading: true, canvasReadbackAllowed })
   } finally {
     cancelAnimationFrame(frame)
+    cancelSeekPresentation()
     abort.abort()
     preview.dispose()
     document.createElement = createElement
