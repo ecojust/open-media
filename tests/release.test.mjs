@@ -7,10 +7,116 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateBuild, validateScheduledBuild, workflowExecution, verifyWorkflowArtifact, verifyDigest, verifyMetadata, digest, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, installedSpeechVoiceIds, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
 import { verifySourceContents } from '../scripts/release-source.mjs';
+import { aiRuntimeRequirements, verifyAiRuntimeAssets, verifyPublishedAiRuntime } from '../scripts/release-ai-runtime.mjs';
 
 const commit = 'a'.repeat(40);
 const disabledSpeechPolicy = { installedSpeechVerification: { enabled: false, reason: '按维护者要求，暂时停用逐音色模型验证以缩短发布时间。' } };
 const enabledSpeechPolicy = { installedSpeechVerification: { enabled: true } };
+function aiRuntimeFixture() {
+  const root = 'https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/';
+  const platforms = Object.fromEntries(['macos-arm64', 'windows-x64', 'linux-x64'].map(platform => {
+    const url = `${root}ai-runtime-v1-${platform}.zip`;
+    return [platform, { url, size: 20, unpackedSize: 40, sha256: 'a'.repeat(64), manifestSha256: 'b'.repeat(64),
+      ...(platform === 'macos-arm64' ? {} : { parts: [1, 2].map(part => ({ url: `${url}.part00${part}`, size: 10, sha256: String(part).repeat(64) })) }) }];
+  }));
+  const catalog = { schemaVersion: 1, runtimes: [{ id: 'ai-generation-v1', version: 1, platforms }] };
+  const release = { id: 30, tag_name: 'ai-runtime-v1', draft: false, prerelease: true, published_at: '2026-10-19T12:00:00Z',
+    url: 'https://api.github.com/repos/ecojust/open-media/releases/30', html_url: 'https://github.com/ecojust/open-media/releases/tag/ai-runtime-v1' };
+  const assets = aiRuntimeRequirements(catalog).map((asset, index) => ({ id: index + 1, name: asset.name, size: asset.size,
+    state: 'uploaded', digest: `sha256:${asset.sha256}`, browser_download_url: asset.url,
+    url: `https://api.github.com/repos/ecojust/open-media/releases/assets/${index + 1}` }));
+  return { catalog, release, assets };
+}
+test('runtime release validation checks real archives and every part, not virtual combined assets', () => {
+  const { catalog, release, assets } = aiRuntimeFixture();
+  const requirements = aiRuntimeRequirements(catalog);
+  assert.equal(requirements.length, 5);
+  assert.ok(!requirements.some(item => item.name === 'ai-runtime-v1-windows-x64.zip'));
+  const evidence = verifyAiRuntimeAssets(requirements, release, assets);
+  assert.equal(evidence.kind, 'public-github-release-assets');
+  assert.equal(evidence.releaseId, 30);
+  assert.equal(evidence.assets.length, 5);
+  assert.deepEqual(evidence.assets.map(item => item.digest), assets.map(item => item.digest));
+  assert.throws(() => verifyAiRuntimeAssets([], release, assets), /must not be empty/);
+});
+test('runtime catalog rejects empty, incomplete, unknown or unpinned downloads before requesting anything', async () => {
+  for (const catalog of [null, {}, { schemaVersion: 1, runtimes: [] }, { schemaVersion: 2, runtimes: [{}] }]) {
+    await assert.rejects(verifyPublishedAiRuntime(catalog, { fetchImpl: () => assert.fail('Invalid catalog made a network request') }), /catalog/);
+  }
+  for (const edit of [
+    runtime => { runtime.id = 'unknown'; }, runtime => { runtime.version = 2; },
+    runtime => { delete runtime.platforms['windows-x64']; }, runtime => { runtime.platforms['unknown-x64'] = {}; },
+    runtime => { runtime.platforms['macos-arm64'].parts = []; },
+    runtime => { runtime.platforms['macos-arm64'].parts = null; },
+    runtime => { runtime.platforms['macos-arm64'].sha256 = ''; },
+    runtime => { runtime.platforms['macos-arm64'].manifestSha256 = undefined; },
+    runtime => { runtime.platforms['macos-arm64'].size = 0; },
+    runtime => { runtime.platforms['macos-arm64'].size = '20'; },
+    runtime => { runtime.platforms['windows-x64'].parts[0].size = 11; },
+    runtime => { runtime.platforms['windows-x64'].parts[0].sha256 = 'wrong'; },
+    runtime => { runtime.platforms['windows-x64'].parts[1] = runtime.platforms['windows-x64'].parts[0]; },
+  ]) {
+    const { catalog } = aiRuntimeFixture(); edit(catalog.runtimes[0]);
+    assert.throws(() => aiRuntimeRequirements(catalog), /runtime/i);
+  }
+  for (const url of [
+    'https://mirror.example/ai-runtime-v1-macos-arm64.zip',
+    'https://github.com/other/repo/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip',
+    'https://github.com/ecojust/open-media/releases/download/other/ai-runtime-v1-macos-arm64.zip',
+    'https://user:secret@github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip',
+    'https://github.com:443/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip',
+    'https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip?token=secret',
+    'https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip#fragment',
+  ]) {
+    const { catalog } = aiRuntimeFixture(); catalog.runtimes[0].platforms['macos-arm64'].url = url;
+    await assert.rejects(verifyPublishedAiRuntime(catalog, { fetchImpl: () => assert.fail('Foreign URL was requested') }), /official AI runtime archive/);
+    const split = aiRuntimeFixture().catalog; split.runtimes[0].platforms['windows-x64'].parts[0].url = url;
+    assert.throws(() => aiRuntimeRequirements(split), /official AI runtime part/);
+  }
+});
+test('runtime release gate refuses unpublished releases, duplicate assets, missing files and mismatched GitHub digests', () => {
+  const { catalog, release, assets } = aiRuntimeFixture(), required = aiRuntimeRequirements(catalog);
+  for (const change of [{ draft: true }, { draft: undefined }, { published_at: null }, { published_at: 'invalid' },
+    { id: 0 }, { tag_name: 'other' }, { url: 'https://api.github.com/repos/other/repository/releases/30' }, { html_url: 'https://mirror.example/release' }]) {
+    assert.throws(() => verifyAiRuntimeAssets(required, { ...release, ...change }, assets), /official AI runtime release/);
+  }
+  for (const asset of assets) {
+    assert.throws(() => verifyAiRuntimeAssets(required, release, assets.filter(item => item !== asset)), /missing or differs/);
+    for (const change of [{ state: 'new' }, { state: 'starter' }, { state: undefined }, { size: 0 }, { size: asset.size + 1 },
+      { digest: undefined }, { digest: `sha256:${'c'.repeat(64)}` }, { browser_download_url: 'https://mirror.example/file.zip' },
+      { url: 'https://api.github.com/repos/other/repository/releases/assets/1' }]) {
+      assert.throws(() => verifyAiRuntimeAssets(required, release, assets.map(item => item === asset ? { ...item, ...change } : item)), /missing or differs/);
+    }
+  }
+  assert.throws(() => verifyAiRuntimeAssets(required, release, [...assets, assets[0]]), /duplicated/);
+  assert.throws(() => verifyAiRuntimeAssets(required, release, [...assets, { ...assets[0], id: 90 }]), /duplicated/);
+  assert.throws(() => verifyAiRuntimeAssets(required, release, [...assets, { ...assets[0], name: 'other' }]), /duplicated/);
+});
+test('runtime gate requests only public official JSON APIs without credentials, redirects or archive downloads', async () => {
+  const { catalog, release, assets } = aiRuntimeFixture(), calls = [];
+  const evidence = await verifyPublishedAiRuntime(catalog, { fetchImpl: async (url, options) => {
+    calls.push(url); assert.equal(options.method, 'GET'); assert.equal(options.redirect, 'error');
+    assert.deepEqual(Object.keys(options.headers).sort(), ['Accept', 'X-GitHub-Api-Version']);
+    assert.ok(url.startsWith('https://api.github.com/repos/ecojust/open-media/releases/'));
+    assert.ok(!url.includes('/download/')); assert.ok(!url.includes('mirror'));
+    return { ok: true, json: async () => calls.length === 1 ? release : assets };
+  } });
+  assert.equal(evidence.assets.length, 5);
+  assert.deepEqual(calls, ['https://api.github.com/repos/ecojust/open-media/releases/tags/ai-runtime-v1',
+    'https://api.github.com/repos/ecojust/open-media/releases/30/assets?per_page=100&page=1']);
+  for (const status of [302, 403, 404, 500]) {
+    await assert.rejects(verifyPublishedAiRuntime(catalog, { fetchImpl: async () => ({ ok: false, status }) }), new RegExp(`returned ${status}`));
+  }
+  await assert.rejects(verifyPublishedAiRuntime(catalog, { fetchImpl: async () => { throw new Error('Network unavailable'); } }), /Network unavailable/);
+});
+test('runtime public asset pagination retains required files and detects duplicates across pages', async () => {
+  const { catalog, release, assets } = aiRuntimeFixture();
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: index + 100, name: `notice-${index}.txt` }));
+  const fetchPages = second => async url => ({ ok: true, json: async () => url.includes('/tags/') ? release : url.endsWith('page=1') ? firstPage : second });
+  assert.equal((await verifyPublishedAiRuntime(catalog, { fetchImpl: fetchPages(assets) })).assets.length, 5);
+  await assert.rejects(verifyPublishedAiRuntime(catalog, { fetchImpl: fetchPages([...assets, firstPage[0]]) }), /duplicated/);
+  await assert.rejects(verifyPublishedAiRuntime(catalog, { fetchImpl: fetchPages({ assets }) }), /Invalid public AI runtime asset listing/);
+});
 function fixture() {
   return {
     run: { id: 7, head_sha: commit, status: 'completed', conclusion: 'success', path: '.github/workflows/desktop-build.yml' },

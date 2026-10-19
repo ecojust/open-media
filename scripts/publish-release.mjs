@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { verifySourceContents } from './release-source.mjs'
+import { verifyPublishedAiRuntime } from './release-ai-runtime.mjs'
 import { join, resolve } from 'node:path'
 import { digest, validateBuild, validateScheduledBuild, workflowExecution, verifyWorkflowArtifact, verifyDigest, verifyMetadata, validateAssetMetadata, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
 
@@ -75,8 +76,14 @@ if (!notes.trim()) throw new Error('Reviewed release notes are required.')
 const output = resolve('release-output'), temporary = resolve('.release-staging')
 await mkdir(output, { recursive: true }); await mkdir(temporary, { recursive: true })
 await writeFile(join(output, 'build-validation.json'), `${JSON.stringify(buildValidation, null, 2)}\n`)
+const aiRuntimeCatalogPath = 'src-tauri/resources/ai-runtime-models.json'
+const aiRuntimeCatalogBytes = sourceFile(aiRuntimeCatalogPath)
+const aiRuntimeCatalog = JSON.parse(aiRuntimeCatalogBytes)
+const aiRuntimeRelease = { ...await verifyPublishedAiRuntime(aiRuntimeCatalog),
+  catalog: { sourcePath: aiRuntimeCatalogPath, sha256: digest(aiRuntimeCatalogBytes) } }
+await writeFile(join(output, 'ai-runtime-verification.json'), `${JSON.stringify(aiRuntimeRelease, null, 2)}\n`)
 const payloads = new Map()
-const verification = { version, commit, sourceRunId: Number(runId), sourceRunUrl, buildValidation, releasePolicy: { ...releasePolicy, sourcePath: releasePolicyPath, sha256: digest(releasePolicyBytes) }, platforms: [] }
+const verification = { version, commit, sourceRunId: Number(runId), sourceRunUrl, buildValidation, aiRuntimeRelease, releasePolicy: { ...releasePolicy, sourcePath: releasePolicyPath, sha256: digest(releasePolicyBytes) }, platforms: [] }
 
 for (const { platform, artifact } of selected) {
   // Read the redirect explicitly: the repository token is never sent to blob storage.
@@ -201,6 +208,8 @@ if (beforePublishTag) {
   while (target.type === 'tag') target = (await api(`/git/tags/${target.sha}`)).object
   if (target.type !== 'commit' || target.sha !== commit) throw new Error('Version tag changed before publishing; leaving the release as a draft.')
 }
+const confirmedAiRuntime = { ...await verifyPublishedAiRuntime(aiRuntimeCatalog), catalog: aiRuntimeRelease.catalog }
+if (JSON.stringify(confirmedAiRuntime) !== JSON.stringify(aiRuntimeRelease)) throw new Error('AI runtime release changed before publication; leaving the application release as a draft.')
 release = await api(`/releases/${release.id}`, { method: 'PATCH', body: JSON.stringify({ draft: false, prerelease: false, make_latest: 'true' }) })
 const latest = await api('/releases/latest')
 if (latest.id !== release.id || latest.draft || latest.prerelease) throw new Error('Published release was not confirmed as the latest stable version.')
@@ -208,7 +217,7 @@ const reference = await api(`/git/ref/tags/${tag}`)
 let tagged = reference.object
 while (tagged.type === 'tag') tagged = (await api(`/git/tags/${tagged.sha}`)).object
 if (tagged.type !== 'commit' || tagged.sha !== commit) throw new Error('Release tag does not match the verified source commit.')
-await writeFile(join(output, 'verification.json'), `${JSON.stringify({ release: release.html_url, version, commit, buildValidation, assets: uploaded.map(asset => ({ name: asset.name, size: asset.size, digest: asset.digest })) }, null, 2)}\n`)
+await writeFile(join(output, 'verification.json'), `${JSON.stringify({ release: release.html_url, version, commit, buildValidation, aiRuntimeRelease, assets: uploaded.map(asset => ({ name: asset.name, size: asset.size, digest: asset.digest })) }, null, 2)}\n`)
 if (process.env.GITHUB_STEP_SUMMARY) await writeFile(process.env.GITHUB_STEP_SUMMARY, `Published [Open Media ${tag}](${release.html_url}) after verifying all three installers, application source, and complete corresponding media and speech sources.\n\nInstalled speech verification: ${releasePolicy.installedSpeechVerification.enabled ? 'passed for all seven voices on each platform' : `skipped — ${releasePolicy.installedSpeechVerification.reason}`}\n`)
 await rm(temporary, { recursive: true, force: true })
 console.log(`Published ${release.html_url}`)
