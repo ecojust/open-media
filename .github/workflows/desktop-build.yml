@@ -115,6 +115,7 @@ jobs:
           mkdir -p test-results/browser
           set -o pipefail
           npm run test:browser 2>&1 | tee test-results/browser/browser.log
+          node tests/browser/preview-composite.cjs --app 2>&1 | tee -a test-results/browser/browser.log
         env:
           BROWSER_ARTIFACTS: test-results/browser
       - name: Summarize browser failures

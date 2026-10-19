@@ -11,7 +11,7 @@ final class FixtureScheme: NSObject, WKURLSchemeHandler {
     init(directory: URL, csp: String) { self.directory = directory; self.csp = csp; super.init() }
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url else { return }
-        let allowed = url.scheme == "asset" ? ["/source.mp4", "/frame.png"] : ["/index.html", "/verification.js"]
+        let allowed = url.scheme == "asset" ? ["/source.mp4", "/frame.png", "/loading-dots.mp4"] : ["/index.html", "/verification.js"]
         guard url.host == "localhost", allowed.contains(url.path) else {
             urlSchemeTask.didFailWithError(NSError(domain: "OpenMediaWebKitProof", code: 404, userInfo: [NSLocalizedDescriptionKey: "Unexpected fixture URL: \(url)"]))
             return
@@ -55,6 +55,11 @@ final class Harness: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
     var calls: [[String: Any]] = []
     var stages: [[String: Any]] = []
     var requestsAtRun: Int?
+    var realtimeCallsAtStart: Int?
+    var realtimeCallsAtEnd: Int?
+    var realtimeRequestsAtStart: Int?
+    var realtimeRequestsAtEnd: Int?
+    var snapshotRequests = 0
     var timer: Timer?
     init(directory: URL, reportURL: URL, fixture: [String: Any]) {
         self.directory = directory; self.reportURL = reportURL; self.fixture = fixture
@@ -69,6 +74,7 @@ final class Harness: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.userContentController.add(self, name: "proof")
         configuration.userContentController.add(self, name: "fixtureIPC")
+        configuration.userContentController.add(self, name: "realtimeSnapshot")
         let parameters = try json(["pngSha256": fixture["pngSha256"]!, "pngBytes": fixture["pngBytes"]!])
         let bootstrap = """
         window.__verification = \(parameters);
@@ -88,6 +94,10 @@ final class Harness: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             },
             convertFileSrc(path) { return 'asset://localhost/' + path.split('/').pop(); }
           };
+          window.__captureRealtimeCanvas = rect => new Promise((resolve, reject) => {
+            const id = ++serial; pending.set(id, { resolve, reject });
+            window.webkit.messageHandlers.realtimeSnapshot.postMessage({ id, rect });
+          });
         })();
         """
         configuration.userContentController.addUserScript(WKUserScript(source: bootstrap, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -118,7 +128,41 @@ final class Harness: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             else {
                 stages.append(body)
                 if body["stage"] as? String == "run-start" { requestsAtRun = scheme.assetRequests }
+                if body["stage"] as? String == "realtime-start" {
+                    realtimeCallsAtStart = calls.count; realtimeRequestsAtStart = scheme.assetRequests
+                }
+                if ["realtime-complete", "realtime-failed"].contains(body["stage"] as? String ?? "") {
+                    realtimeCallsAtEnd = calls.count; realtimeRequestsAtEnd = scheme.assetRequests
+                }
                 print("WKWebView stage: \(body["stage"] ?? "unknown")")
+            }
+            return
+        }
+        if message.name == "realtimeSnapshot" {
+            guard let id = body["id"] as? Int, let rect = body["rect"] as? [String: Double],
+                  let x = rect["x"], let y = rect["y"], let width = rect["width"], let height = rect["height"],
+                  x.isFinite, y.isFinite, width.isFinite, height.isFinite,
+                  x >= 0, y >= 0, width > 0, height > 0, x + width <= webView.bounds.width, y + height <= webView.bounds.height else {
+                complete(["passed": false, "error": "Invalid visible canvas snapshot bounds."]); return
+            }
+            // Read only this harness's generated canvas. This is not screen capture.
+            let configuration = WKSnapshotConfiguration()
+            configuration.rect = NSRect(x: x, y: y, width: width, height: height)
+            configuration.snapshotWidth = NSNumber(value: width)
+            configuration.afterScreenUpdates = true
+            snapshotRequests += 1
+            let number = snapshotRequests
+            webView.takeSnapshot(with: configuration) { [weak self] image, error in
+                guard let self = self else { return }
+                do {
+                    if let error = error { throw error }
+                    guard let tiff = image?.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff), let png = bitmap.representation(using: .png, properties: [:]) else {
+                        throw NSError(domain: "OpenMediaWebKitProof", code: 500, userInfo: [NSLocalizedDescriptionKey: "Visible canvas snapshot returned no PNG."])
+                    }
+                    let output = self.reportURL.deletingLastPathComponent().appendingPathComponent("realtime-snapshot-\(number).png")
+                    try png.write(to: output)
+                    self.reply(id, success: true, value: ["pngBase64": png.base64EncodedString()])
+                } catch { self.reply(id, success: false, value: String(describing: error)) }
             }
             return
         }
@@ -145,11 +189,19 @@ final class Harness: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         guard !finished else { return }
         finished = true; timer?.invalidate()
         var proof = result
-        if proof["passed"] as? Bool == true {
-            let names = calls.compactMap { $0["command"] as? String }
-            let correct = names.contains("begin_tool_preview") && names.contains("tool_preview_result") && names.contains("tool_preview_discard") && requestsAtRun != nil && requestsAtRun == scheme.assetRequests
-            if !correct { proof["passed"] = false; proof["error"] = "Production frame path did not use/discard fixture native PNG exclusively." }
+        let names = calls.compactMap { $0["command"] as? String }
+        let nativeCorrect = proof["nativeFrameArtifactVerified"] as? Bool == true && names.contains("begin_tool_preview") && names.contains("tool_preview_result") && names.contains("tool_preview_discard") && requestsAtRun != nil && requestsAtRun == scheme.assetRequests
+        let realtimeIpcCount = realtimeCallsAtStart.flatMap { start in realtimeCallsAtEnd.map { $0 - start } }
+        let realtimeAssetCount = realtimeRequestsAtStart.flatMap { start in realtimeRequestsAtEnd.map { $0 - start } }
+        let realtimeCorrect = proof["realtimeCompositionVerified"] as? Bool == true && realtimeIpcCount == 0 && (realtimeAssetCount ?? 0) > 0
+        if proof["passed"] as? Bool == true && (!nativeCorrect || !realtimeCorrect) {
+            proof["passed"] = false; proof["error"] = "Real asset composition and the separate fixture native PNG path did not both provide complete evidence."
         }
+        proof["nativeFrameArtifactVerified"] = nativeCorrect
+        proof["realtimeCompositionVerified"] = realtimeCorrect
+        proof["realtimeIpcCalls"] = realtimeIpcCount ?? -1
+        proof["realtimeAssetRequests"] = realtimeAssetCount ?? -1
+        proof["realtimeSnapshotReads"] = snapshotRequests
         proof["engine"] = "System WKWebView"
         proof["operatingSystem"] = ProcessInfo.processInfo.operatingSystemVersionString
         proof["fixtureIPC"] = true
