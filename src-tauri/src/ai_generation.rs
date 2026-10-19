@@ -390,6 +390,9 @@ impl Worker {
                 if !cancelling {
                     model.state = phase.into();
                     model.downloaded_bytes = bytes.min(model.size);
+                    model.download_phase = Some(if phase == "verifying" { "verifying" } else { "model" }.into());
+                    let total = model.download_total_bytes.unwrap_or(model.size);
+                    model.download_transferred_bytes = Some(total.saturating_sub(model.size).saturating_add(bytes.min(model.size)).min(total));
                 }
             }
         }
@@ -408,7 +411,16 @@ impl Worker {
                 model.runtime.reason = reason;
                 if matches!(phase, "downloading" | "verifying") {
                     model.state = phase.into();
+                    model.download_phase = Some(if phase == "verifying" { "verifying" } else { "runtime" }.into());
                 }
+            }
+        }
+    }
+    fn transfer_progress(&self, id: &str, bytes: u64, total: u64) {
+        if let Ok(mut state) = self.shared.lock() {
+            if let Some(model) = state.models.iter_mut().find(|model| model.id == id) {
+                model.download_total_bytes = Some(total);
+                model.download_transferred_bytes = Some(bytes.min(total));
             }
         }
     }
@@ -427,6 +439,9 @@ impl Worker {
         );
         let runtime_ready = self.verify_runtime(runtime, cancelled).is_ok();
         models::check_cancelled(cancelled)?;
+        let cached_weights = models::cached_bytes(&self.root, model);
+        let transfer_total = models::model_size(model).saturating_add(runtime.archive.size);
+        self.transfer_progress(&model.id, cached_weights.saturating_add(if runtime_ready { runtime.archive.size } else { 0 }), transfer_total);
         self.runtime_progress(
             &model.id,
             if runtime_ready {
@@ -454,11 +469,6 @@ impl Worker {
             .saturating_add(runtime_space)
             .saturating_add(512 * 1024 * 1024);
         models::require_space(&self.root, needed)?;
-        self.model_progress(
-            &model.id,
-            "downloading",
-            models::cached_bytes(&self.root, model),
-        );
         let client = models::http_client()?;
         let runtime_root = self.root.join("runtime");
         if !runtime_ready {
@@ -466,7 +476,7 @@ impl Worker {
                 &runtime_root,
                 runtime,
                 cancelled,
-                |name, urls, size, sha256, destination, _offset| {
+                |name, urls, size, sha256, destination, offset| {
                     let file = models::ModelFile {
                         path: name.into(),
                         urls: urls.to_vec(),
@@ -479,6 +489,7 @@ impl Worker {
                         &file,
                         cancelled,
                         |bytes, verifying| {
+                            self.transfer_progress(&model.id, cached_weights.saturating_add(offset).saturating_add(bytes), transfer_total);
                             self.runtime_progress(
                                 &model.id,
                                 if verifying {
@@ -510,6 +521,7 @@ impl Worker {
             }
         }
         self.runtime_progress(&model.id, "ready", None);
+        self.transfer_progress(&model.id, cached_weights.saturating_add(runtime.archive.size), transfer_total);
         models::install_model(&self.root, model, cancelled, |phase, bytes| {
             self.model_progress(&model.id, phase, bytes)
         })
@@ -1025,6 +1037,13 @@ fn model_state(
         } else {
             models::cached_bytes(root, model)
         },
+        download_total_bytes: None,
+        download_transferred_bytes: None,
+        download_phase: None,
+        active_source: None,
+        download_session: None,
+        download_speed_bytes_per_second: None,
+        remaining_seconds: None,
         state: if runtime.state == "unsupported" {
             "unsupported"
         } else if ready && runtime.state == "ready" {
