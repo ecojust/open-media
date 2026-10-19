@@ -177,10 +177,15 @@ pub(super) fn append_graph(
             tile_chain +=
                 &format!(",pad={pad_w}:{pad_h}:'round((ow-iw)/2)':'round((oh-ih)/2)':color=black@0:eval=frame");
         }
-        // Only alpha uses a short scalar expression; geometry is evaluated
-        // by frame-level kernels, outside pixel loops.
+        // Blend two references to the same tile and change only its alpha.
+        // RGB planes stay untouched. Unlike geq, blend parses expressions only
+        // for the active plane and actual worker count, keeping large grids
+        // from allocating thousands of unused expression trees at startup.
         let alpha = expression_clock(&opacity, 't', 'T');
-        tile_chain += &format!(",format=gbrap,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*({alpha})':enable='{active}',format=rgba");
+        filters.push(format!(
+            "{tile_chain},format=gbrap,split=2[{prefix}_alpha_a{tile}][{prefix}_alpha_b{tile}]"
+        ));
+        tile_chain = format!("[{prefix}_alpha_a{tile}][{prefix}_alpha_b{tile}]blend=c3_expr='A*({alpha})':enable='{active}',format=rgba");
         if rotating {
             let diameter = cw.hypot(ch).ceil() as u32 + 2;
             tile_chain += &format!(",rotate=a='({phi})+({theta})':ow={diameter}:oh={diameter}:c=black@0:enable='{active}'");
@@ -209,7 +214,7 @@ pub(super) fn append_graph(
     Some(format!("[{prefix}_base{pieces}]null"))
 }
 
-// Filter enable/scale/rotate use t, while geq uses T. Replace only complete
+// Filter enable/scale/rotate use t, while blend uses T. Replace only complete
 // identifiers, retaining function names such as sqrt and gte verbatim.
 fn expression_clock(expression: &str, from: char, to: char) -> String {
     let chars: Vec<_> = expression.chars().collect();
