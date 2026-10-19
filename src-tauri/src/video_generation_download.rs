@@ -539,8 +539,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let join = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            stream.set_nodelay(true).unwrap();
             stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
+                .set_read_timeout(Some(Duration::from_secs(10)))
                 .unwrap();
             let mut request = String::new();
             {
@@ -591,27 +592,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
         safe_directory(&root, "parts").unwrap();
-        let bytes = b"abcdefghijkl";
-        let file = small_file(bytes);
-        let (url, server) = local_response(bytes.to_vec(), None, 60);
+        // Keep each chunk far below the read deadline even while other native
+        // media tests saturate the runner. The complete body still takes over
+        // twice that deadline, so a total-transfer timeout would fail the test.
+        let read_timeout = Duration::from_secs(3);
+        let bytes: Vec<u8> = (0..512).map(|index| (index % 251) as u8).collect();
+        let file = small_file(&bytes);
+        let (url, server) = local_response(bytes.clone(), None, 25);
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
-            .timeout(Duration::from_millis(150))
+            .timeout(read_timeout)
             .build()
             .unwrap();
         let start = Instant::now();
-        download_attempt(
+        let result = download_attempt(
             &root,
             &client,
             &file,
             &url,
             &AtomicBool::new(false),
             &mut |_, _| {},
-        )
-        .unwrap();
-        assert!(start.elapsed() > Duration::from_millis(250));
-        assert_eq!(fs::read(partial(&root, &file)).unwrap(), bytes);
+        );
+        let elapsed = start.elapsed();
         server.join().unwrap();
+        result.unwrap();
+        assert!(elapsed > read_timeout * 2, "stream finished after {elapsed:?}");
+        assert_eq!(fs::read(partial(&root, &file)).unwrap(), bytes);
     }
     #[test]
     fn partial_download_resumes_at_exact_offset_and_validates_full_hash() {
