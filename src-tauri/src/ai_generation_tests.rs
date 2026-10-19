@@ -124,6 +124,78 @@ fn cancelled_queued_jobs_never_start_a_child() {
 }
 
 #[test]
+fn runtime_download_progress_does_not_change_model_weight_bytes() {
+    let temp = tempfile::tempdir().unwrap();
+    let definition = catalog_model("qwen-image");
+    let mut model = model_state(temp.path(), &definition, &[]);
+    model.state = "downloading".into();
+    model.downloaded_bytes = 12345;
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let shared = Arc::new(Mutex::new(State {
+        models: vec![model],
+        jobs: vec![],
+        tasks: HashMap::new(),
+        download: Some(Download {
+            id: definition.id.clone(),
+            cancelled: cancelled.clone(),
+        }),
+        closing: false,
+        verified_runtimes: HashMap::new(),
+    }));
+    let worker = Worker {
+        root: temp.path().to_owned(),
+        catalog: Arc::new(vec![definition.clone()]),
+        runtimes: Arc::new(vec![]),
+        shared: shared.clone(),
+        gate: AiExecutionGate::default(),
+    };
+    worker.runtime_progress(
+        &definition.id,
+        "downloading",
+        Some(runtime_file_progress(
+            "runtime.part-01",
+            1_200_000_000,
+            1_800_000_000,
+            false,
+        )),
+    );
+    {
+        let state = shared.lock().unwrap();
+        let model = &state.models[0];
+        assert_eq!(model.downloaded_bytes, 12345);
+        assert_eq!(model.runtime.state, "downloading");
+        assert!(model
+            .runtime
+            .reason
+            .as_ref()
+            .unwrap()
+            .contains("1.20 GB / 1.80 GB"));
+        assert!(model.runtime.reason.as_ref().unwrap().contains("当前文件"));
+    }
+    worker.runtime_progress(
+        &definition.id,
+        "verifying",
+        Some(runtime_file_progress(
+            "runtime.part-01",
+            1_800_000_000,
+            1_800_000_000,
+            true,
+        )),
+    );
+    assert_eq!(shared.lock().unwrap().models[0].state, "verifying");
+    worker.runtime_progress(&definition.id, "ready", None);
+    {
+        let state = shared.lock().unwrap();
+        assert_eq!(state.models[0].runtime.state, "ready");
+        assert!(state.models[0].runtime.reason.is_none());
+        assert_eq!(state.models[0].downloaded_bytes, 12345);
+    }
+    cancelled.store(true, Ordering::SeqCst);
+    worker.runtime_progress(&definition.id, "downloading", Some("late event".into()));
+    assert_eq!(shared.lock().unwrap().models[0].runtime.state, "ready");
+}
+
+#[test]
 fn accelerator_failure_is_distinct_from_invalid_input() {
     assert!(accelerator_failure(
         "生成进程退出 signal: 6 device=mps invalid shape"

@@ -393,6 +393,24 @@ impl Worker {
             }
         }
     }
+    fn runtime_progress(&self, id: &str, phase: &str, reason: Option<String>) {
+        if let Ok(mut state) = self.shared.lock() {
+            if state
+                .download
+                .as_ref()
+                .is_some_and(|download| download.cancelled.load(Ordering::SeqCst))
+            {
+                return;
+            }
+            if let Some(model) = state.models.iter_mut().find(|model| model.id == id) {
+                model.runtime.state = phase.into();
+                model.runtime.reason = reason;
+                if matches!(phase, "downloading" | "verifying") {
+                    model.state = phase.into();
+                }
+            }
+        }
+    }
     fn download(
         &self,
         model: &Model,
@@ -401,8 +419,26 @@ impl Worker {
     ) -> Result<()> {
         let _lock = models::operation_lock(&self.root)?;
         models::check_cancelled(cancelled)?;
+        self.runtime_progress(
+            &model.id,
+            "verifying",
+            Some("正在检查已安装的推理环境。".into()),
+        );
         let runtime_ready = self.verify_runtime(runtime, cancelled).is_ok();
         models::check_cancelled(cancelled)?;
+        self.runtime_progress(
+            &model.id,
+            if runtime_ready {
+                "ready"
+            } else {
+                "downloading"
+            },
+            if runtime_ready {
+                None
+            } else {
+                Some("正在准备下载推理环境；模型权重会在环境就绪后下载。".into())
+            },
+        );
         let runtime_space = if runtime_ready {
             0
         } else {
@@ -417,7 +453,11 @@ impl Worker {
             .saturating_add(runtime_space)
             .saturating_add(512 * 1024 * 1024);
         models::require_space(&self.root, needed)?;
-        self.model_progress(&model.id, "downloading", 0);
+        self.model_progress(
+            &model.id,
+            "downloading",
+            models::cached_bytes(&self.root, model),
+        );
         let client = models::http_client()?;
         let runtime_root = self.root.join("runtime");
         if !runtime_ready {
@@ -437,20 +477,25 @@ impl Worker {
                         &client,
                         &file,
                         cancelled,
-                        |_bytes, verifying| {
-                            self.model_progress(
+                        |bytes, verifying| {
+                            self.runtime_progress(
                                 &model.id,
                                 if verifying {
                                     "verifying"
                                 } else {
                                     "downloading"
                                 },
-                                0,
+                                Some(runtime_file_progress(name, bytes, size, verifying)),
                             )
                         },
                     )?;
                     fs::hard_link(self.root.join("blobs").join(sha256), destination)
                         .map_err(|e| format!("无法共享 AI 运行环境下载文件：{e}"))?;
+                    self.runtime_progress(
+                        &model.id,
+                        "verifying",
+                        Some("当前运行环境文件已下载，正在校验和安装。".into()),
+                    );
                     Ok(())
                 },
                 |directory, selected, flag| {
@@ -463,6 +508,7 @@ impl Worker {
                     .insert(runtime_packages::path(&runtime_root, runtime), stamps);
             }
         }
+        self.runtime_progress(&model.id, "ready", None);
         models::install_model(&self.root, model, cancelled, |phase, bytes| {
             self.model_progress(&model.id, phase, bytes)
         })
@@ -475,8 +521,19 @@ impl Worker {
         cancelled: &AtomicBool,
     ) -> Result<()> {
         let id = format!("runtime-check:{model_id}");
-        let _permit = self.gate.acquire(&id, cancelled, |_| {})?;
+        let _permit = self.gate.acquire(&id, cancelled, |_| {
+            self.runtime_progress(
+                model_id,
+                "verifying",
+                Some("正在等待其他 AI 任务释放设备，以检查推理环境。".into()),
+            )
+        })?;
         models::check_cancelled(cancelled)?;
+        self.runtime_progress(
+            model_id,
+            "verifying",
+            Some("正在检查推理环境及可用计算设备。".into()),
+        );
         {
             let mut state = self.shared.lock().map_err(|_| "AI 下载状态不可用。")?;
             if state.closing {
@@ -814,6 +871,24 @@ impl Worker {
             )
         })
     }
+}
+
+fn runtime_file_progress(name: &str, bytes: u64, size: u64, verifying: bool) -> String {
+    let (scale, unit) = if size >= 1_000_000_000 {
+        (1_000_000_000.0, "GB")
+    } else {
+        (1_000_000.0, "MB")
+    };
+    format!(
+        "{}运行环境文件 {name}：{:.2} {unit} / {:.2} {unit}（当前文件）",
+        if verifying {
+            "正在校验"
+        } else {
+            "正在下载"
+        },
+        bytes.min(size) as f64 / scale,
+        size as f64 / scale
+    )
 }
 
 fn select_runtime(
