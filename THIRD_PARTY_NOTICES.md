@@ -117,3 +117,29 @@ Three fixed audition recordings are copied byte-for-byte from the corresponding 
 Ten distinct instrumental selections are bundled for offline preview and use in video projects. All ten original works are published under **CC0 1.0 Universal**. The original authors, track titles, publication pages, download URLs, SHA-256 hashes, and excerpt/encoding changes are recorded in [licenses/application/background-music/manifest.json](licenses/application/background-music/manifest.json). The complete legal text and original publication pages carrying each license declaration are preserved alongside that inventory and included with the application notices.
 
 Chinese display titles describe the selected excerpts; the original creators retain their credited authorship. These CC0 selections may be used in exported projects without a mandatory attribution requirement.
+
+## Optional local image and music generation
+
+Qwen-Image and Z-Image-Turbo model weights are downloaded only on explicit
+request. Both model distributions use Apache-2.0; their unmodified licenses,
+model cards, fixed revisions and source digests are retained in
+`licenses/ai-generation/image/`. The exact model files, byte sizes, SHA-256
+hashes and download URLs are pinned in
+`src-tauri/resources/ai-image-models.json`. Model repository code is not
+executed. Image-to-image support uses local diffusion repainting.
+
+ACE-Step 1.5 Turbo and SFT weights and implementation are MIT licensed. Their
+shared text encoder retains its Apache-2.0 license. Original notices and
+source provenance are in `licenses/ai-generation/music/`; the exact optional
+weight inventory is pinned in `src-tauri/resources/ai-music-models.json`.
+Only the declared local generation components are used; no additional lyric
+language model is downloaded implicitly.
+
+These capabilities use a separately downloaded, isolated Python runtime.
+The fixed build inputs are recorded in `scripts/ai-runtime.lock.json` and
+`scripts/ai-runtime-requirements.txt`. Each platform package retains the
+original runtime, installed package and native library notices, and a
+per-file verification manifest. Runtime archive URLs and checksums are
+recorded in `src-tauri/resources/ai-runtime-models.json`. This environment
+is separate from the existing speech runtime and does not modify the user's
+Python installation. All generated image and audio data is processed locally.

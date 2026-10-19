@@ -34,7 +34,7 @@ async function fixture(browser, url, autoSave = false) {
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
-        if (command === 'get_video_generation_status') { state.generationChecks ||= []; state.generationChecks.push(args); return { supported: false, runtimeReady: false, models: state.generationModels || [] } }
+        if (command === 'ai_get_status') { state.generationChecks ||= []; state.generationChecks.push(args); const models=(state.generationModels || []).map(model=>({provider:'video',capabilities:[],runtime:{state:'ready'},requiresLicenseAcceptance:false,bundled:false,version:'1',...model})); const jobs=(state.generationJobs || []).map(job=>({provider:'video',kind:'generation',cancelable:true,...job})); return {models,jobs,busy:models.some(model=>['downloading','verifying'].includes(model.state)) || jobs.some(job=>job.state==='running')} }
         if (command === 'list_video_generation_jobs') return state.generationJobs || []
         if (command === 'get_media_jobs') {
           if (state.jobsMode === 'fail') throw new Error('无法检查正在处理的任务')
@@ -289,8 +289,8 @@ async function main() {
       if (downloading) await setMode(page, 'generationModels', [{ id: 'h3-base-fl2va', name: 'MiniMax H3 FL2VA', state: 'downloading', size: 144000000000, downloadedBytes: 100, modes: ['prompt'], hardware: 'Apple 芯片' }])
       else await setMode(page, 'generationJobs', [{ id: 'background-video', state: 'running', stage: '正在生成', shotIndex: 0, shotCount: 1, startedAt: Date.now(), elapsedSeconds: 0, assets: [] }])
       await close(page)
-      await expect(page.locator('.app-error').first()).toContainText('视频生成及模型下载')
-      await expect(page.getByTestId('video-generation-workspace')).toBeVisible()
+      await expect(page.locator('.app-error').first()).toContainText('AI 模型中心')
+      await expect(page.getByRole('dialog', { name: 'AI 模型中心', exact: true })).toBeVisible()
       await checkNoExit(page)
       assert.equal(await page.evaluate(() => window.closeHarness.generationChecks[0].probeRuntime), false, '退出检查不应初始化生成引擎')
       await finish()

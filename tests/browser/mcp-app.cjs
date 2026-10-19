@@ -54,6 +54,7 @@ async function installNativeBridge(page) {
         }
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_media_jobs') return structuredClone(fixture.mediaJobs)
+        if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
         if (command === 'get_video_generation_status') return { supported: false, runtimeReady: false, models: [] }
         if (command === 'list_video_generation_jobs') return []
         if (command === 'cancel_media_job') { fixture.mediaJobs.find(job => job.id === args.id).state = 'cancelled'; return null }

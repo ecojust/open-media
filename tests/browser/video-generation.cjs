@@ -38,7 +38,7 @@ async function mount(page, base, native = true) {
 
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, watch: { ignored: ['**'] }, hmr: false }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: { ignored: ['**'] }, hmr: false }, logLevel: 'error' })
   await server.listen()
   let browser
   try {
@@ -154,7 +154,7 @@ async function main() {
     await appPage.goto(server.resolvedUrls.local[0])
     await expect(appPage.getByTestId('create-generate')).toBeVisible({ timeout: 20000 }).catch(async error => { console.error(await appPage.locator('body').innerText(), errors); throw error })
     const navOrder = await appPage.locator('.sidebar nav [data-testid]').evaluateAll(items => items.map(item => item.dataset.testid))
-    assert.deepEqual(navOrder, ['nav-record', 'nav-gif', 'nav-edit', 'nav-generate', 'nav-video', 'nav-image'])
+    assert.deepEqual(navOrder, ['nav-record', 'nav-gif', 'nav-edit', 'nav-generate', 'nav-image-generate', 'nav-song-generate', 'nav-video', 'nav-image'])
     await appPage.getByTestId('nav-generate').click()
     await expect(appPage.getByTestId('generation-preview')).toBeVisible()
     await appPage.getByRole('button', { name: '加入素材', exact: true }).click()

@@ -48,6 +48,7 @@
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../licenses/application/": "licenses/application/",
       "../licenses/video-generation/": "licenses/video-generation/",
+      "../licenses/ai-generation/": "licenses/ai-generation/",
       "resources/speech/manifest.json": "speech/manifest.json",
       "resources/speech/runtime.json": "speech/runtime.json",
       "resources/speech/source-lock.json": "speech/source-lock.json",
