@@ -127,6 +127,7 @@ fn video_generation_history_recovers_interrupted_jobs_without_claiming_success()
     fs::create_dir_all(&root).unwrap();
     let old = VideoGenerationJob {
         id: "interrupted".into(),
+        model_id: None,
         state: "running".into(),
         stage: "生成画面".into(),
         progress: None,

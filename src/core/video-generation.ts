@@ -51,6 +51,7 @@ export interface VideoGenerationRequest {
 }
 export interface VideoGenerationJob {
   id: string
+  modelId?: string
   state: 'running' | 'completed' | 'failed' | 'cancelled'
   stage: string
   progress?: number

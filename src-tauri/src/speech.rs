@@ -1,5 +1,6 @@
 use crate::engine::{Asset, MediaStore, Result, Runtime};
 use crate::speech_models::SpeechModels;
+use crate::{ai_execution::AiExecutionGate, ai_types::AiJob};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -12,7 +13,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 const MAX_TEXT_CHARS: usize = 4_000;
@@ -20,6 +21,10 @@ const MAX_JOBS: usize = 2048;
 const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_AUDIO_BYTES: u64 = 512 * 1024 * 1024;
 const CANCELLED: &str = "语音生成已取消。";
+
+fn speech_now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64
+}
 
 pub(crate) fn additional_voice_kind(id: &str) -> Option<ModelKind> {
     match id {
@@ -555,6 +560,9 @@ struct Entry {
     discard: bool,
     accepted: bool,
     asset_root: PathBuf,
+    started_at: u64,
+    finished_at: Option<u64>,
+    model_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -586,10 +594,15 @@ pub struct SpeechManager {
     models: Result<SpeechModels>,
     workspace: PathBuf,
     owner: Arc<ManagerOwner>,
+    gate: AiExecutionGate,
 }
 
 impl SpeechManager {
     pub fn new(app_data: &Path, resource: &Path) -> Result<Self> {
+        Self::with_gate(app_data, resource, AiExecutionGate::default())
+    }
+
+    pub fn with_gate(app_data: &Path, resource: &Path, gate: AiExecutionGate) -> Result<Self> {
         let workspace = app_data.join("speech-work");
         fs::create_dir_all(&workspace).map_err(|e| format!("无法创建配音工作目录：{e}"))?;
         let workspace = workspace.canonicalize().map_err(|e| e.to_string())?;
@@ -599,6 +612,7 @@ impl SpeechManager {
             runtime,
             models,
             workspace,
+            gate,
             owner: Arc::new(ManagerOwner {
                 jobs: Arc::new(Mutex::new(Jobs::default())),
             }),
@@ -666,6 +680,19 @@ impl SpeechManager {
             .ok_or_else(|| "语音任务不存在。".into())
     }
 
+    pub fn ai_jobs(&self) -> Result<Vec<AiJob>> {
+        let jobs = self.owner.jobs.lock().map_err(|_| "语音任务状态不可用。")?;
+        Ok(jobs.order.iter().rev().filter_map(|id| jobs.entries.get(id)).map(|entry| {
+            let job = &entry.job;
+            AiJob {
+                id: format!("speech:{}", job.id), provider: "speech".into(), model_id: entry.model_id.clone(),
+                kind: "generation".into(), state: job.state.clone(), stage: job.stage.clone(), progress: job.progress,
+                started_at: entry.started_at, elapsed_seconds: entry.finished_at.unwrap_or_else(speech_now_ms).saturating_sub(entry.started_at) as f64 / 1000.0,
+                assets: job.asset.clone().into_iter().collect(), cancelable: job.state == "running", error: job.error.clone(), warning: None,
+            }
+        }).collect())
+    }
+
     pub fn begin(
         &self,
         runtime: Runtime,
@@ -692,6 +719,7 @@ impl SpeechManager {
             |models| models.native_runtime_for(&speech),
         );
         let id = request.request_id.clone();
+        let model_id = self.status().voices.into_iter().find(|voice| voice.id == request.voice_id).and_then(|voice| voice.model_id);
         let cancelled = Arc::new(AtomicBool::new(false));
         let job = {
             let mut jobs = self.owner.jobs.lock().map_err(|_| "语音任务状态不可用。")?;
@@ -742,6 +770,9 @@ impl SpeechManager {
                     discard: false,
                     accepted: false,
                     asset_root: store.root.clone(),
+                    started_at: speech_now_ms(),
+                    finished_at: early_cancelled.then(speech_now_ms),
+                    model_id,
                 },
             );
             job
@@ -751,14 +782,20 @@ impl SpeechManager {
         }
         let jobs = self.owner.jobs.clone();
         let workspace = self.workspace.clone();
+        let gate = self.gate.clone();
         let spawn_result = thread::Builder::new()
             .name("speech-generation".into())
             .spawn(move || {
-                let result = synthesize(
+                let result = gate.acquire(&format!("speech:{}", request.request_id), &cancelled, |_| {
+                    if let Ok(mut jobs) = jobs.lock() {
+                        if let Some(entry) = jobs.entries.get_mut(&request.request_id) { entry.job.stage = "正在等待其他 AI 任务释放设备".into(); }
+                    }
+                }).and_then(|_permit| synthesize(
                     &speech, &runtime, &store, &workspace, &request, &cancelled, &jobs,
-                );
+                ));
                 if let Ok(mut jobs) = jobs.lock() {
                     if let Some(entry) = jobs.entries.get_mut(&request.request_id) {
+                        entry.finished_at = Some(speech_now_ms());
                         let must_cancel = entry.discard || cancelled.load(Ordering::SeqCst);
                         match result {
                             Ok(asset) if !must_cancel => {
@@ -792,6 +829,7 @@ impl SpeechManager {
         if let Err(error) = spawn_result {
             if let Ok(mut jobs) = self.owner.jobs.lock() {
                 if let Some(entry) = jobs.entries.get_mut(&id) {
+                    entry.finished_at = Some(speech_now_ms());
                     entry.job.state = "failed".into();
                     entry.job.stage = "生成失败".into();
                     entry.job.error = Some(format!("无法启动语音任务：{error}"));
@@ -2740,6 +2778,7 @@ exit 1
             runtime,
             models: Err("测试不启用可选音色。".into()),
             workspace: root.into(),
+            gate: AiExecutionGate::default(),
             owner: Arc::new(ManagerOwner {
                 jobs: Arc::new(Mutex::new(Jobs::default())),
             }),
@@ -2812,6 +2851,9 @@ exit 1
             discard: false,
             accepted: false,
             asset_root: root.into(),
+            started_at: speech_now_ms(),
+            finished_at: Some(speech_now_ms()),
+            model_id: Some("bundled".into()),
         }
     }
 

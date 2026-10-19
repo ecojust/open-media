@@ -24,6 +24,11 @@ pub mod preview_tools;
 pub mod image_clipboard;
 pub mod speech;
 pub mod video_generation;
+pub mod ai_types;
+pub mod ai_execution;
+pub mod ai_generation;
+mod ai_models;
+pub mod ai;
 mod speech_models;
 mod speech_chinese;
 #[cfg(any(feature = "desktop", test))]
@@ -54,8 +59,10 @@ mod desktop {
         video_library::{StoredVideos, VideoLibrary},
         image_clipboard::{self, ImageClipboard},
         recording_controls::{ControlsAction, ControlsManager, ControlsSnapshot},
-        speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
-        video_generation::{VideoGenerationJob, VideoGenerationManager, VideoGenerationRequest, VideoGenerationStatus},
+        speech::{SpeechJob, SpeechRequest, SpeechStatus},
+        video_generation::{VideoGenerationJob, VideoGenerationRequest, VideoGenerationStatus},
+        ai::AiService,
+        ai_types::{AiJob, AiRequest, AiStatus},
     };
     use serde_json::Value;
     use std::{
@@ -78,8 +85,7 @@ mod desktop {
         asset_tools: crate::asset_tools::AssetTools,
         audio_tools: crate::audio_tools::AudioToolsManager,
         asr: crate::audio_tools_asr::AsrManager,
-        speech: SpeechManager,
-        video_generation: VideoGenerationManager,
+        ai: AiService,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
         resource: PathBuf,
@@ -479,15 +485,48 @@ mod desktop {
     }
     #[tauri::command]
     pub async fn get_speech_status(state: State<'_, MediaState>) -> engine::Result<SpeechStatus> {
-        let speech = state.speech.clone();
+        let speech = state.ai.speech.clone();
         blocking(move || Ok(speech.status())).await
+    }
+    #[tauri::command]
+    pub async fn ai_get_status(probe_runtime: Option<bool>, state: State<'_, MediaState>) -> engine::Result<AiStatus> {
+        let ai = state.ai.clone();
+        blocking(move || ai.status(probe_runtime.unwrap_or(false))).await
+    }
+    #[tauri::command]
+    pub async fn ai_model_download(model_id: String, accepted_license: Option<bool>, state: State<'_, MediaState>) -> engine::Result<AiStatus> {
+        let ai = state.ai.clone();
+        blocking(move || ai.download(&model_id, accepted_license.unwrap_or(false))).await
+    }
+    #[tauri::command]
+    pub async fn ai_model_cancel(model_id: String, state: State<'_, MediaState>) -> engine::Result<AiStatus> {
+        let ai = state.ai.clone();
+        blocking(move || ai.cancel_download(&model_id)).await
+    }
+    #[tauri::command]
+    pub async fn ai_model_repair(model_id: String, accepted_license: Option<bool>, state: State<'_, MediaState>) -> engine::Result<AiStatus> {
+        let ai = state.ai.clone();
+        blocking(move || ai.repair(&model_id, accepted_license.unwrap_or(false))).await
+    }
+    #[tauri::command]
+    pub async fn ai_generate(request: AiRequest, state: State<'_, MediaState>) -> engine::Result<AiJob> {
+        let state = state.inner().clone();
+        blocking(move || state.ai.begin(state.runtime()?, state.store, request)).await
+    }
+    #[tauri::command]
+    pub fn ai_job_get(id: String, state: State<'_, MediaState>) -> engine::Result<AiJob> {
+        state.ai.get(&id)
+    }
+    #[tauri::command]
+    pub fn ai_job_cancel(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
+        state.ai.cancel(&id)
     }
     #[tauri::command]
     pub async fn begin_speech_model_download(
         model_id: String,
         state: State<'_, MediaState>,
     ) -> engine::Result<SpeechStatus> {
-        let speech = state.speech.clone();
+        let speech = state.ai.speech.clone();
         blocking(move || speech.begin_model_download(&model_id)).await
     }
     #[tauri::command]
@@ -495,7 +534,7 @@ mod desktop {
         model_id: String,
         state: State<'_, MediaState>,
     ) -> engine::Result<SpeechStatus> {
-        let speech = state.speech.clone();
+        let speech = state.ai.speech.clone();
         blocking(move || speech.cancel_model_download(&model_id)).await
     }
     #[tauri::command]
@@ -503,7 +542,7 @@ mod desktop {
         model_id: String,
         state: State<'_, MediaState>,
     ) -> engine::Result<SpeechStatus> {
-        let speech = state.speech.clone();
+        let speech = state.ai.speech.clone();
         blocking(move || speech.repair_model(&model_id)).await
     }
     #[tauri::command]
@@ -512,56 +551,56 @@ mod desktop {
         state: State<'_, MediaState>,
     ) -> engine::Result<SpeechJob> {
         let state = state.inner().clone();
-        blocking(move || state.speech.begin(state.runtime()?, state.store.clone(), request)).await
+        blocking(move || state.ai.speech.begin(state.runtime()?, state.store.clone(), request)).await
     }
     #[tauri::command]
     pub fn get_speech_job(id: String, state: State<'_, MediaState>) -> engine::Result<SpeechJob> {
-        state.speech.get(&id)
+        state.ai.speech.get(&id)
     }
     #[tauri::command]
     pub fn cancel_speech_job(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
-        state.speech.cancel(&id)
+        state.ai.speech.cancel(&id)
     }
     #[tauri::command]
     pub async fn discard_speech_job(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
-        let speech = state.speech.clone();
+        let speech = state.ai.speech.clone();
         blocking(move || speech.discard(&id)).await
     }
     #[tauri::command]
     pub fn accept_speech_jobs(ids: Vec<String>, state: State<'_, MediaState>) -> engine::Result<()> {
-        state.speech.accept(&ids)
+        state.ai.speech.accept(&ids)
     }
     #[tauri::command]
     pub async fn get_video_generation_status(probe_runtime: Option<bool>, state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
-        let manager = state.video_generation.clone();
+        let manager = state.ai.video.clone();
         blocking(move || Ok(manager.status_with_probe(probe_runtime.unwrap_or(true)))).await
     }
     #[tauri::command]
     pub async fn begin_video_model_download(model_id: String, accepted_license: bool, state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
-        let manager = state.video_generation.clone();
+        let manager = state.ai.video.clone();
         blocking(move || manager.begin_download(&model_id, accepted_license)).await
     }
     #[tauri::command]
     pub async fn cancel_video_model_download(model_id: String, state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
-        let manager = state.video_generation.clone();
+        let manager = state.ai.video.clone();
         blocking(move || manager.cancel_download(&model_id)).await
     }
     #[tauri::command]
     pub async fn begin_video_generation(request: VideoGenerationRequest, state: State<'_, MediaState>) -> engine::Result<VideoGenerationJob> {
         let state = state.inner().clone();
-        blocking(move || state.video_generation.begin(state.runtime()?, state.store, request)).await
+        blocking(move || state.ai.video.begin(state.runtime()?, state.store, request)).await
     }
     #[tauri::command]
     pub fn get_video_generation_job(id: String, state: State<'_, MediaState>) -> engine::Result<VideoGenerationJob> {
-        state.video_generation.get(&id)
+        state.ai.video.get(&id)
     }
     #[tauri::command]
     pub fn list_video_generation_jobs(state: State<'_, MediaState>) -> engine::Result<Vec<VideoGenerationJob>> {
-        state.video_generation.list()
+        state.ai.video.list()
     }
     #[tauri::command]
     pub fn cancel_video_generation(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
-        state.video_generation.cancel(&id)
+        state.ai.video.cancel(&id)
     }
     #[tauri::command]
     pub async fn list_capture_devices(
@@ -951,8 +990,7 @@ mod desktop {
                     asset_tools: crate::asset_tools::AssetTools::new(&data).map_err(std::io::Error::other)?,
                     audio_tools: crate::audio_tools::AudioToolsManager::default(),
                     asr: crate::audio_tools_asr::AsrManager::new(&data, Some(&resource)).map_err(std::io::Error::other)?,
-                    speech: SpeechManager::new(&data, &resource).map_err(std::io::Error::other)?,
-                    video_generation: VideoGenerationManager::new(&data).map_err(std::io::Error::other)?,
+                    ai: AiService::new(&data, &resource).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
                     resource,
@@ -1025,6 +1063,13 @@ mod desktop {
                 reveal_media_job_output,
                 reveal_media_asset,
                 get_speech_status,
+                ai_get_status,
+                ai_model_download,
+                ai_model_cancel,
+                ai_model_repair,
+                ai_generate,
+                ai_job_get,
+                ai_job_cancel,
                 begin_speech_model_download,
                 cancel_speech_model_download,
                 repair_speech_model,
@@ -1085,8 +1130,7 @@ mod desktop {
                 handle.state::<ControlsManager>().close(handle);
                 handle.state::<ImageClipboard>().shutdown();
                 state.capture_starts.cancel_all();
-                state.speech.shutdown();
-                state.video_generation.shutdown();
+                state.ai.shutdown();
                 state.jobs.shutdown();
                 state.asset_tools.shutdown();
                 state.audio_tools.shutdown();

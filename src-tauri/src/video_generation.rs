@@ -1,5 +1,6 @@
 //! Optional local video generation. Model bytes are installed separately from the app.
 use crate::engine::{self, Asset, MediaStore, Result, Runtime};
+use crate::ai_execution::AiExecutionGate;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -67,30 +68,30 @@ struct ModelFile {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoGenerationModel {
-    id: String,
-    name: String,
-    version: String,
-    modes: Vec<String>,
-    size: u64,
-    downloaded_bytes: u64,
-    state: String,
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) version: String,
+    pub(crate) modes: Vec<String>,
+    pub(crate) size: u64,
+    pub(crate) downloaded_bytes: u64,
+    pub(crate) state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
-    license_url: String,
-    hardware: String,
+    pub(crate) error: Option<String>,
+    pub(crate) license_url: String,
+    pub(crate) hardware: String,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoGenerationStatus {
-    supported: bool,
+    pub(crate) supported: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
-    runtime_ready: bool,
-    runtime_version: String,
-    device: String,
+    pub(crate) reason: Option<String>,
+    pub(crate) runtime_ready: bool,
+    pub(crate) runtime_version: String,
+    pub(crate) device: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    memory_bytes: Option<u64>,
-    models: Vec<VideoGenerationModel>,
+    pub(crate) memory_bytes: Option<u64>,
+    pub(crate) models: Vec<VideoGenerationModel>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,38 +118,40 @@ pub struct VideoGenerationShot {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoGenerationRequest {
-    request_id: String,
-    model_id: String,
-    mode: String,
-    width: u32,
-    height: u32,
-    steps: u32,
-    seed: u32,
+    pub(crate) request_id: String,
+    pub(crate) model_id: String,
+    pub(crate) mode: String,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) steps: u32,
+    pub(crate) seed: u32,
     #[serde(default)]
-    low_memory: bool,
+    pub(crate) low_memory: bool,
     #[serde(default)]
-    join_shots: bool,
-    shots: Vec<VideoGenerationShot>,
+    pub(crate) join_shots: bool,
+    pub(crate) shots: Vec<VideoGenerationShot>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoGenerationJob {
-    id: String,
-    state: String,
-    stage: String,
+    pub(crate) id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) model_id: Option<String>,
+    pub(crate) state: String,
+    pub(crate) stage: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    progress: Option<f64>,
-    shot_index: usize,
-    shot_count: usize,
-    started_at: u64,
-    elapsed_seconds: f64,
-    assets: Vec<Asset>,
+    pub(crate) progress: Option<f64>,
+    pub(crate) shot_index: usize,
+    pub(crate) shot_count: usize,
+    pub(crate) started_at: u64,
+    pub(crate) elapsed_seconds: f64,
+    pub(crate) assets: Vec<Asset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    combined_asset: Option<Asset>,
+    pub(crate) combined_asset: Option<Asset>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    pub(crate) error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    warning: Option<String>,
+    pub(crate) warning: Option<String>,
 }
 
 struct Active {
@@ -178,6 +181,7 @@ struct Worker {
     catalog: Arc<Catalog>,
     shared: Arc<Mutex<State>>,
     runner: Arc<OnceLock<Result<PathBuf>>>,
+    gate: AiExecutionGate,
 }
 #[derive(Clone)]
 pub struct VideoGenerationManager {
@@ -189,6 +193,9 @@ pub struct VideoGenerationManager {
 
 impl VideoGenerationManager {
     pub fn new(app_data: &Path) -> Result<Self> {
+        Self::with_gate(app_data, AiExecutionGate::default())
+    }
+    pub fn with_gate(app_data: &Path, gate: AiExecutionGate) -> Result<Self> {
         let catalog: Catalog = serde_json::from_str(MODEL_CATALOG)
             .map_err(|error| format!("视频生成模型清单无效：{error}"))?;
         validate_catalog(&catalog)?;
@@ -242,6 +249,7 @@ impl VideoGenerationManager {
                 catalog: Arc::new(catalog),
                 shared: shared.clone(),
                 runner,
+                gate,
             },
             owner: Arc::new(Owner { shared }),
             unsupported,
@@ -448,6 +456,7 @@ impl VideoGenerationManager {
             let early_cancelled = state.early_cancelled.remove(&request.request_id);
             let job = VideoGenerationJob {
                 id: request.request_id.clone(),
+                model_id: Some(request.model_id.clone()),
                 state: if early_cancelled {
                     "cancelled"
                 } else {
@@ -501,7 +510,9 @@ impl VideoGenerationManager {
         if let Err(error) = thread::Builder::new()
             .name("video-generation".into())
             .spawn(move || {
-                let result = worker.generate(&runtime, &store, &request, &cancelled);
+                let result = worker.gate.acquire(&format!("video:{}", request.request_id), &cancelled, |_| {
+                    worker.update_job(&request.request_id, |job| { job.stage = "正在等待其他 AI 任务释放设备".into(); });
+                }).and_then(|_permit| worker.generate(&runtime, &store, &request, &cancelled));
                 worker.update_job(&request.request_id, |job| {
                     if cancelled.load(Ordering::SeqCst) {
                         job.state = "cancelled".into();

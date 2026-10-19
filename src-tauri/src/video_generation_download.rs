@@ -791,6 +791,7 @@ mod tests {
                 process: None,
             })),
             runner: Arc::new(OnceLock::new()),
+            gate: AiExecutionGate::default(),
         };
         let model = &worker.catalog.models[0];
         let files = model_files(&worker.catalog, model).unwrap();
