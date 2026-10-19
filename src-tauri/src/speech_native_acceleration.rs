@@ -102,6 +102,8 @@ impl SpeechModels {
             voice.runtime_error = entry.error.clone();
             voice.download_size = Some(runtime.archive.size);
             voice.downloaded_bytes = Some(entry.downloaded);
+            voice.download_source = entry.download_source.clone();
+            voice.download_session = Some(entry.download_session);
         }
     }
 

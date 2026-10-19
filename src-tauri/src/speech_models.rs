@@ -114,6 +114,7 @@ struct Entry {
     downloaded: u64,
     error: Option<String>,
     download_source: Option<String>,
+    download_session: u64,
     cancelled: Arc<AtomicBool>,
     runtime: Option<SpeechRuntime>,
     stamps: Vec<FileStamp>,
@@ -128,6 +129,7 @@ impl Default for Entry {
             downloaded: 0,
             error: None,
             download_source: None,
+            download_session: 0,
             cancelled: Arc::new(AtomicBool::new(false)),
             runtime: None,
             stamps: Vec::new(),
@@ -1013,6 +1015,7 @@ impl SpeechModels {
                 voice.error = entry.error.clone();
                 voice.download_sources = Some(download_sources(package));
                 voice.download_source = entry.download_source.clone();
+                voice.download_session = Some(entry.download_session);
                 if !package.runtime_id.is_empty() && package.runtime.is_none() {
                     voice.status = Some("unsupported".into());
                     voice.runtime_status = Some("unsupported".into());
@@ -1290,7 +1293,7 @@ fn download_file(
     file: &ModelFile,
     destination: &Path,
     cancelled: &AtomicBool,
-    mut progress: impl FnMut(u64, &str),
+    mut progress: impl FnMut(u64, &str, bool),
 ) -> Result<()> {
     check_cancelled(cancelled)?;
     if let Some(parent) = destination.parent() {
@@ -1315,85 +1318,157 @@ fn download_file(
         check_cancelled(cancelled)?;
         return Ok(());
     }
+    // The caller may supply a stable partial-cache path. Reuse it only after
+    // validating its type and length; the complete SHA-256 remains authoritative.
+    if let Ok(metadata) = fs::symlink_metadata(destination) {
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err("音色下载缓存文件类型无效。".into());
+        }
+        if metadata.len() == file.size && hash_file(destination, file, cancelled).is_ok() {
+            check_cancelled(cancelled)?;
+            progress(file.size, "", false);
+            return Ok(());
+        }
+        check_cancelled(cancelled)?;
+        if metadata.len() >= file.size {
+            fs::remove_file(destination).map_err(|e| format!("无法清理音色下载缓存：{e}"))?;
+        }
+    }
     let mut failures = Vec::new();
     for url in std::iter::once(&file.url).chain(&file.mirrors) {
-        check_cancelled(cancelled)?;
-        let origin = source_origin(url);
-        progress(0, &origin);
-        let mut created = false;
-        let attempt = (|| {
-            let mut response = client
-                .get(url)
-                .header(reqwest::header::ACCEPT_ENCODING, "identity")
-                .send()
-                .map_err(|error| {
+        // If a resumed prefix proves corrupt, retry this source once from zero.
+        // A transport failure instead carries the partial bytes to the next source.
+        for retry in 0..2 {
+            check_cancelled(cancelled)?;
+            let origin = source_origin(url);
+            let offset = fs::metadata(destination)
+                .map(|meta| meta.len())
+                .unwrap_or(0);
+            // Hash existing bytes before opening the remote response so a large
+            // local prefix cannot leave the network connection idle while reading disk.
+            let mut prefix_hasher = Sha256::new();
+            if offset > 0 {
+                let mut input =
+                    File::open(destination).map_err(|e| format!("本地文件读取失败：{e}"))?;
+                let mut buffer = vec![0_u8; BUFFER_BYTES];
+                let mut hashed = 0_u64;
+                loop {
+                    check_cancelled(cancelled)?;
+                    let count = input
+                        .read(&mut buffer)
+                        .map_err(|e| format!("本地文件读取失败：{e}"))?;
+                    if count == 0 {
+                        break;
+                    }
+                    hashed += count as u64;
+                    prefix_hasher.update(&buffer[..count]);
+                }
+                if hashed != offset {
+                    return Err("本地下载缓存大小已变化".into());
+                }
+            }
+            let mut discard_partial = false;
+            progress(offset, &origin, true);
+            let attempt = (|| {
+                let mut request = client
+                    .get(url)
+                    .header(reqwest::header::ACCEPT_ENCODING, "identity");
+                if offset > 0 {
+                    request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
+                }
+                let mut response = request.send().map_err(|error| {
                     if error.is_timeout() {
                         "连接超时".to_owned()
                     } else {
                         "连接失败".to_owned()
                     }
                 })?;
-            if !response.status().is_success() {
-                return Err(format!("HTTP {}", response.status().as_u16()));
-            }
-            if response
-                .content_length()
-                .is_some_and(|size| size != file.size)
-            {
-                return Err("文件大小不符".into());
-            }
-            let mut output = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(destination)
-                .map_err(|e| format!("本地文件写入失败：{e}"))?;
-            created = true;
-            let mut hasher = Sha256::new();
-            let mut buffer = vec![0_u8; BUFFER_BYTES];
-            let mut received = 0_u64;
-            loop {
-                check_cancelled(cancelled)?;
-                let count = response
-                    .read(&mut buffer)
-                    .map_err(|_| "读取中断或超时".to_owned())?;
-                if count == 0 {
-                    break;
+                if !response.status().is_success() {
+                    return Err(format!("HTTP {}", response.status().as_u16()));
                 }
-                received = received
-                    .checked_add(count as u64)
-                    .ok_or("文件超出声明大小")?;
-                if received > file.size {
-                    return Err("文件超出声明大小".into());
+                let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+                let start = if partial { offset } else { 0 };
+                if partial {
+                    let range = response
+                        .headers()
+                        .get(reqwest::header::CONTENT_RANGE)
+                        .and_then(|value| value.to_str().ok());
+                    if !valid_content_range(range, offset, file.size) {
+                        return Err("服务器返回了不匹配的续传范围".into());
+                    }
+                } else if response.status() != reqwest::StatusCode::OK {
+                    return Err("服务器返回了不支持的下载响应".into());
+                }
+                if response
+                    .content_length()
+                    .is_some_and(|size| size != file.size - start)
+                {
+                    return Err("文件大小不符".into());
+                }
+                let mut hasher = if start > 0 {
+                    prefix_hasher
+                } else {
+                    Sha256::new()
+                };
+                let mut buffer = vec![0_u8; BUFFER_BYTES];
+                let mut output = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(start == 0)
+                    .append(start > 0)
+                    .open(destination)
+                    .map_err(|e| format!("本地文件写入失败：{e}"))?;
+                let mut received = start;
+                progress(received, &origin, false);
+                loop {
+                    check_cancelled(cancelled)?;
+                    let count = response
+                        .read(&mut buffer)
+                        .map_err(|_| "读取中断或超时".to_owned())?;
+                    if count == 0 {
+                        break;
+                    }
+                    received = received
+                        .checked_add(count as u64)
+                        .ok_or("文件超出声明大小")?;
+                    if received > file.size {
+                        discard_partial = true;
+                        return Err("文件超出声明大小".into());
+                    }
+                    output
+                        .write_all(&buffer[..count])
+                        .map_err(|e| format!("本地文件写入失败：{e}"))?;
+                    hasher.update(&buffer[..count]);
+                    progress(received, &origin, false);
+                }
+                if received != file.size {
+                    return Err("读取中断或文件未完整传输".into());
+                }
+                if format!("{:x}", hasher.finalize()) != file.sha256.to_lowercase() {
+                    discard_partial = true;
+                    return Err("文件完整性校验失败".into());
                 }
                 output
-                    .write_all(&buffer[..count])
+                    .sync_all()
                     .map_err(|e| format!("本地文件写入失败：{e}"))?;
-                hasher.update(&buffer[..count]);
-                progress(received, &origin);
-            }
-            if received != file.size
-                || format!("{:x}", hasher.finalize()) != file.sha256.to_lowercase()
-            {
-                return Err("文件完整性校验失败".into());
-            }
-            output
-                .sync_all()
-                .map_err(|e| format!("本地文件写入失败：{e}"))?;
-            Ok(())
-        })();
-        match attempt {
-            Ok(()) => return Ok(()),
-            Err(error) => {
-                // Never retain an unverified partial file when changing download source.
-                if created && destination.exists() {
-                    fs::remove_file(destination)
-                        .map_err(|e| format!("无法清理音色下载临时文件：{e}"))?;
+                Ok(())
+            })();
+            match attempt {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    if discard_partial && destination.exists() {
+                        fs::remove_file(destination)
+                            .map_err(|e| format!("无法清理音色下载临时文件：{e}"))?;
+                    }
+                    check_cancelled(cancelled)?;
+                    if error.starts_with("本地文件") {
+                        return Err(error);
+                    }
+                    failures.push(format!("{origin}：{error}"));
+                    if !(discard_partial && offset > 0 && retry == 0) {
+                        break;
+                    }
                 }
-                check_cancelled(cancelled)?;
-                if error.starts_with("本地文件写入失败") {
-                    return Err(error);
-                }
-                failures.push(format!("{origin}：{error}"));
             }
         }
     }
@@ -1404,13 +1479,33 @@ fn download_file(
     ))
 }
 
+fn valid_content_range(value: Option<&str>, start: u64, total: u64) -> bool {
+    let Some(value) = value.and_then(|value| value.strip_prefix("bytes ")) else {
+        return false;
+    };
+    let Some((range, full)) = value.split_once('/') else {
+        return false;
+    };
+    let Some((first, last)) = range.split_once('-') else {
+        return false;
+    };
+    first.parse::<u64>().ok() == Some(start)
+        && last
+            .parse::<u64>()
+            .ok()
+            .and_then(|last| last.checked_add(1))
+            == Some(total)
+        && full.parse::<u64>().ok() == Some(total)
+        && start < total
+}
+
 fn download_cached_file(
     client: &reqwest::blocking::Client,
     file: &ModelFile,
     destination: &Path,
     root: &Path,
     cancelled: &AtomicBool,
-    mut progress: impl FnMut(u64, &str),
+    mut progress: impl FnMut(u64, &str, bool),
 ) -> Result<()> {
     if file.embedded.is_some() {
         return download_file(client, file, destination, cancelled, progress);
@@ -1455,19 +1550,19 @@ fn download_cached_file(
                 output.sync_all().map_err(|e| e.to_string())?;
                 hash_file(destination, file, cancelled)?;
             }
-            progress(file.size, "");
+            progress(file.size, "", false);
             return Ok(());
         }
         check_cancelled(cancelled)?;
         fs::remove_file(&cache).map_err(|e| format!("无法清理已损坏的音色缓存：{e}"))?;
     }
-    download_file(client, file, destination, cancelled, &mut progress)?;
+    let partial = cache_root.join(format!("{}.part", file.sha256.to_lowercase()));
+    download_file(client, file, &partial, cancelled, &mut progress)?;
     check_cancelled(cancelled)?;
-    // The cache points only to a complete, hash-verified file. Hard links keep a
-    // successfully installed model and its retry cache from occupying two copies.
-    // If this filesystem lacks hard links, generation still works without caching.
-    let _ = fs::hard_link(destination, &cache);
-    Ok(())
+    fs::rename(&partial, &cache).map_err(|e| format!("无法保存已验证的音色缓存：{e}"))?;
+    // Reuse the same checked cache materialization path, including filesystems
+    // that do not support hard links. No network request is made on this pass.
+    download_cached_file(client, file, destination, root, cancelled, progress)
 }
 
 fn reuse_installed_file(
@@ -1517,12 +1612,21 @@ fn reuse_installed_file(
     Ok(true)
 }
 
-fn update_source(downloads: &Mutex<Downloads>, id: &str, generation: u64, source: &str) {
+fn update_source(
+    downloads: &Mutex<Downloads>,
+    id: &str,
+    generation: u64,
+    source: &str,
+    new_request: bool,
+) {
     if let Ok(mut state) = downloads.lock() {
         if let Some(entry) = state.entries.get_mut(id).filter(|entry| {
             entry.generation == generation && !entry.cancelled.load(Ordering::SeqCst)
         }) {
             entry.download_source = (!source.is_empty()).then(|| source.to_owned());
+            if new_request {
+                entry.download_session = crate::ai_download::next_session();
+            }
         }
     }
 }
@@ -1591,8 +1695,8 @@ fn download_package(
                     destination,
                     root,
                     cancelled,
-                    |received, source| {
-                        update_source(downloads, &package.id, generation, source);
+                    |received, source, new_request| {
+                        update_source(downloads, &package.id, generation, source, new_request);
                         update(
                             downloads,
                             &package.id,
@@ -1635,7 +1739,7 @@ fn download_package(
         return verify_package(package, &installed, bundled, cancelled);
     }
     for file in &package.files {
-        update_source(downloads, &package.id, generation, "");
+        update_source(downloads, &package.id, generation, "", false);
         let destination = staging.path().join(&file.path);
         if file.embedded.is_none()
             && reuse_installed_file(&installed, file, &destination, cancelled)?
@@ -1656,8 +1760,8 @@ fn download_package(
             &destination,
             root,
             cancelled,
-            |received, source| {
-                update_source(downloads, &package.id, generation, source);
+            |received, source, new_request| {
+                update_source(downloads, &package.id, generation, source, new_request);
                 update(
                     downloads,
                     &package.id,
@@ -2029,6 +2133,225 @@ mod tests {
         (urls, worker)
     }
 
+    fn response_sources(responses: Vec<Vec<u8>>) -> (Vec<String>, thread::JoinHandle<Vec<String>>) {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let urls = (0..responses.len())
+            .map(|index| format!("http://{address}/{index}"))
+            .collect();
+        let worker = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    if stream.read(&mut byte).unwrap() == 0 {
+                        break;
+                    }
+                    request.push(byte[0]);
+                }
+                requests.push(String::from_utf8(request).unwrap().to_lowercase());
+                stream.write_all(&response).unwrap();
+            }
+            requests
+        });
+        (urls, worker)
+    }
+
+    fn sample_file(url: String, mirrors: Vec<String>) -> ModelFile {
+        ModelFile {
+            path: "model.onnx".into(),
+            url,
+            mirrors,
+            size: 5,
+            sha256: format!("{:x}", Sha256::digest(b"valid")),
+            ..ModelFile::default()
+        }
+    }
+
+    #[test]
+    fn rate_limited_source_switches_mirror_and_reports_each_request() {
+        let (urls, worker) = response_sources(vec![
+            b"HTTP/1.1 429 Too Many Requests\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvalid".to_vec(),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let mut requests = 0;
+        download_file(
+            &test_client(),
+            &sample_file(urls[0].clone(), vec![urls[1].clone()]),
+            &root.path().join("model"),
+            &AtomicBool::new(false),
+            |_, _, fresh| {
+                if fresh {
+                    requests += 1;
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(requests, 2);
+        assert_eq!(worker.join().unwrap().len(), 2);
+        assert_eq!(fs::read(root.path().join("model")).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn interrupted_download_resumes_across_mirrors_with_verified_content_range() {
+        let (urls, worker) = response_sources(vec![
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nva".to_vec(),
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 2-4/5\r\nConnection: close\r\n\r\nlid".to_vec(),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        download_file(
+            &test_client(),
+            &sample_file(urls[0].clone(), vec![urls[1].clone()]),
+            &root.path().join("model"),
+            &AtomicBool::new(false),
+            |_, _, _| {},
+        )
+        .unwrap();
+        let requests = worker.join().unwrap();
+        assert!(!requests[0].contains("range:"));
+        assert!(requests[1].contains("range: bytes=2-"));
+        assert_eq!(fs::read(root.path().join("model")).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn mismatched_range_never_appends_bytes_and_falls_back() {
+        let (urls, worker) = response_sources(vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 1-3/5\r\nConnection: close\r\n\r\nbad".to_vec(),
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 2-4/5\r\nConnection: close\r\n\r\nlid".to_vec(),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("model");
+        fs::write(&path, b"va").unwrap();
+        download_file(
+            &test_client(),
+            &sample_file(urls[0].clone(), vec![urls[1].clone()]),
+            &path,
+            &AtomicBool::new(false),
+            |_, _, _| {},
+        )
+        .unwrap();
+        assert!(worker
+            .join()
+            .unwrap()
+            .iter()
+            .all(|request| request.contains("range: bytes=2-")));
+        assert_eq!(fs::read(path).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn corrupt_resumed_prefix_retries_same_source_without_range() {
+        let (urls, worker) = response_sources(vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 2-4/5\r\nConnection: close\r\n\r\nlid".to_vec(),
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvalid".to_vec(),
+        ]);
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("model");
+        fs::write(&path, b"ba").unwrap();
+        let mut requests = 0;
+        download_file(
+            &test_client(),
+            &sample_file(urls[0].clone(), vec![]),
+            &path,
+            &AtomicBool::new(false),
+            |_, _, fresh| {
+                if fresh {
+                    requests += 1;
+                }
+            },
+        )
+        .unwrap();
+        let sent = worker.join().unwrap();
+        assert!(sent[0].contains("range: bytes=2-"));
+        assert!(!sent[1].contains("range:"));
+        assert_eq!(requests, 2);
+        assert_eq!(fs::read(path).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn server_ignoring_range_replaces_partial_instead_of_appending() {
+        let (urls, worker) = http_sources(vec![b"valid".to_vec()]);
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("model");
+        fs::write(&path, b"va").unwrap();
+        download_file(
+            &test_client(),
+            &sample_file(urls[0].clone(), vec![]),
+            &path,
+            &AtomicBool::new(false),
+            |_, _, _| {},
+        )
+        .unwrap();
+        worker.join().unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn cancelled_staging_retains_partial_cache_and_retry_verifies_before_install() {
+        let (urls, worker) = http_sources(vec![b"valid".to_vec()]);
+        let root = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir_in(root.path()).unwrap();
+        let file = sample_file(urls[0].clone(), vec![]);
+        let cancelled = AtomicBool::new(false);
+        let result = download_cached_file(
+            &test_client(),
+            &file,
+            &staging.path().join("model"),
+            root.path(),
+            &cancelled,
+            |bytes, _, fresh| {
+                if !fresh && bytes > 0 {
+                    cancelled.store(true, Ordering::SeqCst);
+                }
+            },
+        );
+        worker.join().unwrap();
+        assert_eq!(result.unwrap_err(), CANCELLED);
+        assert!(!staging.path().join("model").exists());
+        drop(staging);
+        let partial = root
+            .path()
+            .join(".verified-files")
+            .join(format!("{}.part", file.sha256));
+        assert_eq!(fs::read(&partial).unwrap(), b"valid");
+        let output = root.path().join("new-staging/model");
+        download_cached_file(
+            &test_client(),
+            &file,
+            &output,
+            root.path(),
+            &AtomicBool::new(false),
+            |_, _, fresh| {
+                assert!(!fresh, "complete partial verifies locally after retry");
+            },
+        )
+        .unwrap();
+        assert!(!partial.exists());
+        assert_eq!(fs::read(output).unwrap(), b"valid");
+    }
+
+    #[test]
+    fn content_range_requires_exact_start_end_and_full_size() {
+        assert!(valid_content_range(Some("bytes 2-4/5"), 2, 5));
+        for value in [
+            None,
+            Some("bytes 1-4/5"),
+            Some("bytes 2-5/6"),
+            Some("bytes 2-4/*"),
+            Some("bytes 2-18446744073709551615/5"),
+            Some("bytes 2-4/6"),
+        ] {
+            assert!(!valid_content_range(value, 2, 5));
+        }
+    }
+
     #[test]
     fn mirror_fallback_discards_bad_bytes_and_only_retries_current_file() {
         let (urls, worker) = http_sources(vec![b"wrong".to_vec(), b"valid".to_vec()]);
@@ -2050,8 +2373,8 @@ mod tests {
             &file,
             &output,
             &AtomicBool::new(false),
-            |bytes, _| {
-                if bytes == 0 {
+            |_, _, new_request| {
+                if new_request {
                     restarts += 1;
                 }
             },
@@ -2082,7 +2405,7 @@ mod tests {
             &first.path().join("model.onnx"),
             root.path(),
             &AtomicBool::new(false),
-            |_, _| {},
+            |_, _, _| {},
         )
         .unwrap();
         worker.join().unwrap();
@@ -2096,7 +2419,7 @@ mod tests {
             &output,
             root.path(),
             &AtomicBool::new(false),
-            |count, origin| {
+            |count, origin, _| {
                 bytes = count;
                 assert!(origin.is_empty());
             },
@@ -2142,7 +2465,14 @@ mod tests {
         };
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("model.onnx");
-        download_file(&client, &file, &output, &AtomicBool::new(false), |_, _| {}).unwrap();
+        download_file(
+            &client,
+            &file,
+            &output,
+            &AtomicBool::new(false),
+            |_, _, _| {},
+        )
+        .unwrap();
         worker.join().unwrap();
         assert_eq!(fs::read(output).unwrap(), b"valid");
     }
@@ -2179,7 +2509,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_does_not_try_next_mirror_or_leave_partial_download() {
+    fn cancellation_does_not_try_next_mirror_and_retains_resume_bytes() {
         let (urls, worker) = http_sources(vec![b"valid".to_vec()]);
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("model.onnx");
@@ -2193,17 +2523,23 @@ mod tests {
         };
         let cancelled = AtomicBool::new(false);
         let mut sources = 0;
-        let result = download_file(&test_client(), &file, &output, &cancelled, |bytes, _| {
-            if bytes == 0 {
-                sources += 1;
-            } else {
-                cancelled.store(true, Ordering::SeqCst);
-            }
-        });
+        let result = download_file(
+            &test_client(),
+            &file,
+            &output,
+            &cancelled,
+            |bytes, _, new_request| {
+                if new_request {
+                    sources += 1;
+                } else if bytes > 0 {
+                    cancelled.store(true, Ordering::SeqCst);
+                }
+            },
+        );
         worker.join().unwrap();
         assert_eq!(result.unwrap_err(), CANCELLED);
         assert_eq!(sources, 1);
-        assert!(!output.exists());
+        assert_eq!(fs::read(output).unwrap(), b"valid");
     }
 
     #[test]
@@ -2231,7 +2567,7 @@ mod tests {
             &file,
             &output,
             &AtomicBool::new(false),
-            |_, _| panic!("embedded resources must never report network bytes"),
+            |_, _, _| panic!("embedded resources must never report network bytes"),
         )
         .unwrap();
         assert_eq!(fs::read(output).unwrap(), data);
@@ -2308,19 +2644,22 @@ mod tests {
                 .download_source
                 .clone()
         };
-        update_source(&downloads, "model", 2, "https://modelscope.cn");
-        update_source(&downloads, "model", 1, "https://huggingface.co");
+        update_source(&downloads, "model", 2, "https://modelscope.cn", true);
+        update_source(&downloads, "model", 1, "https://huggingface.co", true);
         assert_eq!(source().as_deref(), Some("https://modelscope.cn"));
+        let first_session = downloads.lock().unwrap().entries["model"].download_session;
+        update_source(&downloads, "model", 2, "https://modelscope.cn", true);
+        assert!(downloads.lock().unwrap().entries["model"].download_session > first_session);
 
         // Local cache and installed-file reuse must not claim a network source.
-        update_source(&downloads, "model", 2, "");
+        update_source(&downloads, "model", 2, "", false);
         assert!(source().is_none());
-        update_source(&downloads, "model", 2, "https://hf-mirror.com");
+        update_source(&downloads, "model", 2, "https://hf-mirror.com", true);
         update(&downloads, "model", 2, State::Verifying, 100);
         assert!(source().is_none());
 
         update(&downloads, "model", 2, State::Downloading, 0);
-        update_source(&downloads, "model", 2, "https://modelscope.cn");
+        update_source(&downloads, "model", 2, "https://modelscope.cn", true);
         finished(
             &downloads,
             "model",
@@ -2332,7 +2671,7 @@ mod tests {
 
         let cancelled = downloads.lock().unwrap().entries["model"].cancelled.clone();
         cancelled.store(true, Ordering::SeqCst);
-        update_source(&downloads, "model", 2, "https://huggingface.co");
+        update_source(&downloads, "model", 2, "https://huggingface.co", true);
         assert!(source().is_none());
     }
 
@@ -2350,7 +2689,9 @@ mod tests {
             .filter(|package| !package.runtime_only)
             .collect();
         assert_eq!(voice_packages.len(), 3);
-        assert!(voice_packages.iter().all(|package| package.voices.len() == 2));
+        assert!(voice_packages
+            .iter()
+            .all(|package| package.voices.len() == 2));
         for package in &voice_packages {
             assert_eq!(package.voices[0].gender.as_deref(), Some("female"));
             assert_eq!(package.voices[1].gender.as_deref(), Some("male"));
@@ -2529,12 +2870,10 @@ mod tests {
             &AtomicBool::new(false),
         )
         .unwrap();
-        let cpu_directory = runtime_packages::path(
-            root.path(),
-            package.fallback_runtime.as_ref().unwrap(),
-        )
-        .canonicalize()
-        .unwrap();
+        let cpu_directory =
+            runtime_packages::path(root.path(), package.fallback_runtime.as_ref().unwrap())
+                .canonicalize()
+                .unwrap();
         assert!(cpu.executable.starts_with(&cpu_directory));
         let mut entry = Entry::default();
         entry.state = State::Ready;

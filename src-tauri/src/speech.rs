@@ -88,6 +88,8 @@ pub struct SpeechVoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub download_source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download_session: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub downloaded_bytes: Option<u64>,
