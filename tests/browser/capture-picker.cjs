@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
-const { chromium } = require('@playwright/test')
+const { chromium, expect } = require('@playwright/test')
 
 async function mount(page, baseURL, options = {}) {
   await page.route('**/__capture_picker__', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="app"></div></body></html>' }))
@@ -9,7 +9,7 @@ async function mount(page, baseURL, options = {}) {
     await import('/src/style.css')
     const source = await (await fetch('/src/components/CaptureSelectionOverlay.vue')).text()
     const vueImport = source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
-    const { createApp, h } = await import(vueImport)
+    const { createApp, h, shallowRef, nextTick } = await import(vueImport)
     const Overlay = (await import('/src/components/CaptureSelectionOverlay.vue')).default
     const context = {
       requestId: 'interaction-test', displayId: 'screen:1',
@@ -18,11 +18,12 @@ async function mount(page, baseURL, options = {}) {
         { id: 'screen:1', name: '主屏幕', kind: 'screen', rect: { x: 0, y: 0, width: 1280, height: 800 }, sourceWidth: 2560, sourceHeight: 1600 },
         { id: 'window:front', name: '资料窗口', kind: 'window', rect: { x: 300, y: 180, width: 600, height: 350 }, sourceWidth: 1200, sourceHeight: 700 },
         { id: 'window:back', name: '编辑窗口', kind: 'window', rect: { x: 100, y: 100, width: 900, height: 600 }, sourceWidth: 1800, sourceHeight: 1200 },
-      ], audioDevices: options.audioDevices, preferences: { mode: options.mode ?? 'region', purpose: options.purpose, microphone: options.microphone, audioDevice: options.audioDevice ?? '' },
+      ], audioDevices: options.audioDevices, audioState: options.audioState, audioError: options.audioError, preferences: { mode: options.mode ?? 'region', purpose: options.purpose, microphone: options.microphone, audioDevice: options.audioDevice ?? '' },
     }
     if (options.windowOnly) { context.availableModes = ['window']; context.targets = [context.targets[1]]; context.preferences.mode = 'window' }
-    window.pickerHarness = { confirmed: [], canceled: 0 }
-    const app = createApp({ render: () => h(Overlay, { context, embedded: options.embedded ?? false, onConfirm: selection => window.pickerHarness.confirmed.push(selection), onCancel: () => window.pickerHarness.canceled++ }, {
+    const contextRef = shallowRef(context)
+    window.pickerHarness = { confirmed: [], canceled: 0, audioRequests: [], replaceContext: async patch => { contextRef.value = { ...contextRef.value, ...patch }; await nextTick() } }
+    const app = createApp({ render: () => h(Overlay, { context: contextRef.value, embedded: options.embedded ?? false, onConfirm: selection => window.pickerHarness.confirmed.push(selection), onCancel: () => window.pickerHarness.canceled++ }, {
       background: () => h('div', { style: 'position:absolute;inset:0;background:linear-gradient(120deg,#4a647c,#789baf);' }, [
         h('div', { style: 'position:absolute;left:7.8125%;top:12.5%;width:70.3125%;height:75%;background:#e6edf4;border-radius:10px;box-shadow:0 12px 35px #182c4440;padding:20px;color:#33475b;' }, '编辑窗口'),
         h('div', { style: 'position:absolute;left:23.4375%;top:22.5%;width:46.875%;height:43.75%;background:#fff;border-radius:10px;box-shadow:0 10px 30px #182c4440;padding:20px;color:#33475b;' }, '资料窗口'),
@@ -33,6 +34,10 @@ async function mount(page, baseURL, options = {}) {
     window.pickerHarness.cleanup = () => app.unmount()
     if (!options.embedded) {
       window.__TAURI_INTERNALS__ = { invoke: async (command, args) => {
+        if (command === 'get_capture_picker_context') return new Promise((resolve, reject) => {
+          const snapshot = structuredClone(contextRef.value)
+          window.pickerHarness.audioRequests.push({ requestId: args.requestId, finish: patch => resolve({ ...snapshot, audioState: 'ready', ...patch }), fail: message => reject(new Error(message)) })
+        })
         if (command !== 'complete_capture_picker') throw new Error(`未知命令 ${command}`)
         if (args.selection) window.pickerHarness.confirmed.push(args.selection)
         else window.pickerHarness.canceled++
@@ -143,6 +148,73 @@ async function main() {
     assert.equal(await page.evaluate(() => window.pickerHarness.confirmed[0].audioDevice), '')
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('open-media:microphone:capture-native')).deviceId), '')
     console.log('PASS 原生麦克风来源可选择并持久化，关闭麦克风保留来源，已断开来源阻止录制且可改回默认')
+
+    await mount(page, baseURL, { audioState: 'loading', audioDevices: [], audioDevice: 'native-usb' })
+    await expect(page.getByTestId('capture-picker-audio-loading')).toBeVisible()
+    await drag(page, { x: 100, y: 100 }, { x: 500, y: 350 })
+    await page.getByLabel('输出尺寸').selectOption('720p')
+    await expect(page.getByTestId('capture-picker-confirm')).toBeDisabled()
+    await page.getByTestId('picker-mode-window').click()
+    await page.mouse.click(400, 240)
+    await expect(page.locator('.selection-caption')).toContainText('资料窗口')
+    await page.getByTestId('picker-mode-region').click()
+    await page.getByTestId('capture-picker-microphone').click()
+    await expect(page.getByTestId('capture-picker-confirm')).toBeEnabled()
+    await page.waitForFunction(() => window.pickerHarness.audioRequests.length === 1)
+    await page.evaluate(audioDevices => window.pickerHarness.audioRequests[0].finish({ audioDevices }), audioDevices)
+    await expect(page.getByTestId('capture-picker-audio-loading')).toHaveCount(0)
+    await expect(page.getByLabel('选区宽度')).toHaveValue('800')
+    await expect(page.getByLabel('选区高度')).toHaveValue('500')
+    await expect(page.getByLabel('输出尺寸')).toHaveValue('720p')
+    await expect(microphoneSource).toHaveValue('native-usb')
+    await expect(page.getByTestId('capture-picker-microphone')).toHaveAttribute('aria-pressed', 'false')
+    await page.getByTestId('capture-picker-confirm').click()
+    assert.deepEqual(await page.evaluate(() => window.pickerHarness.confirmed[0]), { sourceId: 'screen:1', region: { x: 200, y: 200, width: 800, height: 500 }, outputSize: { width: 1280, height: 720 }, microphone: false, audioDevice: 'native-usb' })
+    console.log('PASS 音频后台加载不阻塞选区和窗口选择，完成后保留用户区域、输出尺寸及麦克风偏好')
+
+    for (const finish of ['confirm', 'cancel', 'unmount']) {
+      await mount(page, baseURL, { mode: 'screen', audioState: 'loading', audioDevices: [] })
+      await page.waitForFunction(() => window.pickerHarness.audioRequests.length === 1)
+      if (finish === 'confirm') {
+        await page.getByTestId('capture-picker-microphone').click()
+        await expect(page.getByTestId('capture-picker-confirm')).toBeEnabled()
+        await page.getByTestId('capture-picker-confirm').click()
+        assert.equal(await page.evaluate(() => window.pickerHarness.confirmed[0].microphone), false)
+      } else if (finish === 'cancel') {
+        await page.getByTestId('capture-picker-cancel').click()
+        assert.equal(await page.evaluate(() => window.pickerHarness.canceled), 1)
+      } else await page.evaluate(() => window.pickerHarness.cleanup())
+      await page.evaluate(() => window.pickerHarness.audioRequests[0].finish({ audioDevices: [{ id: 'late-device', name: '迟到设备' }] }))
+      await page.waitForTimeout(350)
+      assert.equal(await page.evaluate(() => window.pickerHarness.audioRequests.length), 1, `${finish} 后停止轮询`)
+      assert.equal(await microphoneSource.locator('option[value="late-device"]').count(), 0, `${finish} 后忽略迟到设备`)
+    }
+    console.log('PASS 麦克风关闭时可立即确认，取消和销毁不等待设备，完成后迟到音频结果被丢弃')
+
+    await mount(page, baseURL, { mode: 'screen', audioState: 'loading', audioDevices: [] })
+    await page.waitForFunction(() => window.pickerHarness.audioRequests.length === 1)
+    await page.evaluate(() => window.pickerHarness.replaceContext({ requestId: 'replacement', displayId: 'screen:2' }))
+    await page.evaluate(() => window.pickerHarness.audioRequests[0].finish({ audioDevices: [{ id: 'stale-device', name: '旧窗口设备' }] }))
+    await expect(page.getByTestId('capture-picker-audio-loading')).toBeVisible()
+    assert.equal(await microphoneSource.locator('option[value="stale-device"]').count(), 0)
+    await page.waitForFunction(() => window.pickerHarness.audioRequests.length === 2)
+    assert.equal(await page.evaluate(() => window.pickerHarness.audioRequests[1].requestId), 'replacement')
+    await page.evaluate(() => window.pickerHarness.audioRequests[1].finish({ displayId: 'wrong-display', audioDevices: [] }))
+    await expect(page.getByRole('alert')).toContainText('当前选择窗口不一致')
+    await expect(page.getByTestId('capture-picker-confirm')).toBeDisabled()
+    await page.getByTestId('capture-picker-cancel').click()
+    assert.equal(await page.evaluate(() => window.pickerHarness.canceled), 1)
+
+    await mount(page, baseURL, { mode: 'screen', audioState: 'loading', audioDevices: [] })
+    await page.waitForFunction(() => window.pickerHarness.audioRequests.length === 1)
+    await page.evaluate(() => window.pickerHarness.audioRequests[0].finish({ audioState: 'error', audioError: '设备扫描失败。' }))
+    await expect(page.getByRole('alert')).toContainText('设备扫描失败')
+    await expect(page.getByTestId('capture-picker-confirm')).toBeDisabled()
+    await page.getByTestId('capture-picker-microphone').click()
+    await expect(page.getByTestId('capture-picker-confirm')).toBeEnabled()
+    await page.getByTestId('capture-picker-confirm').click()
+    assert.equal(await page.evaluate(() => window.pickerHarness.confirmed[0].microphone), false)
+    console.log('PASS 切换会话忽略旧结果，拒绝其他显示器的状态，音频扫描失败仍可取消或关闭麦克风录制')
 
     await mount(page, baseURL, { mode: 'screen', purpose: 'screenshot', microphone: true })
     assert.equal(await page.getByTestId('capture-picker-microphone').count(), 0)

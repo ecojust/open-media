@@ -23,6 +23,8 @@ export interface CaptureSelectionContext {
   display: SelectionDisplay
   targets: SelectionTarget[]
   audioDevices?: { id: string; name: string }[]
+  audioState?: 'loading' | 'ready' | 'error'
+  audioError?: string
   preferences?: { purpose?: 'record' | 'screenshot'; mode?: CaptureSelectionMode; sourceId?: string; outputSize?: SelectionSize; microphone?: boolean; audioDevice?: string }
   availableModes?: CaptureSelectionMode[]
 }
@@ -83,6 +85,10 @@ export function selectionAtPoint(targets: SelectionTarget[], point: SelectionPoi
 export function validateSelection(selection: CaptureSelection, context: CaptureSelectionContext): string | undefined {
   const target = context.targets.find(item => item.id === selection.sourceId)
   if (!target) return '录制来源不可用，请重新选择。'
+  if (context.preferences?.purpose !== 'screenshot' && selection.microphone !== false) {
+    if (context.audioState === 'loading') return '正在读取麦克风来源，请稍候；也可关闭麦克风后开始录制。'
+    if (context.audioState === 'error') return `${context.audioError || '无法读取麦克风来源。'}请关闭麦克风后继续，或取消并重新选择。`
+  }
   if (context.preferences?.purpose !== 'screenshot' && selection.microphone !== false && selection.audioDevice && context.audioDevices && !context.audioDevices.some(device => device.id === selection.audioDevice)) return '所选麦克风已断开或不可用，请重新选择来源，或关闭麦克风。'
   const region = selection.region
   if (region) {

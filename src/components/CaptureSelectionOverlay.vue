@@ -32,8 +32,13 @@ const audioLoaded = ref(false)
 const audioLoading = ref(false)
 const audioAuthorizing = ref(false)
 const audioError = ref('')
+const nativeAudioDevices = ref<CaptureSelectionContext['audioDevices']>()
+const nativeAudioState = ref<CaptureSelectionContext['audioState']>()
+const nativeAudioError = ref('')
 let audioRequest: AbortController | undefined
 let audioRevision = 0
+let nativeAudioRevision = 0
+let nativeAudioTimer: ReturnType<typeof setTimeout> | undefined
 const error = ref('')
 const loading = ref(false)
 const busy = ref(false)
@@ -42,9 +47,10 @@ let destroyed = false
 let drag: { pointerId: number; start: SelectionPoint; original: SelectionRect | null; action: 'draw' | 'move' | SelectionHandle } | null = null
 
 const availableModes = computed<CaptureSelectionMode[]>(() => context.value?.availableModes ?? ['region', 'window', 'screen'])
-const audioDevices = computed(() => props.embedded ? browserAudioDevices.value : context.value?.audioDevices ?? [])
+const audioDevices = computed(() => props.embedded ? browserAudioDevices.value : nativeAudioDevices.value ?? [])
+const nativeAudioWaiting = computed(() => !props.embedded && !isScreenshot.value && nativeAudioState.value === 'loading')
 const audioMissing = computed(() => !!audioDevice.value && !audioDevices.value.some(device => device.id === audioDevice.value))
-const audioUnavailable = computed(() => audioMissing.value && (props.embedded ? audioLoaded.value && !audioPermissionRequired.value : !!context.value?.audioDevices))
+const audioUnavailable = computed(() => audioMissing.value && (props.embedded ? audioLoaded.value && !audioPermissionRequired.value : nativeAudioState.value !== 'loading' && !!nativeAudioDevices.value))
 const audioScope = computed(() => props.embedded ? 'capture-browser' : 'capture-native')
 const missingAudioName = computed(() => {
   const remembered = readMicrophonePreference(audioScope.value)
@@ -63,9 +69,12 @@ const selection = computed<CaptureSelection | null>(() => {
   return selected.value ? { sourceId: selected.value.id, outputSize: outputSize.value, ...audio } : null
 })
 const validation = computed(() => {
+  if (!isScreenshot.value && microphone.value && nativeAudioWaiting.value) return ''
+  const validationContext = context.value && !props.embedded ? { ...context.value, audioDevices: nativeAudioDevices.value, audioState: nativeAudioState.value, audioError: nativeAudioError.value } : context.value
+  const message = selection.value && validationContext ? validateSelection(selection.value, validationContext) : ''
+  if (message) return isScreenshot.value ? message.replaceAll('录制', '截屏') : message
   if (!isScreenshot.value && microphone.value && audioUnavailable.value) return '所选麦克风已断开或不可用，请重新选择来源，或关闭麦克风。'
-  const message = selection.value && context.value ? validateSelection(selection.value, context.value) : ''
-  return isScreenshot.value ? message?.replaceAll('录制', '截屏') : message
+  return ''
 })
 const selectionName = computed(() => mode.value === 'region' ? '自定义区域' : (selected.value ?? hovered.value)?.name ?? '')
 const hint = computed(() => mode.value === 'region' ? region.value ? '拖动选区移动，拖动边角调整；方向键微调，Shift 加速' : `按住鼠标拖动，框选需要${actionName.value}的区域` : mode.value === 'window' ? selected.value ? '已选择窗口，点击其他窗口可更换' : context.value?.targets.some(target => target.kind === 'window') ? '移动鼠标高亮窗口，点击选择' : '当前屏幕没有可选窗口，请选择区域或屏幕' : `点击屏幕，确认${actionName.value}完整画面`)
@@ -88,6 +97,10 @@ const stageStyle = computed(() => {
 })
 
 watch(context, value => {
+  stopNativeAudioPolling()
+  nativeAudioDevices.value = value?.audioDevices
+  nativeAudioState.value = value?.audioState
+  nativeAudioError.value = value?.audioError ?? ''
   if (!value) return
   const preferences = value.preferences
   microphone.value = preferences?.microphone ?? true
@@ -104,8 +117,42 @@ watch(context, value => {
   const size = preferences?.outputSize
   preset.value = !size ? 'original' : size.width === 1920 && size.height === 1080 ? '1080p' : size.width === 1280 && size.height === 720 ? '720p' : 'custom'
   if (size) { outputWidth.value = size.width; outputHeight.value = size.height }
+  scheduleNativeAudioPolling()
   void nextTick(focusPicker)
 }, { immediate: true })
+
+function stopNativeAudioPolling(): void {
+  nativeAudioRevision++
+  clearTimeout(nativeAudioTimer)
+  nativeAudioTimer = undefined
+}
+
+function scheduleNativeAudioPolling(): void {
+  if (destroyed || busy.value || !nativeAudioWaiting.value || !context.value) return
+  const revision = nativeAudioRevision
+  const { requestId: activeRequest, displayId } = context.value
+  const current = () => !destroyed && !busy.value && revision === nativeAudioRevision && context.value?.requestId === activeRequest && context.value.displayId === displayId
+  clearTimeout(nativeAudioTimer)
+  nativeAudioTimer = setTimeout(async () => {
+    nativeAudioTimer = undefined
+    if (!current()) return
+    try {
+      const latest = await getCapturePickerContext(activeRequest)
+      if (!current()) return
+      if (latest.requestId !== activeRequest || latest.displayId !== displayId) throw new Error('麦克风状态与当前选择窗口不一致。')
+      // Only the audio snapshot changes. Replacing context would erase a selection
+      // that the user has already adjusted while the devices were loading.
+      nativeAudioDevices.value = latest.audioDevices
+      nativeAudioState.value = latest.audioState ?? 'ready'
+      nativeAudioError.value = latest.audioError ?? ''
+    } catch (reason) {
+      if (!current()) return
+      nativeAudioState.value = 'error'
+      nativeAudioError.value = reason instanceof Error ? reason.message : String(reason)
+    }
+    if (current()) scheduleNativeAudioPolling()
+  }, 300)
+}
 
 function changeAudioDevice(): void {
   audioError.value = ''
@@ -212,18 +259,20 @@ function updateRegionSize(axis: 'width' | 'height', event: Event) {
 }
 
 async function confirm() {
-  if (busy.value || audioAuthorizing.value || !selection.value || validation.value || error.value) return
+  if (busy.value || audioAuthorizing.value || microphone.value && nativeAudioWaiting.value || !selection.value || validation.value || error.value) return
   error.value = ''
   if (props.embedded) { emit('confirm', selection.value); return }
   busy.value = true
-  try { await completeCapturePicker(requestId, selection.value) } catch (reason) { error.value = String(reason); busy.value = false }
+  stopNativeAudioPolling()
+  try { await completeCapturePicker(requestId, selection.value) } catch (reason) { error.value = String(reason); busy.value = false; scheduleNativeAudioPolling() }
 }
 
 async function cancel() {
   if (busy.value) return
   if (props.embedded) { emit('cancel'); return }
   busy.value = true
-  try { await completeCapturePicker(requestId, null) } catch (reason) { error.value = String(reason); busy.value = false }
+  stopNativeAudioPolling()
+  try { await completeCapturePicker(requestId, null) } catch (reason) { error.value = String(reason); busy.value = false; scheduleNativeAudioPolling() }
 }
 
 function keydown(event: KeyboardEvent) {
@@ -259,6 +308,7 @@ async function loadContext() {
 onMounted(() => { window.addEventListener('keydown', keydown); void nextTick(focusPicker); void loadContext() })
 onBeforeUnmount(() => {
   destroyed = true
+  stopNativeAudioPolling()
   window.removeEventListener('keydown', keydown)
   drag = null
   void nextTick(() => { if (opener?.isConnected) opener.focus({ preventScroll: true }) })
@@ -295,14 +345,15 @@ onBeforeUnmount(() => {
         <label v-if="!isScreenshot" class="selection-output">输出<select v-model="preset" aria-label="输出尺寸" :disabled="busy"><option value="original">原始尺寸</option><option value="1080p">1920 × 1080</option><option value="720p">1280 × 720</option><option value="custom">自定义</option></select></label>
         <div v-if="!isScreenshot && preset === 'custom'" class="selection-custom"><input v-model.number="outputWidth" aria-label="输出宽度" type="number" min="16" max="7680" step="2" :disabled="busy"><span>×</span><input v-model.number="outputHeight" aria-label="输出高度" type="number" min="16" max="4320" step="2" :disabled="busy"></div>
         <div v-if="!isScreenshot" class="selection-audio-source">
-          <label>麦克风来源<select v-model="audioDevice" aria-label="麦克风来源" data-testid="capture-picker-audio-source" :disabled="busy || audioAuthorizing || !context" @change="changeAudioDevice"><option value="">{{ embedded ? '系统默认麦克风' : '默认麦克风' }}</option><option v-for="device in audioDevices" :key="device.id" :value="device.id">{{ device.name }}</option><option v-if="audioMissing" :value="audioDevice">{{ missingAudioName }}（{{ audioUnavailable ? '不可用' : '待授权确认' }}）</option></select></label>
+          <label>麦克风来源<select v-model="audioDevice" aria-label="麦克风来源" data-testid="capture-picker-audio-source" :disabled="busy || audioAuthorizing || nativeAudioWaiting || !context" @change="changeAudioDevice"><option value="">{{ embedded ? '系统默认麦克风' : '默认麦克风' }}</option><option v-for="device in audioDevices" :key="device.id" :value="device.id">{{ device.name }}</option><option v-if="audioMissing" :value="audioDevice">{{ missingAudioName }}（{{ nativeAudioWaiting ? '读取中' : audioUnavailable ? '不可用' : '待授权确认' }}）</option></select></label>
+          <span v-if="nativeAudioWaiting" class="selection-audio-loading" role="status" data-testid="capture-picker-audio-loading">正在读取麦克风…</span>
           <button v-if="embedded" :disabled="busy || audioLoading" :title="audioPermissionRequired ? '授权后显示麦克风名称' : '刷新麦克风列表'" :aria-label="audioPermissionRequired ? '授权并刷新麦克风' : '刷新麦克风列表'" data-testid="capture-picker-audio-refresh" @click="refreshMicrophones(audioPermissionRequired)"><Icon name="refresh" :size="15" /><span v-if="audioPermissionRequired">授权</span></button>
         </div>
         </div>
         <div class="selection-actions">
           <button v-if="!isScreenshot" class="selection-microphone" :aria-pressed="microphone" :aria-label="microphone ? '关闭麦克风' : '开启麦克风'" :title="microphone ? '麦克风已开启，点击关闭' : '麦克风已关闭，点击开启'" data-testid="capture-picker-microphone" :disabled="busy || !context" @click="microphone = !microphone"><Icon :name="microphone ? 'mic' : 'mic-off'" :size="17" /><span>麦克风{{ microphone ? '开' : '关' }}</span></button>
           <button class="selection-cancel" title="取消选择（Esc）" aria-label="取消选择" data-testid="capture-picker-cancel" :disabled="busy" @click="cancel"><Icon name="close" :size="15" />取消</button>
-          <button class="selection-confirm" :disabled="busy || audioAuthorizing || !selection || !!validation || !!error" data-testid="capture-picker-confirm" @click="confirm"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="currentColor" /></svg>{{ busy ? '正在确认…' : isScreenshot ? '截取图片' : '开始录制' }}</button>
+          <button class="selection-confirm" :disabled="busy || audioAuthorizing || microphone && nativeAudioWaiting || !selection || !!validation || !!error" data-testid="capture-picker-confirm" @click="confirm"><svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><circle cx="10" cy="10" r="6" fill="currentColor" /></svg>{{ busy ? '正在确认…' : isScreenshot ? '截取图片' : '开始录制' }}</button>
         </div>
       </div>
     </div>
@@ -322,6 +373,7 @@ onBeforeUnmount(() => {
 .selection-audio-source,.selection-audio-source>label{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;color:#7a8698}
 .selection-audio-source select{width:170px;max-width:45vw;text-overflow:ellipsis}
 .selection-audio-source>button{padding:6px;min-height:30px;background:#f2f5fa;color:#5c687b;border:1px solid #d6dde8}
+.selection-audio-loading{font-size:10px;color:#6b778c;white-space:nowrap}
 @media(max-width:1100px){
   .selection-toolbar{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
   .selection-options{gap:8px}

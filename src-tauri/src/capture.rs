@@ -270,7 +270,7 @@ impl CaptureManager {
         if !(1..=60).contains(&options.fps) {
             return Err("录制帧率应为 1 至 60。".into());
         }
-        let devices = list_devices_with_permission(runtime, true, cancelled)?;
+        let devices = list_start_devices(runtime, &options, cancelled)?;
         let source = select_source(&devices, &options)?;
         options.output_size = Some(resolve_output(&source, &options)?);
         options.source_id = Some(source.id.clone());
@@ -524,6 +524,9 @@ impl CaptureManager {
             // Authorization and device checks run while the current video keeps
             // recording. A denied request must never discard or pause that video.
             let runtime = self.runtime.as_ref().ok_or("录制引擎不可用。")?;
+            #[cfg(target_os = "windows")]
+            let devices = list_windows_audio_devices(runtime, cancelled)?;
+            #[cfg(not(target_os = "windows"))]
             let devices = list_devices_with_permission(runtime, false, cancelled)?;
             device = Some(
                 select_audio_device(&devices, device.as_deref())
@@ -1201,6 +1204,43 @@ pub fn list_picker_devices_with_resource_cancellable(
     }
 }
 
+/// A picker may show screen/window geometry immediately and populate its audio
+/// controls later. Cancelling that picker also terminates this enumeration.
+pub fn list_picker_audio_devices_cancellable(
+    runtime: &Runtime,
+    cancelled: &AtomicBool,
+) -> Result<Vec<CaptureDevice>> {
+    check_cancelled(cancelled)?;
+    #[cfg(target_os = "windows")]
+    {
+        clear_windows_audio_devices();
+        return list_windows_audio_devices(runtime, cancelled);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(list_devices_with_permission(runtime, false, cancelled)?
+            .into_iter().filter(|device| device.kind == "audio").collect())
+    }
+}
+
+fn list_start_devices(
+    runtime: &Runtime,
+    options: &CaptureOptions,
+    cancelled: &AtomicBool,
+) -> Result<Vec<CaptureDevice>> {
+    #[cfg(target_os = "windows")]
+    {
+        // A disabled microphone must not delay video-only capture. Its previous
+        // choice is retained and checked if it is enabled during recording.
+        list_windows_devices(runtime, options.microphone, cancelled)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = options;
+        list_devices_with_permission(runtime, true, cancelled)
+    }
+}
+
 #[cfg(target_os = "windows")]
 type WindowsAudioDeviceCache = Option<(PathBuf, Instant, Vec<CaptureDevice>)>;
 #[cfg(target_os = "windows")]
@@ -1217,6 +1257,14 @@ fn list_windows_devices(runtime: &Runtime, include_audio: bool, cancelled: &Atom
     let mut devices = crate::capture_windows::list_targets()?.into_iter().map(from_windows).collect::<Vec<_>>();
     check_cancelled(cancelled)?;
     if !include_audio { return Ok(devices); }
+    devices.extend(list_windows_audio_devices(runtime, cancelled)?);
+    check_cancelled(cancelled)?;
+    Ok(devices)
+}
+
+#[cfg(target_os = "windows")]
+fn list_windows_audio_devices(runtime: &Runtime, cancelled: &AtomicBool) -> Result<Vec<CaptureDevice>> {
+    check_cancelled(cancelled)?;
     // Source selection and starting the recorder happen close together. Reuse
     // only the audio enumeration, never desktop geometry or live device handles.
     let cached = WINDOWS_AUDIO_DEVICES.lock().ok().and_then(|cached| {
@@ -1239,8 +1287,7 @@ fn list_windows_devices(runtime: &Runtime, include_audio: bool, cancelled: &Atom
         devices
     };
     check_cancelled(cancelled)?;
-    devices.extend(audio);
-    Ok(devices)
+    Ok(audio)
 }
 fn list_devices_with_permission(
     runtime: &Runtime,
@@ -1423,6 +1470,31 @@ mod capture_tests {
             region: None,
             output_size: None,
         }
+    }
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn video_only_start_skips_audio_process_and_retains_selected_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = Runtime {
+            encoder: directory.path().join("unavailable-encoder.exe"),
+            probe: directory.path().join("unavailable-probe.exe"),
+            source: "test".into(),
+            version: "test".into(),
+        };
+        let mut requested = options();
+        requested.audio_device = Some("previous-input-not-connected".into());
+        let token = AtomicBool::new(false);
+        let devices = list_start_devices(&runtime, &requested, &token).unwrap();
+        assert!(devices.iter().any(|device| device.kind == "screen"));
+        assert!(devices.iter().all(|device| device.kind != "audio"));
+        prepare_audio_choice(&devices, &mut requested).unwrap();
+        assert_eq!(requested.audio_device.as_deref(), Some("previous-input-not-connected"));
+        requested.microphone = true;
+        assert!(list_start_devices(&runtime, &requested, &token).is_err(),
+            "enabling audio must validate devices instead of silently accepting the retained choice");
+        requested.microphone = false;
+        token.store(true, Ordering::SeqCst);
+        assert_eq!(list_start_devices(&runtime, &requested, &token).unwrap_err(), "录制已取消。");
     }
     #[test]
     fn explicit_audio_input_never_falls_back_to_another_microphone() {

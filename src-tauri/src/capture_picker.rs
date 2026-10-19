@@ -71,6 +71,14 @@ pub struct PickerAudioDevice {
     pub name: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PickerAudioState {
+    Loading,
+    Ready,
+    Error,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PickerContext {
@@ -80,6 +88,10 @@ pub struct PickerContext {
     pub targets: Vec<PickerTarget>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_devices: Option<Vec<PickerAudioDevice>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_state: Option<PickerAudioState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_error: Option<String>,
     pub preferences: PickerPreferences,
 }
 
@@ -227,8 +239,37 @@ fn make_context(
                     .collect(),
             )
         },
+        audio_state: (preferences.purpose.as_deref() != Some("screenshot"))
+            .then_some(PickerAudioState::Ready),
+        audio_error: None,
         preferences: normalized_preferences(preferences.clone()),
     })
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn validate_audio_state(
+    selection: &PickerSelection,
+    state: Option<&PickerAudioState>,
+    error: Option<&str>,
+) -> Result<()> {
+    if selection.microphone != Some(true) {
+        return Ok(());
+    }
+    match state {
+        Some(PickerAudioState::Loading) => {
+            Err("麦克风列表正在加载，请稍候或关闭麦克风录制。".into())
+        }
+        Some(PickerAudioState::Error) => Err(error
+            .unwrap_or("无法读取麦克风列表，请重新选择或关闭麦克风录制。")
+            .into()),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn replace_audio_sources(sources: &mut Vec<CaptureDevice>, audio: Vec<CaptureDevice>) {
+    sources.retain(|source| source.kind != "audio");
+    sources.extend(audio.into_iter().filter(|source| source.kind == "audio"));
 }
 
 fn validate_selection(
@@ -329,6 +370,8 @@ mod desktop {
         request_id: String,
         preferences: PickerPreferences,
         sources: Vec<CaptureDevice>,
+        audio_state: Option<PickerAudioState>,
+        audio_error: Option<String>,
         windows: HashMap<String, PickerWindow>,
         cancelled: Arc<AtomicBool>,
         sender: mpsc::Sender<Completion>,
@@ -374,6 +417,12 @@ mod desktop {
                     request_id: request_id.clone(),
                     preferences: normalized_preferences(preferences),
                     sources: vec![],
+                    audio_state: include_audio.then_some(if cfg!(target_os = "windows") {
+                        PickerAudioState::Loading
+                    } else {
+                        PickerAudioState::Ready
+                    }),
+                    audio_error: None,
                     windows: HashMap::new(),
                     cancelled: cancelled.clone(),
                     sender,
@@ -402,7 +451,7 @@ mod desktop {
                         &runtime,
                         &resource,
                         true,
-                        include_audio,
+                        include_audio && !cfg!(target_os = "windows"),
                         &cancelled,
                     );
                     if cancelled.load(Ordering::SeqCst) {
@@ -427,8 +476,23 @@ mod desktop {
                             }
                             // Window creation must not run inside the Windows event callback.
                             #[cfg(not(target_os = "macos"))]
-                            if let Err(error) = picker.create_windows(&app, &request_id, sources) {
-                                picker.finish(&app, &request_id, Err(error));
+                            {
+                                if let Err(error) =
+                                    picker.create_windows(&app, &request_id, sources)
+                                {
+                                    picker.finish(&app, &request_id, Err(error));
+                                    return;
+                                }
+                                #[cfg(target_os = "windows")]
+                                if include_audio && picker.is_active(&request_id) {
+                                    // One scan belongs to the whole session, not to
+                                    // each display. The visible picker remains usable
+                                    // while the audio driver initializes.
+                                    let audio = capture::list_picker_audio_devices_cancellable(
+                                        &runtime, &cancelled,
+                                    );
+                                    picker.complete_audio_loading(&request_id, &cancelled, audio);
+                                }
                             }
                         }
                         Err(error) => picker.finish(&app, &request_id, Err(error)),
@@ -466,13 +530,15 @@ mod desktop {
                 session.sources = sources;
                 let mut prepared = Vec::new();
                 for (index, display) in displays.into_iter().enumerate() {
-                    let context = make_context(
+                    let mut context = make_context(
                         request_id,
                         &display,
                         &session.sources,
                         &session.preferences,
                         cfg!(target_os = "macos"),
                     )?;
+                    context.audio_state = session.audio_state.clone();
+                    context.audio_error = session.audio_error.clone();
                     let label = format!("capture-picker-{}-{index}", crate::engine::new_id());
                     // Register every identity before any page can issue an IPC request.
                     session.windows.insert(
@@ -573,6 +639,53 @@ mod desktop {
                 }
             });
             Ok(())
+        }
+
+        #[cfg(target_os = "windows")]
+        fn complete_audio_loading(
+            &self,
+            request_id: &str,
+            request_cancelled: &Arc<AtomicBool>,
+            audio: Result<Vec<CaptureDevice>>,
+        ) {
+            let Ok(mut inner) = self.inner.lock() else {
+                return;
+            };
+            let Some(session) = inner.active.as_mut().filter(|session| {
+                session.request_id == request_id
+                    && Arc::ptr_eq(&session.cancelled, request_cancelled)
+                    && !session.cancelled.load(Ordering::SeqCst)
+            }) else {
+                return;
+            };
+            if session.audio_state != Some(PickerAudioState::Loading) {
+                return;
+            }
+            match audio {
+                Ok(devices) => {
+                    replace_audio_sources(&mut session.sources, devices);
+                    session.audio_state = Some(PickerAudioState::Ready);
+                    session.audio_error = None;
+                }
+                Err(error) => {
+                    session.audio_state = Some(PickerAudioState::Error);
+                    session.audio_error = Some(error);
+                }
+            }
+            let devices = session
+                .sources
+                .iter()
+                .filter(|source| source.kind == "audio")
+                .map(|source| PickerAudioDevice {
+                    id: source.id.clone(),
+                    name: source.name.clone(),
+                })
+                .collect::<Vec<_>>();
+            for window in session.windows.values_mut() {
+                window.context.audio_devices = Some(devices.clone());
+                window.context.audio_state = session.audio_state.clone();
+                window.context.audio_error = session.audio_error.clone();
+            }
         }
 
         fn is_active(&self, request_id: &str) -> bool {
@@ -699,11 +812,13 @@ mod desktop {
                     .ok_or("当前窗口没有此录制选择的访问权限。")?;
                 selection
                     .map(|selection| {
-                        validate_selection(
-                            apply_audio_preference(selection, &session.preferences),
-                            &window.display,
-                            &session.sources,
-                        )
+                        let selection = apply_audio_preference(selection, &session.preferences);
+                        validate_audio_state(
+                            &selection,
+                            session.audio_state.as_ref(),
+                            session.audio_error.as_deref(),
+                        )?;
+                        validate_selection(selection, &window.display, &session.sources)
                     })
                     .transpose()?
             };
@@ -906,6 +1021,108 @@ mod tests {
             source_width: Some(1),
             source_height: Some(1),
         }
+    }
+
+    #[test]
+    fn microphone_loading_or_failure_never_blocks_silent_capture() {
+        let mut selected = selection("screen:1");
+        for enabled in [None, Some(false), Some(true)] {
+            selected.microphone = enabled;
+            assert_eq!(
+                validate_audio_state(&selected, Some(&PickerAudioState::Loading), None).is_ok(),
+                enabled != Some(true),
+            );
+            assert_eq!(
+                validate_audio_state(
+                    &selected,
+                    Some(&PickerAudioState::Error),
+                    Some("音频驱动不可用")
+                )
+                .is_ok(),
+                enabled != Some(true),
+            );
+            assert!(validate_audio_state(&selected, Some(&PickerAudioState::Ready), None).is_ok());
+        }
+        assert_eq!(
+            validate_audio_state(
+                &selected,
+                Some(&PickerAudioState::Error),
+                Some("音频驱动不可用")
+            )
+            .unwrap_err(),
+            "音频驱动不可用",
+        );
+    }
+
+    #[test]
+    fn background_audio_results_preserve_original_display_geometry() {
+        let screen = display();
+        let original_bounds = serde_json::to_value(&screen).unwrap();
+        let mut sources = vec![
+            screen,
+            CaptureDevice {
+                id: "old-audio".into(),
+                kind: "audio".into(),
+                ..CaptureDevice::default()
+            },
+        ];
+        let audio = CaptureDevice {
+            id: "new-audio".into(),
+            name: "USB 麦克风".into(),
+            kind: "audio".into(),
+            ..CaptureDevice::default()
+        };
+        let mut stale_screen = display();
+        stale_screen.width = Some(1);
+        replace_audio_sources(&mut sources, vec![audio.clone(), stale_screen]);
+        assert_eq!(sources.len(), 2);
+        assert_eq!(serde_json::to_value(&sources[0]).unwrap(), original_bounds);
+        assert_eq!(sources[1].id, audio.id);
+        replace_audio_sources(&mut sources, vec![]);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(serde_json::to_value(&sources[0]).unwrap(), original_bounds);
+    }
+
+    #[test]
+    fn picker_context_exposes_audio_readiness_only_for_recording() {
+        let display = display();
+        let context = make_context(
+            "test",
+            &display,
+            &[display.clone()],
+            &PickerPreferences::default(),
+            false,
+        )
+        .unwrap();
+        let json = serde_json::to_value(&context).unwrap();
+        assert_eq!(json["audioState"], "ready");
+        assert!(json.get("audioError").is_none());
+        let screenshot = make_context(
+            "test",
+            &display,
+            &[display.clone()],
+            &PickerPreferences {
+                purpose: Some("screenshot".into()),
+                ..PickerPreferences::default()
+            },
+            false,
+        )
+        .unwrap();
+        let json = serde_json::to_value(&screenshot).unwrap();
+        assert!(json.get("audioState").is_none());
+        assert!(json.get("audioError").is_none());
+        assert!(json.get("audioDevices").is_none());
+        let mut pending = context;
+        pending.audio_state = Some(PickerAudioState::Loading);
+        assert_eq!(
+            serde_json::to_value(&pending).unwrap()["audioState"],
+            "loading"
+        );
+        pending.audio_state = Some(PickerAudioState::Error);
+        pending.audio_error = Some("音频驱动不可用".into());
+        let json = serde_json::to_value(&pending).unwrap();
+        assert_eq!(json["audioState"], "error");
+        assert_eq!(json["audioError"], "音频驱动不可用");
     }
 
     #[test]

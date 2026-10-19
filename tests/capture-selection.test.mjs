@@ -6,6 +6,17 @@ const display = { id: 'screen:1', name: '主屏幕', logicalWidth: 1440, logical
 const screen = { id: display.id, name: display.name, kind: 'screen', rect: { x: 0, y: 0, width: 1440, height: 900 }, sourceWidth: 2880, sourceHeight: 1800 }
 const context = { requestId: 'example', displayId: display.id, display, targets: [screen] }
 
+test('音频后台加载和读取失败只阻止开启麦克风的确认，不阻止静音录制或截屏', () => {
+  const selected = { sourceId: screen.id, microphone: true, audioDevice: '' }
+  for (const audioState of ['loading', 'error']) {
+    const pending = { ...context, audioState, audioError: audioState === 'error' ? '设备扫描失败。' : undefined, audioDevices: [] }
+    assert.match(validateSelection(selected, pending), audioState === 'loading' ? /正在读取麦克风/ : /设备扫描失败/)
+    assert.equal(validateSelection({ ...selected, microphone: false }, pending), undefined)
+    assert.equal(validateSelection(selected, { ...pending, preferences: { purpose: 'screenshot' } }), undefined)
+  }
+  assert.equal(validateSelection(selected, { ...context, audioState: 'ready', audioDevices: [] }), undefined)
+})
+
 test('不可用的指定麦克风阻止录制确认，但允许关闭麦克风或切回默认设备', () => {
   const audioContext = { ...context, audioDevices: [{ id: 'usb-mic', name: 'USB 麦克风' }] }
   const selected = { sourceId: screen.id, microphone: true, audioDevice: 'unplugged' }

@@ -88,22 +88,44 @@ jobs:
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
             throw 'The synthetic recording checks require both ffmpeg and ffprobe.'
           }
-          ffmpeg -version 2>&1 | Tee-Object -FilePath test-results/capture-windows/test-encoder.log
+          $encoder = (Get-Command ffmpeg).Source
+          $probe = (Get-Command ffprobe).Source
+          # The package manager's shim launches a second process. Cancellation
+          # must exercise the actual encoder handle, as the packaged app does.
+          $packageRoot = Join-Path $env:ChocolateyInstall 'lib/ffmpeg'
+          if (Test-Path $packageRoot) {
+            $nativeEncoder = Get-ChildItem $packageRoot -Recurse -File -Filter ffmpeg.exe | Where-Object {
+              Test-Path (Join-Path $_.DirectoryName 'ffprobe.exe')
+            } | Select-Object -First 1
+            if (-not $nativeEncoder) { throw 'The native encoder executable could not be resolved.' }
+            $encoder = $nativeEncoder.FullName
+            $probe = Join-Path $nativeEncoder.DirectoryName 'ffprobe.exe'
+          }
+          if ((Split-Path $encoder -Parent) -eq (Join-Path $env:ChocolateyInstall 'bin')) {
+            throw 'Use the real encoder executable instead of a process-launcher shim.'
+          }
+          "Encoder executable: $encoder" | Tee-Object -FilePath test-results/capture-windows/test-encoder.log
+          & $encoder -version 2>&1 | Tee-Object -Append -FilePath test-results/capture-windows/test-encoder.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          ffprobe -version 2>&1 | Tee-Object -FilePath test-results/capture-windows/test-probe.log
+          "Probe executable: $probe" | Tee-Object -FilePath test-results/capture-windows/test-probe.log
+          & $probe -version 2>&1 | Tee-Object -Append -FilePath test-results/capture-windows/test-probe.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "OPEN_MEDIA_FFMPEG=$((Get-Command ffmpeg).Source)" >> $env:GITHUB_ENV
-          "OPEN_MEDIA_FFPROBE=$((Get-Command ffprobe).Source)" >> $env:GITHUB_ENV
-      - name: Verify recording readiness, cancellation and the native border
+          "OPEN_MEDIA_FFMPEG=$encoder" >> $env:GITHUB_ENV
+          "OPEN_MEDIA_FFPROBE=$probe" >> $env:GITHUB_ENV
+      - name: Verify recording readiness and cancellation
         id: recording
         if: always() && steps.encoder.outcome == 'success'
         run: |
           set -euo pipefail
-          for filter in capture::capture_tests capture_windows::; do
-            log="test-results/capture-windows/${filter//::/-}.log"
-            cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib "$filter" -- --nocapture --test-threads=1 2>&1 | tee "$log"
-            grep -Eq '^test result: ok\. [1-9][0-9]* passed;' "$log"
-          done
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib capture::capture_tests -- --nocapture --test-threads=1 2>&1 | tee test-results/capture-windows/recording-state.log
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed;' test-results/capture-windows/recording-state.log
+      - name: Verify native window geometry and recording border
+        id: border
+        if: always() && steps.encoder.outcome == 'success'
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib capture_windows:: -- --nocapture --test-threads=1 2>&1 | tee test-results/capture-windows/window-border.log
+          grep -Eq '^test result: ok\. [1-9][0-9]* passed;' test-results/capture-windows/window-border.log
       - name: Summarize the observed results
         if: always()
         shell: pwsh
@@ -116,7 +138,8 @@ jobs:
           | Desktop native integration compilation | ${{ steps.desktop.outcome }} |
           | PNG validation and capture selection | ${{ steps.screenshot.outcome }} |
           | Native screenshot pixels and elapsed time | ${{ steps.native-screenshot.outcome }} |
-          | Recording readiness, cancellation and border | ${{ steps.recording.outcome }} |
+          | Recording readiness and cancellation | ${{ steps.recording.outcome }} |
+          | Native window geometry and recording border | ${{ steps.border.outcome }} |
 
           The hosted Windows runner captures only generated fixtures and its disposable desktop. Recording tests use generated colors and tones; they never enable a microphone. The native screenshot test intentionally supplies missing encoder/probe paths and verifies decoded pixels. The separate recording checks use the encoder identified in the artifacts, not a packaged media runtime. Compilation and these native tests do not measure full application startup, screenshot-to-editor latency, or a user's hardware. No installer or release is produced.
           '@ >> $env:GITHUB_STEP_SUMMARY
