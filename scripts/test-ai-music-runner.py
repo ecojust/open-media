@@ -75,6 +75,19 @@ class MusicAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.verify_local_layout(self.models, "acestep-v15-turbo")
 
+    def test_local_layout_accepts_a_root_alias_without_weakening_containment(self):
+        for name in runner.required_files("acestep-v15-turbo"):
+            path = self.models / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"contract-only-placeholder")
+        # This lexical alias exercises canonical-root handling on every OS,
+        # including hosts without permission to create directory symlinks.
+        alias = self.models / ".." / "models"
+        self.assertNotEqual(alias, self.models)
+        runner.verify_local_layout(alias, "acestep-v15-turbo")
+        parsed = runner.validate_request({**self.request, "modelRoot": str(alias)})
+        self.assertEqual(parsed["modelRoot"], self.models.resolve())
+
     @unittest.skipIf(os.name == "nt", "Windows symlink creation can require elevated privileges")
     def test_layout_cannot_escape_download_directory(self):
         external = self.root / "external"

@@ -119,6 +119,9 @@ def required_files(variant: str) -> tuple[str, ...]:
 
 
 def verify_local_layout(root: Path, variant: str) -> None:
+    # Compare canonical paths on both sides: temporary/model directories can
+    # use filesystem aliases, including shortened or redirected system paths.
+    root = root.resolve()
     for relative in required_files(variant):
         candidate = (root / relative).resolve()
         if not candidate.is_relative_to(root) or not candidate.is_file() or candidate.stat().st_size == 0:
