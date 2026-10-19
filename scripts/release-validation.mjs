@@ -26,11 +26,79 @@ export function validateBuild(run, jobs, artifacts, expectedCommit, releasePolic
       }
     }
   }
+  return selectBuildArtifacts(artifacts, run.id)
+}
+function selectBuildArtifacts(artifacts, runId) {
   return [...platforms, 'runtime-source'].map(platform => {
-    const matching = artifacts.filter(item => item.name === `open-media-${platform}-${run.id}`)
+    const matching = artifacts.filter(item => item.name === `open-media-${platform}-${runId}`)
     if (matching.length !== 1 || matching[0].expired || matching[0].size_in_bytes < 1 || !/^sha256:[a-f0-9]{64}$/.test(matching[0].digest || '')) throw new Error(`Missing or invalid artifact: ${platform}`)
     return { platform, artifact: matching[0] }
   })
+}
+
+// Only selected non-secret Actions fields are recorded. In particular, never
+// serialize the full github context, which contains the workflow token.
+export function workflowExecution(env) {
+  return {
+    schema: 1, actions: env.GITHUB_ACTIONS === 'true', repository: env.GITHUB_REPOSITORY,
+    serverUrl: env.GITHUB_SERVER_URL, workflow: env.GITHUB_WORKFLOW,
+    workflowRef: env.GITHUB_WORKFLOW_REF, workflowSha: env.GITHUB_WORKFLOW_SHA,
+    eventName: env.GITHUB_EVENT_NAME, ref: env.GITHUB_REF, headSha: env.GITHUB_SHA,
+    runId: env.GITHUB_RUN_ID, runAttempt: Number(env.GITHUB_RUN_ATTEMPT), job: env.GITHUB_JOB,
+  }
+}
+export function validateScheduledBuild({ context, event, needs, artifacts, repository, runId, expectedCommit, checkoutCommit, publishRequested, releasePolicy }) {
+  installedSpeechPolicy(releasePolicy)
+  if (!/^[a-f0-9]{40}$/.test(expectedCommit) || !/^[1-9][0-9]*$/.test(runId)
+      || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid scheduled release selection.')
+  if (context?.schema !== 1 || context.actions !== true || context.repository !== repository
+      || context.serverUrl !== 'https://github.com' || context.workflow !== 'Build Open Media desktop'
+      || context.eventName !== 'workflow_dispatch' || context.job !== 'publish'
+      || !/^refs\/heads\/[^\s]+$/.test(context.ref || '')
+      || context.workflowRef !== `${repository}/.github/workflows/desktop-build.yml@${context.ref}`
+      || context.workflowSha !== expectedCommit || context.headSha !== expectedCommit
+      || checkoutCommit !== expectedCommit || context.runId !== runId
+      || !Number.isSafeInteger(context.runAttempt) || context.runAttempt < 1) {
+    throw new Error('Scheduled release requires the exact desktop workflow Actions context and source checkout.')
+  }
+  if (publishRequested !== 'true' || ![true, 'true'].includes(event?.inputs?.publish)
+      || event?.repository?.full_name !== repository
+      || ![context.ref, context.ref.slice('refs/heads/'.length)].includes(event?.ref)) {
+    throw new Error('Scheduled publication was not explicitly requested by this workflow dispatch.')
+  }
+  const required = ['checks', 'desktop', 'runtime-source']
+  if (!needs || typeof needs !== 'object' || Array.isArray(needs)
+      || Object.keys(needs).sort().join(',') !== required.join(',')
+      || required.some(id => needs[id]?.result !== 'success')) {
+    throw new Error('Every required workflow dependency must actually succeed before publication.')
+  }
+  // This is scheduler evidence from the current job, not synthesized REST run
+  // or job data. The workflow must inject toJSON(needs), never a dispatch input.
+  const proof = {
+    schema: 1, kind: 'same-workflow-scheduling', context: { ...context }, checkoutCommit,
+    dependencies: Object.fromEntries(required.map(id => [id, needs[id].result])),
+    platforms: [...platforms],
+  }
+  return { selected: selectBuildArtifacts(artifacts, runId), proof }
+}
+export function verifyWorkflowArtifact(execution, platform, proof, releasePolicy) {
+  const context = proof?.context
+  if (proof?.schema !== 1 || proof.kind !== 'same-workflow-scheduling' || !context || execution?.schema !== 1
+      || execution.actions !== true
+      || ['repository', 'serverUrl', 'workflow', 'workflowRef', 'workflowSha', 'eventName', 'ref', 'headSha', 'runId']
+        .some(field => execution[field] !== context[field])
+      || !Number.isSafeInteger(execution.runAttempt) || execution.runAttempt < 1 || execution.runAttempt > context.runAttempt
+      || execution.job !== (platform === 'runtime-source' ? 'runtime-source' : 'desktop')
+      || ![...platforms, 'runtime-source'].includes(platform)) {
+    throw new Error(`Artifact workflow execution differs from the scheduled build: ${platform}`)
+  }
+  if (platform !== 'runtime-source') {
+    const policy = installedSpeechPolicy(releasePolicy)
+    if (policy.enabled ? execution.installedSpeechOutcome !== 'success'
+      : !['omitted', 'skipped'].includes(execution.installedSpeechOutcome)) {
+      throw new Error(`Installed speech step outcome contradicts the release policy: ${platform}`)
+    }
+  }
 }
 export function verifyDigest(bytes, expected) {
   if (`sha256:${digest(bytes)}` !== expected) throw new Error('Artifact or release asset SHA-256 mismatch.')

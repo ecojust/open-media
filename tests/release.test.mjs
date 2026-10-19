@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync, mkdirSync, copyFileSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { validateBuild, verifyDigest, verifyMetadata, digest, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, installedSpeechVoiceIds, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
+import { validateBuild, validateScheduledBuild, workflowExecution, verifyWorkflowArtifact, verifyDigest, verifyMetadata, digest, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, installedSpeechVoiceIds, sourceChecksums, speechSourceRequirements } from '../scripts/release-validation.mjs';
 import { verifySourceContents } from '../scripts/release-source.mjs';
 
 const commit = 'a'.repeat(40);
@@ -18,6 +18,145 @@ function fixture() {
     artifacts: ['windows-x64', 'macos-arm64', 'macos-x64', 'runtime-source'].map(platform => ({ name: `open-media-${platform}-7`, expired: false, size_in_bytes: 1, digest: `sha256:${'a'.repeat(64)}` })),
   };
 }
+function schedulingFixture() {
+  const repository = 'ecojust/open-media';
+  const env = {
+    GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: repository, GITHUB_SERVER_URL: 'https://github.com',
+    GITHUB_WORKFLOW: 'Build Open Media desktop', GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/desktop-build.yml@refs/heads/master`,
+    GITHUB_WORKFLOW_SHA: commit, GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF: 'refs/heads/master',
+    GITHUB_SHA: commit, GITHUB_RUN_ID: '7', GITHUB_RUN_ATTEMPT: '1', GITHUB_JOB: 'publish',
+  };
+  return { environment: env, context: workflowExecution(env), event: { inputs: { publish: 'true' }, repository: { full_name: repository }, ref: 'master' },
+    needs: { checks: { result: 'success' }, 'runtime-source': { result: 'success' }, desktop: { result: 'success' } },
+    artifacts: fixture().artifacts, repository, runId: '7', expectedCommit: commit, checkoutCommit: commit,
+    publishRequested: 'true', releasePolicy: disabledSpeechPolicy };
+}
+test('same-workflow publication uses actual scheduler dependency evidence without synthesizing API jobs', () => {
+  const input = schedulingFixture();
+  const { selected, proof } = validateScheduledBuild(input);
+  assert.equal(selected.length, 4);
+  assert.equal(proof.kind, 'same-workflow-scheduling');
+  assert.deepEqual(proof.dependencies, { checks: 'success', desktop: 'success', 'runtime-source': 'success' });
+  assert.equal(proof.context.runAttempt, 1);
+  assert.equal(proof.context.headSha, commit);
+  assert.equal(proof.jobs, undefined);
+  assert.equal(proof.conclusion, undefined);
+  assert.equal(workflowExecution({ GH_TOKEN: 'secret', GITHUB_TOKEN: 'secret' }).GH_TOKEN, undefined);
+});
+test('scheduled publication rejects failures, skipped dependencies, cancelled work and missing gates', () => {
+  for (const id of ['checks', 'desktop', 'runtime-source']) {
+    for (const result of ['failure', 'skipped', 'cancelled', '', null, undefined, 'in_progress']) {
+      const input = schedulingFixture();
+      input.needs[id].result = result;
+      assert.throws(() => validateScheduledBuild(input), /dependency must actually succeed/);
+    }
+    const input = schedulingFixture();
+    delete input.needs[id];
+    assert.throws(() => validateScheduledBuild(input), /dependency must actually succeed/);
+  }
+  for (const needs of [null, [], {}, { ...schedulingFixture().needs, unknown: { result: 'success' } }]) {
+    assert.throws(() => validateScheduledBuild({ ...schedulingFixture(), needs }), /dependency must actually succeed/);
+  }
+});
+test('scheduled publication rejects a foreign workflow, run, attempt, event, checkout or undispatched request', () => {
+  const changes = {
+    schema: 2, actions: false, repository: 'someone/other', serverUrl: 'https://example.com', workflow: 'Other workflow',
+    workflowRef: `ecojust/open-media/.github/workflows/publish-release.yml@refs/heads/master`, workflowSha: 'b'.repeat(40),
+    headSha: 'b'.repeat(40), eventName: 'pull_request', job: 'checks', ref: 'refs/tags/v0.3.0', runId: '8',
+  };
+  for (const [field, value] of Object.entries(changes)) {
+    const input = schedulingFixture(); input.context[field] = value;
+    assert.throws(() => validateScheduledBuild(input), /exact desktop workflow Actions context/);
+  }
+  for (const runAttempt of [0, -1, 1.5, '1', undefined, Number.MAX_SAFE_INTEGER + 1]) {
+    const input = schedulingFixture(); input.context.runAttempt = runAttempt;
+    assert.throws(() => validateScheduledBuild(input), /exact desktop workflow Actions context/);
+  }
+  for (const changes of [{ checkoutCommit: 'b'.repeat(40) }, { expectedCommit: 'b'.repeat(40) }, { runId: '8' }]) {
+    assert.throws(() => validateScheduledBuild({ ...schedulingFixture(), ...changes }), /exact desktop workflow Actions context/);
+  }
+  for (const publishRequested of [undefined, false, true, 'false', '']) {
+    assert.throws(() => validateScheduledBuild({ ...schedulingFixture(), publishRequested }), /explicitly requested/);
+  }
+  for (const event of [{}, { inputs: { publish: false } }, { ...schedulingFixture().event, ref: 'another-branch' },
+    { ...schedulingFixture().event, repository: { full_name: 'other/repository' } }]) {
+    assert.throws(() => validateScheduledBuild({ ...schedulingFixture(), event }), /explicitly requested/);
+  }
+});
+test('missing Actions fields and local or standalone contexts cannot enter scheduled publication', () => {
+  for (const context of [undefined, null, {}, workflowExecution({}), workflowExecution({ GITHUB_ACTIONS: 'true' })]) {
+    assert.throws(() => validateScheduledBuild({ ...schedulingFixture(), context }), /exact desktop workflow Actions context/);
+  }
+  for (const field of Object.keys(schedulingFixture().context)) {
+    const input = schedulingFixture(); delete input.context[field];
+    assert.throws(() => validateScheduledBuild(input), /exact desktop workflow Actions context/);
+  }
+  const local = schedulingFixture();
+  local.context = workflowExecution({ ...local.environment, GITHUB_ACTIONS: 'false' });
+  assert.throws(() => validateScheduledBuild(local), /exact desktop workflow Actions context/);
+  const standalone = schedulingFixture();
+  standalone.context.workflowRef = 'ecojust/open-media/.github/workflows/publish-release.yml@refs/heads/master';
+  assert.throws(() => validateScheduledBuild(standalone), /exact desktop workflow Actions context/);
+});
+test('scheduler success cannot replace required artifacts, digests or the corresponding source', () => {
+  const input = schedulingFixture();
+  for (const artifact of input.artifacts) {
+    assert.throws(() => validateScheduledBuild({ ...input, artifacts: input.artifacts.filter(item => item !== artifact) }), /Missing or invalid artifact/);
+    for (const change of [{ expired: true }, { size_in_bytes: 0 }, { digest: undefined }, { digest: 'wrong' }]) {
+      assert.throws(() => validateScheduledBuild({ ...input, artifacts: input.artifacts.map(item => item === artifact ? { ...item, ...change } : item) }), /Missing or invalid artifact/);
+    }
+  }
+  assert.throws(() => validateScheduledBuild({ ...input, artifacts: [...input.artifacts, input.artifacts[0]] }), /Missing or invalid artifact/);
+  assert.throws(() => validateScheduledBuild({ ...input, releasePolicy: { installedSpeechVerification: { enabled: false } } }), /requires a nonempty reason/);
+});
+test('artifact workflow evidence binds platform receipts to the exact scheduled source and voice policy', () => {
+  const input = schedulingFixture(), { proof } = validateScheduledBuild(input);
+  for (const platform of ['windows-x64', 'macos-arm64', 'macos-x64', 'runtime-source']) {
+    const execution = { ...input.context, job: platform === 'runtime-source' ? 'runtime-source' : 'desktop', installedSpeechOutcome: 'omitted' };
+    verifyWorkflowArtifact(execution, platform, proof, disabledSpeechPolicy);
+    for (const changes of [{ headSha: 'b'.repeat(40) }, { workflowSha: 'b'.repeat(40) }, { runId: '8' }, { runAttempt: 0 },
+      { runAttempt: 2 }, { runAttempt: '1' }, { actions: false }, { schema: 2 }, { eventName: 'push' }, { job: 'publish' },
+      { workflowRef: 'other/workflow' }, { repository: 'someone/other' }, { serverUrl: 'https://example.com' }]) {
+      assert.throws(() => verifyWorkflowArtifact({ ...execution, ...changes }, platform, proof, disabledSpeechPolicy), /Artifact workflow execution differs/);
+    }
+    assert.throws(() => verifyWorkflowArtifact(undefined, platform, proof, disabledSpeechPolicy), /Artifact workflow execution differs/);
+    if (platform !== 'runtime-source') {
+      verifyWorkflowArtifact({ ...execution, installedSpeechOutcome: 'success' }, platform, proof, enabledSpeechPolicy);
+      for (const outcome of [undefined, 'failure', 'cancelled', 'in_progress', 'omitted', 'skipped']) {
+        assert.throws(() => verifyWorkflowArtifact({ ...execution, installedSpeechOutcome: outcome }, platform, proof, enabledSpeechPolicy), /step outcome contradicts/);
+      }
+      for (const outcome of [undefined, 'success', 'failure', 'cancelled', 'in_progress']) {
+        assert.throws(() => verifyWorkflowArtifact({ ...execution, installedSpeechOutcome: outcome }, platform, proof, disabledSpeechPolicy), /step outcome contradicts/);
+      }
+    }
+    // A publisher-only retry may reuse successful dependencies from an earlier
+    // attempt of this exact run; future attempts and other runs remain invalid.
+    verifyWorkflowArtifact(execution, platform, { ...proof, context: { ...proof.context, runAttempt: 2 } }, disabledSpeechPolicy);
+  }
+});
+test('the source job writes executable Node metadata bound to its actual workflow context', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'open-media-source-receipt-'));
+  try {
+    mkdirSync(join(directory, 'scripts')); mkdirSync(join(directory, 'source-artifacts'));
+    copyFileSync(new URL('../scripts/release-validation.mjs', import.meta.url), join(directory, 'scripts/release-validation.mjs'));
+    const workflow = readFileSync(new URL('../.github/workflows/desktop-build.yml', import.meta.url), 'utf8');
+    const sourceJob = workflow.split('\n  runtime-source:\n')[1].split('\n  desktop:\n')[0];
+    const script = /node --input-type=module <<'NODE'\n([\s\S]*?)\n\s+NODE/.exec(sourceJob)?.[1];
+    assert.ok(script, 'The source job must write its workflow receipt.');
+    const input = schedulingFixture();
+    execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: directory, env: { ...input.environment, GITHUB_JOB: 'runtime-source' },
+    });
+    const meta = JSON.parse(readFileSync(join(directory, 'source-artifacts/build.json')));
+    assert.equal(meta.commit, commit); assert.equal(meta.kind, 'corresponding-source');
+    verifyWorkflowArtifact(meta.workflowExecution, 'runtime-source', validateScheduledBuild(input).proof, disabledSpeechPolicy);
+    const receipt = { ...input.context, job: 'runtime-source' };
+    for (const field of Object.keys(receipt)) {
+      const missing = { ...receipt }; delete missing[field];
+      assert.throws(() => verifyWorkflowArtifact(missing, 'runtime-source', validateScheduledBuild(input).proof, disabledSpeechPolicy), /Artifact workflow execution differs/);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 test('release requires the same successful source commit and all platform checks', () => {
   const { run, jobs, artifacts } = fixture();
   assert.equal(validateBuild(run, jobs, artifacts, commit).length, 4);

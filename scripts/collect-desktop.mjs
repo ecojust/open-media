@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, statSync, mkdirSync, copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { digest, verifySpeechMetadata, verifyDigest, verifySpeechSynthesis } from './release-validation.mjs';
+import { digest, verifySpeechMetadata, verifyDigest, verifySpeechSynthesis, workflowExecution } from './release-validation.mjs';
 
 const directory = `src-tauri/target/${process.env.MEDIA_TARGET}/release/bundle`;
 const collect = (root) => readdirSync(root).flatMap(name => {
@@ -42,6 +42,8 @@ for (const voice of speechEvidence.voices) {
 }
 writeFileSync('desktop-artifacts/speech-verification.json', speechEvidenceBytes);
 const speechVerification = { file: 'speech-verification.json', sha256: digest(speechEvidenceBytes), bytes: speechEvidenceBytes.length };
-writeFileSync('desktop-artifacts/build.json', JSON.stringify({ commit: process.env.MEDIA_COMMIT, platform: process.env.MEDIA_PLATFORM, version: JSON.parse(readFileSync('package.json', 'utf8')).version, runtime: JSON.parse(readFileSync('src-tauri/resources/media/runtime.json', 'utf8')), speechRuntime, speechVerification }, null, 2) + '\n');
+const stepOutcomes = JSON.parse(process.env.MEDIA_STEP_OUTCOMES || '{}');
+const execution = { ...workflowExecution(process.env), installedSpeechOutcome: stepOutcomes['all-speech-voices']?.outcome || 'omitted' };
+writeFileSync('desktop-artifacts/build.json', JSON.stringify({ commit: process.env.MEDIA_COMMIT, platform: process.env.MEDIA_PLATFORM, version: JSON.parse(readFileSync('package.json', 'utf8')).version, runtime: JSON.parse(readFileSync('src-tauri/resources/media/runtime.json', 'utf8')), speechRuntime, speechVerification, workflowExecution: execution }, null, 2) + '\n');
 copyFileSync('LICENSE', 'desktop-artifacts/LICENSE');
 copyFileSync('THIRD_PARTY_NOTICES.md', 'desktop-artifacts/THIRD_PARTY_NOTICES.md');

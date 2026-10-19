@@ -2,6 +2,12 @@ name: Build Open Media desktop
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish this exact build after every required job succeeds
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main, master]
   pull_request:
@@ -178,7 +184,11 @@ jobs:
           sha256sum source-artifacts/open-media-runtime-source.tar.gz source-artifacts/open-media-speech-source.tar.gz | sed 's|source-artifacts/||' > source-artifacts/SHA256SUMS
           cp THIRD_PARTY_NOTICES.md source-artifacts/
           cp LICENSE source-artifacts/
-          printf '{"commit":"%s","kind":"corresponding-source"}\n' '${{ github.sha }}' > source-artifacts/build.json
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs';
+          import { workflowExecution } from './scripts/release-validation.mjs';
+          writeFileSync('source-artifacts/build.json', JSON.stringify({ commit: process.env.GITHUB_SHA, kind: 'corresponding-source', workflowExecution: workflowExecution(process.env) }, null, 2) + '\n');
+          NODE
       - name: Summarize corresponding source failures
         if: failure() && steps.complete-source.outcome == 'failure'
         run: node scripts/report-build-failure.mjs source-logs/media.log source-logs/speech.log
@@ -478,6 +488,7 @@ jobs:
           MEDIA_TARGET: ${{ matrix.target }}
           MEDIA_PLATFORM: ${{ matrix.platform }}
           MEDIA_COMMIT: ${{ github.sha }}
+          MEDIA_STEP_OUTCOMES: ${{ toJSON(steps) }}
         run: node scripts/collect-desktop.mjs
       - name: Summarize media build failures
         if: failure()
@@ -521,3 +532,48 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+  publish:
+    name: Publish the verified build
+    needs: [checks, runtime-source, desktop]
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.publish == true &&
+      needs.checks.result == 'success' && needs.runtime-source.result == 'success' &&
+      needs.desktop.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    concurrency:
+      group: publish-desktop-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependency notice audit inputs
+        run: npm ci --ignore-scripts
+      - name: Verify release guardrails
+        run: node --test tests/release.test.mjs
+      - name: Verify scheduler evidence and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_BUILD_RUN: ${{ github.run_id }}
+          RELEASE_EXPECTED_COMMIT: ${{ github.sha }}
+          RELEASE_BUILD_VALIDATION: same-workflow
+          RELEASE_SCHEDULED_NEEDS: ${{ toJSON(needs) }}
+          RELEASE_DISPATCH_PUBLISH: ${{ inputs.publish }}
+        run: node scripts/publish-release.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-output/*
+          if-no-files-found: warn
+          retention-days: 14

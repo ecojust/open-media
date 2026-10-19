@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { verifySourceContents } from './release-source.mjs'
 import { join, resolve } from 'node:path'
-import { digest, validateBuild, verifyDigest, verifyMetadata, validateAssetMetadata, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
+import { digest, validateBuild, validateScheduledBuild, workflowExecution, verifyWorkflowArtifact, verifyDigest, verifyMetadata, validateAssetMetadata, verifyMediaMetadata, mediaRuntimeSourceFiles, verifySpeechMetadata, verifySpeechSynthesis, sourceChecksums, speechSourceRequirements } from './release-validation.mjs'
 
 const repository = process.env.RELEASE_REPOSITORY
 const runId = process.env.RELEASE_BUILD_RUN
@@ -27,14 +27,33 @@ async function list(path, field) {
     if (items.length < 100) return values
   }
 }
-const [run, jobs, artifacts] = await Promise.all([
-  api(`/actions/runs/${runId}`), list(`/actions/runs/${runId}/jobs`, 'jobs'), list(`/actions/runs/${runId}/artifacts`, 'artifacts'),
-])
 const sourceFile = path => execFileSync('git', ['show', `${commit}:${path}`], { maxBuffer: 5 * 1024 * 1024 })
 const releasePolicyPath = 'scripts/release-policy.json'
 const releasePolicyBytes = sourceFile(releasePolicyPath)
 const releasePolicy = JSON.parse(releasePolicyBytes)
-const selected = validateBuild(run, jobs, artifacts, commit, releasePolicy)
+const validationMode = process.env.RELEASE_BUILD_VALIDATION || 'api'
+let selected, buildValidation, sourceRunUrl
+if (validationMode === 'same-workflow') {
+  const context = workflowExecution(process.env)
+  const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'))
+  const needs = JSON.parse(process.env.RELEASE_SCHEDULED_NEEDS || 'null')
+  const artifacts = await list(`/actions/runs/${runId}/artifacts`, 'artifacts')
+  const verified = validateScheduledBuild({ context, event, needs, artifacts, repository, runId, expectedCommit: commit,
+    checkoutCommit: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    publishRequested: process.env.RELEASE_DISPATCH_PUBLISH, releasePolicy })
+  selected = verified.selected
+  buildValidation = verified.proof
+  sourceRunUrl = `${context.serverUrl}/${repository}/actions/runs/${runId}`
+} else if (validationMode === 'api') {
+  const [run, jobs, artifacts] = await Promise.all([
+    api(`/actions/runs/${runId}`), list(`/actions/runs/${runId}/jobs`, 'jobs'), list(`/actions/runs/${runId}/artifacts`, 'artifacts'),
+  ])
+  selected = validateBuild(run, jobs, artifacts, commit, releasePolicy)
+  buildValidation = { schema: 1, kind: 'github-api', runId: run.id, runAttempt: run.run_attempt, workflow: run.path, headSha: run.head_sha,
+    status: run.status, conclusion: run.conclusion,
+    jobs: jobs.map(({ id, name, status, conclusion }) => ({ id, name, status, conclusion })) }
+  sourceRunUrl = run.html_url
+} else throw new Error('Unknown release build validation mode.')
 const expectedMedia = { sourceLockSha256: digest(sourceFile('scripts/media-runtime.lock.json')), buildScriptSha256: digest(sourceFile('scripts/build-media-runtime.sh')), capabilitiesScriptSha256: digest(sourceFile('scripts/media-runtime-capabilities.mjs')) }
 const speechLockBytes = sourceFile('scripts/speech-runtime.lock.json')
 const speechLock = JSON.parse(speechLockBytes)
@@ -55,8 +74,9 @@ const notes = sourceFile(`.github/release-notes/${tag}.md`).toString('utf8')
 if (!notes.trim()) throw new Error('Reviewed release notes are required.')
 const output = resolve('release-output'), temporary = resolve('.release-staging')
 await mkdir(output, { recursive: true }); await mkdir(temporary, { recursive: true })
+await writeFile(join(output, 'build-validation.json'), `${JSON.stringify(buildValidation, null, 2)}\n`)
 const payloads = new Map()
-const verification = { version, commit, sourceRunId: run.id, sourceRunUrl: run.html_url, releasePolicy: { ...releasePolicy, sourcePath: releasePolicyPath, sha256: digest(releasePolicyBytes) }, platforms: [] }
+const verification = { version, commit, sourceRunId: Number(runId), sourceRunUrl, buildValidation, releasePolicy: { ...releasePolicy, sourcePath: releasePolicyPath, sha256: digest(releasePolicyBytes) }, platforms: [] }
 
 for (const { platform, artifact } of selected) {
   // Read the redirect explicitly: the repository token is never sent to blob storage.
@@ -87,6 +107,7 @@ with zipfile.ZipFile(archive) as z:
     z.extractall(target)
 `, archive, directory, String((platform === 'runtime-source' ? 2048 : 512) * 1024 * 1024)], { stdio: 'pipe' })
   const meta = JSON.parse(await readFile(join(directory, 'build.json'), 'utf8'))
+  if (validationMode === 'same-workflow') verifyWorkflowArtifact(meta.workflowExecution, platform, buildValidation, releasePolicy)
   let speechVerification
   if (platform === 'runtime-source') {
     if (meta.commit !== commit || meta.kind !== 'corresponding-source') throw new Error('Corresponding source commit mismatch.')
@@ -120,7 +141,7 @@ with zipfile.ZipFile(archive) as z:
     }
     const sourceName = `Open-Media_${version}_media-runtime-source.tar.gz`
     payloads.set(sourceName, source)
-    verification.mediaSource = { artifactId: artifact.id, artifactDigest: artifact.digest, file: sourceName, sha256: digest(source), size: source.length }
+    verification.mediaSource = { artifactId: artifact.id, artifactDigest: artifact.digest, file: sourceName, sha256: digest(source), size: source.length, workflowExecution: meta.workflowExecution }
     const speechFile = 'open-media-speech-source.tar.gz'
     const speechSource = await readFile(join(directory, speechFile))
     verifyDigest(speechSource, `sha256:${entries.get(speechFile)}`)
@@ -143,7 +164,7 @@ with zipfile.ZipFile(archive) as z:
   if (!installer.length) throw new Error('Empty installer.')
   const name = `Open-Media_${version}_${platform}${platform === 'windows-x64' ? '-setup.exe' : '.dmg'}`
   payloads.set(name, installer)
-  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, mediaRuntime: meta.runtime, speechRuntime: meta.speechRuntime, speechVerification })
+  verification.platforms.push({ platform, artifactId: artifact.id, artifactDigest: artifact.digest, file: name, sha256: digest(installer), size: installer.length, mediaRuntime: meta.runtime, speechRuntime: meta.speechRuntime, speechVerification, workflowExecution: meta.workflowExecution })
   console.log(`Verified ${platform}: source, artifact archive, installer and notices. Installed speech verification: ${speechVerification.status}${speechVerification.status === 'skipped' ? ` (${speechVerification.reason})` : ' (seven voices)'}.`)
 }
 
@@ -187,7 +208,7 @@ const reference = await api(`/git/ref/tags/${tag}`)
 let tagged = reference.object
 while (tagged.type === 'tag') tagged = (await api(`/git/tags/${tagged.sha}`)).object
 if (tagged.type !== 'commit' || tagged.sha !== commit) throw new Error('Release tag does not match the verified source commit.')
-await writeFile(join(output, 'verification.json'), `${JSON.stringify({ release: release.html_url, version, commit, assets: uploaded.map(asset => ({ name: asset.name, size: asset.size, digest: asset.digest })) }, null, 2)}\n`)
+await writeFile(join(output, 'verification.json'), `${JSON.stringify({ release: release.html_url, version, commit, buildValidation, assets: uploaded.map(asset => ({ name: asset.name, size: asset.size, digest: asset.digest })) }, null, 2)}\n`)
 if (process.env.GITHUB_STEP_SUMMARY) await writeFile(process.env.GITHUB_STEP_SUMMARY, `Published [Open Media ${tag}](${release.html_url}) after verifying all three installers, application source, and complete corresponding media and speech sources.\n\nInstalled speech verification: ${releasePolicy.installedSpeechVerification.enabled ? 'passed for all seven voices on each platform' : `skipped — ${releasePolicy.installedSpeechVerification.reason}`}\n`)
 await rm(temporary, { recursive: true, force: true })
 console.log(`Published ${release.html_url}`)
