@@ -253,6 +253,38 @@ impl MediaStore {
         fs::write(temp.path(), bytes).map_err(|e| e.to_string())?;
         self.import(runtime, temp.path(), Some(name))
     }
+    /// Capture output is already a PNG. Read its dimensions locally instead of
+    /// starting a media-probing process for this known still-image format.
+    pub fn import_png(&self, input: &Path, name: &str) -> Result<Asset> {
+        self.checked_root()?;
+        let file = fs::File::open(input).map_err(|error| format!("无法读取截屏：{error}"))?;
+        let mut decoder = png::Decoder::new(BufReader::new(file));
+        decoder.set_limits(png::Limits { bytes: 400_000_000 });
+        let mut reader = decoder.read_info().map_err(|error| format!("截屏图片无效：{error}"))?;
+        let (width, height) = (reader.info().width, reader.info().height);
+        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 100_000_000 {
+            return Err("截屏尺寸无效或范围过大。".into());
+        }
+        // Decode one row at a time to validate actual image data without keeping
+        // another full desktop-sized bitmap in memory.
+        while reader.next_row().map_err(|error| format!("截屏图片损坏：{error}"))?.is_some() {}
+        reader.finish().map_err(|error| format!("截屏图片不完整：{error}"))?;
+        let destination = self.root.join(format!("{}.png", new_id()));
+        let size = match fs::copy(input, &destination) {
+            Ok(size) => size,
+            Err(error) => {
+                let _ = fs::remove_file(&destination);
+                return Err(format!("无法保存截屏：{error}"));
+            }
+        };
+        let asset = Asset {
+            id: new_id(), name: name.into(), kind: "image".into(), url: String::new(),
+            duration: 5.0, width, height, size, mime: "image/png".into(),
+            native_path: destination.to_string_lossy().into(),
+        };
+        let _ = crate::media_metadata::remember_name(self, &asset);
+        Ok(asset)
+    }
     pub fn authorized_path(&self, asset: &Value) -> Result<PathBuf> {
         self.checked_root()?;
         let path = asset

@@ -11,7 +11,7 @@ import type { MediaAsset } from '../core/types'
 import { readMicrophonePreference, writeMicrophonePreference } from '../core/microphone-devices'
 import { recordingClock, type CaptureControlAction, type CaptureControlsSnapshot } from '../core/capture-controls'
 import { browserCaptureAvailable, captureErrorMessage, startBrowserCapture, type BrowserCapture, type BrowserCaptureSelectionRequest } from '../core/capture'
-import { cancelCapturePicker, cancelCaptureStart, getCaptureStatus, onCaptureControlsAction, pauseCapture, pickCaptureSource, resumeCapture, setCaptureMicrophone, startCapture, stopCapture, type CaptureSelection, type CapturePickerPreferences, type CaptureStatus } from '../native'
+import { cancelCapturePicker, cancelCaptureStart, getCaptureStatus, onCaptureControlsAction, pauseCapture, pickCaptureSource, resumeCapture, setCaptureMicrophone, showMainWindow, startCapture, stopCapture, type CaptureSelection, type CapturePickerPreferences, type CaptureStatus } from '../native'
 
 const props = withDefaults(defineProps<{ assets: MediaAsset[]; native: boolean; screenshotShortcut?: string | null; screenshotBusy?: boolean; screenshotDisabled?: boolean; screenshotError?: string; screenshotConfiguring?: boolean }>(), { screenshotShortcut: null, screenshotBusy: false, screenshotDisabled: false, screenshotError: '', screenshotConfiguring: false })
 const emit = defineEmits<{ captured: [blob: Blob, name: string]; asset: [asset: MediaAsset]; status: [message: string]; 'add-to-timeline': [assetId: string]; 'recording-change': [active: boolean]; screenshot: []; 'screenshot-shortcut-change': [shortcut: string | null] }>()
@@ -78,6 +78,11 @@ function clearPreview(): void {
   if (finishedUrl.value) URL.revokeObjectURL(finishedUrl.value)
   finishedUrl.value = ''
   if (preview.value) { preview.value.pause(); preview.value.srcObject = null; preview.value.removeAttribute('src'); preview.value.load() }
+}
+async function restoreAfterCapture(): Promise<void> {
+  if (!props.native || destroyed) return
+  try { await showMainWindow() }
+  catch (cause) { emit('status', `无法自动返回录制界面：${captureErrorMessage(cause)}`) }
 }
 function finished(blob: Blob, name: string): void {
   phase.value = 'idle'
@@ -214,7 +219,10 @@ async function begin(): Promise<void> {
     remaining.value = 0
     if (nativeStarted) await recoverNativeStop(cause)
     else { error.value = abort.signal.aborted || cause instanceof DOMException && cause.name === 'AbortError' ? '' : captureErrorMessage(cause); phase.value = 'idle' }
-  } finally { if (startAbort === abort) startAbort = undefined }
+  } finally {
+    if (startAbort === abort) startAbort = undefined
+    if (phase.value === 'idle') await restoreAfterCapture()
+  }
 }
 async function recoverNativeStop(cause: unknown): Promise<void> {
   const originalError = captureErrorMessage(cause)
@@ -321,7 +329,7 @@ async function stop(): Promise<void> {
   } catch (cause) {
     if (!props.native) { error.value = captureErrorMessage(cause); phase.value = 'idle'; return }
     await recoverNativeStop(cause)
-  } finally { controlBusy.value = false }
+  } finally { controlBusy.value = false; await restoreAfterCapture() }
 }
 function beforeUnload(event: BeforeUnloadEvent): void { if (active.value) { event.preventDefault(); event.returnValue = '' } }
 onMounted(() => {
@@ -344,6 +352,7 @@ onMounted(() => {
         updateNativeSource(value)
         error.value = recoveryError || value.error || ''
         if (value.state === 'idle' || value.state === 'paused' || value.state === 'recording') phase.value = value.state
+        if (value.state === 'idle') void restoreAfterCapture()
       }).catch(cause => { if (!destroyed && version === nativeStateVersion && ['recording', 'paused'].includes(phase.value)) error.value = recoveryError || captureErrorMessage(cause) }).finally(() => { polling = false })
     }
   }, 300)

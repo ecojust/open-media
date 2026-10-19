@@ -621,11 +621,14 @@ mod desktop {
         state.inner().clone().configure(shortcut).await
     }
     #[tauri::command]
+    pub fn get_desktop_platform(window: tauri::WebviewWindow) -> engine::Result<String> {
+        capture_picker::require_main(&window)?;
+        Ok(std::env::consts::OS.to_string())
+    }
+    #[tauri::command]
     pub fn show_main_window(window: tauri::WebviewWindow) -> engine::Result<()> {
         capture_picker::require_main(&window)?;
-        window.unminimize().map_err(|error| error.to_string())?;
-        window.show().map_err(|error| error.to_string())?;
-        window.set_focus().map_err(|error| error.to_string())
+        capture_picker::restore_main_window(&window)
     }
     #[tauri::command]
     pub async fn capture_screenshot(
@@ -993,6 +996,7 @@ mod desktop {
                 discard_speech_job,
                 accept_speech_jobs,
                 configure_screenshot_shortcut,
+                get_desktop_platform,
                 capture_screenshot,
                 show_main_window,
                 list_capture_devices,

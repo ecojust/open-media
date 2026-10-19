@@ -42,6 +42,7 @@ async function installNativeBridge(page) {
       convertFileSrc: path => path,
       invoke: async (command, args = {}) => {
         fixture.calls.push({ command, args: structuredClone(args) })
+        if (command === 'get_desktop_platform') return 'macos'
         if (command === 'plugin:event|listen') {
           const id = fixture.counter++; fixture.listeners.set(id, { ...args, id }); return id
         }

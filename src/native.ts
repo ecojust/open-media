@@ -152,7 +152,14 @@ export async function onNativeCloseRequest(handler: () => void): Promise<() => v
 export async function closeNativeWindow(): Promise<void> { return call('close_native_window') }
 
 export async function configureScreenshotShortcut(shortcut: string | null): Promise<string | null> { return call('configure_screenshot_shortcut', { shortcut }) }
-export async function captureScreenshot(selection: CaptureSelection): Promise<MediaAsset> { return assetUrl(await call('capture_screenshot', { selection })) }
+export async function captureScreenshot(selection: CaptureSelection): Promise<MediaAsset> {
+  const asset = await call<MediaAsset>('capture_screenshot', { selection })
+  // The native screenshot path validates the generated PNG. Display it directly
+  // instead of decoding it once here and again when the image editor opens.
+  if (!asset.nativePath || asset.kind !== 'image' || asset.mime !== 'image/png') return assetUrl(asset)
+  const { convertFileSrc } = await import('@tauri-apps/api/core')
+  return { ...asset, url: convertFileSrc(asset.nativePath) }
+}
 export async function onScreenshotRequested(handler: () => void): Promise<() => void> {
   const { listen } = await import('@tauri-apps/api/event')
   return listen('screenshot-requested', handler)

@@ -1155,6 +1155,8 @@ fn resolve_source(runtime: &Runtime, id: &str, cancelled: &AtomicBool) -> Result
     }
 }
 pub fn list_devices(runtime: &Runtime) -> Result<Vec<CaptureDevice>> {
+    #[cfg(target_os = "windows")]
+    clear_windows_audio_devices();
     list_devices_with_permission(runtime, false, &AtomicBool::new(false))
 }
 pub fn list_devices_with_resource(
@@ -1175,7 +1177,70 @@ pub fn list_devices_with_resource_cancellable(
     request_permission: bool,
     cancelled: &AtomicBool,
 ) -> Result<Vec<CaptureDevice>> {
+    #[cfg(target_os = "windows")]
+    clear_windows_audio_devices();
     list_devices_with_permission(runtime, request_permission, cancelled)
+}
+pub fn list_picker_devices_with_resource_cancellable(
+    runtime: &Runtime,
+    _resource: &Path,
+    request_permission: bool,
+    include_audio: bool,
+    cancelled: &AtomicBool,
+) -> Result<Vec<CaptureDevice>> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = request_permission;
+        if include_audio { clear_windows_audio_devices(); }
+        return list_windows_devices(runtime, include_audio, cancelled);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = include_audio;
+        list_devices_with_permission(runtime, request_permission, cancelled)
+    }
+}
+
+#[cfg(target_os = "windows")]
+type WindowsAudioDeviceCache = Option<(PathBuf, Instant, Vec<CaptureDevice>)>;
+#[cfg(target_os = "windows")]
+static WINDOWS_AUDIO_DEVICES: Mutex<WindowsAudioDeviceCache> = Mutex::new(None);
+
+#[cfg(target_os = "windows")]
+fn clear_windows_audio_devices() {
+    if let Ok(mut cached) = WINDOWS_AUDIO_DEVICES.lock() { *cached = None; }
+}
+
+#[cfg(target_os = "windows")]
+fn list_windows_devices(runtime: &Runtime, include_audio: bool, cancelled: &AtomicBool) -> Result<Vec<CaptureDevice>> {
+    check_cancelled(cancelled)?;
+    let mut devices = crate::capture_windows::list_targets()?.into_iter().map(from_windows).collect::<Vec<_>>();
+    check_cancelled(cancelled)?;
+    if !include_audio { return Ok(devices); }
+    // Source selection and starting the recorder happen close together. Reuse
+    // only the audio enumeration, never desktop geometry or live device handles.
+    let cached = WINDOWS_AUDIO_DEVICES.lock().ok().and_then(|cached| {
+        cached.as_ref().filter(|(encoder, at, _)| encoder == &runtime.encoder && at.elapsed() < Duration::from_secs(30))
+            .map(|(_, _, devices)| devices.clone())
+    });
+    let audio = if let Some(cached) = cached { cached } else {
+        let mut command = process(&runtime.encoder);
+        command.args(["-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"]);
+        let (_, _, stderr) = run_source_listing(command, cancelled, Duration::from_secs(25))?;
+        check_cancelled(cancelled)?;
+        let devices = parse_devices(&String::from_utf8_lossy(&stderr), false);
+        // No cache lock is held while scanning. Empty/failed enumerations are
+        // retried; an explicit refresh or a new picker also invalidates this.
+        if !devices.is_empty() {
+            if let Ok(mut cached) = WINDOWS_AUDIO_DEVICES.lock() {
+                *cached = Some((runtime.encoder.clone(), Instant::now(), devices.clone()));
+            }
+        }
+        devices
+    };
+    check_cancelled(cancelled)?;
+    devices.extend(audio);
+    Ok(devices)
 }
 fn list_devices_with_permission(
     runtime: &Runtime,
@@ -1191,23 +1256,7 @@ fn list_devices_with_permission(
     #[cfg(target_os = "windows")]
     {
         let _ = request_permission;
-        let mut devices = crate::capture_windows::list_targets()?
-            .into_iter()
-            .map(from_windows)
-            .collect::<Vec<_>>();
-        let mut command = process(&runtime.encoder);
-        command.args([
-            "-hide_banner",
-            "-list_devices",
-            "true",
-            "-f",
-            "dshow",
-            "-i",
-            "dummy",
-        ]);
-        let (_, _, stderr) = run_source_listing(command, cancelled, Duration::from_secs(25))?;
-        devices.extend(parse_devices(&String::from_utf8_lossy(&stderr), false));
-        return Ok(devices);
+        return list_windows_devices(runtime, true, cancelled);
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {

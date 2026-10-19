@@ -1,0 +1,134 @@
+name: Verify Windows capture responsiveness
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/windows-capture-responsiveness]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    name: Native capture checks on Windows
+    runs-on: windows-2022
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: never
+      OPEN_MEDIA_CAPTURE_TEST_ARTIFACTS: ${{ github.workspace }}/test-results/capture-windows/native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: windows-capture-checks
+          cache-on-failure: true
+      - name: Record the test host and source revision
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force test-results/capture-windows | Out-Null
+          $system = Get-CimInstance Win32_OperatingSystem
+          $hostInfo = [ordered]@{
+            commit = $env:GITHUB_SHA
+            runner = $env:RUNNER_NAME
+            runnerImage = $env:ImageOS
+            runnerImageVersion = $env:ImageVersion
+            operatingSystem = $system.Caption
+            operatingSystemVersion = $system.Version
+            architecture = $env:PROCESSOR_ARCHITECTURE
+            rust = (rustc --version)
+            scope = 'Hosted runner; synthetic test windows and generated media only. No microphone access. These timings are not measurements of a user computer or the packaged application.'
+          }
+          $hostInfo | ConvertTo-Json | Tee-Object -FilePath test-results/capture-windows/environment.json
+      - name: Check the desktop integration without packaging resources
+        id: desktop
+        env:
+          # Only the package resource map is omitted. The application, window,
+          # capabilities and native commands retain their production settings.
+          TAURI_CONFIG: '{"bundle":{"active":false,"resources":[]}}'
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path src-tauri/Cargo.toml --locked --all-targets 2>&1 | tee test-results/capture-windows/desktop-check.log
+      - name: Verify screenshot import and capture selection
+        id: screenshot
+        if: always() && steps.desktop.outcome != 'cancelled'
+        run: |
+          set -euo pipefail
+          for filter in screenshot::tests capture_picker::tests; do
+            log="test-results/capture-windows/${filter//::/-}.log"
+            cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib "$filter" -- --nocapture --test-threads=1 2>&1 | tee "$log"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed;' "$log"
+          done
+      - name: Capture and decode a generated test window with no media subprocess
+        id: native-screenshot
+        if: always() && steps.screenshot.outcome == 'success'
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib real_screenshot_window_region_and_screen_need_no_media_process -- --nocapture --test-threads=1 2>&1 | tee test-results/capture-windows/native-screenshot.log
+          grep -Eq '^test result: ok\. 1 passed;' test-results/capture-windows/native-screenshot.log
+          test -s test-results/capture-windows/native/native-screenshot-timings.json
+          cat test-results/capture-windows/native/native-screenshot-timings.json
+      - name: Prepare an encoder for synthetic recording checks
+        id: encoder
+        if: always() && steps.screenshot.outcome == 'success'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --yes --no-progress --limit-output
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue) -or -not (Get-Command ffprobe -ErrorAction SilentlyContinue)) {
+            throw 'The synthetic recording checks require both ffmpeg and ffprobe.'
+          }
+          ffmpeg -version 2>&1 | Tee-Object -FilePath test-results/capture-windows/test-encoder.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ffprobe -version 2>&1 | Tee-Object -FilePath test-results/capture-windows/test-probe.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "OPEN_MEDIA_FFMPEG=$((Get-Command ffmpeg).Source)" >> $env:GITHUB_ENV
+          "OPEN_MEDIA_FFPROBE=$((Get-Command ffprobe).Source)" >> $env:GITHUB_ENV
+      - name: Verify recording readiness, cancellation and the native border
+        id: recording
+        if: always() && steps.encoder.outcome == 'success'
+        run: |
+          set -euo pipefail
+          for filter in capture::capture_tests capture_windows::; do
+            log="test-results/capture-windows/${filter//::/-}.log"
+            cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib "$filter" -- --nocapture --test-threads=1 2>&1 | tee "$log"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed;' "$log"
+          done
+      - name: Summarize the observed results
+        if: always()
+        shell: pwsh
+        run: |
+          @'
+          ## Windows capture checks
+
+          | Check | Result |
+          | --- | --- |
+          | Desktop native integration compilation | ${{ steps.desktop.outcome }} |
+          | PNG validation and capture selection | ${{ steps.screenshot.outcome }} |
+          | Native screenshot pixels and elapsed time | ${{ steps.native-screenshot.outcome }} |
+          | Recording readiness, cancellation and border | ${{ steps.recording.outcome }} |
+
+          The hosted Windows runner captures only generated fixtures and its disposable desktop. Recording tests use generated colors and tones; they never enable a microphone. The native screenshot test intentionally supplies missing encoder/probe paths and verifies decoded pixels. The separate recording checks use the encoder identified in the artifacts, not a packaged media runtime. Compilation and these native tests do not measure full application startup, screenshot-to-editor latency, or a user's hardware. No installer or release is produced.
+          '@ >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path test-results/capture-windows/native/native-screenshot-timings.json) {
+            '```json' >> $env:GITHUB_STEP_SUMMARY
+            Get-Content test-results/capture-windows/native/native-screenshot-timings.json >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: open-media-windows-capture-checks-${{ github.run_id }}
+          path: test-results/capture-windows/
+          if-no-files-found: warn
+          retention-days: 14

@@ -137,7 +137,7 @@ fn border_rects(bounds: &CaptureBounds) -> [CaptureBounds; 4] {
 }
 
 #[cfg(windows)]
-pub use platform::{list_targets, resolve_target, BorderIndicator};
+pub use platform::{capture_png, list_targets, resolve_target, BorderIndicator};
 
 #[cfg(not(windows))]
 pub fn list_targets() -> Result<Vec<VisualTarget>> {
@@ -171,7 +171,9 @@ mod platform {
     };
     use std::{
         ffi::c_void,
+        io::Write,
         mem::{size_of, zeroed},
+        path::Path,
         ptr::{null, null_mut},
         sync::{
             atomic::{AtomicU64, Ordering},
@@ -238,6 +240,20 @@ mod platform {
         point: Point,
         private: u32,
     }
+    #[repr(C)]
+    struct BitmapInfoHeader {
+        size: u32,
+        width: i32,
+        height: i32,
+        planes: u16,
+        bit_count: u16,
+        compression: u32,
+        image_size: u32,
+        x_pixels_per_meter: i32,
+        y_pixels_per_meter: i32,
+        colors_used: u32,
+        colors_important: u32,
+    }
     #[link(name = "user32")]
     extern "system" {
         fn EnumWindows(callback: unsafe extern "system" fn(Hwnd, isize) -> i32, data: isize)
@@ -300,6 +316,8 @@ mod platform {
         ) -> i32;
         fn TranslateMessage(message: *const Message) -> i32;
         fn DispatchMessageW(message: *const Message) -> isize;
+        fn GetDC(window: Hwnd) -> Handle;
+        fn ReleaseDC(window: Hwnd, dc: Handle) -> i32;
     }
     #[link(name = "kernel32")]
     extern "system" {
@@ -308,6 +326,7 @@ mod platform {
     }
     #[link(name = "dwmapi")]
     extern "system" {
+        fn DwmFlush() -> i32;
         fn DwmGetWindowAttribute(
             window: Hwnd,
             attribute: u32,
@@ -323,6 +342,14 @@ mod platform {
     extern "system" {
         fn CreateSolidBrush(color: u32) -> Handle;
         fn DeleteObject(object: Handle) -> i32;
+        fn CreateCompatibleDC(dc: Handle) -> Handle;
+        fn CreateDIBSection(dc: Handle, info: *const BitmapInfoHeader, usage: u32,
+            bits: *mut *mut c_void, section: Handle, offset: u32) -> Handle;
+        fn SelectObject(dc: Handle, object: Handle) -> Handle;
+        fn BitBlt(destination: Handle, x: i32, y: i32, width: i32, height: i32,
+            source: Handle, source_x: i32, source_y: i32, operation: u32) -> i32;
+        fn GdiFlush() -> i32;
+        fn DeleteDC(dc: Handle) -> i32;
     }
     #[link(name = "ntdll")]
     extern "system" {
@@ -512,6 +539,98 @@ mod platform {
             return Err("原录制窗口已关闭，请重新选择录制目标。".into());
         }
         Ok(target)
+    }
+
+    struct ScreenshotBitmap {
+        window: Hwnd,
+        source: Handle,
+        memory: Handle,
+        bitmap: Handle,
+        original: Handle,
+    }
+    impl Drop for ScreenshotBitmap {
+        fn drop(&mut self) {
+            unsafe {
+                if !self.original.is_null() && self.original as isize != -1 {
+                    SelectObject(self.memory, self.original);
+                }
+                if !self.bitmap.is_null() { DeleteObject(self.bitmap); }
+                if !self.memory.is_null() { DeleteDC(self.memory); }
+                if !self.source.is_null() { ReleaseDC(self.window, self.source); }
+            }
+        }
+    }
+
+    /// Read one physical-pixel frame directly. There is no video stream, frame
+    /// interval or encoder process to start for a still screenshot.
+    pub fn capture_png(target: &VisualTarget, bounds: &CaptureBounds, output: &Path) -> Result<()> {
+        let _physical = PhysicalCoordinates::enter();
+        let width = i32::try_from(bounds.width).map_err(|_| "截屏尺寸无效。")?;
+        let height = i32::try_from(bounds.height).map_err(|_| "截屏尺寸无效。")?;
+        if width < 16 || height < 16 || u64::from(bounds.width) * u64::from(bounds.height) > 100_000_000 {
+            return Err("截屏尺寸无效或范围过大。".into());
+        }
+        let current = resolve_target(&target.id)?;
+        if current.bounds != target.bounds || current.kind != target.kind {
+            return Err("截屏来源的位置或尺寸已改变，请重新选择。".into());
+        }
+        let (window, source_x, source_y) = if target.kind == "window" {
+            if *bounds != target.bounds { return Err("窗口截屏范围无效。".into()); }
+            (parse_window_id(&target.id)?.0 as Hwnd, 0, 0)
+        } else if target.kind == "screen" {
+            if i64::from(bounds.x) < i64::from(target.bounds.x)
+                || i64::from(bounds.y) < i64::from(target.bounds.y)
+                || i64::from(bounds.x) + i64::from(bounds.width) > i64::from(target.bounds.x) + i64::from(target.bounds.width)
+                || i64::from(bounds.y) + i64::from(bounds.height) > i64::from(target.bounds.y) + i64::from(target.bounds.height) {
+                return Err("截屏区域超出所选屏幕。".into());
+            }
+            (null_mut(), bounds.x, bounds.y)
+        } else { return Err("截屏来源无效。".into()); };
+        let mut owned = ScreenshotBitmap {
+            window, source: unsafe { GetDC(window) }, memory: null_mut(),
+            bitmap: null_mut(), original: null_mut(),
+        };
+        if owned.source.is_null() { return Err("无法访问截屏来源。".into()); }
+        owned.memory = unsafe { CreateCompatibleDC(owned.source) };
+        if owned.memory.is_null() { return Err("无法创建截屏画布。".into()); }
+        // Negative height gives top-to-bottom rows, avoiding a full-image flip.
+        let header = BitmapInfoHeader {
+            size: size_of::<BitmapInfoHeader>() as u32, width, height: -height,
+            planes: 1, bit_count: 32, compression: 0, image_size: 0,
+            x_pixels_per_meter: 0, y_pixels_per_meter: 0, colors_used: 0, colors_important: 0,
+        };
+        let mut pixels = null_mut();
+        owned.bitmap = unsafe { CreateDIBSection(owned.source, &header, 0, &mut pixels, null_mut(), 0) };
+        if owned.bitmap.is_null() || pixels.is_null() { return Err("无法创建截屏像素缓冲区。".into()); }
+        owned.original = unsafe { SelectObject(owned.memory, owned.bitmap) };
+        if owned.original.is_null() || owned.original as isize == -1 {
+            return Err("无法选择截屏画布。".into());
+        }
+        // Wait for the compositor to present the picker dismissal. Sessions
+        // without desktop composition can still capture directly through GDI.
+        let _ = unsafe { DwmFlush() };
+        let copied = unsafe {
+            BitBlt(owned.memory, 0, 0, width, height, owned.source, source_x, source_y,
+                0x00CC0020 | 0x40000000)
+        };
+        if copied == 0 || unsafe { GdiFlush() } == 0 { return Err("无法读取截屏像素，请重新选择范围。".into()); }
+        let pixels = unsafe { std::slice::from_raw_parts(pixels.cast::<u8>(), width as usize * height as usize * 4) };
+        let file = std::fs::File::create(output).map_err(|error| format!("无法保存截屏：{error}"))?;
+        let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), bounds.width, bounds.height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder.write_header().map_err(|error| format!("无法编码截屏：{error}"))?;
+        let mut stream = writer.stream_writer().map_err(|error| format!("无法编码截屏：{error}"))?;
+        let mut row = vec![0; width as usize * 3];
+        for source in pixels.chunks_exact(width as usize * 4) {
+            for (source, destination) in source.chunks_exact(4).zip(row.chunks_exact_mut(3)) {
+                destination.copy_from_slice(&[source[2], source[1], source[0]]);
+            }
+            stream.write_all(&row).map_err(|error| format!("无法编码截屏：{error}"))?;
+        }
+        stream.finish().map_err(|error| format!("无法完成截屏：{error}"))?;
+        writer.finish().map_err(|error| format!("无法完成截屏：{error}"))
     }
 
     struct BorderWindows {
@@ -763,6 +882,7 @@ mod platform {
     mod windows_tests {
         use super::*;
         use std::time::Instant;
+        static DESKTOP_TEST: Mutex<()> = Mutex::new(());
 
         #[link(name = "user32")]
         extern "system" {
@@ -1079,8 +1199,84 @@ mod platform {
                 }
             }
         }
+        fn assert_native_screenshot(target: &VisualTarget) {
+            use crate::{capture_picker::PickerSelection, engine::{MediaStore, Runtime}};
+            let root = tempfile::tempdir().unwrap();
+            let store = MediaStore::new(root.path()).unwrap();
+            // A screenshot must no longer invoke either external executable.
+            let unavailable = Runtime {
+                encoder: root.path().join("no-encoder.exe"), probe: root.path().join("no-probe.exe"),
+                source: "test".into(), version: "test".into(),
+            };
+            let listing_started = Instant::now();
+            let listed = crate::capture::list_picker_devices_with_resource_cancellable(
+                &unavailable, root.path(), true, false, &std::sync::atomic::AtomicBool::new(false)
+            ).unwrap();
+            let listing_elapsed = listing_started.elapsed();
+            assert!(listed.iter().any(|device| device.id == target.id));
+            assert!(listed.iter().all(|device| device.kind != "audio"));
+            let screen = list_targets().unwrap().into_iter().find(|candidate| candidate.kind == "screen"
+                && target.bounds.x >= candidate.bounds.x && target.bounds.y >= candidate.bounds.y
+                && i64::from(target.bounds.x) + i64::from(target.bounds.width) <= i64::from(candidate.bounds.x) + i64::from(candidate.bounds.width)
+                && i64::from(target.bounds.y) + i64::from(target.bounds.height) <= i64::from(candidate.bounds.y) + i64::from(candidate.bounds.height)).unwrap();
+            let mut timings = vec![];
+            for mode in ["window", "region", "screen"] {
+                let window = mode == "window";
+                let selected = if window { target } else { &screen };
+                let selection = PickerSelection {
+                    source_id: selected.id.clone(), source_name: Some(selected.name.clone()),
+                    source_width: Some(selected.bounds.width), source_height: Some(selected.bounds.height),
+                    microphone: None, audio_device: None, output_size: None,
+                    region: if mode != "region" { None } else { Some(crate::capture::Region {
+                        x: target.bounds.x - screen.bounds.x, y: target.bounds.y - screen.bounds.y,
+                        width: target.bounds.width, height: target.bounds.height,
+                    }) },
+                };
+                let started = Instant::now();
+                let asset = crate::screenshot::capture(&unavailable, &store, &selection).unwrap();
+                let elapsed = started.elapsed();
+                eprintln!("native screenshot {mode}: {elapsed:?}");
+                timings.push(serde_json::json!({ "mode": mode, "elapsedMs": elapsed.as_secs_f64() * 1000.0, "width": asset.width, "height": asset.height }));
+                let expected = if mode == "screen" { &screen.bounds } else { &target.bounds };
+                assert_eq!((asset.width, asset.height), (expected.width, expected.height));
+                assert_eq!(asset.mime, "image/png");
+                if let Ok(directory) = std::env::var("OPEN_MEDIA_CAPTURE_TEST_ARTIFACTS") {
+                    std::fs::create_dir_all(&directory).unwrap();
+                    std::fs::copy(&asset.native_path, Path::new(&directory).join(format!("{mode}.png"))).unwrap();
+                }
+                let file = std::fs::File::open(&asset.native_path).unwrap();
+                let mut decoded = png::Decoder::new(std::io::BufReader::new(file)).read_info().unwrap();
+                let mut pixels = vec![0; decoded.output_buffer_size().unwrap()];
+                let info = decoded.next_frame(&mut pixels).unwrap();
+                assert_eq!(info.color_type, png::ColorType::Rgb);
+                for (x, y) in [(1, 1), (358, 1), (1, 238), (358, 238), (180, 120)] {
+                    let (x, y) = if mode == "screen" {
+                        (x + (target.bounds.x - screen.bounds.x) as u32, y + (target.bounds.y - screen.bounds.y) as u32)
+                    } else { (x, y) };
+                    let offset = ((y * asset.width + x) * 3) as usize;
+                    assert_eq!(&pixels[offset..offset + 3], &[64, 160, 32], "native screenshot at {x},{y}");
+                }
+            }
+            if let Ok(directory) = std::env::var("OPEN_MEDIA_CAPTURE_TEST_ARTIFACTS") {
+                std::fs::write(Path::new(&directory).join("native-screenshot-timings.json"),
+                    serde_json::to_vec_pretty(&serde_json::json!({ "path": "GDI single frame + PNG encode + validated import", "platform": std::env::consts::OS, "architecture": std::env::consts::ARCH,
+                        "pixelValidationPassed": true, "encoderAndProbeAvailable": false,
+                        "sourceListingMs": listing_elapsed.as_secs_f64() * 1000.0, "timings": timings })).unwrap()).unwrap();
+            }
+        }
+        #[test]
+        fn real_screenshot_window_region_and_screen_need_no_media_process() {
+            let _desktop = DESKTOP_TEST.lock().unwrap();
+            let _physical = PhysicalCoordinates::enter();
+            let fixture = Fixture::start();
+            let id = format!("window:{}:{}", fixture.hwnd, unsafe { GetCurrentProcessId() });
+            let selected = resolve_target(&id).unwrap();
+            wait_for(|| captured_pixel(selected.bounds.x + 1, selected.bounds.y + 1) == 0x0020a040);
+            assert_native_screenshot(&selected);
+        }
         #[test]
         fn real_window_indicator_tracks_excludes_pixels_and_cleans_up() {
+            let _desktop = DESKTOP_TEST.lock().unwrap();
             let _physical = PhysicalCoordinates::enter();
             let fixture = Fixture::start();
             let id = format!("window:{}:{}", fixture.hwnd, unsafe {

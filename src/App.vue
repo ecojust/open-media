@@ -31,6 +31,7 @@ import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectF
 import { loadProjectSaveTarget, storeProjectSaveTarget, type ProjectSaveTarget } from './core/project-save-targets.ts'
 import { downloadBlob, importMediaFile } from './core/media-import.ts'
 import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, saveProjectFile, type ProjectFileTarget, type MediaJob } from './native.ts'
+import { getDesktopPlatform, type DesktopPlatform } from './native-platform.ts'
 
 type Workspace = 'home' | 'edit' | 'record' | 'gif' | 'image' | 'video'
 const workspaces: { id: Workspace; title: string; icon: string; description: string; color: string }[] = [
@@ -41,6 +42,7 @@ const workspaces: { id: Workspace; title: string; icon: string; description: str
   { id: 'image', title: '图片编辑', icon: 'image', description: '插入文字与自定义笔触，裁剪并导出图片', color: '#2a9d80' },
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
+const desktopPlatform = ref<DesktopPlatform | null>(null)
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
 const projectRevision = ref(0)
 watch(project, () => { projectRevision.value++ }, { flush: 'sync' })
@@ -257,13 +259,14 @@ async function takeScreenshot(): Promise<void> {
   screenshotAbort = abort
   announce('请选择截屏范围，按 Esc 取消。')
   let clipboardResult: Promise<{ copied: true } | { copied: false; cause: unknown }> | undefined
+  let capturedImageUrl: string | undefined
+  const startClipboardCopy = (content: string | Blob | Promise<Blob>) => copyImageToClipboard(content, native, abort.signal).then(
+    () => ({ copied: true as const }),
+    (cause: unknown) => ({ copied: false as const, cause }),
+  )
   try {
     let asset: MediaAsset
     let blob: Blob | undefined
-    const startClipboardCopy = (content: string | Blob | Promise<Blob>) => copyImageToClipboard(content, native, abort.signal).then(
-      () => ({ copied: true as const }),
-      (cause: unknown) => ({ copied: false as const, cause }),
-    )
     if (native) {
       const requestId = crypto.randomUUID()
       screenshotRequestId = requestId
@@ -277,6 +280,7 @@ async function takeScreenshot(): Promise<void> {
         return
       }
       asset = await captureScreenshot(selection)
+      capturedImageUrl = asset.url
     } else {
       if (!screenshotPicker.value) throw new Error('截屏界面尚未就绪，请重试。')
       const result = await screenshotPicker.value.capture(abort.signal, content => { clipboardResult = startClipboardCopy(content) })
@@ -284,14 +288,16 @@ async function takeScreenshot(): Promise<void> {
       asset = await importMediaFile(new File([blob], result.name, { type: 'image/png' }))
     }
     if (destroyed) { if (asset.url.startsWith('blob:')) URL.revokeObjectURL(asset.url); return }
-    if (native) clipboardResult = startClipboardCopy(asset.url)
     if (targetProjectId !== project.value.id) throw new Error('截屏所属项目已改变，请重新截屏。')
     await acceptAssets([asset], blob ? new Map([[asset.id, blob]]) : undefined)
     if (!project.value.assets.some(item => item.id === asset.id)) throw new Error(error.value || '截屏未能加入项目，请重试。')
     screenshotAssetId.value = asset.id
     view.value = 'image'
     await nextTick()
-    if (native) await showMainWindow()
+    if (native) {
+      await showMainWindow()
+      clipboardResult = startClipboardCopy(asset.url)
+    }
     const copied = await (clipboardResult ?? startClipboardCopy(blob ?? asset.url))
     if (!destroyed && !abort.signal.aborted) {
       if (copied.copied) announce('截屏已复制到剪贴板，并载入图片编辑。')
@@ -299,6 +305,8 @@ async function takeScreenshot(): Promise<void> {
     }
   } catch (cause) {
     const message = screenshotErrorMessage(cause)
+    if (native && !destroyed) await showMainWindow().catch(() => {})
+    if (!destroyed && !abort.signal.aborted && capturedImageUrl && !clipboardResult) clipboardResult = startClipboardCopy(capturedImageUrl)
     const copied = await clipboardResult
     if (!destroyed) {
       if (message) {
@@ -306,7 +314,6 @@ async function takeScreenshot(): Promise<void> {
         fail(screenshotError.value)
       } else announce('已取消截屏。')
     }
-    if (native && !destroyed) await showMainWindow().catch(() => {})
   } finally { if (screenshotAbort === abort) screenshotAbort = undefined; screenshotRequestId = undefined; screenshotBusy.value = false }
 }
 function convertedBusy(value: boolean, mode: 'image' | 'video') { if (mode === 'image') imageConverting.value = value; else videoConverting.value = value }
@@ -821,6 +828,7 @@ async function initializeMcp(): Promise<void> {
   } catch (cause) { if (!destroyed) mcpBridgeError = `无法监听 MCP 请求：${cause instanceof Error ? cause.message : String(cause)}` }
 }
 onMounted(async () => {
+  if (native) void getDesktopPlatform().then(value => { if (!destroyed) desktopPlatform.value = value })
   mediaQuery = matchMedia('(prefers-color-scheme: dark)'); systemDark.value = mediaQuery.matches; mediaQuery.addEventListener('change', mediaChanged)
   window.addEventListener('keydown', keyboard); window.addEventListener('beforeunload', unload)
   try { autoSave.value = localStorage.getItem('open-media:autosave') !== 'false'; const value = localStorage.getItem('open-media:theme'); if (value === 'light' || value === 'dark' || value === 'system') theme.value = value } catch {}
@@ -840,7 +848,7 @@ onBeforeUnmount(() => { destroyed = true; nativeAppearance.dispose(); clearMcpTo
 <template>
   <div class="app-shell" :data-theme="effectiveTheme" @dragover.prevent @drop="dropped">
     <header class="topbar">
-      <button class="brand" :disabled="speechWorking || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
+      <button v-if="desktopPlatform !== 'windows'" class="brand" :disabled="speechWorking || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
     </header>
     <section v-if="!booting && (mcpBusy || mcpToolActivity)" class="mcp-processing-banner" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state" :data-call-tool="mcpToolActivity?.tool" @keydown.esc.stop="mcpDetailsOpen=false">

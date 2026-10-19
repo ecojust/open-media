@@ -289,6 +289,18 @@ fn validate_selection(
     Ok(selection)
 }
 
+#[cfg(any(feature = "desktop", test))]
+fn restore_window(
+    unminimize: impl FnOnce() -> Result<()>,
+    show: impl FnOnce() -> Result<()>,
+    focus: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let unminimize_result = unminimize();
+    let show_result = show();
+    let focus_result = focus();
+    unminimize_result.and(show_result).and(focus_result)
+}
+
 #[cfg(feature = "desktop")]
 mod desktop {
     use super::*;
@@ -347,6 +359,7 @@ mod desktop {
                 return Err("录制选择请求编号无效。".into());
             }
             let (sender, receiver) = mpsc::channel();
+            let include_audio = preferences.purpose.as_deref() != Some("screenshot");
             let cancelled = Arc::new(AtomicBool::new(false));
             {
                 let mut inner = self.inner.lock().map_err(|_| "录制选择状态不可用。")?;
@@ -369,39 +382,61 @@ mod desktop {
             }
             let picker = self.clone();
             let app = app.clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let result = capture::list_devices_with_resource_cancellable(
-                    &runtime, &resource, true, &cancelled,
-                );
-                if cancelled.load(Ordering::SeqCst) {
+            let dispatch = app.clone();
+            let error_id = request_id.clone();
+            if let Err(error) = dispatch.run_on_main_thread(move || {
+                // Hide the application before source enumeration, which can take
+                // time when a microphone or a permission prompt is initializing.
+                // This also keeps our own window out of the selectable targets.
+                if !picker.is_active(&request_id) {
                     return;
                 }
-                match result {
-                    Ok(sources) => {
-                        #[cfg(target_os = "macos")]
-                        {
-                            let main_app = app.clone();
-                            let main_picker = picker.clone();
-                            let main_id = request_id.clone();
-                            if let Err(error) = app.run_on_main_thread(move || {
-                                if let Err(error) =
-                                    main_picker.create_windows(&main_app, &main_id, sources)
-                                {
-                                    main_picker.finish(&main_app, &main_id, Err(error));
+                if let Some(main) = app.get_webview_window("main") {
+                    if let Err(error) = main.minimize() {
+                        picker.finish(&app, &request_id, Err(error.to_string()));
+                        return;
+                    }
+                }
+                tauri::async_runtime::spawn_blocking(move || {
+                    let result = capture::list_picker_devices_with_resource_cancellable(
+                        &runtime,
+                        &resource,
+                        true,
+                        include_audio,
+                        &cancelled,
+                    );
+                    if cancelled.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    match result {
+                        Ok(sources) => {
+                            #[cfg(target_os = "macos")]
+                            {
+                                let main_app = app.clone();
+                                let main_picker = picker.clone();
+                                let main_id = request_id.clone();
+                                if let Err(error) = app.run_on_main_thread(move || {
+                                    if let Err(error) =
+                                        main_picker.create_windows(&main_app, &main_id, sources)
+                                    {
+                                        main_picker.finish(&main_app, &main_id, Err(error));
+                                    }
+                                }) {
+                                    picker.finish(&app, &request_id, Err(error.to_string()));
                                 }
-                            }) {
-                                picker.finish(&app, &request_id, Err(error.to_string()));
+                            }
+                            // Window creation must not run inside the Windows event callback.
+                            #[cfg(not(target_os = "macos"))]
+                            if let Err(error) = picker.create_windows(&app, &request_id, sources) {
+                                picker.finish(&app, &request_id, Err(error));
                             }
                         }
-                        // Window creation must not run inside the Windows event callback.
-                        #[cfg(not(target_os = "macos"))]
-                        if let Err(error) = picker.create_windows(&app, &request_id, sources) {
-                            picker.finish(&app, &request_id, Err(error));
-                        }
+                        Err(error) => picker.finish(&app, &request_id, Err(error)),
                     }
-                    Err(error) => picker.finish(&app, &request_id, Err(error)),
-                }
-            });
+                });
+            }) {
+                self.finish(&dispatch, &error_id, Err(error.to_string()));
+            }
             Ok(receiver)
         }
 
@@ -629,9 +664,6 @@ mod desktop {
                 };
                 session.windows.keys().cloned().collect::<Vec<_>>()
             };
-            if let Some(main) = app.get_webview_window("main") {
-                main.hide().map_err(|error| error.to_string())?;
-            }
             for label in &labels {
                 app.get_webview_window(label)
                     .ok_or("录制选择窗口已关闭。")?
@@ -730,8 +762,6 @@ mod desktop {
             let Some(session) = session else { return };
             session.cancelled.store(true, Ordering::SeqCst);
             let restore_focus = !matches!(result, Ok(Some(_)));
-            let keep_hidden =
-                !restore_focus && session.preferences.purpose.as_deref() == Some("screenshot");
             let dispatch = app.clone();
             let app = app.clone();
             let sender = session.sender.clone();
@@ -745,23 +775,21 @@ mod desktop {
                         }
                     }
                 }
-                if let Some(main) = app.get_webview_window("main") {
-                    // Keep the application out of the image until the PNG has been captured.
-                    if !keep_hidden || cleanup_error.is_some() {
-                        if restore_focus || keep_hidden {
-                            let _ = main.show();
-                            let _ = main.set_focus();
-                        } else if let Err(error) = restore_behind_other_windows(&main) {
-                            cleanup_error = Some(error);
-                            let _ = main.show();
-                            let _ = main.set_focus();
+                // Successful selections leave the application minimized for
+                // both screenshots and recordings. The capture owner restores
+                // it after the image is read or recording stops. Never strand
+                // the application minimized after cancellation or a failure.
+                if restore_focus || cleanup_error.is_some() {
+                    if let Some(main) = app.get_webview_window("main") {
+                        if let Err(error) = restore_main_window(&main) {
+                            cleanup_error.get_or_insert(error);
                         }
                     }
                 }
                 // Resolve only after every overlay is gone, before capture can start.
                 let _ = session.sender.send(match (result, cleanup_error) {
-                    (Ok(Some(_)), Some(error)) => Err(error),
-                    (result, _) => result,
+                    (_, Some(error)) => Err(error),
+                    (result, None) => result,
                 });
             }) {
                 let _ = sender.send(Err(format!("无法关闭录制选择器：{error}")));
@@ -777,53 +805,14 @@ mod desktop {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    fn restore_behind_other_windows(window: &WebviewWindow) -> Result<()> {
-        use std::ffi::c_void;
-        #[link(name = "user32")]
-        unsafe extern "system" {
-            fn SetWindowPos(
-                window: *mut c_void,
-                after: *mut c_void,
-                x: i32,
-                y: i32,
-                width: i32,
-                height: i32,
-                flags: u32,
-            ) -> i32;
-        }
-        let native = window.hwnd().map_err(|error| error.to_string())?;
-        // Show at the bottom of the normal window stack without activating it.
-        let succeeded = unsafe { SetWindowPos(native.0, 1_usize as *mut c_void, 0, 0, 0, 0, 0x53) };
-        if succeeded == 0 {
-            return Err("无法将主窗口恢复到后台，请重新选择录制范围。".into());
-        }
-        Ok(())
-    }
-
-    #[cfg(target_os = "macos")]
-    fn restore_behind_other_windows(window: &WebviewWindow) -> Result<()> {
-        use std::ffi::{c_char, c_void};
-        #[link(name = "objc")]
-        unsafe extern "C" {
-            fn sel_registerName(name: *const c_char) -> *mut c_void;
-            #[link_name = "objc_msgSend"]
-            fn send_message();
-        }
-        let native = window.ns_window().map_err(|error| error.to_string())?;
-        // Ordering to the back restores the window without making it key.
-        unsafe {
-            let selector = sel_registerName(c"orderBack:".as_ptr());
-            let send: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) =
-                std::mem::transmute(send_message as unsafe extern "C" fn());
-            send(native, selector, std::ptr::null_mut());
-        }
-        Ok(())
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    fn restore_behind_other_windows(_window: &WebviewWindow) -> Result<()> {
-        Err("当前系统不支持桌面交互选区。".into())
+    pub fn restore_main_window(window: &WebviewWindow) -> Result<()> {
+        // Attempt every step even if one fails, so a transient native state
+        // error does not prevent the application from becoming reachable.
+        restore_window(
+            || window.unminimize().map_err(|error| error.to_string()),
+            || window.show().map_err(|error| error.to_string()),
+            || window.set_focus().map_err(|error| error.to_string()),
+        )
     }
 
     #[cfg(target_os = "macos")]
@@ -883,7 +872,7 @@ mod desktop {
 }
 
 #[cfg(feature = "desktop")]
-pub use desktop::{require_main, CapturePicker};
+pub use desktop::{require_main, restore_main_window, CapturePicker};
 
 #[cfg(test)]
 mod tests {
@@ -917,6 +906,49 @@ mod tests {
             source_width: Some(1),
             source_height: Some(1),
         }
+    }
+
+    #[test]
+    fn restoring_capture_window_unminimizes_before_showing_and_focusing() {
+        let steps = std::cell::RefCell::new(Vec::new());
+        restore_window(
+            || {
+                steps.borrow_mut().push("unminimize");
+                Ok(())
+            },
+            || {
+                steps.borrow_mut().push("show");
+                Ok(())
+            },
+            || {
+                steps.borrow_mut().push("focus");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*steps.borrow(), vec!["unminimize", "show", "focus"]);
+    }
+
+    #[test]
+    fn restoring_capture_window_attempts_visibility_after_native_errors() {
+        let steps = std::cell::RefCell::new(Vec::new());
+        let error = restore_window(
+            || {
+                steps.borrow_mut().push("unminimize");
+                Err("minimized state unavailable".into())
+            },
+            || {
+                steps.borrow_mut().push("show");
+                Err("show failed".into())
+            },
+            || {
+                steps.borrow_mut().push("focus");
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(*steps.borrow(), vec!["unminimize", "show", "focus"]);
+        assert_eq!(error, "minimized state unavailable");
     }
 
     #[test]

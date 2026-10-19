@@ -26,12 +26,14 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
           if (command === 'plugin:event|listen') { const id = ++listenerId; listeners.set(id, args); return id }
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null }
           if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
+          if (command === 'show_main_window') return null
           if (command === 'pick_capture_source') {
             if (state.permissionFailure) { state.permissionFailure = false; throw new Error('未获得屏幕录制权限，请在系统设置中允许后重试。') }
             return new Promise(resolve => { state.resolvePicker = resolve })
           }
           if (command === 'cancel_capture_picker') { state.resolvePicker(null); return }
           if (command === 'start_capture') {
+            if (state.startFailure) { state.startFailure = false; throw new Error('录制来源已关闭，请重新选择。') }
             const options = args.options
             state.status = { state: 'recording', elapsed: 0, segments: 0, audioAvailable: options.microphone, muted: !options.microphone, microphoneEnabled: options.microphone, sourceId: options.sourceId, sourceName: state.selectedName ?? '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: options.outputSize ?? options.region ?? { width: 1200, height: 900 } }
             return { ...state.status }
@@ -121,6 +123,7 @@ async function main() {
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.find(call => call.command === 'pick_capture_source').args.preferences.microphone), true)
     await page.evaluate(() => window.recorderHarness.resolvePicker({ microphone: false, audioDevice: 'native-usb', sourceId: 'window:4', sourceName: '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: { width: 1280, height: 720 } }))
     await page.getByTestId('recording-source').waitFor()
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'show_main_window').length), 0, '成功开始录制不能重新显示主窗口')
     assert.match(await page.getByTestId('recording-source').innerText(), /演示窗口[\s\S]*1200 × 900[\s\S]*1280 × 720/)
     const started = await page.evaluate(() => window.recorderHarness.calls.find(call => call.command === 'start_capture').args.options)
     assert.equal(started.sourceId, 'window:4')
@@ -140,6 +143,7 @@ async function main() {
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'stop_capture').length), 1)
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pause_capture').length), 1)
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'resume_capture').length), 1)
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'show_main_window').length)).toBe(1)
     console.log('PASS 开始后选择来源、确认后才录制、尺寸传递，浮栏事件复用暂停/继续/麦克风开关/停止且仅导入一次')
 
     await page.evaluate(() => { window.recorderHarness.permissionFailure = true })
@@ -168,6 +172,26 @@ async function main() {
     await page.getByTestId('record-stop').click()
     assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'start_capture').length), 1)
     console.log('PASS 原生选区更改麦克风后取消，再次开启选择器读取最新来源且不启动录制')
+
+    const restoreCount = () => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'show_main_window').length)
+    await expect.poll(restoreCount).toBe(5)
+    await page.getByLabel('开始倒计时').selectOption('3')
+    await page.getByTestId('record-start').click()
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pick_capture_source').length)).toBe(6)
+    await page.evaluate(() => window.recorderHarness.resolvePicker({ microphone: false, sourceId: 'screen:1', sourceWidth: 1920, sourceHeight: 1080 }))
+    await expect(page.getByText('3 秒后开始', { exact: true })).toBeVisible()
+    await page.getByTestId('record-stop').click()
+    await page.getByTestId('record-start').waitFor()
+    await expect.poll(restoreCount).toBe(6)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'start_capture').length), 1, '倒计时取消不能启动录制')
+    await page.getByLabel('开始倒计时').selectOption('0')
+    await page.evaluate(() => { window.recorderHarness.startFailure = true })
+    await page.getByTestId('record-start').click()
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pick_capture_source').length)).toBe(7)
+    await page.evaluate(() => window.recorderHarness.resolvePicker({ microphone: false, sourceId: 'window:4', sourceWidth: 1200, sourceHeight: 900 }))
+    await expect(page.getByRole('alert')).toContainText('录制来源已关闭')
+    await expect.poll(restoreCount).toBe(7)
+    console.log('PASS 录制成功保持最小化，停止、倒计时取消和开始失败恢复主窗口')
 
     await page.setViewportSize({ width: 320, height: 850 })
     assert.equal(await page.evaluate(() => document.querySelector('[data-testid="recorder-workspace"]').scrollWidth > document.documentElement.clientWidth), false)

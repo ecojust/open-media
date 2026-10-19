@@ -3,13 +3,14 @@ use crate::{
     engine::{Asset, MediaStore, Result, Runtime},
 };
 use std::{
-    fs,
     path::Path,
-    process::{Child, Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
+#[cfg(any(target_os = "macos", test))]
+use std::fs;
+#[cfg(target_os = "macos")]
+use std::{process::{Child, Command, Stdio}, thread, time::{Duration, Instant}};
 
 static CAPTURING: AtomicBool = AtomicBool::new(false);
 
@@ -20,7 +21,9 @@ impl Drop for CaptureSession {
     }
 }
 
+#[cfg(target_os = "macos")]
 struct CaptureChild(Child);
+#[cfg(target_os = "macos")]
 impl Drop for CaptureChild {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -43,7 +46,7 @@ pub fn capture(runtime: &Runtime, store: &MediaStore, selection: &PickerSelectio
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    store.import(runtime, &output, Some(&format!("截屏-{stamp}.png")))
+    store.import_png(&output, &format!("截屏-{stamp}.png"))
 }
 
 fn validate_selection(selection: &PickerSelection) -> Result<()> {
@@ -87,9 +90,9 @@ fn capture_file(
 
 #[cfg(target_os = "windows")]
 fn capture_file(
-    runtime: &Runtime,
+    _runtime: &Runtime,
     selection: &PickerSelection,
-    directory: &Path,
+    _directory: &Path,
     output: &Path,
 ) -> Result<()> {
     use crate::capture_windows;
@@ -113,24 +116,7 @@ fn capture_file(
     if u64::from(bounds.width) * u64::from(bounds.height) > 100_000_000 {
         return Err("截屏范围过大，请选择较小的区域。".into());
     }
-    let mut command = crate::engine::process(&runtime.encoder);
-    command.args([
-        "-hide_banner", "-y", "-loglevel", "error", "-f", "gdigrab", "-framerate", "1",
-        "-draw_mouse", "0",
-    ]);
-    if target.kind == "window" {
-        let handle = capture_windows::window_handle(&selection.source_id)?;
-        command.args(["-i", &format!("hwnd={handle}")]);
-    } else {
-        command.args([
-            "-offset_x", &bounds.x.to_string(),
-            "-offset_y", &bounds.y.to_string(),
-            "-video_size", &format!("{}x{}", bounds.width, bounds.height),
-            "-i", "desktop",
-        ]);
-    }
-    command.args(["-frames:v", "1", "-an", "-c:v", "png", "-update", "1"]).arg(output);
-    run_capture(command, directory)
+    capture_windows::capture_png(&target, &bounds, output)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -143,6 +129,7 @@ fn capture_file(
     Err("桌面截屏支持 macOS 和 Windows。".into())
 }
 
+#[cfg(target_os = "macos")]
 fn run_capture(mut command: Command, directory: &Path) -> Result<()> {
     let errors = directory.join("screenshot.log");
     let mut child = CaptureChild(
@@ -171,5 +158,54 @@ fn run_capture(mut command: Command, directory: &Path) -> Result<()> {
             }
             Ok(None) => thread::sleep(Duration::from_millis(40)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_png_import_preserves_pixels_and_needs_no_media_process() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("capture.png");
+        let file = fs::File::create(&source).unwrap();
+        let mut encoder = png::Encoder::new(file, 2, 2);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let pixels = [255, 0, 0, 0, 255, 0, 0, 0, 255, 42, 128, 233];
+        encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
+        let store = MediaStore::new(directory.path()).unwrap();
+        let asset = store.import_png(&source, "截屏.png").unwrap();
+        assert_eq!((asset.width, asset.height, asset.duration), (2, 2, 5.0));
+        assert_eq!(asset.kind, "image");
+        assert_eq!(asset.mime, "image/png");
+        assert_eq!(asset.name, "截屏.png");
+        assert_eq!(fs::read(&source).unwrap(), fs::read(&asset.native_path).unwrap());
+        let file = fs::File::open(&asset.native_path).unwrap();
+        let mut reader = png::Decoder::new(std::io::BufReader::new(file)).read_info().unwrap();
+        let mut actual = vec![0; reader.output_buffer_size().unwrap()];
+        reader.next_frame(&mut actual).unwrap();
+        assert_eq!(actual, pixels);
+    }
+
+    #[test]
+    fn known_png_import_rejects_bad_header_and_truncated_pixel_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("capture.png");
+        let mut valid = Vec::new();
+        let mut encoder = png::Encoder::new(&mut valid, 16, 16);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.write_header().unwrap().write_image_data(&vec![143; 16 * 16 * 3]).unwrap();
+        let store = MediaStore::new(directory.path()).unwrap();
+        for length in [0, 8, 29, 48, valid.len() - 20] {
+            fs::write(&source, &valid[..length]).unwrap();
+            assert!(store.import_png(&source, "截屏.png").is_err(), "truncated at {length}");
+            assert_eq!(fs::read_dir(&store.root).unwrap().count(), 0, "failed PNG must not enter the media library");
+        }
+        valid[0] = 0;
+        fs::write(&source, valid).unwrap();
+        assert!(store.import_png(&source, "截屏.png").is_err());
     }
 }

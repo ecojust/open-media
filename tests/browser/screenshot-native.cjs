@@ -45,12 +45,14 @@ async function installNativeContract(page) {
           if (args.byteLength !== 8 + width * height * 4) throw new Error('图片剪贴板消息尺寸与像素长度不一致')
           state.calls.push({ command, args: { width, height, byteLength: args.byteLength, firstPixel: [...args.slice(8, 12)], lastPixel: [...args.slice(-4)] } })
           if (state.rejectClipboard) throw new Error('无法访问系统剪贴板，请稍后重试。')
+          if (state.holdClipboard) return new Promise(resolve => { state.finishClipboard = resolve })
           return null
         }
         state.calls.push({ command, args })
         if (command === 'plugin:event|listen') { const id = ++listenerId; listeners.set(id, args); return id }
         if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null }
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
+        if (command === 'get_desktop_platform') return 'macos'
         if (command === 'get_media_jobs') return []
         if (command === 'mcp_pending') return []
         if (command === 'mcp_get_status') return { running: false, host: '127.0.0.1', port: 39861, url: null, pendingRequests: 0, connectedClients: 0 }
@@ -130,7 +132,7 @@ async function main() {
       assert.equal((await calls(page, 'show_main_window')).length, 0, '截屏尚未返回时不能前置主窗口')
       await emitScreenshot(page)
       assert.equal((await calls(page, 'pick_capture_source')).length, 1, '截屏写入期间不能重复启动')
-      await page.evaluate(() => window.screenshotHarness.finishCapture())
+      await page.evaluate(() => { window.screenshotHarness.holdClipboard = true; window.screenshotHarness.finishCapture() })
       await expect(page.getByTestId('convert-workspace')).toBeVisible()
       await expect(page.locator('.convert-toolbar h1')).toHaveText('图片编辑')
       await expect(page.locator('.convert-source')).toHaveCount(3)
@@ -144,8 +146,11 @@ async function main() {
       const pixel = await preview.evaluate(image => { const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight; const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); return [...context.getImageData(0, 0, 1, 1).data] })
       assert.deepEqual(pixel, [26, 120, 188, 255])
       await expect.poll(async () => (await calls(page, 'show_main_window')).length).toBe(1)
-      await expect(page.locator('.status-main')).toContainText('已复制')
       await expect.poll(async () => (await calls(page, 'copy_image_to_clipboard')).length).toBe(1)
+      const returned = await page.evaluate(() => window.screenshotHarness.calls)
+      assert(returned.findIndex(item => item.command === 'show_main_window') < returned.findIndex(item => item.command === 'copy_image_to_clipboard'), '返回主窗口不能等待剪贴板写入')
+      await page.evaluate(() => { window.screenshotHarness.holdClipboard = false; window.screenshotHarness.finishClipboard() })
+      await expect(page.locator('.status-main')).toContainText('已复制')
       assert.deepEqual((await calls(page, 'copy_image_to_clipboard'))[0].args, { width: 64, height: 40, byteLength: 8 + 64 * 40 * 4, firstPixel: [26, 120, 188, 255], lastPixel: [26, 120, 188, 255] })
     })
 
