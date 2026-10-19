@@ -58,13 +58,29 @@ fn sample(root: &Path, runtime: &Runtime) -> Asset {
         .unwrap()
 }
 fn wait(jobs: &JobManager, id: &str) -> MediaJob {
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(60);
+    let diagnostic = std::env::var_os("OPEN_MEDIA_TEST_PROGRESS").is_some();
+    let mut next_report = started + Duration::from_secs(5);
     loop {
         let item = jobs.list().into_iter().find(|j| j.id == id).unwrap();
         if item.state != "running" {
             return item;
         }
-        assert!(Instant::now() < deadline, "job timeout");
+        if diagnostic && Instant::now() >= next_report {
+            eprintln!("NATIVE_JOB_PROGRESS {}", serde_json::to_string(&item).unwrap());
+            next_report = Instant::now() + Duration::from_secs(5);
+        }
+        if Instant::now() >= deadline {
+            // Keep the existing deadline, but report the actual stalled phase
+            // and release the encoder instead of leaving it running after panic.
+            let _ = jobs.cancel(id);
+            let cleanup = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < cleanup && jobs.list().iter().any(|job| job.id == id && job.state == "running") {
+                thread::sleep(Duration::from_millis(30));
+            }
+            panic!("job timeout after {:.2}s: {}", started.elapsed().as_secs_f64(), serde_json::to_string(&item).unwrap());
+        }
         thread::sleep(Duration::from_millis(30));
     }
 }

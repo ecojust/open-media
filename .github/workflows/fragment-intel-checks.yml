@@ -1,0 +1,65 @@
+name: Verify native transitions on Intel desktop
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-transitions:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      OPEN_MEDIA_FFMPEG: ${{ github.workspace }}/src-tauri/resources/media/ffmpeg
+      OPEN_MEDIA_FFPROBE: ${{ github.workspace }}/src-tauri/resources/media/ffprobe
+      OPEN_MEDIA_TEST_PROGRESS: '1'
+      OPEN_MEDIA_FRAGMENT_ARTIFACTS: ${{ github.workspace }}/.media-runtime/logs/fragment-artifacts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: x86_64-apple-darwin
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            src-tauri/resources/media
+            .media-runtime/downloads
+          key: media-runtime-v1-macos-x64-${{ hashFiles('scripts/media-runtime.lock.json', 'scripts/media-runtime.mjs', 'scripts/media-runtime-capabilities.mjs', 'scripts/build-media-runtime.sh') }}
+      - name: Verify the packaged runtime and machine
+        run: |
+          mkdir -p .media-runtime/logs
+          node scripts/media-runtime.mjs verify
+          uname -a
+          sysctl -n hw.ncpu hw.memsize
+          src-tauri/resources/media/ffmpeg -version
+      - name: Run all twelve real transition exports in isolation
+        run: |
+          set -o pipefail
+          (
+            while sleep 10; do
+              date -u
+              ps -axo pid,ppid,%cpu,rss,comm | awk 'NR == 1 || /ffmpeg|ffprobe|cargo|open_media_lib/'
+            done
+          ) > .media-runtime/logs/fragment-processes.log &
+          monitor_pid=$!
+          trap 'kill "$monitor_pid" 2>/dev/null || true' EXIT
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib tests::fragment_transitions_encode_live_textures_and_restore_both_endpoints -- --exact --nocapture --test-threads=1 2>&1 | tee .media-runtime/logs/fragment-native.log
+      - name: Print process observations
+        if: always()
+        run: cat .media-runtime/logs/fragment-processes.log 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-transition-intel-${{ github.run_id }}
+          path: .media-runtime/logs
+          if-no-files-found: warn
+          retention-days: 7
