@@ -1682,7 +1682,10 @@ fn timeline_plan(
             // A trimmed stream can reach EOF between output frame timestamps.
             // Its final decoded frame remains valid until the clip's exclusive
             // endpoint; passing the background here would insert a black frame.
-            filters.push(format!("[base{visuals}][v{index}]overlay=x='{x}+({cw}-overlay_w)/2':y='{y}+({ch}-overlay_h)/2':enable='gte(t,{start})*lt(t,{})':eof_action=repeat:repeatlast=1:format=auto[base{}]",start+duration,visuals+1));
+            // Evaluate visibility on the composition clock. Generic enable can
+            // be reevaluated on a secondary frame and leak it past a cut.
+            // An offscreen coordinate skips blending outside the clip interval.
+            filters.push(format!("[base{visuals}][v{index}]overlay=x='if(gte(t,{start})*lt(t,{}),{x}+({cw}-overlay_w)/2,NAN)':y='{y}+({ch}-overlay_h)/2':eof_action=repeat:repeatlast=1:format=auto[base{}]",start+duration,visuals+1));
             visuals += 1;
         }
         let volume = number(clip, "volume", 1.0, 0.0, 4.0)?;

@@ -675,9 +675,122 @@ fn ten_minute_split_recording_fifty_texts_and_1080p_startup() {
 /// A successful override does not turn a failed production export into a pass.
 #[cfg(target_os = "macos")]
 #[test]
-#[ignore = "macOS long-graph CPU, real-time VideoToolbox and production encoder diagnostics"]
+#[ignore = "macOS long-graph CPU and production pipeline diagnostics"]
 fn macos_ten_minute_encoder_variants_diagnostic() {
     use std::io::{BufRead, BufReader};
+
+    fn capture_tool(mut command: Command, output: &Path) -> Value {
+        let stdout = match fs::File::create(output) {
+            Ok(file) => file,
+            Err(error) => return json!({"error":error.to_string()}),
+        };
+        let stderr = match fs::File::create(output.with_extension("stderr.log")) {
+            Ok(file) => file,
+            Err(error) => return json!({"error":error.to_string()}),
+        };
+        let mut child = match command
+            .stdin(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(error) => return json!({"error":error.to_string()}),
+        };
+        let began = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return json!({"success":status.success(),"code":status.code(),"path":output})
+                }
+                Err(error) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return json!({"error":error.to_string(),"path":output});
+                }
+                Ok(None) if began.elapsed() >= Duration::from_secs(5) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return json!({"timedOut":true,"path":output});
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    }
+
+    fn sample_owned_encoders(variant: &str, artifacts: &Path) -> Value {
+        let pgrep_path = artifacts.join(format!("{variant}-pgrep.log"));
+        let mut command = Command::new("/usr/bin/pgrep");
+        // Restrict inspection to this test process's direct children.
+        command.args(["-P", &std::process::id().to_string(), "-x", "ffmpeg"]);
+        let pgrep = capture_tool(command, &pgrep_path);
+        let pids: Vec<u32> = fs::read_to_string(&pgrep_path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.trim().parse().ok())
+            .take(4)
+            .collect();
+        let mut samples = Vec::new();
+        for pid in pids {
+            let ps_path = artifacts.join(format!("{variant}-{pid}-ps.log"));
+            let mut command = Command::new("/bin/ps");
+            command.args([
+                "-p",
+                &pid.to_string(),
+                "-o",
+                "pid=,ppid=,%cpu=,rss=,etime=,stat=,comm=",
+            ]);
+            let ps = capture_tool(command, &ps_path);
+            let stack = artifacts.join(format!("{variant}-{pid}-sample.txt"));
+            let mut command = Command::new("/usr/bin/sample");
+            command.args([
+                pid.to_string(),
+                "1".into(),
+                "-file".into(),
+                stack.to_string_lossy().into_owned(),
+            ]);
+            let sampling = capture_tool(
+                command,
+                &artifacts.join(format!("{variant}-{pid}-sample.log")),
+            );
+            samples.push(json!({"pid":pid,"ps":ps,"psText":fs::read_to_string(ps_path).unwrap_or_default(),"sample":sampling,"stackPath":stack}));
+        }
+        json!({"sampledAfterSeconds":20,"pgrep":pgrep,"processes":samples})
+    }
+
+    fn report_files(directory: &Path) -> std::collections::HashSet<std::path::PathBuf> {
+        fs::read_dir(directory)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name().is_some_and(|name| {
+                    let name = name.to_string_lossy();
+                    name.starts_with("ffmpeg-") && name.ends_with(".log")
+                })
+            })
+            .collect()
+    }
+
+    fn report_tail(path: &Path) -> String {
+        let Ok(file) = fs::File::open(path) else {
+            return String::new();
+        };
+        let mut tail = std::collections::VecDeque::new();
+        for line in BufReader::new(file)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
+            tail.push_back(line);
+            if tail.len() > 60 {
+                tail.pop_front();
+            }
+        }
+        let joined = tail.into_iter().collect::<Vec<_>>().join("\n");
+        let mut chars: Vec<_> = joined.chars().rev().take(5000).collect();
+        chars.reverse();
+        chars.into_iter().collect()
+    }
 
     fn summarize_stats(path: &Path) -> Value {
         let file = match fs::File::open(path) {
@@ -714,74 +827,56 @@ fn macos_ten_minute_encoder_variants_diagnostic() {
     let store = MediaStore::new(root.path()).unwrap();
     let runtime = runtime();
     let spec = long_project(&runtime, &store);
+    let artifacts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("test-results/export-scaling");
+    fs::create_dir_all(&artifacts).unwrap();
+    let report_directory = std::env::current_dir().unwrap();
     let mut results = Vec::new();
-    for variant in [
-        "forced-cpu",
-        "forced-videotoolbox-realtime",
-        "production-default",
-    ] {
+    for variant in ["forced-cpu", "production-default"] {
         let began = Instant::now();
+        let previous_reports = report_files(&report_directory);
         let statistics = [
             (
                 "encPre",
                 "-stats_enc_pre:v",
-                root.path().join(format!("{variant}-enc-pre.txt")),
+                artifacts.join(format!("{variant}-enc-pre.txt")),
             ),
             (
                 "encPost",
                 "-stats_enc_post:v",
-                root.path().join(format!("{variant}-enc-post.txt")),
+                artifacts.join(format!("{variant}-enc-post.txt")),
             ),
             (
                 "muxPre",
                 "-stats_mux_pre:v",
-                root.path().join(format!("{variant}-mux-pre.txt")),
+                artifacts.join(format!("{variant}-mux-pre.txt")),
             ),
         ];
         println!(
             "EXPORT_SCALING_DIAGNOSTIC_BEGIN {}",
             json!({"variant":variant})
         );
+        let (stop_monitor, stop_requested) = std::sync::mpsc::channel();
+        let monitor_artifacts = artifacts.clone();
+        let monitor = thread::spawn(move || {
+            if stop_requested.recv_timeout(Duration::from_secs(20)).is_ok() {
+                return json!({"sampled":false,"reason":"variant finished before twenty seconds"});
+            }
+            let result = sample_owned_encoders(variant, &monitor_artifacts);
+            println!(
+                "EXPORT_SCALING_PROCESS_SAMPLE {}",
+                json!({"variant":variant,"monitor":result})
+            );
+            result
+        });
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut plan = engine::build_plan(&store, &runtime, &spec).unwrap();
             if variant != "production-default" {
                 plan.video = None;
             }
-            if variant == "forced-videotoolbox-realtime" {
-                let output_start = plan
-                    .args
-                    .iter()
-                    .rposition(|argument| argument == "-i")
-                    .unwrap()
-                    + 2;
-                let mut args = Vec::with_capacity(plan.args.len() + 8);
-                let mut index = 0;
-                while index < plan.args.len() {
-                    if index >= output_start
-                        && ["-c:v", "-crf", "-preset", "-b:v"].contains(&plan.args[index].as_str())
-                    {
-                        index += 2;
-                    } else {
-                        args.push(plan.args[index].clone());
-                        index += 1;
-                    }
-                }
-                args.extend(
-                    [
-                        "-c:v",
-                        "h264_videotoolbox",
-                        "-allow_sw",
-                        "0",
-                        "-realtime",
-                        "1",
-                        "-b:v",
-                        "350000",
-                    ]
-                    .into_iter()
-                    .map(str::to_owned),
-                );
-                plan.args = args;
-            }
+            plan.args.push("-report".into());
             for (_, option, path) in &statistics {
                 plan.args
                     .extend([(*option).to_owned(), path.to_string_lossy().into_owned()]);
@@ -791,12 +886,25 @@ fn macos_ten_minute_encoder_variants_diagnostic() {
                 &runtime,
                 plan,
                 &output,
-                Duration::from_secs(30),
                 Duration::from_secs(90),
+                Duration::from_secs(180),
             );
             assert_eq!(job.encoded_frames, 6000);
             verify_streams(&runtime, &output, 6000, 600.0, 160, 90);
         }));
+        let _ = stop_monitor.send(());
+        let monitor = monitor
+            .join()
+            .unwrap_or_else(|_| json!({"error":"monitor thread panicked"}));
+        let reports: Vec<_> = report_files(&report_directory)
+            .difference(&previous_reports)
+            .enumerate()
+            .map(|(index, path)| {
+                let retained = artifacts.join(format!("{variant}-ffmpeg-report-{index}.log"));
+                let copied = fs::copy(path, &retained).map_err(|error| error.to_string());
+                json!({"path":retained,"copyError":copied.err(),"tail":report_tail(path)})
+            })
+            .collect();
         let error = attempt.as_ref().err().map(|payload| {
             payload
                 .downcast_ref::<String>()
@@ -814,7 +922,7 @@ fn macos_ten_minute_encoder_variants_diagnostic() {
             .collect();
         let result = json!({
             "variant":variant,"pass":attempt.is_ok(),"elapsedSeconds":began.elapsed().as_secs_f64(),
-            "error":error,"stats":statistics,
+            "error":error,"stats":statistics,"monitor":monitor,"reports":reports,
             // The override bypasses selection; its job.backend field alone
             // cannot describe the manually selected encoder.
             "encoderSelectionBypassed":variant != "production-default",

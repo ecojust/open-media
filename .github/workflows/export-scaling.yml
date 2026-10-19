@@ -78,16 +78,25 @@ jobs:
         if: always()
         run: |
           node --input-type=module <<'NODE'
-          import { existsSync, readFileSync } from 'node:fs';
+          import { existsSync, readFileSync, readdirSync } from 'node:fs';
+          const report = (title, message) => console.log(`::notice title=${title}::${message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
           for (const path of ['test-results/export-scaling/benchmark.log', 'test-results/export-scaling/encoder-comparison.log']) {
             if (!existsSync(path)) continue;
             for (const line of readFileSync(path, 'utf8').split('\n')) {
+              const diagnostic = line.match(/^EXPORT_SCALING_DIAGNOSTIC (\{.*\})$/);
+              if (diagnostic) report('Encoder diagnostic', diagnostic[1]);
               const match = line.match(/EXPORT_SCALING (\{.*\})$/);
               if (!match) continue;
               const result = JSON.parse(match[1]);
               const message = JSON.stringify({ name: result.name, runtime: result.runtime, firstEncodedProgressSeconds: result.firstEncodedProgressSeconds, elapsedSeconds: result.elapsedSeconds, frames: result.job.encodedFrames, state: result.job.state });
-              console.log(`::notice title=Long export measurement::${message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`);
+              report('Long export measurement', message);
             }
+          }
+          for (const name of readdirSync('test-results/export-scaling').filter(name => name.endsWith('-sample.txt'))) {
+            const stack = readFileSync(`test-results/export-scaling/${name}`, 'utf8');
+            const top = stack.indexOf('Sort by top of stack');
+            report(name, stack.slice(0, 6000));
+            if (top >= 0) report(`${name} top`, stack.slice(top, top + 6000));
           }
           NODE
       - name: Summarize failed media checks
