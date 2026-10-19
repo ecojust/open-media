@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/antirez/h3.c",
+  "revision": "8974cc055ea9c02fcd14cc27dfda3e1027c05153",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "663e51edcd9a3a8f858018ce6924ad2895a24c269c26c39ad75325bcd0f7e5bc",
+      "size": 1077
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "sha256": "a0d77db7d2aca0eda811ab3c386cc32b3143f2c2609a042cf4642954f0f6fb09",
+      "size": 1774
+    },
+    {
+      "path": "h3.c",
+      "sha256": "38e1fb2a1ec668dc849fc8f1395f681094267505ad7ea8e3b3b082a70184259f",
+      "size": 71951
+    },
+    {
+      "path": "h3.h",
+      "sha256": "be11f79818a226fe7d47d31d904be50e900683cd9c07c7900a1d4857dc2e9320",
+      "size": 6470
+    },
+    {
+      "path": "h3_audio_vae.c",
+      "sha256": "bdbb0bea5a4056d80d67061d72f1bb9213cb008467f054f832478540c076d817",
+      "size": 60099
+    },
+    {
+      "path": "h3_audio_vae.h",
+      "sha256": "f39c42eeadc4f0bfcbc16748586457a2767ef097dbe510027c7ecac2579e06c3",
+      "size": 1769
+    },
+    {
+      "path": "h3_dit.c",
+      "sha256": "f888013332f327ca5d7449a53a29f46399239a34e12f1a9389200b3079d459e6",
+      "size": 142343
+    },
+    {
+      "path": "h3_dit.h",
+      "sha256": "a19f61523284d5f43b3b6d5b2716990265428a062521256af2376cfd48627904",
+      "size": 7176
+    },
+    {
+      "path": "h3_dit_schedule.c",
+      "sha256": "d9ca9266a5a2084584c096e9423ff1e0c53e48370f2f0f237e47d04bcc888aa9",
+      "size": 20072
+    },
+    {
+      "path": "h3_dit_schedule.h",
+      "sha256": "3b5f6d00114093914df6e92afd337487a1b29730440ee4fb2c147c0d45696d32",
+      "size": 2444
+    },
+    {
+      "path": "h3_ffmpeg.c",
+      "sha256": "bd7c902d1b2ddfd6f7da47d5027f2e0a8b21640fb3067e2c880b4ee7402e691a",
+      "size": 29067
+    },
+    {
+      "path": "h3_ffmpeg.h",
+      "sha256": "87c55a6914b5994e8ba0975a25e695f64bbba0fc8b22ff880d2eb6673b787405",
+      "size": 2257
+    },
+    {
+      "path": "h3_gpu.h",
+      "sha256": "2f5c0ab28582c9baf939b4588523deb57fc076a09f245b8cd7f512102fa35a6b",
+      "size": 34967
+    },
+    {
+      "path": "h3_gpu.m",
+      "sha256": "4a41d398bd169a651cce8ab7cba85497811d4adaf9ee6a8428e50924302941e8",
+      "size": 235113
+    },
+    {
+      "path": "h3_host.c",
+      "sha256": "da2095c4557068c4cd3082b9c781d02bc018aba8d0d3f425053f985131741786",
+      "size": 25048
+    },
+    {
+      "path": "h3_host.h",
+      "sha256": "2f202dbb73e7ca33152ebf83378915f6271268541d5a1d952899dfe7417db666",
+      "size": 4235
+    },
+    {
+      "path": "h3_internal.h",
+      "sha256": "65f98435c1290366134b79f05d19c8dd3a9616b482f7d397823dce02453d02fd",
+      "size": 938
+    },
+    {
+      "path": "h3_metal.h",
+      "sha256": "00241135c11315200b5d68ee9dc68cd96702ec24d39e2b18bb2d179edbfb44ca",
+      "size": 138
+    },
+    {
+      "path": "h3_metal.m",
+      "sha256": "205fd4b62a6606ee50fcf5c23805828340429469c5ec51414a87d51bcf986301",
+      "size": 1796
+    },
+    {
+      "path": "h3_multimodal.c",
+      "sha256": "48a9a15e7f7e65fda6884cebe668123996d86bdefee73b39199948c9e0650c8b",
+      "size": 15217
+    },
+    {
+      "path": "h3_multimodal.h",
+      "sha256": "e7e54f9c7251342f64451bf42164a47119864cd0069f4375ce8cf3354d297a29",
+      "size": 2168
+    },
+    {
+      "path": "h3_safetensors.c",
+      "sha256": "30a815d567fefc1b5870347719e68b7fcca651407117c6dd033c72324da2263c",
+      "size": 20948
+    },
+    {
+      "path": "h3_safetensors.h",
+      "sha256": "e95d8e21572cf598f793026ac542ef75d8aaa9ba431f3daa1fe0f138b759ae18",
+      "size": 1404
+    },
+    {
+      "path": "h3_shaders.metal",
+      "sha256": "95d665ecad0a19b6864708272b4e0a30d41ea445ecc8a74b8f75dd6de323ddd3",
+      "size": 205527
+    },
+    {
+      "path": "h3_terminal.c",
+      "sha256": "d4a49423f6c543f81aae3ff1f66a8fef029d20dcc004dd07185401c45d963eef",
+      "size": 10667
+    },
+    {
+      "path": "h3_terminal.h",
+      "sha256": "de30040bce0148bef4679d6c95572666ad41019e138b35e1b47f7ea84313d907",
+      "size": 768
+    },
+    {
+      "path": "h3_text_encoder.c",
+      "sha256": "b87472da65a17ecd5e10c3de7b78d585c39e545508cbd27af0e1d238d510a40a",
+      "size": 35205
+    },
+    {
+      "path": "h3_text_encoder.h",
+      "sha256": "739631dd8bdfaf54c24c12d3035160519a27a7234fc7399aafe8d5a7e62b0052",
+      "size": 2822
+    },
+    {
+      "path": "h3_tokenizer.h",
+      "sha256": "3607647577c1bf8a85c0359027f24d94619776c827118975da71f2715aa66483",
+      "size": 927
+    },
+    {
+      "path": "h3_tokenizer.m",
+      "sha256": "bc37558c00eb77bcd6834d000186dafe64407502a853c37d0ab5da0f43f82f29",
+      "size": 21599
+    },
+    {
+      "path": "h3_video_encoder.c",
+      "sha256": "6b3c1ddc3abed1f7fb9828dc35d8ec32bd0f71767d06916eb292b9e73debd650",
+      "size": 35440
+    },
+    {
+      "path": "h3_video_encoder.h",
+      "sha256": "715486a3dffa061989766c3d327a38f353074faa5a1b6dd44655fa12a61e0f7a",
+      "size": 1019
+    },
+    {
+      "path": "h3_video_vae.c",
+      "sha256": "62d2638d0bddfd0e6a477826e5b949a3419d9665c55e969e6c7688dff7bc2c87",
+      "size": 54979
+    },
+    {
+      "path": "h3_video_vae.h",
+      "sha256": "341402e15fb2e1dac67e621a48e0414c1c2e286e39f76a703b01b82aff437c8b",
+      "size": 2320
+    },
+    {
+      "path": "h3_vision_encoder.c",
+      "sha256": "208820b951376a81123af20d109d40dd15b3a2bb71c6fe9fee9a5c6e8a4b47f2",
+      "size": 29210
+    },
+    {
+      "path": "h3_vision_encoder.h",
+      "sha256": "3248a198d654343c38ea82f2462bde0072e03b0a1928184ef207389228a65ba7",
+      "size": 1197
+    },
+    {
+      "path": "h3_weights.c",
+      "sha256": "d68476becd34dee90b78797ce9fb9025f65f3e222e01bb3f498b2d005d5f1fcc",
+      "size": 7149
+    },
+    {
+      "path": "h3_weights.h",
+      "sha256": "1593bb41730a13ad26d99fcf15863528ceb00b51ef8b482dc0ff2c9714e0bb2e",
+      "size": 1402
+    }
+  ]
+}

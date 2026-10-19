@@ -1,0 +1,73 @@
+name: Video generation native check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/video-generation-20261019
+
+permissions:
+  contents: read
+
+jobs:
+  host-contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: video-generation-contracts
+      - name: Validate pinned source and generation requests
+        run: |
+          node scripts/video-generation-verify.mjs
+          node --experimental-strip-types --test tests/video-generation.test.mjs
+      - name: Validate native contracts and unsupported platforms
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib video_generation -- --nocapture
+
+  native-macos-arm64:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Select compiler SDK
+        run: python3 scripts/video-generation-select-sdk.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: video-generation-native
+      - name: Verify pinned source and model inventory
+        run: node scripts/video-generation-verify.mjs
+      - name: Compile isolated runner and validate native module
+        run: cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib video_generation -- --nocapture
+      - name: Validate request protocol and real GPU compute when available
+        shell: bash
+        run: |
+          runner_path=$(python3 - <<'PY'
+          from pathlib import Path
+          paths = list(Path('src-tauri/target/debug/build').glob('open-media-*/out/open-media-video-generation'))
+          if not paths:
+              raise SystemExit('Native runner was not produced.')
+          print(max(paths, key=lambda path: path.stat().st_mtime).resolve())
+          PY
+          )
+          node scripts/video-generation-runtime-check.mjs "$runner_path"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: video-generation-check-${{ github.run_id }}
+          path: .video-generation-check/
+          if-no-files-found: warn

@@ -27,7 +27,7 @@ function assertUnchangedAfterFailure(project, tool, args, regex) {
 }
 
 test('MCP catalog is unique, restrictive and contains the declared runtime and editing operations', () => {
-  assert.equal(MCP_TOOLS.length, 85)
+  assert.equal(MCP_TOOLS.length, 88)
   assert.equal(new Set(MCP_TOOLS.map(tool => tool.name)).size, MCP_TOOLS.length)
   assert.equal(MCP_TOOLS.filter(tool => isProjectTool(tool.name)).length, 38)
   for (const tool of MCP_TOOLS) {

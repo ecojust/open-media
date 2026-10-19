@@ -2,7 +2,7 @@
 
 Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。视频剪辑顶部“项目设置”左侧的 **M** 按钮打开简洁的服务弹窗，显示连接地址、Token 和“复制配置”按钮，通过服务开关启停。有已认证的客户端连接时，M 按钮显示青紫色流动荧光；连接断开或服务停止后恢复普通样式。自动化任务的进度和取消操作位于“处理任务”中。
 
-服务直接使用界面中的工程、撤销历史和保存位置。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场、背景音乐、片头片尾、配音、模型管理和视频导出，共 **85 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
+服务直接使用界面中的工程、撤销历史和保存位置。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场、背景音乐、片头片尾、配音、模型管理、视频生成和视频导出，共 **88 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
 
 ## 连接
 
@@ -88,6 +88,9 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_material_list` | 搜索并分页浏览水印、配乐、片头片尾素材 |
 | `open_media_material_add` | 添加内置素材，片头片尾支持前插／后插及编辑标题 |
 | `open_media_export_start` | 按项目尺寸导出 MP4、WebM、MOV 或 GIF |
+| `open_media_video_generation_status` | 查询平台支持、视频模型大小、下载和校验状态 |
+| `open_media_video_model_download` | 经用户同意许可后按需下载视频模型与运行时，支持统一进度查询和取消 |
+| `open_media_video_generation_start` | 通过提示词、首尾帧、参考素材或分镜生成视频，完成后一次加入工程，可选插入时间线 |
 | `open_media_job_list` | 列出本次会话的自动化任务 |
 | `open_media_job_get` | 查询任务进度、耗时、错误或完成结果 |
 | `open_media_job_cancel` | 请求取消仍可取消的任务 |
@@ -158,11 +161,57 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 
 锁定轨道遵守界面相同的编辑限制，需先解除锁定。修改通过项目校验后才提交到界面，并使用现有撤销历史；删除素材引用不会删除原文件。录屏和麦克风采集不属于这些编辑工具，仍由用户在界面主动启动并完成系统授权。
 
+## 本地视频生成
+
+视频生成模型按需下载，当前仅支持 Apple 芯片 Mac；其他平台的状态查询会明确返回 `supported: false` 和原因。先调用 `open_media_video_generation_status` 查看模型大小、运行时和许可地址。下载前需取得用户对模型许可和下载的明确同意，再调用 `open_media_video_model_download`，必须包含 `acceptedLicense: true`。模型文件与执行程序均由本机按照固定清单验证，接口不接受任意运行时下载地址或命令。
+
+```json
+{
+  "modelId": "h3-base-fl2va",
+  "acceptedLicense": true
+}
+```
+
+下载和生成都返回统一异步任务，用 `open_media_job_get` 获取阶段和进度，或 `open_media_job_cancel` 取消；模型状态、项目查询和任务查询在处理期间仍可用。只有模型与运行时完成校验，才能开始生成，不会隐式下载或接受许可。
+
+`open_media_video_generation_start` 支持四种方式。默认 512 × 512、每镜 1 秒、20 步和低内存模式；宽高必须是 32 的倍数且不小于 256，像素总数不能超过 1344 × 768。每镜可请求 1–15 秒，实际帧数由模型取整，插入时间线使用真实生成时长。
+
+| mode | 输入 | 模型 |
+| --- | --- | --- |
+| `prompt` | 顶层 `prompt`、可选 `seconds` | `h3-base-fl2va` |
+| `image` | 提示词，加 `firstFrameAssetId` 或 `lastFrameAssetId` | `h3-base-fl2va` |
+| `reference` | 提示词，加 `references` 中已有图片、视频或音频的 `assetId` 和 `kind`；至少有图片或视频 | `h3-base-ref2va` |
+| `storyboard` | `shots`，最多 20 镜；每镜包含 `prompt`、可选 `title`、`seconds`、首尾帧素材 ID | `h3-base-fl2va` |
+
+参考模式最多 12 个素材，其中图片最多 9 张、视频最多 3 段；音视频每段 2–15 秒，视频和音频各自累计最多 15 秒、音频最多 3 段。视频的 `includeAudio: true` 会计入音频限制；此时未提供 `seconds` 默认 2 秒，明确请求过短时会返回错误（要求实际生成至少 56 帧）。首尾帧与参考模式不能混用。所有素材须先导入当前工程，只接受工程 `assetId`，不接受文件路径、外部 URL 或伪造的素材对象。
+
+下面的分镜请求会完成两镜及合并视频，并从第 5 秒开始逐镜插入新建的视频轨道：
+
+```json
+{
+  "modelId": "h3-base-fl2va",
+  "mode": "storyboard",
+  "width": 512,
+  "height": 512,
+  "shots": [
+    { "title": "开场", "prompt": "深蓝背景中的玻璃球缓慢旋转，柔和边缘光", "seconds": 2 },
+    { "title": "收尾", "prompt": "玻璃球中的金色光点散开，镜头缓慢后退", "seconds": 2 }
+  ],
+  "joinShots": true,
+  "insert": { "start": 5, "mode": "shots" },
+  "expectedRevision": 7
+}
+```
+
+省略 `insert` 只加入项目素材。`insert.trackId` 可指定未锁定的视频轨道；省略时新建“生成视频”轨道，`insert.mode: "combined"` 插入合并视频而非逐镜插入。成功结果包括 `assetIds`、可选 `combinedAssetId`、`clipIds`、`trackId` 和 `nativeJobId`，后续可通过已有素材、预览和剪辑工具使用。
+
+全部镜头完成后才原子写入工程，共用一个撤销步骤。取消、失败或工程版本变化都不会插入部分结果；已完成的本地生成文件保留在视频生成历史，便于稍后取用。任务完成后，当前会话仍可通过 `open_media_job_get` 读取结果。生成任务不会自动导出整个剪辑工程。
+
 ## 项目版本和任务
 
 `open_media_project_get` 返回当前 `projectId` 和 `revision`。写操作建议带上 `expectedRevision`，防止把基于旧画面的修改应用到用户刚编辑过的工程。版本不匹配时工具会返回错误，应重新读取工程并据此重试，而不是直接去掉版本参数。
 
-导入、打开、新建、保存、添加内置素材、配音、媒体分析、取帧、预览、批量编辑、版本操作、导出检查和导出采用异步任务。上传的 begin／chunk／status／abort 以及 artifact_read 直接返回协议结果，commit 返回导入任务。调用返回相同值的 `id` 和 `jobId`，查询及取消工具的参数名为 `id`。用 `open_media_job_get` 查询，或在“处理任务”中查看进度；`state` 为 `running`、`completed`、`failed` 或 `cancelled`。只有 `completed` 表示操作完成，仍应检查 `result`；创建任务本身不代表已经生成音频或视频。配音提供当前阶段、完成数量及可用的百分比，其他任务按实际能力返回进度。
+导入、打开、新建、保存、添加内置素材、配音、媒体分析、取帧、预览、批量编辑、版本操作、视频模型下载、视频生成、导出检查和导出采用异步任务。上传的 begin／chunk／status／abort 以及 artifact_read 直接返回协议结果，commit 返回导入任务。调用返回相同值的 `id` 和 `jobId`，查询及取消工具的参数名为 `id`。用 `open_media_job_get` 查询，或在“处理任务”中查看进度；`state` 为 `running`、`completed`、`failed` 或 `cancelled`。只有 `completed` 表示操作完成，仍应检查 `result`；创建任务本身不代表已经生成音频或视频。配音提供当前阶段、完成数量及可用的百分比，其他任务按实际能力返回进度。
 
 任务响应保留原有 `id/state/result`，同时明确返回以下字段。同步操作返回 `responseType: "result"`、`execution: "synchronous"`、`final: true`；为保持兼容，任务列表仍是数组，其中每个任务都包含完整查询契约。
 

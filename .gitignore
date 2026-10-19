@@ -13,6 +13,7 @@ src-tauri/resources/media/*
 src-tauri/resources/capture/open-media-capture
 src-tauri/resources/capture/libopen_media_capture.dylib
 .speech-runtime/
+.video-generation-check/
 src-tauri/resources/speech/*
 !src-tauri/resources/speech/README.txt
 !src-tauri/resources/speech/README.md

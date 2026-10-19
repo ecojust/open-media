@@ -47,6 +47,39 @@ The `licenses/application/frontend/manifest.json` inventory records the dependen
 
 Required dependency names, file-format names, copyright statements, and licensing references are preserved for accurate attribution.
 
+## Optional local video generation
+
+On Apple Silicon, the isolated video generation executable is built from the
+vendored `antirez/h3.c` source at commit
+`8974cc055ea9c02fcd14cc27dfda3e1027c05153`. The engine is MIT licensed,
+copyright (c) 2026 Salvatore Sanfilippo. Its shader implementation contains
+adaptations of ccv kernels under BSD-3-Clause, copyright (c) 2010 Liu Liu.
+The original, unmodified source, original license and third-party notice texts,
+and per-file source digests are retained in
+`src-tauri/native/video-generation/upstream/` and `licenses/video-generation/h3/`.
+Open Media's separate request/progress adapter is licensed under the main
+application's MIT license. It launches the existing bundled media executable
+through its documented process interface; it does not link that executable.
+
+Model weights are **not** covered by the engine's MIT license and are not
+included in the installer. The optional MiniMax H3 checkpoint is pinned to
+`MiniMaxAI/MiniMax-H3` revision
+`42ed227ee7df40d41602854ae760620d6eb651fe`; file paths, sizes, SHA-256 digests,
+and official/mirror URLs are locked in
+`src-tauri/resources/video-generation-models.json`. Model repository Python
+code is not downloaded or executed. Identical encoder and decoder files are
+reused across model modes without modifying the weights.
+
+The complete MiniMax H3 Community License Agreement, required NOTICE and
+the encoder's Apache-2.0 license are retained in
+`licenses/video-generation/MiniMax-H3/`. This community license excludes the
+European Union, United Kingdom, Republic of Korea and United States of America
+from its applicable territory, and includes separate commercial terms and use
+restrictions. Commercial interfaces using the model must prominently display
+“MiniMax H3”. Users must confirm that their use is covered by the model license
+before downloading it. The MIT engine license grants no rights to model
+weights or to uses outside that model license.
+
 ## Bundled image text recognition
 
 Offline recognition uses `tesseract.js` 7.0.0 and `tesseract.js-core` 7.0.0 under Apache-2.0. The worker, WebAssembly code and simplified Chinese/English language models are included locally. Images and recognized text are not sent to a remote recognition service.

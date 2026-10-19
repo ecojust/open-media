@@ -34,6 +34,8 @@ async function fixture(browser, url, autoSave = false) {
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
+        if (command === 'get_video_generation_status') return { supported: false, runtimeReady: false, models: state.generationModels || [] }
+        if (command === 'list_video_generation_jobs') return state.generationJobs || []
         if (command === 'get_media_jobs') {
           if (state.jobsMode === 'fail') throw new Error('无法检查正在处理的任务')
           return structuredClone(state.jobs)
@@ -246,7 +248,7 @@ async function main() {
     {
       const { page, finish } = await fixture(browser, url)
       const protections = [
-        ['screenshotBusy', true, '截屏'], ['speechWorking', true, '文字配音'], ['recording', true, '录制'],
+        ['videoGenerating', true, '视频生成'], ['screenshotBusy', true, '截屏'], ['speechWorking', true, '文字配音'], ['recording', true, '录制'],
         ['recoveryRecordings', [{ id: 'recovery', name: '待保存录制', blob: null }], '录制'],
         ['pendingMedia', 1, '素材导入'], ['imageConverting', true, '媒体转换'],
         ['videoConverting', true, '媒体转换'], ['gifConverting', true, '媒体转换'], ['browserExporting', true, '导出'],
@@ -282,6 +284,17 @@ async function main() {
       await finish()
       console.log('PASS 截屏、配音、录制恢复、素材导入、转换、导出和任务状态失败均阻止退出；无修改时直接关闭')
     }
+    for (const downloading of [false, true]) {
+      const { page, finish } = await fixture(browser, url)
+      if (downloading) await setMode(page, 'generationModels', [{ id: 'h3-base-fl2va', name: 'MiniMax H3 FL2VA', state: 'downloading', size: 144000000000, downloadedBytes: 100, modes: ['prompt'], hardware: 'Apple 芯片' }])
+      else await setMode(page, 'generationJobs', [{ id: 'background-video', state: 'running', stage: '正在生成', shotIndex: 0, shotCount: 1, startedAt: Date.now(), elapsedSeconds: 0, assets: [] }])
+      await close(page)
+      await expect(page.locator('.app-error').first()).toContainText('视频生成及模型下载')
+      await expect(page.getByTestId('video-generation-workspace')).toBeVisible()
+      await checkNoExit(page)
+      await finish()
+    }
+    console.log('PASS 未进入生成工作区时，后台视频生成与模型下载同样阻止直接退出')
   } finally { await browser?.close(); await server.close() }
 }
 

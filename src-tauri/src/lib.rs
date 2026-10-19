@@ -23,6 +23,7 @@ pub mod preview_tools;
 #[cfg(any(feature = "desktop", test))]
 pub mod image_clipboard;
 pub mod speech;
+pub mod video_generation;
 mod speech_models;
 mod speech_chinese;
 #[cfg(any(feature = "desktop", test))]
@@ -54,6 +55,7 @@ mod desktop {
         image_clipboard::{self, ImageClipboard},
         recording_controls::{ControlsAction, ControlsManager, ControlsSnapshot},
         speech::{SpeechJob, SpeechManager, SpeechRequest, SpeechStatus},
+        video_generation::{VideoGenerationJob, VideoGenerationManager, VideoGenerationRequest, VideoGenerationStatus},
     };
     use serde_json::Value;
     use std::{
@@ -77,6 +79,7 @@ mod desktop {
         audio_tools: crate::audio_tools::AudioToolsManager,
         asr: crate::audio_tools_asr::AsrManager,
         speech: SpeechManager,
+        video_generation: VideoGenerationManager,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
         resource: PathBuf,
@@ -529,6 +532,38 @@ mod desktop {
         state.speech.accept(&ids)
     }
     #[tauri::command]
+    pub async fn get_video_generation_status(state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
+        let manager = state.video_generation.clone();
+        blocking(move || Ok(manager.status())).await
+    }
+    #[tauri::command]
+    pub async fn begin_video_model_download(model_id: String, accepted_license: bool, state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
+        let manager = state.video_generation.clone();
+        blocking(move || manager.begin_download(&model_id, accepted_license)).await
+    }
+    #[tauri::command]
+    pub async fn cancel_video_model_download(model_id: String, state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
+        let manager = state.video_generation.clone();
+        blocking(move || manager.cancel_download(&model_id)).await
+    }
+    #[tauri::command]
+    pub async fn begin_video_generation(request: VideoGenerationRequest, state: State<'_, MediaState>) -> engine::Result<VideoGenerationJob> {
+        let state = state.inner().clone();
+        blocking(move || state.video_generation.begin(state.runtime()?, state.store, request)).await
+    }
+    #[tauri::command]
+    pub fn get_video_generation_job(id: String, state: State<'_, MediaState>) -> engine::Result<VideoGenerationJob> {
+        state.video_generation.get(&id)
+    }
+    #[tauri::command]
+    pub fn list_video_generation_jobs(state: State<'_, MediaState>) -> engine::Result<Vec<VideoGenerationJob>> {
+        state.video_generation.list()
+    }
+    #[tauri::command]
+    pub fn cancel_video_generation(id: String, state: State<'_, MediaState>) -> engine::Result<()> {
+        state.video_generation.cancel(&id)
+    }
+    #[tauri::command]
     pub async fn list_capture_devices(
         request_permission: Option<bool>,
         state: State<'_, MediaState>,
@@ -917,6 +952,7 @@ mod desktop {
                     audio_tools: crate::audio_tools::AudioToolsManager::default(),
                     asr: crate::audio_tools_asr::AsrManager::new(&data, Some(&resource)).map_err(std::io::Error::other)?,
                     speech: SpeechManager::new(&data, &resource).map_err(std::io::Error::other)?,
+                    video_generation: VideoGenerationManager::new(&data).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
                     resource,
@@ -997,6 +1033,13 @@ mod desktop {
                 cancel_speech_job,
                 discard_speech_job,
                 accept_speech_jobs,
+                get_video_generation_status,
+                begin_video_model_download,
+                cancel_video_model_download,
+                begin_video_generation,
+                get_video_generation_job,
+                list_video_generation_jobs,
+                cancel_video_generation,
                 configure_screenshot_shortcut,
                 get_desktop_platform,
                 capture_screenshot,

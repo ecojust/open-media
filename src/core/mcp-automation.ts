@@ -12,6 +12,8 @@ import { createMcpSpeechJobs, type McpSpeechJob } from './mcp-speech-jobs.ts'
 import { isSharedEditorTool, prepareEditorTool } from './editor-tool-service.ts'
 import { getSpeechSettings, updateSpeechSettings } from './speech-settings.ts'
 import { McpBusyError, mcpBlockingJob, mcpJobResponse, mcpSynchronousResponse, serializeMcpError, type McpBlockingOperation, type McpJobProtocol } from './mcp-response.ts'
+import { beginVideoGeneration, beginVideoModelDownload, cancelVideoGeneration, cancelVideoModelDownload, getVideoGenerationJob, getVideoGenerationStatus } from '../native-video-generation.ts'
+import { applyMcpVideoGeneration, prepareMcpVideoGeneration } from './mcp-video-generation.ts'
 
 export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
 export interface McpAutomationHost {
@@ -256,6 +258,60 @@ export function createMcpAutomation(host: McpAutomationHost) {
         return { ...status, responseType: 'model-status', execution: 'asynchronous', final: false, modelId,
           poll: { tool: 'open_media_speech_model', arguments: { action: 'status', modelId } },
           cancel: { tool: 'open_media_speech_model', arguments: { action: 'cancel', modelId } } }
+      }
+      case 'open_media_video_generation_status': return getVideoGenerationStatus()
+      case 'open_media_video_model_download':
+        return startTool('video-model-download', '下载视频生成模型', async operation => {
+          const modelId = args.modelId as string
+          let status = await getVideoGenerationStatus()
+          check(operation)
+          if (!status.supported) throw new Error(status.reason || '当前平台暂不支持本地视频生成。')
+          if (!status.models.some(model => model.id === modelId)) throw new Error('未知的视频生成模型。')
+          // License consent is explicit in the schema and verified again by the native manager.
+          operation.cancelNative = async () => { await cancelVideoModelDownload(modelId) }
+          status = await beginVideoModelDownload(modelId, args.acceptedLicense === true)
+          while (true) {
+            check(operation)
+            const model = status.models.find(item => item.id === modelId)
+            if (!model) throw new Error('视频生成模型已不在当前清单中。')
+            changed(operation, model.state === 'verifying' ? '正在校验视频生成模型' : `正在下载 ${model.name}`, model.size > 0 ? Math.min(1, model.downloadedBytes / model.size) : undefined)
+            if (model.state === 'ready' && status.runtimeReady) return { modelId, status }
+            if (model.state === 'failed' || model.state === 'unsupported') throw new Error(model.error || status.reason || '视频模型下载失败。')
+            if (model.state === 'not-downloaded') throw new DOMException('模型下载已取消。', 'AbortError')
+            await wait(operation)
+            status = await getVideoGenerationStatus()
+          }
+        })
+      case 'open_media_video_generation_start': {
+        const prepared = prepareMcpVideoGeneration(host.getProject(), args)
+        return startTool('video-generation', '生成视频', async operation => {
+          const status = await getVideoGenerationStatus()
+          check(operation)
+          if (!status.supported) throw new Error(status.reason || '当前平台暂不支持本地视频生成。')
+          const model = status.models.find(item => item.id === prepared.request.modelId)
+          if (!model || !model.modes.includes(prepared.request.mode)) throw new Error('所选模型不支持此生成方式。')
+          if (!status.runtimeReady || model.state !== 'ready') throw new Error('请先下载并完成校验所选视频生成模型。')
+          changed(operation, '正在启动视频生成')
+          operation.cancelNative = () => cancelVideoGeneration(prepared.request.requestId)
+          let nativeJob = await beginVideoGeneration(prepared.request)
+          operation.cancelNative = () => cancelVideoGeneration(nativeJob.id)
+          while (true) {
+            check(operation)
+            changed(operation, `${nativeJob.stage} · 镜头 ${Math.min(nativeJob.shotCount, nativeJob.shotIndex + 1)}/${nativeJob.shotCount}`, nativeJob.progress)
+            if (nativeJob.warning) operation.job.warning = nativeJob.warning
+            if (nativeJob.state === 'completed') {
+              const result = applyMcpVideoGeneration(operation.source, nativeJob, prepared.request, prepared.insert)
+              commit(operation, result.project, '添加生成视频')
+              result.assets.forEach(asset => host.ownAsset(asset))
+              if (result.result.clipIds[0]) void host.setPlayback({ selectedClipId: result.result.clipIds[0] }).catch(() => {})
+              return { ...result.result, projectId: host.getProject().id, revision: host.getRevision() }
+            }
+            if (nativeJob.state === 'failed') throw new Error(nativeJob.error || '视频生成失败。')
+            if (nativeJob.state === 'cancelled') throw new DOMException('视频生成已取消。', 'AbortError')
+            await wait(operation)
+            nativeJob = await getVideoGenerationJob(nativeJob.id)
+          }
+        })
       }
       case 'open_media_job_list': return list()
       case 'open_media_job_get': return status(args.id as string)

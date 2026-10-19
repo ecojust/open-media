@@ -224,6 +224,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Select compiler SDK for native video generation
+        if: matrix.platform == 'macos-arm64'
+        run: python3 scripts/video-generation-select-sdk.py
       - name: Verify voice adapter and device fallback on the desktop platform
         run: |
           python tests/speech-voice-adapter.test.py

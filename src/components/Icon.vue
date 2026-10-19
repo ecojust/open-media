@@ -1,6 +1,7 @@
 <script setup lang="ts">
 withDefaults(defineProps<{ name: string; size?: number }>(), { size: 18 })
 const paths: Record<string, string> = {
+  sparkles: 'm12 3 2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2zM20 2v4M18 4h4',
   mcp: 'M4 19V5l8 10 8-10v14',
   home: 'm3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9',
   menu: 'M4 6h16M4 12h16M4 18h16',

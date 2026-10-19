@@ -12,6 +12,7 @@ const boundaries = {
  '../src/native-audio-tools.ts':['beginAudioTool','getAudioTool','cancelAudioTool','acceptAudioTool','discardAudioTool'],
  '../src/native-transcription.ts':['getAsrStatus','beginAsrDownload','beginAsrTranscription','getAsrJob','cancelAsrJob'],
  '../src/native-mcp-files.ts':['beginMcpMediaJob','importMcpMediaPaths','openMcpProjectFile','saveMcpProjectFile'],
+ '../src/native-video-generation.ts':['getVideoGenerationStatus','beginVideoModelDownload','cancelVideoModelDownload','beginVideoGeneration','getVideoGenerationJob','cancelVideoGeneration'],
  '../src/core/native-project.ts':['prepareNativeProject'],
 }
 const modules = new Map(Object.entries(boundaries).map(([file,names])=>[new URL(file,import.meta.url).href,names]))

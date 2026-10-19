@@ -10,6 +10,7 @@ import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from
 const boundaryExports = {
   '../src/native.ts': ['acceptSpeechJobs', 'beginSpeechJob', 'beginSpeechModelDownload', 'cancelMediaJob', 'cancelSpeechJob', 'cancelSpeechModelDownload', 'discardSpeechJob', 'getMediaJobs', 'getSpeechJob', 'getSpeechStatus', 'repairSpeechModel', 'revealMediaJobOutput'],
   '../src/native-mcp-files.ts': ['beginMcpMediaJob', 'importMcpMediaPaths', 'openMcpProjectFile', 'saveMcpProjectFile'],
+  '../src/native-video-generation.ts': ['getVideoGenerationStatus', 'beginVideoModelDownload', 'cancelVideoModelDownload', 'beginVideoGeneration', 'getVideoGenerationJob', 'cancelVideoGeneration'],
   '../src/core/native-project.ts': ['prepareNativeProject'],
   '../src/core/project-file.ts': ['exportProjectFile', 'importProjectFile'],
   '../src/core/mcp-materials.ts': ['listMcpMaterials', 'prepareMcpMaterial'],
@@ -42,6 +43,11 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
   let playback = { time: 2.5, playing: false, selectedClipId: '' }
   const calls = [], announcements = [], assets = [], commits = [], blobs = new Map()
   const io = {
+    async getVideoGenerationStatus() { return { supported: true, runtimeReady: true, models: [{ id: 'h3-base-fl2va', name: '视频生成', modes: ['prompt', 'image', 'storyboard'], state: 'ready', size: 100, downloadedBytes: 100 }, { id: 'h3-base-ref2va', name: '参考生成', modes: ['reference'], state: 'ready', size: 100, downloadedBytes: 100 }] } },
+    async beginVideoModelDownload() { return io.getVideoGenerationStatus() },
+    async cancelVideoModelDownload() { return io.getVideoGenerationStatus() },
+    async beginVideoGeneration(request) { const assets = request.shots.map((shot, index) => ({ ...video(`generated-${request.requestId}-${index}`), name: `${shot.title}.mp4`, duration: shot.seconds })); return { id: request.requestId, state: 'completed', stage: '完成', progress: 1, shotIndex: assets.length - 1, shotCount: assets.length, assets, startedAt: Date.now(), elapsedSeconds: 1, ...(request.joinShots && assets.length > 1 ? { combinedAsset: { ...video(`generated-combined-${request.requestId}`), duration: assets.reduce((sum, asset) => sum + asset.duration, 0) } } : {}) } },
+    async getVideoGenerationJob() { throw new Error('unexpected video generation polling') }, async cancelVideoGeneration() {},
     async getSpeechStatus() { return { ready: true, voices: [voice] } },
     async beginSpeechJob(request) { return { id: request.requestId, state: 'completed', progress: 1, stage: '完成', asset: { id: `speech-${request.requestId}`, name: '配音.wav', kind: 'audio', url: 'http://asset.localhost/voice.wav', nativePath: '/private/voice.wav', duration: 2, width: 0, height: 0, size: 10, mime: 'audio/wav' } } },
     async getSpeechJob() { throw new Error('unexpected speech polling') },
@@ -472,5 +478,190 @@ for (const action of ['download', 'repair']) test(`model ${action} explicitly re
   assert.equal(status.ready, true)
   await f.controller.execute(download.cancel.tool, download.cancel.arguments)
   assert.equal(f.calls.at(-1).name, 'cancelSpeechModelDownload')
+  await f.controller.dispose()
+})
+
+// These checks exercise protocol/transactions with mocked native I/O, not inference quality.
+const generation = (patch = {}) => ({ modelId: 'h3-base-fl2va', mode: 'prompt', prompt: '缓慢旋转的蓝色球体', ...patch })
+test('video generation exposes safe final assets, optional timeline insertion and one undo transaction', async () => {
+  const f = fixture()
+  const original = clone(f.project)
+  const result = await finished(f.controller, await f.run('video_generation_start', generation({ insert: { start: 3 } })))
+  assert.equal(result.state, 'completed')
+  assert.equal(result.tool, 'open_media_video_generation_start')
+  assert.equal(result.result.assetIds.length, 1)
+  assert.equal(result.result.clipIds.length, 1)
+  assert.equal(findClip(f.project, result.result.clipIds[0]).clip.start, 3)
+  assert.equal(f.commits.length, 1)
+  assert.equal(f.assets.length, 1)
+  assert.equal(JSON.stringify(result.result).includes('/private/'), false)
+  const request = f.calls.find(call => call.name === 'beginVideoGeneration').args[0]
+  assert.equal(request.width, 512)
+  assert.equal(request.height, 512)
+  assert.equal(request.shots[0].seconds, 1)
+  assert.equal(request.lowMemory, true)
+  assert.equal(request.steps, 20)
+  assert.deepEqual((await f.run('job_get', { id: result.id })).result, result.result)
+  await f.run('project_history', { direction: 'undo' })
+  assert.deepEqual(f.project, original)
+  await f.controller.dispose()
+})
+
+test('storyboard generates all shots before inserting sequential or combined clips', async () => {
+  for (const mode of ['shots', 'combined']) {
+    const f = fixture()
+    const result = await finished(f.controller, await f.run('video_generation_start', {
+      modelId: 'h3-base-fl2va', mode: 'storyboard', shots: [{ title: '开场', prompt: '蓝色球体', seconds: 2 }, { title: '结束', prompt: '金色光芒', seconds: 3 }],
+      insert: { mode, trackId: f.project.tracks[1].id, start: 4 },
+    }))
+    assert.equal(result.state, 'completed')
+    assert.equal(f.commits.length, 1)
+    assert.equal(f.project.assets.length, 3)
+    const clips = f.project.tracks[1].clips
+    assert.deepEqual(clips.map(clip => clip.start), mode === 'shots' ? [4, 6] : [4])
+    assert.deepEqual(clips.map(clip => clip.trimOut), mode === 'shots' ? [2, 3] : [5])
+    await f.controller.dispose()
+  }
+})
+
+test('generation input validates modes, dimensions, asset ownership and insertion before native work', async () => {
+  const f = fixture()
+  for (const args of [
+    generation({ modelId: 'unreviewed-model' }), generation({ mode: 'image', firstFrameAssetId: 'missing' }),
+    generation({ width: 513 }), generation({ width: 1344, height: 1344 }), generation({ seconds: 16 }),
+    generation({ prompt: '' }), generation({ nativePath: '/tmp/forged.mp4' }),
+    generation({ references: [{ assetId: 'missing', kind: 'image' }] }),
+    generation({ shots: [{ prompt: '混用' }] }), generation({ insert: { trackId: f.project.tracks[0].id } }),
+    { modelId: 'h3-base-fl2va', mode: 'storyboard', shots: Array.from({ length: 21 }, () => ({ prompt: '超量' })) },
+    { modelId: 'h3-base-fl2va', mode: 'storyboard', shots: [{ prompt: '第一镜' }, { prompt: '第二镜' }], joinShots: false, insert: { mode: 'combined' } },
+  ]) await assert.rejects(f.run('video_generation_start', args))
+  assert.equal(f.calls.filter(call => call.name === 'beginVideoGeneration').length, 0)
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('image/reference modes resolve only existing project assets and preserve typed references', async () => {
+  const initial = createProject('参考测试')
+  initial.assets = [{ ...video('image'), kind: 'image', duration: 0, mime: 'image/png', name: '参考.png' }, video('video')]
+  const f = fixture(initial)
+  await finished(f.controller, await f.run('video_generation_start', generation({ mode: 'image', firstFrameAssetId: 'image' })))
+  const imageRequest = f.calls.find(call => call.name === 'beginVideoGeneration').args[0]
+  assert.equal(imageRequest.shots[0].firstFrame.id, 'image')
+  const result = await finished(f.controller, await f.run('video_generation_start', { modelId: 'h3-base-ref2va', mode: 'reference', prompt: '保持参考画面的色彩', references: [{ assetId: 'video', kind: 'video', includeAudio: true }] }))
+  assert.equal(result.state, 'completed')
+  const referenceRequest = f.calls.filter(call => call.name === 'beginVideoGeneration').at(-1).args[0]
+  assert.equal(referenceRequest.shots[0].references[0].asset.id, 'video')
+  assert.equal(referenceRequest.shots[0].references[0].includeAudio, true)
+  assert.equal(referenceRequest.shots[0].seconds, 2)
+  await assert.rejects(f.run('video_generation_start', { modelId: 'h3-base-ref2va', mode: 'reference', prompt: '保持参考画面的色彩', seconds: 1, references: [{ assetId: 'video', kind: 'video', includeAudio: true }] }), /2 秒/)
+  await assert.rejects(f.run('video_generation_start', generation({ mode: 'image', firstFrameAssetId: 'image', references: [{ assetId: 'video', kind: 'video' }] })), /参考素材/)
+  await f.controller.dispose()
+})
+
+test('generation cancellation, native failures and stale revisions leave no partial project', async () => {
+  for (const outcome of ['cancel', 'stale', 'failed', 'incomplete']) {
+    const f = fixture(), pending = deferred(), original = clone(f.project)
+    const actual = f.io.beginVideoGeneration
+    f.io.beginVideoGeneration = () => pending.promise
+    const job = await f.run('video_generation_start', generation())
+    await until(() => f.calls.some(call => call.name === 'beginVideoGeneration'))
+    assert.equal((await f.run('video_generation_status')).supported, true)
+    assert.equal((await f.run('job_get', { id: job.id })).state, 'running')
+    await assert.rejects(f.run('project_update', { patch: { title: 'blocked' } }), cause => cause.blockingJob?.jobId === job.id)
+    if (outcome === 'cancel') await f.run('job_cancel', { id: job.id })
+    if (outcome === 'stale') f.externalChange()
+    const request = f.calls.find(call => call.name === 'beginVideoGeneration').args[0]
+    const completed = await actual(request)
+    pending.resolve(outcome === 'failed' ? { ...completed, state: 'failed', error: '生成设备不可用' } : outcome === 'incomplete' ? { ...completed, assets: [] } : completed)
+    const result = await finished(f.controller, job)
+    assert.equal(result.state, outcome === 'cancel' ? 'cancelled' : 'failed')
+    assert.equal(f.commits.length, 0)
+    assert.deepEqual(f.project.assets, original.assets)
+    assert.deepEqual(f.project.tracks, original.tracks)
+    assert.equal(f.assets.length, 0)
+    assert.equal(f.busy, false)
+    assert.ok(f.calls.some(call => call.name === 'cancelVideoGeneration'))
+    await f.controller.dispose()
+  }
+})
+
+test('unsupported platform and missing model fail without invoking inference or download', async () => {
+  for (const unsupported of [true, false]) {
+    const f = fixture()
+    const nativeStatus = await f.io.getVideoGenerationStatus()
+    f.io.getVideoGenerationStatus = async () => unsupported ? { ...nativeStatus, supported: false, reason: '当前平台不支持', runtimeReady: false } : { ...nativeStatus, models: nativeStatus.models.map(model => ({ ...model, state: 'not-downloaded' })) }
+    const result = await finished(f.controller, await f.run('video_generation_start', generation()))
+    assert.equal(result.state, 'failed')
+    assert.match(result.error, unsupported ? /平台不支持/ : /先下载/)
+    assert.equal(f.calls.some(call => call.name === 'beginVideoGeneration'), false)
+    assert.equal(f.calls.some(call => call.name === 'beginVideoModelDownload'), false)
+    await f.controller.dispose()
+  }
+})
+
+test('model download requires explicit license consent and uses the shared cancellable job contract', async () => {
+  const f = fixture()
+  await assert.rejects(f.run('video_model_download', { modelId: 'h3-base-fl2va' }), /acceptedLicense/)
+  await assert.rejects(f.run('video_model_download', { modelId: 'h3-base-fl2va', acceptedLicense: false }), /选项/)
+  assert.equal(f.calls.some(call => call.name === 'beginVideoModelDownload'), false)
+  const result = await finished(f.controller, await f.run('video_model_download', { modelId: 'h3-base-fl2va', acceptedLicense: true }))
+  assert.equal(result.state, 'completed')
+  assert.equal(result.result.modelId, 'h3-base-fl2va')
+  assert.deepEqual(f.calls.find(call => call.name === 'beginVideoModelDownload').args, ['h3-base-fl2va', true])
+  assert.equal(f.commits.length, 0)
+  const pending = deferred()
+  f.io.beginVideoModelDownload = () => pending.promise
+  const job = await f.run('video_model_download', { modelId: 'h3-base-ref2va', acceptedLicense: true })
+  await until(() => f.calls.filter(call => call.name === 'beginVideoModelDownload').length === 2)
+  await f.run('job_cancel', { id: job.id })
+  pending.resolve(await f.io.getVideoGenerationStatus())
+  assert.equal((await finished(f.controller, job)).state, 'cancelled')
+  assert.ok(f.calls.some(call => call.name === 'cancelVideoModelDownload' && call.args[0] === 'h3-base-ref2va'))
+  await f.controller.dispose()
+})
+
+test('video polling forwards native stages and measured progress while model/project reads stay available', async () => {
+  const f = fixture(), release = deferred()
+  let nativeJob
+  const complete = f.io.beginVideoGeneration
+  f.io.beginVideoGeneration = async request => {
+    nativeJob = await complete(request)
+    return { ...nativeJob, state: 'running', stage: '正在采样 2/20', progress: .1, assets: [] }
+  }
+  f.io.getVideoGenerationJob = () => release.promise
+  const job = await f.run('video_generation_start', generation())
+  await until(() => f.controller.status(job.id).progress === .1)
+  const status = await f.run('job_get', { id: job.id })
+  assert.match(status.stage, /正在采样 2\/20/)
+  assert.equal(status.progress, .1)
+  assert.equal((await f.run('video_generation_status')).supported, true)
+  assert.equal((await f.run('project_get')).revision, 7)
+  assert.equal(f.commits.length, 0)
+  await new Promise(resolve => setTimeout(resolve, 450))
+  release.resolve({ ...nativeJob, warning: '生成时长已按模型帧数取整' })
+  const result = await finished(f.controller, job)
+  assert.equal(result.state, 'completed')
+  assert.match(result.warning, /取整/)
+  assert.equal(f.commits.length, 1)
+  await f.controller.dispose()
+})
+
+test('model polling reports byte progress and unsupported platforms cannot start downloads', async () => {
+  const f = fixture(), initialStatus = await f.io.getVideoGenerationStatus()
+  const downloading = { ...initialStatus, runtimeReady: false, models: initialStatus.models.map(model => ({ ...model, state: 'downloading', downloadedBytes: 25 })) }
+  f.io.beginVideoModelDownload = async () => downloading
+  const job = await f.run('video_model_download', { modelId: 'h3-base-fl2va', acceptedLicense: true })
+  await until(() => f.controller.status(job.id).progress === .25)
+  assert.match(f.controller.status(job.id).stage, /正在下载/)
+  assert.equal(f.commits.length, 0)
+  await new Promise(resolve => setTimeout(resolve, 450))
+  assert.equal((await finished(f.controller, job)).state, 'completed')
+  f.io.getVideoGenerationStatus = async () => ({ ...initialStatus, supported: false, reason: '当前平台不支持' })
+  const failed = await finished(f.controller, await f.run('video_model_download', { modelId: 'h3-base-ref2va', acceptedLicense: true }))
+  assert.equal(failed.state, 'failed')
+  assert.match(failed.error, /平台不支持/)
+  assert.equal(f.calls.filter(call => call.name === 'beginVideoModelDownload').length, 1)
+  await assert.rejects(f.run('video_generation_start', generation({ expectedRevision: 6 })), /版本已变化/)
+  assert.equal(f.calls.some(call => call.name === 'beginVideoGeneration'), false)
   await f.controller.dispose()
 })

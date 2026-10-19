@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/QwenLM/Qwen3-VL",
+  "revision": "96588727e44c78b25ba03ea03b8e12f7e64fd0da",
+  "url": "https://raw.githubusercontent.com/QwenLM/Qwen3-VL/96588727e44c78b25ba03ea03b8e12f7e64fd0da/LICENSE",
+  "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+  "relationship": "The model license identifies this encoder and its Apache-2.0 license."
+}

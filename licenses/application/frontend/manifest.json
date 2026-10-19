@@ -5,8 +5,8 @@
   "inputs": [
     {
       "path": "package.json",
-      "sha256": "69865e2f6b395ef3ff96a4ba7db7f6d7c0a5ba91aeb508eb70325f1b7580d70f",
-      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives. Only the browser regression command changed; dependency declarations and build commands are unchanged from the audited inputs. Release version updated to 0.2.5; dependency declarations, locked dependency entries, build commands and original notice bytes are unchanged."
+      "sha256": "9120ee37cec9b2138920c74ddde1d4d8ff1b338711ae3c23dadc729a7bdaa614",
+      "reviewMethod": "Audited production OCR imports and copied runtime assets, worker source-map module bytes, upstream pinned worker dependencies, WebAssembly native submodules, and original notices; versions and integrity match the locked archives. Only the browser regression command changed; dependency declarations and build commands are unchanged from the audited inputs. Release version updated to 0.2.5; dependency declarations, locked dependency entries, build commands and original notice bytes are unchanged. Added targeted video-generation and browser interaction test commands; dependency declarations, production build commands and original notices remain unchanged."
     },
     {
       "path": "package-lock.json",

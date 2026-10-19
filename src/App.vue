@@ -10,6 +10,8 @@ import { buildInfo } from './core/build-info'
 import VideoEditor from './components/VideoEditor.vue'
 import RecorderWorkspace from './components/RecorderWorkspace.vue'
 import GifWorkspace from './components/GifWorkspace.vue'
+import VideoGenerationWorkspace from './components/VideoGenerationWorkspace.vue'
+import { getVideoGenerationStatus, listVideoGenerationJobs } from './native-video-generation.ts'
 import ConvertWorkspace from './components/ConvertWorkspace.vue'
 import ExportPanel from './components/ExportPanel.vue'
 import McpPanel from './components/McpPanel.vue'
@@ -33,15 +35,18 @@ import { downloadBlob, importMediaFile } from './core/media-import.ts'
 import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, saveProjectFile, type ProjectFileTarget, type MediaJob } from './native.ts'
 import { getDesktopPlatform, type DesktopPlatform } from './native-platform.ts'
 
-type Workspace = 'home' | 'edit' | 'record' | 'gif' | 'image' | 'video'
+type Workspace = 'home' | 'edit' | 'record' | 'gif' | 'image' | 'video' | 'generate'
 const workspaces: { id: Workspace; title: string; icon: string; description: string; color: string }[] = [
   { id: 'record', title: '录屏', icon: 'record', description: '录制屏幕与声音，随时暂停和继续', color: '#e35764' },
   { id: 'gif', title: '片段转 GIF', icon: 'gif', description: '截取多个精彩片段，生成循环动图', color: '#9161d1' },
   { id: 'edit', title: '视频剪辑', icon: 'scissors', description: '多轨剪辑、字幕与配乐，组合你的故事', color: '#2563eb' },
+  { id: 'generate', title: '视频生成', icon: 'sparkles', description: '提示词、首尾帧与分镜，让灵感成为视频', color: '#8060d6' },
   { id: 'video', title: '视频转换', icon: 'convert', description: '转换视频格式、压缩体积与提取音频', color: '#dd9635' },
   { id: 'image', title: '图片编辑', icon: 'image', description: '插入文字与自定义笔触，裁剪并导出图片', color: '#2a9d80' },
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
+const generationVisited = ref(false), videoGenerating = ref(false)
+watch(view, value => { if (value === 'generate') generationVisited.value = true })
 const desktopPlatform = ref<DesktopPlatform | null>(null)
 const sidebarControls = computed(() => desktopPlatform.value === 'windows' || desktopPlatform.value === 'macos')
 const initial = createProject(), project = shallowRef(initial), history = shallowRef(createHistory(initial))
@@ -212,6 +217,15 @@ async function acceptAssets(assets: MediaAsset[], assetBlobs?: Map<string, Blob>
   commit(adoptFirstVideoSize(addAssets(project.value, assets), assets), `已导入 ${assets.length} 个素材`)
 }
 async function acceptAsset(asset: MediaAsset) { try { await acceptAssets([asset]); announce('录制已加入素材库，可前往视频剪辑继续编辑。') } catch (cause) { fail(cause) } }
+function acceptGeneratedAsset(asset: MediaAsset, timeline = false): void {
+  if (destroyed || switching.value || booting.value || mcpBusy.value) { fail('请等待当前项目操作结束后，再加入生成素材。'); return }
+  try {
+    rememberAsset(asset)
+    const next = project.value.assets.some(item => item.id === asset.id) ? project.value : adoptFirstVideoSize(addAssets(project.value, [asset]), [asset])
+    if (!commit(next, '生成视频已加入当前项目素材')) return
+    if (timeline) addToTimeline(asset.id)
+  } catch (cause) { fail(cause) }
+}
 async function importFiles(files?: File[]) {
   if (busy.value || switching.value || booting.value || speechWorking.value || mcpBusy.value) return false
   if (!files?.length) {
@@ -577,11 +591,20 @@ async function nativeClose() {
   if (busy.value || booting.value) { fail('请等待当前操作完成，再关闭应用。'); return }
   if (mcpBusy.value) { openJobs(); fail('请在处理任务中完成或取消 MCP 任务，再关闭应用。'); return }
   if (screenshotBusy.value) { fail('请先完成或取消截屏，再关闭应用。'); return }
+  if (videoGenerating.value) { view.value = 'generate'; fail('请先完成或取消视频生成及模型下载，再关闭应用。'); return }
   if (speechWorking.value) { view.value = 'edit'; fail('请先结束录音或完成、取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
   if (browserExporting.value || runningJobs.value) { if (native) openJobs(); fail('请等待导出完成，或先取消正在处理的任务。'); return }
   if (pendingMedia.value || imageConverting.value || videoConverting.value || gifConverting.value) { fail('请先完成或取消素材导入及媒体转换，再关闭应用。'); return }
   switching.value = true
+  try {
+    const [generationStatus, generationJobs] = await Promise.all([getVideoGenerationStatus(), listVideoGenerationJobs()])
+    if (generationJobs.some(job => job.state === 'running') || generationStatus.models.some(model => model.state === 'downloading' || model.state === 'verifying')) {
+      view.value = 'generate'; switching.value = false; fail('请先完成或取消视频生成及模型下载，再关闭应用。'); return
+    }
+  } catch (cause) {
+    switching.value = false; fail(`无法检查视频生成任务，请稍后重试关闭：${cause instanceof Error ? cause.message : String(cause)}`); return
+  }
   const suspendedDialogs = [...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].map(element => ({ element, inert: element.inert }))
   try {
     const focused = document.activeElement
@@ -645,7 +668,7 @@ function keyboard(event: KeyboardEvent) {
   if (key === 'z') { event.preventDefault(); moveHistory(event.shiftKey ? 'redo' : 'undo') }
   if (key === 'y') { event.preventDefault(); moveHistory('redo') }
 }
-function unload(event: BeforeUnloadEvent) { if (!allowClose && (mediaIsWorking() || recoveryRecordings.value.length || busy.value || switching.value || dirty.value && (draftState.value !== 'saved' || !autoSave.value))) { event.preventDefault(); event.returnValue = '' } }
+function unload(event: BeforeUnloadEvent) { if (!allowClose && (mediaIsWorking() || videoGenerating.value || recoveryRecordings.value.length || busy.value || switching.value || dirty.value && (draftState.value !== 'saved' || !autoSave.value))) { event.preventDefault(); event.returnValue = '' } }
 function mediaChanged(event: MediaQueryListEvent) { systemDark.value = event.matches }
 function dropped(event: DragEvent) { event.preventDefault(); const files = [...(event.dataTransfer?.files || [])]; if (files.length === 1 && files[0]!.name.toLowerCase().endsWith('.omedia')) void openProject(files[0]); else if (files.length) void importFiles(files) }
 function mcpLocalInteractionBusy(): boolean {
@@ -928,6 +951,7 @@ onBeforeUnmount(() => { destroyed = true; releaseMcpFocus(); nativeAppearance.di
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
         <VideoEditor :run-tool="runEditorTool" ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :mcp-connected="mcpConnected" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
+        <VideoGenerationWorkspace v-if="!booting && generationVisited" v-show="view==='generate'" :active="view==='generate'" :native="native" :project-title="project.title" :disabled="mcpBusy || switching || !!busy" @busy-change="videoGenerating=$event" @open-mcp="openMcp" @add-asset="acceptGeneratedAsset" @add-timeline="acceptGeneratedAsset($event, true)" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
         <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
@@ -968,6 +992,9 @@ onBeforeUnmount(() => { destroyed = true; releaseMcpFocus(); nativeAppearance.di
 </template>
 
 <style scoped>
+.workspace-cards{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(min-width:1600px){.workspace-cards{grid-template-columns:repeat(6,minmax(0,1fr))}}
+@media(max-width:640px){.workspace-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-cards>button:last-child{grid-column:auto;min-height:142px;padding:13px 10px;display:block}.workspace-cards>button:last-child>.card-icon{position:static}.workspace-cards>button:last-child>svg{top:20px}}
 .autosave-countdown{font-size:10px;color:var(--ui-muted);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:5.5em;margin-right:4px}
 .status-message{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .last-save-time{flex:none;font-variant-numeric:tabular-nums;border-left:1px solid var(--ui-line);padding-left:8px;margin-left:2px}
