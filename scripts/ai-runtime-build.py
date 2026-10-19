@@ -177,6 +177,7 @@ def main() -> None:
         musicSource=lock["musicSource"], modelWeightsIncluded=False, sourceCommit=os.environ.get("GITHUB_SHA"),
         createdAt=dt.datetime.now(dt.timezone.utc).isoformat()))
     initial = check(root, spec, args.output / "validation/original.log", require_gpu=args.require_gpu)
+    print("::notice title=AI runtime probe::" + json.dumps(initial), flush=True)
     archive = args.output / f"ai-runtime-v1-{args.platform}.zip"
     metadata = package(root, archive, spec, args.platform)
     portable.verify_archive_payload(archive, metadata)
@@ -187,7 +188,9 @@ def main() -> None:
     second = check(moved, spec, args.output / "validation/relocated-offline.log", require_gpu=args.require_gpu)
     integrity = portable.verify_tree(moved, metadata)
     metadata.update(id=lock["id"], version=lock["version"], validated=True, sourceCommit=os.environ.get("GITHUB_SHA"),
-                    validation=dict(imports=True, cpuCompute=True, gpuCompute=second["gpuCompute"], actualModelGeneration="not-run"),
+                    validation=dict(imports=True, cpuCompute=True, gpuCompute=second["gpuCompute"],
+                                    devices=second["devices"], cudaVersion=second["cudaVersion"], offline=True,
+                                    actualModelGeneration="not-run", postInferenceIntegrity=integrity),
                     url=f"https://github.com/ecojust/open-media/releases/download/{lock['releaseTag']}/" + archive.name)
     if metadata["size"] > portable.RELEASE_PART_BYTES:
         metadata = portable.split_archive(archive, metadata, lock["releaseTag"])

@@ -7,10 +7,16 @@ import json
 import os
 from pathlib import Path
 import socket
+import sys
 import tempfile
 
 
 def main() -> None:
+    # Isolated Python ignores PYTHONIOENCODING, including on Windows. Imported
+    # libraries may print Unicode diagnostics before the JSON result is emitted.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--self-test", action="store_true", required=True)
     parser.add_argument("--require-gpu", action="store_true")
