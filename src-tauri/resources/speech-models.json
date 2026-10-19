@@ -71,21 +71,33 @@
           "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-lexicon.txt",
           "embedded": "zipvoice-lexicon.txt",
           "size": 1727147,
-          "sha256": "c94b049d970e971acdc2a7e5e7b23ca594222a9d640e417c711f2ad1e7bb7d46"
+          "sha256": "c94b049d970e971acdc2a7e5e7b23ca594222a9d640e417c711f2ad1e7bb7d46",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-lexicon.txt",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-lexicon.txt"
+          ]
         },
         {
           "path": "reference.wav",
           "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.wav",
           "embedded": "zipvoice-reference.wav",
           "size": 161952,
-          "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
+          "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.wav",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.wav"
+          ]
         },
         {
           "path": "reference.txt",
           "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.txt",
           "embedded": "zipvoice-reference.txt",
           "size": 75,
-          "sha256": "3167ae2c4779efd4d7608ce400cb7b4de76c925a9ecab9c32eee0e1cfe391f13"
+          "sha256": "3167ae2c4779efd4d7608ce400cb7b4de76c925a9ecab9c32eee0e1cfe391f13",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.txt",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.txt"
+          ]
         }
       ],
       "model": {
@@ -172,21 +184,33 @@
           "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.wav",
           "embedded": "f5-reference.wav",
           "size": 419088,
-          "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+          "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.wav",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.wav"
+          ]
         },
         {
           "path": "reference.txt",
           "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.txt",
           "embedded": "f5-reference.txt",
           "size": 123,
-          "sha256": "0c8221e15bba82653eee30e99b7c675bfbb7a8e1dbc0f70f40c320e2159ed890"
+          "sha256": "0c8221e15bba82653eee30e99b7c675bfbb7a8e1dbc0f70f40c320e2159ed890",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.txt",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.txt"
+          ]
         },
         {
           "path": "runner-config.json",
           "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-runner-config.json",
           "embedded": "f5-runner-config.json",
           "size": 400,
-          "sha256": "73e3fe772676ab9b1b1df0c426a610abf35713cda88b2c0354c131f30776f619"
+          "sha256": "73e3fe772676ab9b1b1df0c426a610abf35713cda88b2c0354c131f30776f619",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-runner-config.json",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-runner-config.json"
+          ]
         }
       ],
       "model": {
@@ -336,7 +360,11 @@
           "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/qwen3-runner-config.json",
           "embedded": "qwen3-runner-config.json",
           "size": 259,
-          "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28"
+          "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/qwen3-runner-config.json",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/qwen3-runner-config.json"
+          ]
         }
       ],
       "model": {

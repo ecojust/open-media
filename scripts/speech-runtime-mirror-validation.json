@@ -1,0 +1,389 @@
+{
+  "schema": 1,
+  "checkedAt": "2026-10-19T16:00:26.248682+00:00",
+  "verification": "Complete file bytes and locked SHA-256",
+  "assets": [
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "lexicon.txt",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-lexicon.txt",
+      "matched": true,
+      "size": 1727147,
+      "sha256": "c94b049d970e971acdc2a7e5e7b23ca594222a9d640e417c711f2ad1e7bb7d46"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "lexicon.txt",
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-lexicon.txt",
+      "matched": true,
+      "size": 1727147,
+      "sha256": "c94b049d970e971acdc2a7e5e7b23ca594222a9d640e417c711f2ad1e7bb7d46"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "lexicon.txt",
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-lexicon.txt",
+      "matched": true,
+      "size": 1727147,
+      "sha256": "c94b049d970e971acdc2a7e5e7b23ca594222a9d640e417c711f2ad1e7bb7d46"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "reference.wav",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.wav",
+      "matched": true,
+      "size": 161952,
+      "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "reference.wav",
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.wav",
+      "matched": true,
+      "size": 161952,
+      "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "reference.wav",
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.wav",
+      "matched": true,
+      "size": 161952,
+      "sha256": "e9c6e266584978aa3c3a93a7eaea279d9045877b0acf29ecf7d675d32eada3ec"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "reference.txt",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.txt",
+      "matched": true,
+      "size": 75,
+      "sha256": "3167ae2c4779efd4d7608ce400cb7b4de76c925a9ecab9c32eee0e1cfe391f13"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "reference.txt",
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.txt",
+      "matched": true,
+      "size": 75,
+      "sha256": "3167ae2c4779efd4d7608ce400cb7b4de76c925a9ecab9c32eee0e1cfe391f13"
+    },
+    {
+      "model": "zipvoice-distill-fp32",
+      "path": "reference.txt",
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/zipvoice-reference.txt",
+      "matched": true,
+      "size": 75,
+      "sha256": "3167ae2c4779efd4d7608ce400cb7b4de76c925a9ecab9c32eee0e1cfe391f13"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "reference.wav",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.wav",
+      "matched": true,
+      "size": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "reference.wav",
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.wav",
+      "matched": true,
+      "size": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "reference.wav",
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.wav",
+      "matched": true,
+      "size": 419088,
+      "sha256": "7145832bda24000b4f84c6cb03cfcf6e008fdcfbab560e57b211e2b64c3c9cad"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "reference.txt",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.txt",
+      "matched": true,
+      "size": 123,
+      "sha256": "0c8221e15bba82653eee30e99b7c675bfbb7a8e1dbc0f70f40c320e2159ed890"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "reference.txt",
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.txt",
+      "matched": true,
+      "size": 123,
+      "sha256": "0c8221e15bba82653eee30e99b7c675bfbb7a8e1dbc0f70f40c320e2159ed890"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "reference.txt",
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-reference.txt",
+      "matched": true,
+      "size": 123,
+      "sha256": "0c8221e15bba82653eee30e99b7c675bfbb7a8e1dbc0f70f40c320e2159ed890"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "runner-config.json",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-runner-config.json",
+      "matched": true,
+      "size": 400,
+      "sha256": "73e3fe772676ab9b1b1df0c426a610abf35713cda88b2c0354c131f30776f619"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "runner-config.json",
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-runner-config.json",
+      "matched": true,
+      "size": 400,
+      "sha256": "73e3fe772676ab9b1b1df0c426a610abf35713cda88b2c0354c131f30776f619"
+    },
+    {
+      "model": "f5-v1-base-fp32",
+      "path": "runner-config.json",
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/f5-runner-config.json",
+      "matched": true,
+      "size": 400,
+      "sha256": "73e3fe772676ab9b1b1df0c426a610abf35713cda88b2c0354c131f30776f619"
+    },
+    {
+      "model": "qwen3-tts-1.7b-serena",
+      "path": "runner-config.json",
+      "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/qwen3-runner-config.json",
+      "matched": true,
+      "size": 259,
+      "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28"
+    },
+    {
+      "model": "qwen3-tts-1.7b-serena",
+      "path": "runner-config.json",
+      "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/qwen3-runner-config.json",
+      "matched": true,
+      "size": 259,
+      "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28"
+    },
+    {
+      "model": "qwen3-tts-1.7b-serena",
+      "path": "runner-config.json",
+      "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-v1/qwen3-runner-config.json",
+      "matched": true,
+      "size": 259,
+      "sha256": "5915f8a8452e746d406478b650cc01bdbfdc92f5b24a805c4ec6d42747e44b28"
+    }
+  ],
+  "cudaRuntimeParts": {
+    "checkedAt": "2026-10-19T16:01:33.797288+00:00",
+    "verification": "Matching bounded first/last ranges and total byte size; full SHA-256 enforced by installer",
+    "assets": [
+      {
+        "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part001",
+        "size": 1800000000,
+        "expectedFullSha256": "405424501bdf718f5f04db1c9e20ef3838b127b31cc124092ac461d7be042c25",
+        "originalRanges": [
+          {
+            "start": 0,
+            "end": 65535,
+            "sha256": "83eab7985cc7fcb1e24c04257431142ce55b251b971c527a2387b1841653675d"
+          },
+          {
+            "start": 1799934464,
+            "end": 1799999999,
+            "sha256": "681b5920ec5630d0c05032a2298a693ee362c483c93901135c2a00cdfb70f174"
+          }
+        ],
+        "mirrors": [
+          {
+            "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part001",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "83eab7985cc7fcb1e24c04257431142ce55b251b971c527a2387b1841653675d"
+              },
+              {
+                "start": 1799934464,
+                "end": 1799999999,
+                "sha256": "681b5920ec5630d0c05032a2298a693ee362c483c93901135c2a00cdfb70f174"
+              }
+            ]
+          },
+          {
+            "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part001",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "83eab7985cc7fcb1e24c04257431142ce55b251b971c527a2387b1841653675d"
+              },
+              {
+                "start": 1799934464,
+                "end": 1799999999,
+                "sha256": "681b5920ec5630d0c05032a2298a693ee362c483c93901135c2a00cdfb70f174"
+              }
+            ]
+          }
+        ],
+        "runtime": "python-cuda-v1"
+      },
+      {
+        "url": "https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part002",
+        "size": 1244230657,
+        "expectedFullSha256": "c20db3c2a2101bea24d0004ddd3afbd39a5ce08556fe9ed9539e52fd0cad7e16",
+        "originalRanges": [
+          {
+            "start": 0,
+            "end": 65535,
+            "sha256": "d0f0c9b149477ffe4f765c6a41636c1a9c60d06a0b5841224faec267365eed09"
+          },
+          {
+            "start": 1244165121,
+            "end": 1244230656,
+            "sha256": "280cf72918aed28e6c5120e0cdec56e5d0e497c9677e3e2bba18cc45e65fd4b6"
+          }
+        ],
+        "mirrors": [
+          {
+            "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part002",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "d0f0c9b149477ffe4f765c6a41636c1a9c60d06a0b5841224faec267365eed09"
+              },
+              {
+                "start": 1244165121,
+                "end": 1244230656,
+                "sha256": "280cf72918aed28e6c5120e0cdec56e5d0e497c9677e3e2bba18cc45e65fd4b6"
+              }
+            ]
+          },
+          {
+            "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-runtime-cuda-v1/speech-runtime-python-cuda-v1-windows-x64.zip.part002",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "d0f0c9b149477ffe4f765c6a41636c1a9c60d06a0b5841224faec267365eed09"
+              },
+              {
+                "start": 1244165121,
+                "end": 1244230656,
+                "sha256": "280cf72918aed28e6c5120e0cdec56e5d0e497c9677e3e2bba18cc45e65fd4b6"
+              }
+            ]
+          }
+        ],
+        "runtime": "python-cuda-v1"
+      },
+      {
+        "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+        "size": 1800000000,
+        "expectedFullSha256": "5a25cbd05028e190c8f7fbf56b4c32fb8bd3d13bb1d11282b82b3aeb3671b2a3",
+        "originalRanges": [
+          {
+            "start": 0,
+            "end": 65535,
+            "sha256": "68d7f2ba2f5a65412106f975f04f500431175c9ba7ae1126a8edce61af1b8dac"
+          },
+          {
+            "start": 1799934464,
+            "end": 1799999999,
+            "sha256": "b1de0316d84c30f752ca82704ad53aa821015241687cbfadc39928de6c52ef29"
+          }
+        ],
+        "mirrors": [
+          {
+            "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "68d7f2ba2f5a65412106f975f04f500431175c9ba7ae1126a8edce61af1b8dac"
+              },
+              {
+                "start": 1799934464,
+                "end": 1799999999,
+                "sha256": "b1de0316d84c30f752ca82704ad53aa821015241687cbfadc39928de6c52ef29"
+              }
+            ]
+          },
+          {
+            "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part001",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "68d7f2ba2f5a65412106f975f04f500431175c9ba7ae1126a8edce61af1b8dac"
+              },
+              {
+                "start": 1799934464,
+                "end": 1799999999,
+                "sha256": "b1de0316d84c30f752ca82704ad53aa821015241687cbfadc39928de6c52ef29"
+              }
+            ]
+          }
+        ],
+        "runtime": "native-cuda-v1"
+      },
+      {
+        "url": "https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+        "size": 59481904,
+        "expectedFullSha256": "cdba56b3e6f15155e10c34e19d9e920872fc8337dff721d10e3b8cc21b258886",
+        "originalRanges": [
+          {
+            "start": 0,
+            "end": 65535,
+            "sha256": "e08f6e1345ab602a48e4d4f2076a249a12e0559810c278b514a7f67ce5536ad9"
+          },
+          {
+            "start": 59416368,
+            "end": 59481903,
+            "sha256": "8a9041e6438b0929ce42de44e0789097918af84dfa9bc4ee81a95e5589dc1fe7"
+          }
+        ],
+        "mirrors": [
+          {
+            "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "e08f6e1345ab602a48e4d4f2076a249a12e0559810c278b514a7f67ce5536ad9"
+              },
+              {
+                "start": 59416368,
+                "end": 59481903,
+                "sha256": "8a9041e6438b0929ce42de44e0789097918af84dfa9bc4ee81a95e5589dc1fe7"
+              }
+            ]
+          },
+          {
+            "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/speech-native-cuda-v1/open-media-native-cuda-v1-windows-x64.zip.part002",
+            "matched": true,
+            "ranges": [
+              {
+                "start": 0,
+                "end": 65535,
+                "sha256": "e08f6e1345ab602a48e4d4f2076a249a12e0559810c278b514a7f67ce5536ad9"
+              },
+              {
+                "start": 59416368,
+                "end": 59481903,
+                "sha256": "8a9041e6438b0929ce42de44e0789097918af84dfa9bc4ee81a95e5589dc1fe7"
+              }
+            ]
+          }
+        ],
+        "runtime": "native-cuda-v1"
+      }
+    ]
+  }
+}

@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: ['feat/shared-ai-generation-*', 'work/ai-runtime-*']
+    branches: ['work/ai-runtime-*']
     paths:
       - 'scripts/ai-runtime*'
       - '.github/workflows/ai-runtime-build.yml'
@@ -125,7 +125,7 @@ jobs:
           mapfile -d '' assets < <(find runtime-artifacts -type f \( -name '*.zip' -o -name '*.part*' \) -print0)
           gh release create ai-runtime-v1 \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --prerelease --latest=false --title '可选图像与歌曲运行组件 v1' \
+            --prerelease --latest=false --title 'Open Media AI Runtime v1' \
             --notes-file runtime-artifacts/notes.md \
             "${assets[@]}" runtime-artifacts/ai-runtime-models.json \
             runtime-artifacts/runtime-metadata.json runtime-artifacts/SHA256SUMS.txt

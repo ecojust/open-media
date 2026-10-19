@@ -2,9 +2,11 @@
 """Verify built artifacts and derive the application catalog from actual bytes."""
 import argparse
 import hashlib
+import io
 import json
 from pathlib import Path
 import re
+import zipfile
 
 
 def digest(path: Path) -> str:
@@ -13,6 +15,82 @@ def digest(path: Path) -> str:
         while data := source.read(4 * 1024**2):
             value.update(data)
     return value.hexdigest()
+
+
+class JoinedArchive(io.RawIOBase):
+    """Read ZIP central directories across immutable parts without copying GBs."""
+    def __init__(self, paths):
+        super().__init__()
+        self.files = [path.open("rb") for path in paths]
+        self.sizes = [path.stat().st_size for path in paths]
+        self.length = sum(self.sizes)
+        self.position = 0
+
+    def readable(self):
+        return True
+
+    def seekable(self):
+        return True
+
+    def tell(self):
+        return self.position
+
+    def seek(self, offset, whence=0):
+        position = offset if whence == 0 else self.position + offset if whence == 1 else self.length + offset
+        if position < 0:
+            raise ValueError("Negative archive position")
+        self.position = position
+        return position
+
+    def read(self, size=-1):
+        remaining = self.length - self.position if size < 0 else min(size, self.length - self.position)
+        chunks, base = [], 0
+        for source, length in zip(self.files, self.sizes):
+            if remaining <= 0:
+                break
+            if self.position >= base + length:
+                base += length
+                continue
+            offset = self.position - base
+            source.seek(offset)
+            data = source.read(min(remaining, length - offset))
+            if not data:
+                raise ValueError("Truncated runtime part")
+            chunks.append(data)
+            self.position += len(data)
+            remaining -= len(data)
+            base += length
+        return b"".join(chunks)
+
+    def close(self):
+        for source in self.files:
+            source.close()
+        super().close()
+
+
+def validate_manifest(paths, item):
+    with JoinedArchive(paths) as joined, zipfile.ZipFile(joined) as archive:
+        entries = archive.infolist()
+        names = [entry.filename for entry in entries]
+        if len(names) != len(set(names)):
+            raise ValueError("Duplicate runtime archive entry")
+        info = archive.getinfo("manifest.json")
+        if info.file_size > 32 * 1024**2:
+            raise ValueError("Runtime manifest exceeds the safety limit")
+        manifest = archive.read(info)
+        if hashlib.sha256(manifest).hexdigest() != item["manifestSha256"]:
+            raise ValueError("Runtime manifest differs from its validation record")
+        files = json.loads(manifest)["files"]
+        if set(names) != {"manifest.json", *(entry["path"] for entry in files)}:
+            raise ValueError("Runtime archive and manifest file lists differ")
+        for entry in files:
+            name = entry["path"]
+            if (name.startswith("/") or "\\" in name or any(part in ("", ".", "..") or ":" in part for part in name.split("/"))
+                    or not re.fullmatch(r"[a-f0-9]{64}", entry["sha256"])
+                    or archive.getinfo(name).file_size != entry["size"]):
+                raise ValueError("Unsafe or inconsistent runtime manifest entry")
+        if not {item["executable"], item["script"]}.issubset(names):
+            raise ValueError("Runtime entry point is missing")
 
 
 def main() -> None:
@@ -47,6 +125,7 @@ def main() -> None:
             checksums.append((part["sha256"], name))
         if total != item["size"] or combined.hexdigest() != item["sha256"]:
             raise ValueError("Split runtime combined size or checksum mismatch")
+        validate_manifest([root / part["filename"] for part in parts], item)
         archive = {key: item[key] for key in ("url", "size", "unpackedSize", "sha256", "manifestSha256", "executable", "script")}
         if item.get("parts"):
             archive["parts"] = [{key: part[key] for key in ("url", "size", "sha256")} for part in item["parts"]]
