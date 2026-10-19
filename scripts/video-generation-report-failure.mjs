@@ -4,7 +4,8 @@ import { existsSync, readFileSync } from 'node:fs';
 for (const path of ['.video-generation-check/native-build.log', '.video-generation-check/desktop-check.log', '.video-generation-check/evidence.json']) {
   if (!existsSync(path)) continue;
   const raw = readFileSync(path, 'utf8');
-  const lines = raw.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').split('\n');
+  const lines = raw.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').split('\n')
+    .filter(line => !/^\s*(Compiling|Checking|Downloaded|Downloading)\b/.test(line));
   const detail = `${path}\n${lines.slice(-140).join('\n')}`.slice(-45000)
     .replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
   console.log(`::error::${detail}`);

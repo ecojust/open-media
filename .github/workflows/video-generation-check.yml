@@ -30,6 +30,7 @@ jobs:
         with:
           workspaces: src-tauri
           shared-key: video-generation-contracts
+          cache-on-failure: true
       - name: Validate pinned source and generation requests
         run: |
           node scripts/video-generation-verify.mjs
@@ -43,6 +44,10 @@ jobs:
       - name: Check desktop command integration
         if: matrix.os == 'windows-2022'
         shell: bash
+        env:
+          # This checks command types; installer resources are validated by the
+          # separate desktop packaging workflow with the real bundled runtimes.
+          TAURI_CONFIG: '{"bundle":{"resources":[]}}'
         run: |
           set -o pipefail
           cargo check --manifest-path src-tauri/Cargo.toml --locked --lib 2>&1 | tee .video-generation-check/desktop-check.log
