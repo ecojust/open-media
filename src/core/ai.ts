@@ -2,8 +2,8 @@ import type { MediaAsset } from './types.ts'
 import type { SpeechRequest } from '../native.ts'
 import type { VideoGenerationRequest } from './video-generation.ts'
 
-export type AiProvider = 'speech' | 'video' | 'image' | 'music'
-export type AiCapability = 'text-to-speech' | 'text-to-video' | 'image-to-video' | 'reference-to-video' | 'storyboard-to-video' | 'text-to-image' | 'image-to-image' | 'text-to-music' | 'lyrics-to-song'
+export type AiProvider = 'speech' | 'video' | 'image' | 'music' | 'transcription'
+export type AiCapability = 'text-to-speech' | 'text-to-video' | 'image-to-video' | 'reference-to-video' | 'storyboard-to-video' | 'text-to-image' | 'image-to-image' | 'text-to-music' | 'lyrics-to-song' | 'audio-to-text'
 export interface AiRuntimeStatus { state: string; device?: string; reason?: string }
 export interface AiModel {
   id: string
@@ -13,6 +13,13 @@ export interface AiModel {
   version: string
   size: number
   downloadedBytes: number
+  downloadTotalBytes?: number
+  downloadTransferredBytes?: number
+  downloadPhase?: 'runtime' | 'model' | 'verifying'
+  activeSource?: string
+  downloadSession?: number
+  downloadSpeedBytesPerSecond?: number
+  remainingSeconds?: number
   state: 'not-downloaded' | 'downloading' | 'verifying' | 'ready' | 'failed' | 'unsupported' | 'update-available'
   hardware: string
   runtime: AiRuntimeStatus

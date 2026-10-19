@@ -1,21 +1,25 @@
 //! Application-wide model access. Existing providers keep their installed paths
 //! and own task state; the facade supplies a common catalog and device budget.
 use crate::{
+    ai_download::DownloadEstimates,
     ai_execution::AiExecutionGate,
     ai_generation::AiGenerationManager,
     ai_types::{AiJob, AiModel, AiRequest, AiRuntimeStatus, AiStatus, AiVoice},
     engine::{MediaStore, Result, Runtime},
     speech::{SpeechManager, SpeechStatus},
+    audio_tools_asr::AsrManager,
     video_generation::{VideoGenerationJob, VideoGenerationManager, VideoGenerationStatus},
 };
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, path::Path, sync::{Arc, Mutex}, time::Instant};
 
 #[derive(Clone)]
 pub struct AiService {
     pub(crate) speech: SpeechManager,
     pub(crate) video: VideoGenerationManager,
+    pub(crate) asr: AsrManager,
     generation: AiGenerationManager,
     gate: AiExecutionGate,
+    downloads: Arc<Mutex<DownloadEstimates>>,
 }
 
 impl AiService {
@@ -24,21 +28,26 @@ impl AiService {
         Ok(Self {
             speech: SpeechManager::with_gate(app_data, resource, gate.clone())?,
             video: VideoGenerationManager::with_gate(app_data, gate.clone())?,
+            asr: AsrManager::new(app_data, Some(resource))?,
             generation: AiGenerationManager::new(app_data, resource, gate.clone())?,
             gate,
+            downloads: Arc::new(Mutex::new(DownloadEstimates::default())),
         })
     }
     fn models(&self, probe_runtime: bool) -> Result<Vec<AiModel>> {
         let mut models = speech_models(self.speech.status());
         models.extend(video_models(self.video.status_with_probe(probe_runtime)));
         models.extend(self.generation.models(probe_runtime)?);
+        models.extend(self.asr.ai_models());
         Ok(models)
     }
     pub fn status(&self, probe_runtime: bool) -> Result<AiStatus> {
-        let models = self.models(probe_runtime)?;
+        let mut models = self.models(probe_runtime)?;
+        if let Ok(mut downloads) = self.downloads.lock() { downloads.decorate(&mut models, Instant::now()); }
         let mut jobs = self.speech.ai_jobs()?;
         jobs.extend(self.video.list()?.into_iter().map(video_job));
         jobs.extend(self.generation.list()?);
+        jobs.extend(self.asr.ai_jobs()?);
         jobs.sort_by(|left, right| right.started_at.cmp(&left.started_at));
         let busy = jobs
             .iter()
@@ -64,6 +73,7 @@ impl AiService {
             "video" => {
                 self.video.begin_download(model_id, accepted_license)?;
             }
+            "transcription" => { self.asr.begin_download(Some(model_id))?; }
             _ => self.generation.download(model_id, accepted_license)?,
         }
         self.status(false)
@@ -77,6 +87,7 @@ impl AiService {
             "video" => {
                 self.video.cancel_download(model_id)?;
             }
+            "transcription" => { self.asr.cancel_download(model_id)?; }
             _ => self.generation.cancel_download(model_id)?,
         }
         self.status(false)
@@ -90,6 +101,7 @@ impl AiService {
             "video" => {
                 self.video.begin_download(model_id, accepted_license)?;
             }
+            "transcription" => { self.asr.begin_download(Some(model_id))?; }
             _ => self.generation.repair(model_id, accepted_license)?,
         }
         self.status(false)
@@ -127,6 +139,9 @@ impl AiService {
         if let Some(id) = id.strip_prefix("video:") {
             return self.video.get(id).map(video_job);
         }
+        if id.starts_with("transcription:") {
+            return self.asr.ai_jobs()?.into_iter().find(|job| job.id == id).ok_or_else(|| "识别任务不存在。".into());
+        }
         self.generation.get(id)
     }
     pub fn cancel(&self, id: &str) -> Result<()> {
@@ -136,6 +151,7 @@ impl AiService {
         if let Some(id) = id.strip_prefix("video:") {
             return self.video.cancel(id);
         }
+        if let Some(id) = id.strip_prefix("transcription:") { return self.asr.cancel(id); }
         self.generation.cancel(id)
     }
     pub fn shutdown(&self) {
@@ -143,6 +159,7 @@ impl AiService {
         self.generation.shutdown();
         self.video.shutdown();
         self.speech.shutdown();
+        self.asr.shutdown();
     }
 }
 
@@ -255,6 +272,13 @@ fn speech_models(status: SpeechStatus) -> Vec<AiModel> {
             } else {
                 voice.downloaded_bytes.unwrap_or(0).min(size)
             },
+            download_total_bytes: None,
+            download_transferred_bytes: None,
+            download_phase: None,
+            active_source: voice.download_source.clone(),
+            download_session: None,
+            download_speed_bytes_per_second: None,
+            remaining_seconds: None,
             state: state.into(),
             hardware: format!("建议 {memory} GB 系统内存；优先可用 GPU，失败时回退 CPU。"),
             runtime: AiRuntimeStatus {
@@ -297,6 +321,13 @@ fn video_models(status: VideoGenerationStatus) -> Vec<AiModel> {
             version: model.version,
             size: model.size,
             downloaded_bytes: model.downloaded_bytes,
+            download_total_bytes: None,
+            download_transferred_bytes: None,
+            download_phase: None,
+            active_source: None,
+            download_session: None,
+            download_speed_bytes_per_second: None,
+            remaining_seconds: None,
             state: model.state,
             hardware: model.hardware,
             runtime: runtime.clone(),

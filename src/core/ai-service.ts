@@ -66,5 +66,5 @@ export function generateAi(request: AiRequest): Promise<AiJob> {
 export const stopAiJob = (id: string) => mutate(() => cancelAiJob(id))
 export function aiBytes(value: number): string { return value >= 1e9 ? `${(value / 1e9).toFixed(2)} GB` : `${(value / 1e6).toFixed(1)} MB` }
 export function aiDuration(seconds: number): string { const value = Math.max(0, Math.floor(seconds)); return value < 60 ? `${value} 秒` : `${Math.floor(value / 60)} 分 ${value % 60} 秒` }
-export const aiProviderNames = { speech: '配音', image: '图像', video: '视频', music: '歌曲' }
+export const aiProviderNames = { speech: '配音', image: '图像', video: '视频', music: '歌曲', transcription: '语音识别' }
 export const aiModelStateNames = { 'not-downloaded': '待下载', downloading: '正在下载', verifying: '正在校验', ready: '已就绪', failed: '未完成', unsupported: '当前设备不支持', 'update-available': '可更新' }

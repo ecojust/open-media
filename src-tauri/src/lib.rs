@@ -26,6 +26,7 @@ pub mod speech;
 pub mod video_generation;
 pub mod ai_types;
 pub mod ai_execution;
+mod ai_download;
 pub mod ai_generation;
 mod ai_models;
 pub mod ai;
@@ -84,7 +85,6 @@ mod desktop {
         video_library: VideoLibrary,
         asset_tools: crate::asset_tools::AssetTools,
         audio_tools: crate::audio_tools::AudioToolsManager,
-        asr: crate::audio_tools_asr::AsrManager,
         ai: AiService,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
@@ -150,29 +150,29 @@ mod desktop {
     pub async fn asr_status(window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Value> {
         require_mcp_window(&window)?;
         let state = state.inner().clone();
-        blocking(move || Ok(state.asr.status())).await
+        blocking(move || Ok(state.ai.asr.status())).await
     }
     #[tauri::command]
     pub async fn asr_download(model_id: Option<String>, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools_asr::AsrJob> {
         require_mcp_window(&window)?;
         let state = state.inner().clone();
-        blocking(move || state.asr.begin_download(model_id.as_deref())).await
+        blocking(move || state.ai.asr.begin_download(model_id.as_deref())).await
     }
     #[tauri::command]
     pub async fn asr_transcribe(spec: Value, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools_asr::AsrJob> {
         require_mcp_window(&window)?;
         let state = state.inner().clone();
-        blocking(move || state.asr.begin_transcribe(&state.runtime()?, &state.store, spec)).await
+        blocking(move || state.ai.asr.begin_transcribe(&state.runtime()?, &state.store, spec)).await
     }
     #[tauri::command]
     pub fn asr_job(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools_asr::AsrJob> {
         require_mcp_window(&window)?;
-        state.asr.get(&id)
+        state.ai.asr.get(&id)
     }
     #[tauri::command]
     pub fn asr_cancel(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
         require_mcp_window(&window)?;
-        state.asr.cancel(&id)
+        state.ai.asr.cancel(&id)
     }
     #[tauri::command]
     pub async fn audio_tool_begin(spec: Value, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<crate::audio_tools::AudioToolJob> {
@@ -989,7 +989,6 @@ mod desktop {
                     video_library: VideoLibrary::new(data.join("stored-recording-index.json")),
                     asset_tools: crate::asset_tools::AssetTools::new(&data).map_err(std::io::Error::other)?,
                     audio_tools: crate::audio_tools::AudioToolsManager::default(),
-                    asr: crate::audio_tools_asr::AsrManager::new(&data, Some(&resource)).map_err(std::io::Error::other)?,
                     ai: AiService::new(&data, &resource).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
@@ -1134,7 +1133,6 @@ mod desktop {
                 state.jobs.shutdown();
                 state.asset_tools.shutdown();
                 state.audio_tools.shutdown();
-                state.asr.shutdown();
                 state.capture.lock().unwrap().abort();
             }
         });

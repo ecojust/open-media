@@ -31,6 +31,20 @@ pub struct AiModel {
     pub version: String,
     pub size: u64,
     pub downloaded_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_transferred_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_session: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_speed_bytes_per_second: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_seconds: Option<f64>,
     pub state: String,
     pub hardware: String,
     pub runtime: AiRuntimeStatus,
