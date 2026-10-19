@@ -12,7 +12,7 @@ import RecorderWorkspace from './components/RecorderWorkspace.vue'
 import GifWorkspace from './components/GifWorkspace.vue'
 import VideoGenerationWorkspace from './components/VideoGenerationWorkspace.vue'
 import AiGenerationWorkspace from './components/AiGenerationWorkspace.vue'
-import AiModelCenter from './components/AiModelCenter.vue'
+import AppInfo from './components/AppInfo.vue'
 import { aiState, observeAi } from './core/ai-service.ts'
 import { getAiStatus, type AiProvider } from './native-ai.ts'
 import ConvertWorkspace from './components/ConvertWorkspace.vue'
@@ -52,9 +52,9 @@ const workspaces: { id: Workspace; title: string; icon: string; description: str
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
 const generationVisited = ref(false), videoGenerating = ref(false)
 const imageGenerationVisited = ref(false), songGenerationVisited = ref(false)
-const aiModelsOpen = ref(false), aiInitialProvider = ref<AiProvider>()
+const infoOpen = ref(false), aiInitialProvider = ref<AiProvider>()
 let releaseAiStatus: (() => void) | undefined
-function openAiModels(provider?: AiProvider): void { aiInitialProvider.value=provider; aiModelsOpen.value=true }
+function openAiModels(provider?: AiProvider): void { aiInitialProvider.value=provider; infoOpen.value=true }
 watch(view, value => { if (value === 'generate') generationVisited.value = true; if(value==='image-generate') imageGenerationVisited.value=true; if(value==='song-generate') songGenerationVisited.value=true })
 const desktopPlatform = ref<DesktopPlatform | null>(null)
 const sidebarControls = computed(() => desktopPlatform.value === 'windows' || desktopPlatform.value === 'macos')
@@ -604,7 +604,7 @@ async function nativeClose() {
   if (busy.value || booting.value) { fail('请等待当前操作完成，再关闭应用。'); return }
   if (mcpBusy.value) { openJobs(); fail('请在处理任务中完成或取消 MCP 任务，再关闭应用。'); return }
   if (screenshotBusy.value) { fail('请先完成或取消截屏，再关闭应用。'); return }
-  if (aiState.value.busy) { openAiModels(); fail('请在 AI 模型中心完成或取消任务，再关闭应用。'); return }
+  if (aiState.value.busy) { openAiModels(); fail('请在 Info 的模型任务中完成或取消任务，再关闭应用。'); return }
   if (videoGenerating.value) { view.value = 'generate'; fail('请先完成或取消视频生成及模型下载，再关闭应用。'); return }
   if (speechWorking.value) { view.value = 'edit'; fail('请先结束录音或完成、取消文字配音，再关闭应用。'); return }
   if (recording.value || recoveryRecordings.value.length) { view.value = 'record'; fail('请先结束录制，录制完成后再关闭应用。'); return }
@@ -614,7 +614,7 @@ async function nativeClose() {
   try {
     const aiStatus = await getAiStatus(false)
     if (aiStatus.busy || aiStatus.jobs.some(job => job.state === 'running') || aiStatus.models.some(model => model.state === 'downloading' || model.state === 'verifying')) {
-      openAiModels(); switching.value = false; fail('请在 AI 模型中心完成或取消任务，再关闭应用。'); return
+      openAiModels(); switching.value = false; fail('请在 Info 的模型任务中完成或取消任务，再关闭应用。'); return
     }
   } catch (cause) {
     switching.value = false; fail(`无法检查 AI 模型任务，请稍后重试关闭：${cause instanceof Error ? cause.message : String(cause)}`); return
@@ -921,7 +921,7 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
   <div class="app-shell" :class="{ 'sidebar-appearance': sidebarControls, 'mcp-focus-dimmed': mcpFocusDimmed }" :data-theme="effectiveTheme" :data-platform="desktopPlatform" @dragover.prevent @drop="dropped">
     <header v-if="!sidebarControls" class="topbar">
       <button class="brand" :disabled="speechWorking || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
-      <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
+      <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme" :info-open="infoOpen" @open-info="openAiModels()"/></div>
     </header>
     <div v-if="mcpFocusActive" class="mcp-focus-shade" data-testid="mcp-focus-shade" aria-hidden="true"/>
     <section v-if="!booting && (mcpBusy || mcpToolActivity)" class="mcp-processing-banner" :class="{ working: mcpWorkHighlighted }" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state" :data-call-tool="mcpToolActivity?.tool" @keydown.esc.stop="mcpDetailsOpen=false">
@@ -945,7 +945,7 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
       <aside class="sidebar" :class="{collapsed, 'with-controls': sidebarControls}">
         <div class="sidebar-heading"><span v-if="!collapsed">工作台</span><button class="icon-button" :title="collapsed?'展开侧栏':'折叠侧栏'" :aria-label="collapsed?'展开侧栏':'折叠侧栏'" @click="collapsed=!collapsed"><Icon name="panel" :size="17"/></button></div>
         <nav aria-label="工作区"><button :disabled="speechWorking || mcpBusy" :class="{active:view==='home'}" title="开始" @click="view='home'"><Icon name="home"/><span>开始</span></button><div class="nav-divider"/><button v-for="item in workspaces" :key="item.id" :disabled="speechWorking || mcpBusy" :class="{active:view===item.id}" :title="item.title" :data-testid="`nav-${item.id}`" @click="view=item.id"><Icon :name="item.icon"/><span>{{ item.title }}</span><i v-if="item.id==='record' && recording" class="recording-dot"/></button></nav>
-        <div class="sidebar-bottom"><button class="sidebar-ai-models" :class="{working:aiState.busy}" title="AI 模型中心" aria-label="AI 模型中心" data-testid="ai-model-center" @click="openAiModels()"><Icon name="sparkles" :size="17"/><span v-if="!collapsed">AI 模型中心</span><i v-if="aiState.busy"/></button><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · {{ buildInfo.version }}</small><HeaderControls v-if="sidebarControls" sidebar :collapsed="collapsed" :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme"/></div>
+        <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · {{ buildInfo.version }}</small><HeaderControls v-if="sidebarControls" sidebar :collapsed="collapsed" :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme" :info-open="infoOpen" @open-info="openAiModels()"/></div>
       </aside>
       <main class="main-area">
         <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking || mcpBusy" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
@@ -966,8 +966,8 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
           <section class="recent-section"><div class="section-heading"><h2>最近项目 <span>{{ recent.length }}</span></h2><label class="search-field"><Icon name="search" :size="15"/><input v-model="search" placeholder="搜索本地项目" aria-label="搜索本地项目"/></label></div><div v-if="!visibleRecent.length" class="empty-projects"><Icon name="folder" :size="31"/><p>{{ search?'没有找到匹配项目':'你的项目会保存在这里' }}</p><small>开启自动保存后，可随时回来继续编辑。</small></div><div v-else class="recent-list"><div v-for="item in visibleRecent" :key="item.id" class="recent-item"><button :disabled="mcpBusy" @click="openRecent(item.id)"><span class="recent-icon"><Icon name="video" :size="22"/></span><span><strong>{{ item.title }}</strong><small>{{ item.width }} × {{ item.height }} · {{ item.assetCount }} 个素材 · {{ item.duration.toFixed(1) }} 秒</small></span><time :datetime="item.updatedAt">{{ new Date(item.updatedAt).toLocaleString() }}</time></button><button class="icon-button" :aria-label="`移除草稿 ${item.title}`" :disabled="mcpBusy" @click="removeRecent(item)"><Icon name="trash" :size="16"/></button></div></div></section>
           <p class="home-footnote"><Icon name="info" :size="14"/>自动保存保留本地草稿；保存项目会同时打包素材，方便迁移和继续编辑。</p>
         </section>
-        <VideoEditor :run-tool="runEditorTool" ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :mcp-connected="mcpConnected" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
-        <VideoGenerationWorkspace v-if="!booting && generationVisited" v-show="view==='generate'" :active="view==='generate'" :native="native" :project-title="project.title" :disabled="mcpBusy || switching || !!busy" @busy-change="videoGenerating=$event" @open-mcp="openMcp" @add-asset="acceptGeneratedAsset" @add-timeline="acceptGeneratedAsset($event, true)" @status="announce"/>
+        <VideoEditor :run-tool="runEditorTool" ref="videoEditor" v-if="!booting && view==='edit'" :project="project" :automation-busy="mcpBusy" :mcp-connected="mcpConnected" :export-disabled="!!busy || switching || booting || mcpBusy" :recording-disabled="recording || screenshotBusy || pendingMedia > 0 || browserExporting || mcpBusy" @open-mcp="openMcp" @open-models="openAiModels" @recorded-asset="rememberEditorAsset" @prepared-asset="rememberEditorAsset" @busy="speechWorking=$event" @change="commit" @import="importFiles" @export="openVideoExport" @status="announce"/>
+        <VideoGenerationWorkspace v-if="!booting && generationVisited" v-show="view==='generate'" :active="view==='generate'" :native="native" :project-title="project.title" :disabled="mcpBusy || switching || !!busy" @busy-change="videoGenerating=$event" @open-mcp="openMcp" @open-models="openAiModels" @add-asset="acceptGeneratedAsset" @add-timeline="acceptGeneratedAsset($event, true)" @status="announce"/>
         <AiGenerationWorkspace v-if="!booting && imageGenerationVisited" v-show="view==='image-generate'" provider="image" :active="view==='image-generate'" :native="native" :project-title="project.title" :disabled="mcpBusy || switching || !!busy" @open-models="openAiModels" @add-asset="acceptGeneratedAsset" @add-timeline="acceptGeneratedAsset($event,true)" @edit-image="editGeneratedImage" @status="announce"/>
         <AiGenerationWorkspace v-if="!booting && songGenerationVisited" v-show="view==='song-generate'" provider="music" :active="view==='song-generate'" :native="native" :project-title="project.title" :disabled="mcpBusy || switching || !!busy" @open-models="openAiModels" @add-asset="acceptGeneratedAsset" @add-timeline="acceptGeneratedAsset($event,true)" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
@@ -981,7 +981,7 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
     <ScreenshotPicker ref="screenshotPicker"/>
     <ExportPanel :open="exportOpen" :project="project" :native="native" @close="exportOpen=false" @status="announce" @busy="browserExporting=$event"/>
     <McpPanel :open="mcpOpen" :native="native" @close="mcpOpen=false" @status="announce" @service-change="mcpServiceChanged"/>
-    <AiModelCenter :open="aiModelsOpen" :native="native" :initial-provider="aiInitialProvider" @close="aiModelsOpen=false" @status="announce"/>
+    <AppInfo :open="infoOpen" :native="native" :initial-provider="aiInitialProvider" @close="infoOpen=false" @status="announce"/>
     <EditorDialog :open="!!question" :title="question?.title || '确认操作'" icon="alert" class="app-confirm" @close="answer('cancel')"><div class="dialog-content"><p>{{ question?.text }}</p></div><template #footer><div class="confirmation-actions"><button v-for="choice in question?.choices" :key="choice.id" :class="{primary:choice.primary}" @click="answer(choice.id)">{{ choice.label }}</button></div></template></EditorDialog>
     <div v-if="jobsOpen" class="modal-shade" @click.self="jobsOpen=false">
       <section class="dialog jobs-dialog" role="dialog" aria-modal="true" aria-labelledby="jobs-title">
@@ -1012,7 +1012,7 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
 
 <style scoped>
 .workspace-cards{grid-template-columns:repeat(4,minmax(0,1fr))}
-.sidebar-ai-models{display:flex;align-items:center;gap:9px;padding:9px 10px;width:100%;min-height:36px;margin-bottom:12px;font-size:11px;color:var(--ui-muted);background:transparent;border:1px solid var(--ui-line);border-radius:8px}.sidebar-ai-models.working{color:var(--ui-accent)}.sidebar-ai-models i{width:6px;height:6px;flex:none;border-radius:50%;background:var(--ui-accent);margin-left:auto}.sidebar.collapsed .sidebar-ai-models{justify-content:center;padding:8px 0;position:relative}.sidebar.collapsed .sidebar-ai-models i{position:absolute;top:4px;right:4px}.sidebar nav{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.sidebar nav>button{flex-shrink:0}@media(max-width:1000px){.workspace-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sidebar nav{min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}.sidebar nav>button{flex-shrink:0}@media(max-width:1000px){.workspace-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.workspace-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.workspace-cards>button:last-child{grid-column:auto;min-height:142px;padding:13px 10px;display:block}.workspace-cards>button:last-child>.card-icon{position:static}.workspace-cards>button:last-child>svg{top:20px}}
 .autosave-countdown{font-size:10px;color:var(--ui-muted);font-variant-numeric:tabular-nums;white-space:nowrap;min-width:5.5em;margin-right:4px}
 .status-message{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}

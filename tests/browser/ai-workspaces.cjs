@@ -12,7 +12,7 @@ async function mount(page, base) {
     const vueURL=source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
     const {createApp,h,ref}=await import(vueURL)
     const Workspace=(await import('/src/components/AiGenerationWorkspace.vue')).default
-    const Center=(await import('/src/components/AiModelCenter.vue')).default
+    const Center=(await import('/src/components/AppInfo.vue')).default
     await import('/src/style.css')
     const common={version:'test',size:1000000000,downloadedBytes:0,hardware:'测试硬件要求',runtime:{state:'ready'},bundled:false,requiresLicenseAcceptance:true,license:'测试许可',licenseUrl:'https://example.com/license'}
     const state=window.aiHarness={calls:[],unexpected:[],models:[
@@ -28,7 +28,7 @@ async function mount(page, base) {
     window.__TAURI_INTERNALS__={convertFileSrc:()=>state.asset.url,invoke:async(command,args={})=>{
       state.calls.push({command,args:JSON.parse(JSON.stringify(args))})
       if(command==='ai_get_status')return status()
-      if(command==='ai_model_download'||command==='ai_model_repair'){if(!args.acceptedLicense)throw Error('许可未确认');const model=state.models.find(model=>model.id===args.modelId);model.state='downloading';model.runtime={state:'downloading',reason:'正在下载运行环境：50 MB / 100 MB'};return status()}
+      if(command==='ai_model_download'||command==='ai_model_repair'){if(!args.acceptedLicense)throw Error('许可未确认');const model=state.models.find(model=>model.id===args.modelId);model.state='downloading';model.runtime={state:'downloading',reason:'正在下载运行环境：50 MB / 100 MB'};Object.assign(model,{downloadTransferredBytes:50000000,downloadTotalBytes:1100000000,downloadPhase:'runtime',downloadSpeedBytesPerSecond:5000000,remainingSeconds:210,activeSource:'hf-mirror.com'});return status()}
       if(command==='ai_model_cancel'){const model=state.models.find(model=>model.id===args.modelId);model.state='not-downloaded';model.runtime={state:'ready'};return status()}
       if(command==='ai_generate'){const request=args.request;const job={id:`${request.provider}:${request.request.requestId}`,provider:request.provider,modelId:request.request.modelId,kind:'generation',state:'running',stage:'排队等待推理',startedAt:Date.now(),elapsedSeconds:0,assets:[],cancelable:true};state.jobs.unshift(job);return structuredClone(job)}
       if(command==='ai_job_cancel'){state.jobs.find(job=>job.id===args.id).state='cancelled';return}
@@ -38,7 +38,7 @@ async function mount(page, base) {
     }}
     state.refresh=async()=>{const service=await import('/src/core/ai-service.ts');await service.refreshAi()}
     createApp({render:()=>h('div',{class:'app-shell','data-theme':'dark'},[
-      h('button',{onClick:()=>{state.filter.value=undefined;state.open.value=true}},'全局模型中心'),
+      h('button',{onClick:()=>{state.filter.value=undefined;state.open.value=true}},'关于 Open Media'),
       h('button',{onClick:()=>state.provider.value=state.provider.value==='image'?'music':'image'},'切换工作区'),
       h(Workspace,{key:state.provider.value,provider:state.provider.value,native:true,active:true,projectTitle:'共享项目',onOpenModels:value=>{state.filter.value=value;state.open.value=true},onAddAsset:asset=>state.added.push(asset),onAddTimeline:asset=>state.timeline.push(asset),onEditImage:asset=>state.edited.push(asset)}),
       h(Center,{open:state.open.value,native:true,initialProvider:state.filter.value,onClose:()=>state.open.value=false}),
@@ -59,20 +59,34 @@ async function main(){
     await page.evaluate(()=>window.dispatchEvent(new Event('open-media:save-generation-drafts')))
     assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('open-media:ai-image-draft:v1')).prompt),'山谷里的一座安静的小屋')
     await expect(page.getByTestId('ai-generation-start')).toBeDisabled()
-    await page.getByRole('button',{name:'全局模型中心',exact:true}).click()
-    const center=page.getByRole('dialog',{name:'AI 模型中心',exact:true})
-    await expect(center.locator('[data-ai-model]')).toHaveCount(5)
+    await page.getByRole('button',{name:'请前往下载',exact:true}).click()
+    const center=page.getByRole('dialog',{name:'关于 Open Media',exact:true})
+    await expect(center).toContainText('版本号')
+    await expect(center).toContainText('构建时间')
+    await expect(center.getByTestId('ai-category-image')).toHaveAttribute('aria-expanded','true')
+    await expect(center.getByTestId('ai-category-speech')).toHaveAttribute('aria-expanded','false')
+    await expect(center.locator('[data-ai-model]')).toHaveCount(2)
+    await center.getByTestId('ai-category-speech').click()
+    await expect(center.locator('[data-ai-model="voice-fixture"]')).toBeVisible()
+    await center.getByTestId('ai-category-speech').click()
+    await expect(center.locator('[data-ai-model="voice-fixture"]')).toHaveCount(0)
     await center.locator('[data-ai-model="qwen-image"]').getByRole('button',{name:'下载',exact:true}).click()
     const license=page.getByRole('dialog',{name:'下载模型',exact:true})
     await expect(license.getByRole('button',{name:'开始下载'})).toBeDisabled()
     await license.getByRole('checkbox').check();await license.getByRole('button',{name:'开始下载'}).click()
     await expect(license).not.toBeVisible();await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('正在下载')
     await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('50 MB / 100 MB')
-    assert.equal(await center.locator('[data-ai-model="qwen-image"] progress').getAttribute('value'),null)
+    await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('预计剩余约 4 分钟')
+    if(process.env.UI_SCREENSHOT_PATH) await page.screenshot({path:process.env.UI_SCREENSHOT_PATH})
+    await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('当前来源：hf-mirror.com')
+    assert.equal(await center.locator('[data-ai-model="qwen-image"] progress').getAttribute('value'),'50000000')
+    await page.evaluate(()=>{Object.assign(window.aiHarness.models[0],{downloadPhase:'verifying',remainingSeconds:undefined,downloadSpeedBytesPerSecond:undefined});return window.aiHarness.refresh()})
+    await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('正在校验文件完整性')
+    await expect(center.locator('[data-ai-model="qwen-image"]')).not.toContainText('预计剩余')
     await center.locator('[data-ai-model="qwen-image"]').getByRole('button',{name:'取消',exact:true}).click()
     await expect(center.locator('[data-ai-model="qwen-image"]')).toContainText('待下载')
     await page.evaluate(()=>{window.aiHarness.models[0].state='ready';return window.aiHarness.refresh()})
-    await center.getByRole('button',{name:'关闭AI 模型中心',exact:true}).click()
+    await center.getByRole('button',{name:'关闭关于 Open Media',exact:true}).click()
     await expect(page.getByTestId('ai-generation-start')).toBeEnabled().catch(async cause=>{console.error(await page.locator('.ai-generation-workspace').innerText(),await page.evaluate(()=>({calls:window.aiHarness.calls,models:window.aiHarness.models})));throw cause})
     await page.getByRole('button',{name:'图生图',exact:true}).click();await expect(page.getByTestId('ai-generation-start')).toBeDisabled()
     await page.getByRole('button',{name:'选择起始图片',exact:true}).click()
@@ -82,8 +96,8 @@ async function main(){
     assert.equal(request.provider,'image');assert.equal(request.request.inputAsset.id,'result-image');assert.equal(request.request.strength,.7)
     await page.getByRole('button',{name:'切换工作区',exact:true}).click()
     await expect(page.getByTestId('music-generation-workspace')).toBeVisible()
-    await page.getByRole('button',{name:'全局模型中心',exact:true}).click();await center.getByRole('tab',{name:'任务',exact:false}).click();await expect(center).toContainText('排队等待推理')
-    await center.getByRole('button',{name:'取消任务',exact:true}).click();await expect(center).toContainText('已取消');await center.getByRole('button',{name:'关闭AI 模型中心',exact:true}).click()
+    await page.getByRole('button',{name:'关于 Open Media',exact:true}).click();await center.getByTestId('ai-category-jobs').click();await expect(center).toContainText('排队等待推理')
+    await center.getByRole('button',{name:'取消任务',exact:true}).click();await expect(center).toContainText('已取消');await center.getByRole('button',{name:'关闭关于 Open Media',exact:true}).click()
     await page.getByLabel('音乐提示词',{exact:true}).fill('轻快的木吉他与钢琴，温暖自然')
     await expect(page.getByTestId('ai-generation-start')).toBeDisabled()
     await page.getByRole('button',{name:'纯音乐',exact:true}).click();await page.getByTestId('ai-generation-start').click()
@@ -106,6 +120,11 @@ async function main(){
     assert.deepEqual(await page.evaluate(()=>[window.aiHarness.added.length,window.aiHarness.timeline.length,window.aiHarness.edited.length]),[1,1,1])
     await page.setViewportSize({width:520,height:900})
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
+    await page.getByRole('button',{name:'关于 Open Media',exact:true}).click()
+    await center.getByTestId('ai-category-image').click()
+    await expect(center.locator('[data-ai-model="qwen-image"]')).toBeVisible()
+    assert.equal(await center.evaluate(element=>element.scrollWidth>element.clientWidth),false)
+    await center.getByRole('button',{name:'关闭关于 Open Media',exact:true}).click()
     assert.deepEqual(await page.evaluate(()=>window.aiHarness.unexpected),[]);assert.deepEqual(errors,[])
     console.log('PASS shared AI GUI contracts: global models, consent, download cancellation, background jobs, image input, lyrics/instrumental modes, drafts, model-specific controls, results and narrow layout (mocked IPC; no full-model inference claimed)')
   }finally{await browser?.close();await server.close()}
