@@ -1,0 +1,325 @@
+{
+  "schema": 1,
+  "checkedAt": "2026-10-19T16:25:50.418784+00:00",
+  "verification": "Matching bounded first/last ranges and total byte size; full SHA-256 enforced by installer",
+  "assets": [
+    {
+      "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip",
+      "size": 157800568,
+      "expectedFullSha256": "e9ebdf102941e94923fb3bf22e36138f3980e44df4ca4e6bff50fb737b0b365e",
+      "originalRanges": [
+        {
+          "start": 0,
+          "end": 65535,
+          "sha256": "5acd921a84787665fa3d169280783eea930705f0d201bf2d10591694d69588d1"
+        },
+        {
+          "start": 157735032,
+          "end": 157800567,
+          "sha256": "929df3344b2e922a22c0490f7c5780feb3713e6e9574a80e8fb31cd3d10d0973"
+        }
+      ],
+      "mirrors": [
+        {
+          "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "5acd921a84787665fa3d169280783eea930705f0d201bf2d10591694d69588d1"
+            },
+            {
+              "start": 157735032,
+              "end": 157800567,
+              "sha256": "929df3344b2e922a22c0490f7c5780feb3713e6e9574a80e8fb31cd3d10d0973"
+            }
+          ]
+        },
+        {
+          "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "5acd921a84787665fa3d169280783eea930705f0d201bf2d10591694d69588d1"
+            },
+            {
+              "start": 157735032,
+              "end": 157800567,
+              "sha256": "929df3344b2e922a22c0490f7c5780feb3713e6e9574a80e8fb31cd3d10d0973"
+            }
+          ]
+        }
+      ],
+      "runtime": "ai-generation-v1",
+      "platform": "macos-arm64"
+    },
+    {
+      "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part001",
+      "size": 1800000000,
+      "expectedFullSha256": "0b7c5623db8db16035603515128d16182121f7def36371d9bfe7f2df12a7e66a",
+      "originalRanges": [
+        {
+          "start": 0,
+          "end": 65535,
+          "sha256": "c81d7d88376fa25b7f74134f1449657e74e557b0a6f116c4b7c2615e99c56eae"
+        },
+        {
+          "start": 1799934464,
+          "end": 1799999999,
+          "sha256": "aec827c5580638821b28e630700aad767bf52b2b43801a36151b379dc778816b"
+        }
+      ],
+      "mirrors": [
+        {
+          "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part001",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "c81d7d88376fa25b7f74134f1449657e74e557b0a6f116c4b7c2615e99c56eae"
+            },
+            {
+              "start": 1799934464,
+              "end": 1799999999,
+              "sha256": "aec827c5580638821b28e630700aad767bf52b2b43801a36151b379dc778816b"
+            }
+          ]
+        },
+        {
+          "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part001",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "c81d7d88376fa25b7f74134f1449657e74e557b0a6f116c4b7c2615e99c56eae"
+            },
+            {
+              "start": 1799934464,
+              "end": 1799999999,
+              "sha256": "aec827c5580638821b28e630700aad767bf52b2b43801a36151b379dc778816b"
+            }
+          ]
+        }
+      ],
+      "runtime": "ai-generation-v1",
+      "platform": "windows-x64"
+    },
+    {
+      "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part002",
+      "size": 1160791014,
+      "expectedFullSha256": "4101c3d10cd5379d568974a8db2204d7df59e3f7c1a41c7c236dc996362391ff",
+      "originalRanges": [
+        {
+          "start": 0,
+          "end": 65535,
+          "sha256": "2ede10ac3d5b877008e1c8ce167983f922922b8baa57f027de20bc5707f2d758"
+        },
+        {
+          "start": 1160725478,
+          "end": 1160791013,
+          "sha256": "4b6040bac0f70f86582cfcc35e26374a75925b5d8844d3a851559e674e5013ad"
+        }
+      ],
+      "mirrors": [
+        {
+          "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part002",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "2ede10ac3d5b877008e1c8ce167983f922922b8baa57f027de20bc5707f2d758"
+            },
+            {
+              "start": 1160725478,
+              "end": 1160791013,
+              "sha256": "4b6040bac0f70f86582cfcc35e26374a75925b5d8844d3a851559e674e5013ad"
+            }
+          ]
+        },
+        {
+          "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part002",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "2ede10ac3d5b877008e1c8ce167983f922922b8baa57f027de20bc5707f2d758"
+            },
+            {
+              "start": 1160725478,
+              "end": 1160791013,
+              "sha256": "4b6040bac0f70f86582cfcc35e26374a75925b5d8844d3a851559e674e5013ad"
+            }
+          ]
+        }
+      ],
+      "runtime": "ai-generation-v1",
+      "platform": "windows-x64"
+    },
+    {
+      "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part001",
+      "size": 1800000000,
+      "expectedFullSha256": "eb75cfb6dcdf8390bcf58c03e8576bb3c438bbcb0a6f04be6ff6487cb65c693f",
+      "originalRanges": [
+        {
+          "start": 0,
+          "end": 65535,
+          "sha256": "eff8b8c74282f80a3d9781242120b237d6dff997dbcaa6ff7da510aa16aee8ab"
+        },
+        {
+          "start": 1799934464,
+          "end": 1799999999,
+          "sha256": "155366a2369eebf429fd728d36a879397a8290a46918967f90bb6308a569e309"
+        }
+      ],
+      "mirrors": [
+        {
+          "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part001",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "eff8b8c74282f80a3d9781242120b237d6dff997dbcaa6ff7da510aa16aee8ab"
+            },
+            {
+              "start": 1799934464,
+              "end": 1799999999,
+              "sha256": "155366a2369eebf429fd728d36a879397a8290a46918967f90bb6308a569e309"
+            }
+          ]
+        },
+        {
+          "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part001",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "eff8b8c74282f80a3d9781242120b237d6dff997dbcaa6ff7da510aa16aee8ab"
+            },
+            {
+              "start": 1799934464,
+              "end": 1799999999,
+              "sha256": "155366a2369eebf429fd728d36a879397a8290a46918967f90bb6308a569e309"
+            }
+          ]
+        }
+      ],
+      "runtime": "ai-generation-v1",
+      "platform": "linux-x64"
+    },
+    {
+      "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part002",
+      "size": 1800000000,
+      "expectedFullSha256": "db55e16c5550fba92f914d151bac45e885140c1a6add498fcce7a39cbf6e5375",
+      "originalRanges": [
+        {
+          "start": 0,
+          "end": 65535,
+          "sha256": "10e00044a2eec12865f5e388a51fea6b349f125a114b9d7b19b64360df9aef36"
+        },
+        {
+          "start": 1799934464,
+          "end": 1799999999,
+          "sha256": "8815f4da01d652bb4a65d5cc508bca80a3efd2bfabac3e5e42126dfd69860fe1"
+        }
+      ],
+      "mirrors": [
+        {
+          "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part002",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "10e00044a2eec12865f5e388a51fea6b349f125a114b9d7b19b64360df9aef36"
+            },
+            {
+              "start": 1799934464,
+              "end": 1799999999,
+              "sha256": "8815f4da01d652bb4a65d5cc508bca80a3efd2bfabac3e5e42126dfd69860fe1"
+            }
+          ]
+        },
+        {
+          "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part002",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "10e00044a2eec12865f5e388a51fea6b349f125a114b9d7b19b64360df9aef36"
+            },
+            {
+              "start": 1799934464,
+              "end": 1799999999,
+              "sha256": "8815f4da01d652bb4a65d5cc508bca80a3efd2bfabac3e5e42126dfd69860fe1"
+            }
+          ]
+        }
+      ],
+      "runtime": "ai-generation-v1",
+      "platform": "linux-x64"
+    },
+    {
+      "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part003",
+      "size": 596248351,
+      "expectedFullSha256": "568f08b5eab26cb668faa460cb734ed0c313c1283b08add4952f59178ac96f25",
+      "originalRanges": [
+        {
+          "start": 0,
+          "end": 65535,
+          "sha256": "39d6dd9f7c79a44bacb706e0af81383059d16fd713c35a6152a14ad6637f9e26"
+        },
+        {
+          "start": 596182815,
+          "end": 596248350,
+          "sha256": "a6fda6802f14737fcabd3758a73a9cd581a46b54c10931b89f743502fc9efa63"
+        }
+      ],
+      "mirrors": [
+        {
+          "url": "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part003",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "39d6dd9f7c79a44bacb706e0af81383059d16fd713c35a6152a14ad6637f9e26"
+            },
+            {
+              "start": 596182815,
+              "end": 596248350,
+              "sha256": "a6fda6802f14737fcabd3758a73a9cd581a46b54c10931b89f743502fc9efa63"
+            }
+          ]
+        },
+        {
+          "url": "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part003",
+          "matched": true,
+          "ranges": [
+            {
+              "start": 0,
+              "end": 65535,
+              "sha256": "39d6dd9f7c79a44bacb706e0af81383059d16fd713c35a6152a14ad6637f9e26"
+            },
+            {
+              "start": 596182815,
+              "end": 596248350,
+              "sha256": "a6fda6802f14737fcabd3758a73a9cd581a46b54c10931b89f743502fc9efa63"
+            }
+          ]
+        }
+      ],
+      "runtime": "ai-generation-v1",
+      "platform": "linux-x64"
+    }
+  ]
+}
