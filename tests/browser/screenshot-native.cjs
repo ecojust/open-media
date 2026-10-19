@@ -54,6 +54,7 @@ async function installNativeContract(page) {
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_desktop_platform') return 'macos'
         if (command === 'get_media_jobs') return []
+        if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
         if (command === 'mcp_pending') return []
         if (command === 'mcp_get_status') return { running: false, host: '127.0.0.1', port: 39861, url: null, pendingRequests: 0, connectedClients: 0 }
         if (command === 'configure_screenshot_shortcut') {

@@ -92,6 +92,7 @@ async function nativeChecks(browser, url) {
     await page.exposeBinding('projectNativeInvoke', async (_, command, args) => {
       if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
       if (command === 'get_media_jobs') return []
+      if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
       if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
       if (command === 'configure_screenshot_shortcut') return args.shortcut
       if (command === 'plugin:event|listen') return 1

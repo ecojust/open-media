@@ -53,6 +53,7 @@ async function main() {
             if (command === 'plugin:event|listen') return ++nextId
             if (command === 'configure_screenshot_shortcut') return args.shortcut
             if (command === 'get_media_jobs' || command === 'mcp_pending') return []
+            if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
             if (command === 'get_runtime_status') return { ready: true, version: 'fixture' }
             if (command === 'mcp_get_status') return { running: false, connectedClients: 0, pendingRequests: 0 }
             return null
