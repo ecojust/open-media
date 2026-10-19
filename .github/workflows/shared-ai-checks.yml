@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: shared-ai-checks-${{ github.ref }}
@@ -71,6 +72,7 @@ jobs:
           shared-key: shared-ai-native
           cache-on-failure: true
       - name: Verify image and music adapter contracts without model weights
+        id: adapters
         shell: bash
         run: |
           set -euo pipefail
@@ -78,12 +80,19 @@ jobs:
           python -B scripts/test-ai-image-runner.py 2>&1 | tee test-results/shared-ai/image-contracts.log
           python -B scripts/test-ai-music-runner.py 2>&1 | tee test-results/shared-ai/music-contracts.log
       - name: Verify shared model downloads, inference scheduling and process lifecycle
+        id: native
         shell: bash
         run: |
           set -euo pipefail
           cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib ai_ -- --nocapture 2>&1 | tee test-results/shared-ai/native-contracts.log
+      - name: Verify the application-wide model service
+        id: service
+        shell: bash
+        run: |
+          set -euo pipefail
           cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib ai:: -- --nocapture 2>&1 | tee test-results/shared-ai/service-contracts.log
       - name: Check desktop command and application integration
+        id: desktop
         shell: bash
         env:
           # Desktop command types are compiled here. Complete installer resources
@@ -100,7 +109,54 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: shared-ai-native-${{ matrix.platform }}-${{ github.run_id }}
+          name: shared-ai-${{ matrix.platform }}-${{ github.run_id }}-adapters_${{ steps.adapters.outcome }}-native_${{ steps.native.outcome }}-service_${{ steps.service.outcome }}-desktop_${{ steps.desktop.outcome }}
           path: test-results/shared-ai/
           retention-days: 14
           if-no-files-found: warn
+      - name: Publish completed validation evidence
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          VALIDATION_PLATFORM: ${{ matrix.platform }}
+          ADAPTER_OUTCOME: ${{ steps.adapters.outcome }}
+          NATIVE_OUTCOME: ${{ steps.native.outcome }}
+          SERVICE_OUTCOME: ${{ steps.service.outcome }}
+          DESKTOP_OUTCOME: ${{ steps.desktop.outcome }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const outcomes = {
+              adapters: process.env.ADAPTER_OUTCOME,
+              native: process.env.NATIVE_OUTCOME,
+              service: process.env.SERVICE_OUTCOME,
+              desktop: process.env.DESKTOP_OUTCOME,
+            };
+            const values = Object.values(outcomes);
+            const conclusion = values.every(value => value === 'success') ? 'success'
+              : values.includes('failure') ? 'failure'
+              : values.includes('cancelled') ? 'cancelled' : 'neutral';
+            const logs = ['image-contracts', 'music-contracts', 'native-contracts', 'service-contracts', 'desktop-check'];
+            const sanitize = value => value.replace(/\u001b\[[0-9;]*m/g, '')
+              .replace(/https?:\/\/[^\s"<>]+/g, url => url.split('?')[0])
+              .replace(/(Bearer\s+|(?:token|password|secret|authorization)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]');
+            const text = logs.map(name => {
+              const file = `test-results/shared-ai/${name}.log`;
+              if (!fs.existsSync(file)) return `### ${name}\nNo log produced; see step outcomes.`;
+              const tail = sanitize(fs.readFileSync(file, 'utf8')).trim().split(/\r?\n/).slice(-45).join('\n').slice(-9000);
+              return `### ${name}\n\n\`\`\`text\n${tail}\n\`\`\``;
+            }).join('\n\n');
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: `Shared AI evidence — ${process.env.VALIDATION_PLATFORM}`,
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion,
+              completed_at: new Date().toISOString(),
+              details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              output: {
+                title: `Shared AI ${process.env.VALIDATION_PLATFORM}: ${conclusion}`,
+                summary: `Run ${context.runId}; commit ${context.sha}.\n\n\`\`\`json\n${JSON.stringify(outcomes, null, 2)}\n\`\`\`\n\nNo model weights are downloaded by these contract and compilation checks.`,
+                text,
+              },
+            });
