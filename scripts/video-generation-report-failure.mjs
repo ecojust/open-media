@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 
 // Keep failures visible in check annotations when archived logs are unavailable.
-for (const path of ['.video-generation-check/native-build.log', '.video-generation-check/evidence.json']) {
+for (const path of ['.video-generation-check/native-build.log', '.video-generation-check/desktop-check.log', '.video-generation-check/evidence.json']) {
   if (!existsSync(path)) continue;
   const raw = readFileSync(path, 'utf8');
   const lines = raw.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '').split('\n');

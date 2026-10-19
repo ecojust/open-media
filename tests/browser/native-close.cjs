@@ -34,7 +34,7 @@ async function fixture(browser, url, autoSave = false) {
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
-        if (command === 'get_video_generation_status') return { supported: false, runtimeReady: false, models: state.generationModels || [] }
+        if (command === 'get_video_generation_status') { state.generationChecks ||= []; state.generationChecks.push(args); return { supported: false, runtimeReady: false, models: state.generationModels || [] } }
         if (command === 'list_video_generation_jobs') return state.generationJobs || []
         if (command === 'get_media_jobs') {
           if (state.jobsMode === 'fail') throw new Error('无法检查正在处理的任务')
@@ -292,6 +292,7 @@ async function main() {
       await expect(page.locator('.app-error').first()).toContainText('视频生成及模型下载')
       await expect(page.getByTestId('video-generation-workspace')).toBeVisible()
       await checkNoExit(page)
+      assert.equal(await page.evaluate(() => window.closeHarness.generationChecks[0].probeRuntime), false, '退出检查不应初始化生成引擎')
       await finish()
     }
     console.log('PASS 未进入生成工作区时，后台视频生成与模型下载同样阻止直接退出')

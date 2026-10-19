@@ -532,9 +532,9 @@ mod desktop {
         state.speech.accept(&ids)
     }
     #[tauri::command]
-    pub async fn get_video_generation_status(state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
+    pub async fn get_video_generation_status(probe_runtime: Option<bool>, state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {
         let manager = state.video_generation.clone();
-        blocking(move || Ok(manager.status())).await
+        blocking(move || Ok(manager.status_with_probe(probe_runtime.unwrap_or(true)))).await
     }
     #[tauri::command]
     pub async fn begin_video_model_download(model_id: String, accepted_license: bool, state: State<'_, MediaState>) -> engine::Result<VideoGenerationStatus> {

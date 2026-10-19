@@ -172,6 +172,22 @@ fn video_generation_platform_status_never_claims_support_elsewhere() {
     assert!(manager.begin_download("h3-base-fl2va", true).is_err());
 }
 
+#[test]
+fn video_generation_close_status_does_not_initialize_optional_runtime() {
+    let temp = tempfile::tempdir().unwrap();
+    let manager = VideoGenerationManager::new(temp.path()).unwrap();
+    assert!(manager.worker.runner.get().is_none());
+    let status = manager.status_with_probe(false);
+    assert_eq!(status.models.len(), 2);
+    assert!(!status.runtime_ready);
+    assert!(status.device.is_empty());
+    assert!(
+        manager.worker.runner.get().is_none(),
+        "close status must not extract or execute a helper"
+    );
+    assert!(manager.owner.shared.lock().unwrap().process.is_none());
+}
+
 #[cfg(unix)]
 #[test]
 fn video_generation_symlinks_cannot_escape_cache() {

@@ -252,15 +252,25 @@ impl VideoGenerationManager {
     }
 
     pub fn status(&self) -> VideoGenerationStatus {
+        self.status_with_probe(true)
+    }
+
+    pub fn status_with_probe(&self, probe_runtime: bool) -> VideoGenerationStatus {
         let mut models = self
             .owner
             .shared
             .lock()
             .map(|state| state.models.clone())
             .unwrap_or_default();
-        let runtime = self.runtime();
+        // Close checks only need download state. Do not extract or launch an
+        // optional engine just because an otherwise unused app is being closed.
+        let runtime = if probe_runtime {
+            Some(self.runtime())
+        } else {
+            self.worker.runner.get()
+        };
         if self.unsupported.is_none() {
-            if let Err(error) = runtime {
+            if let Some(Err(error)) = runtime {
                 for model in &mut models {
                     model.state = "failed".into();
                     model.error = Some(error.clone());
@@ -272,10 +282,10 @@ impl VideoGenerationManager {
             reason: self
                 .unsupported
                 .clone()
-                .or_else(|| runtime.as_ref().err().cloned()),
-            runtime_ready: runtime.is_ok(),
+                .or_else(|| runtime.and_then(|runtime| runtime.as_ref().err().cloned())),
+            runtime_ready: runtime.is_some_and(Result::is_ok),
             runtime_version: self.worker.catalog.engine.version.clone(),
-            device: if self.unsupported.is_none() && runtime.is_ok() {
+            device: if self.unsupported.is_none() && runtime.is_some_and(Result::is_ok) {
                 "Apple GPU · Metal"
             } else {
                 ""

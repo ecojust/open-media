@@ -16,8 +16,8 @@ async function assetUrl(asset: MediaAsset): Promise<MediaAsset> {
 async function prepareJob(job: VideoGenerationJob): Promise<VideoGenerationJob> {
   return { ...job, assets: await Promise.all(job.assets.map(assetUrl)), combinedAsset: job.combinedAsset ? await assetUrl(job.combinedAsset) : undefined }
 }
-export async function getVideoGenerationStatus(): Promise<VideoGenerationStatus> {
-  return isDesktop() ? call('get_video_generation_status') : { supported: false, runtimeReady: false, reason: '本地视频生成需要 Apple 芯片 Mac 桌面端。', models: [] }
+export async function getVideoGenerationStatus(probeRuntime = true): Promise<VideoGenerationStatus> {
+  return isDesktop() ? call('get_video_generation_status', { probeRuntime }) : { supported: false, runtimeReady: false, reason: '本地视频生成需要 Apple 芯片 Mac 桌面端。', models: [] }
 }
 export async function beginVideoModelDownload(modelId: string, acceptedLicense: boolean): Promise<VideoGenerationStatus> { return call('begin_video_model_download', { modelId, acceptedLicense }) }
 export async function cancelVideoModelDownload(modelId: string): Promise<VideoGenerationStatus> { return call('cancel_video_model_download', { modelId }) }

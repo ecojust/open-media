@@ -40,6 +40,12 @@ jobs:
           set -o pipefail
           mkdir -p .video-generation-check
           cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib video_generation -- --nocapture 2>&1 | tee .video-generation-check/native-build.log
+      - name: Check desktop command integration
+        if: matrix.os == 'windows-2022'
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --manifest-path src-tauri/Cargo.toml --locked --lib 2>&1 | tee .video-generation-check/desktop-check.log
       - name: Report native failure details
         if: failure()
         run: node scripts/video-generation-report-failure.mjs
@@ -59,6 +65,7 @@ jobs:
         with:
           workspaces: src-tauri
           shared-key: video-generation-native
+          cache-on-failure: true
       - name: Verify pinned source and model inventory
         run: node scripts/video-generation-verify.mjs
       - name: Compile isolated runner and validate native module
@@ -87,4 +94,5 @@ jobs:
         with:
           name: video-generation-check-${{ github.run_id }}
           path: .video-generation-check/
+          include-hidden-files: true
           if-no-files-found: warn

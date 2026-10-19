@@ -598,7 +598,7 @@ async function nativeClose() {
   if (pendingMedia.value || imageConverting.value || videoConverting.value || gifConverting.value) { fail('请先完成或取消素材导入及媒体转换，再关闭应用。'); return }
   switching.value = true
   try {
-    const [generationStatus, generationJobs] = await Promise.all([getVideoGenerationStatus(), listVideoGenerationJobs()])
+    const [generationStatus, generationJobs] = await Promise.all([getVideoGenerationStatus(false), listVideoGenerationJobs()])
     if (generationJobs.some(job => job.state === 'running') || generationStatus.models.some(model => model.state === 'downloading' || model.state === 'verifying')) {
       view.value = 'generate'; switching.value = false; fail('请先完成或取消视频生成及模型下载，再关闭应用。'); return
     }

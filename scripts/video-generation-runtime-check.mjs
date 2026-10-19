@@ -47,4 +47,7 @@ try {
 } finally {
   await writeFile(join(out, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`);
   console.log(JSON.stringify(evidence, null, 2));
+  const summary = JSON.stringify({ requestValidation: evidence.requestValidation, gpuComputation: evidence.gpuComputation, device: evidence.device?.device ?? null, actualModelGeneration: evidence.actualModelGeneration })
+    .replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+  console.log(`::notice title=Video generation verification::${summary}`);
 }
