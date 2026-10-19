@@ -12,7 +12,11 @@
           "sha256": "e9ebdf102941e94923fb3bf22e36138f3980e44df4ca4e6bff50fb737b0b365e",
           "manifestSha256": "053d4d08dafbd5e2415c6de36555e2586d9b2f4155296a46bbe667404b13afe8",
           "executable": "python/bin/python3",
-          "script": "runner/check.py"
+          "script": "runner/check.py",
+          "mirrors": [
+            "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip",
+            "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-macos-arm64.zip"
+          ]
         },
         "windows-x64": {
           "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip",
@@ -26,12 +30,20 @@
             {
               "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part001",
               "size": 1800000000,
-              "sha256": "0b7c5623db8db16035603515128d16182121f7def36371d9bfe7f2df12a7e66a"
+              "sha256": "0b7c5623db8db16035603515128d16182121f7def36371d9bfe7f2df12a7e66a",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part001",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part001"
+              ]
             },
             {
               "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part002",
               "size": 1160791014,
-              "sha256": "4101c3d10cd5379d568974a8db2204d7df59e3f7c1a41c7c236dc996362391ff"
+              "sha256": "4101c3d10cd5379d568974a8db2204d7df59e3f7c1a41c7c236dc996362391ff",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part002",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-windows-x64.zip.part002"
+              ]
             }
           ]
         },
@@ -47,17 +59,29 @@
             {
               "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part001",
               "size": 1800000000,
-              "sha256": "eb75cfb6dcdf8390bcf58c03e8576bb3c438bbcb0a6f04be6ff6487cb65c693f"
+              "sha256": "eb75cfb6dcdf8390bcf58c03e8576bb3c438bbcb0a6f04be6ff6487cb65c693f",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part001",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part001"
+              ]
             },
             {
               "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part002",
               "size": 1800000000,
-              "sha256": "db55e16c5550fba92f914d151bac45e885140c1a6add498fcce7a39cbf6e5375"
+              "sha256": "db55e16c5550fba92f914d151bac45e885140c1a6add498fcce7a39cbf6e5375",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part002",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part002"
+              ]
             },
             {
               "url": "https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part003",
               "size": 596248351,
-              "sha256": "568f08b5eab26cb668faa460cb734ed0c313c1283b08add4952f59178ac96f25"
+              "sha256": "568f08b5eab26cb668faa460cb734ed0c313c1283b08add4952f59178ac96f25",
+              "mirrors": [
+                "https://ghfast.top/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part003",
+                "https://gh-proxy.com/https://github.com/ecojust/open-media/releases/download/ai-runtime-v1/ai-runtime-v1-linux-x64.zip.part003"
+              ]
             }
           ]
         }
