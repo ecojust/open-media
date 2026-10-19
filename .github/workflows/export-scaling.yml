@@ -70,13 +70,17 @@ jobs:
       - name: Measure the complete long graph with real media
         run: |
           cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib export_scaling_tests::ten_minute_split_recording_fifty_texts_and_1080p_startup -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee test-results/export-scaling/benchmark.log
+      - name: Compare native encoder output
+        if: always() && runner.os == 'macOS'
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --no-default-features --lib export_scaling_tests::macos_ten_minute_encoder_variants_diagnostic -- --exact --ignored --nocapture --test-threads=1 2>&1 | tee test-results/export-scaling/encoder-comparison.log
       - name: Report measured output progress
         if: always()
         run: |
           node --input-type=module <<'NODE'
           import { existsSync, readFileSync } from 'node:fs';
-          const path = 'test-results/export-scaling/benchmark.log';
-          if (existsSync(path)) {
+          for (const path of ['test-results/export-scaling/benchmark.log', 'test-results/export-scaling/encoder-comparison.log']) {
+            if (!existsSync(path)) continue;
             for (const line of readFileSync(path, 'utf8').split('\n')) {
               const match = line.match(/EXPORT_SCALING (\{.*\})$/);
               if (!match) continue;
@@ -88,7 +92,7 @@ jobs:
           NODE
       - name: Summarize failed media checks
         if: failure()
-        run: node scripts/report-build-failure.mjs test-results/export-scaling/correctness.log test-results/export-scaling/benchmark.log
+        run: node scripts/report-build-failure.mjs test-results/export-scaling/correctness.log test-results/export-scaling/benchmark.log test-results/export-scaling/encoder-comparison.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -352,14 +352,22 @@ fn static_text_with_nonzero_trim_preserves_exclusive_boundaries_and_gaps() {
 #[test]
 fn fractional_millisecond_mkv_slices_keep_every_source_frame() {
     source_clock_slices_keep_every_source_frame(
-        "millisecond-clock.mkv", "30", "1/1000", 30.0, &[7.0 / 6.0, 37.0 / 6.0],
+        "millisecond-clock.mkv",
+        "30",
+        "1/1000",
+        30.0,
+        &[7.0 / 6.0, 37.0 / 6.0],
     );
 }
 
 #[test]
 fn fractional_avi_time_base_slices_keep_every_source_frame() {
     source_clock_slices_keep_every_source_frame(
-        "fractional-clock.avi", "30000/1001", "1001/30000", 30000.0 / 1001.0, &[2.002, 6.006],
+        "fractional-clock.avi",
+        "30000/1001",
+        "1001/30000",
+        30000.0 / 1001.0,
+        &[2.002, 6.006],
     );
 }
 
@@ -392,7 +400,18 @@ fn source_clock_slices_keep_every_source_frame(
         .arg(&source);
     bounded_output(command, Duration::from_secs(30));
     let mut command = engine::process(&runtime.probe);
-    command.args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=time_base", "-of", "default=nw=1:nk=1"]).arg(&source);
+    command
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=time_base",
+            "-of",
+            "default=nw=1:nk=1",
+        ])
+        .arg(&source);
     let clock = bounded_output(command, Duration::from_secs(30));
     assert_eq!(String::from_utf8_lossy(&clock.stdout).trim(), time_base);
     let asset = store.probe(&runtime, &source, name).unwrap();
@@ -436,18 +455,29 @@ fn source_clock_slices_keep_every_source_frame(
             let mut still = spec.clone();
             still["frameOnly"] = json!(true);
             still["frameTime"] = json!(frame_time);
-            let output = root.path().join(format!("clock-still-{trim}-{frame_time}.mp4"));
+            let output = root
+                .path()
+                .join(format!("clock-still-{trim}-{frame_time}.mp4"));
             let mut plan = engine::build_plan(&store, &runtime, &still).unwrap();
             plan.args.extend(["-frames:v".into(), "1".into()]);
-            let job = export_plan(&runtime, plan, &output, Duration::from_secs(30), Duration::from_secs(60));
+            let job = export_plan(
+                &runtime,
+                plan,
+                &output,
+                Duration::from_secs(30),
+                Duration::from_secs(60),
+            );
             assert_eq!(job.encoded_frames, 1);
             let pixels = pixels_at(&runtime, &output, 32, 24);
             assert_eq!(pixels.len(), 1);
             let source_frame = ((trim + frame_time) * fps).floor() as u64;
             assert_eq!(pixels[0][0] > 120, source_frame % 2 == 1,
                 "window source-frame shift at trim={trim}, time={frame_time}: {:?}, expected frame {source_frame}", pixels[0]);
-            assert!((i16::from(pixels[0][1]) - (source_frame / 30 * 25) as i16).abs() < 10,
-                "window chose wrong source second at trim={trim}, time={frame_time}: {:?}", pixels[0]);
+            assert!(
+                (i16::from(pixels[0][1]) - (source_frame / 30 * 25) as i16).abs() < 10,
+                "window chose wrong source second at trim={trim}, time={frame_time}: {:?}",
+                pixels[0]
+            );
         }
     }
 }
@@ -639,4 +669,165 @@ fn ten_minute_split_recording_fifty_texts_and_1080p_startup() {
     );
     assert_eq!(job.encoded_frames, 90);
     verify_streams(&runtime, &output, 90, 3.0, 1920, 1080);
+}
+
+/// Explicit diagnostics retain failures after trying every encoder variant.
+/// A successful override does not turn a failed production export into a pass.
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "macOS long-graph CPU, real-time VideoToolbox and production encoder diagnostics"]
+fn macos_ten_minute_encoder_variants_diagnostic() {
+    use std::io::{BufRead, BufReader};
+
+    fn summarize_stats(path: &Path) -> Value {
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) => {
+                return json!({"exists":false,"lineCount":0,"firstLine":null,"lastLine":null,"error":error.to_string()})
+            }
+        };
+        let bytes = file.metadata().ok().map(|metadata| metadata.len());
+        let mut count = 0_u64;
+        let mut first = None;
+        let mut last = None;
+        let mut error = None;
+        for line in BufReader::new(file).lines() {
+            match line {
+                Ok(line) => {
+                    count += 1;
+                    let line: String = line.chars().take(512).collect();
+                    if first.is_none() {
+                        first = Some(line.clone());
+                    }
+                    last = Some(line);
+                }
+                Err(failure) => {
+                    error = Some(failure.to_string());
+                    break;
+                }
+            }
+        }
+        json!({"exists":true,"bytes":bytes,"lineCount":count,"firstLine":first,"lastLine":last,"error":error})
+    }
+
+    let root = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(root.path()).unwrap();
+    let runtime = runtime();
+    let spec = long_project(&runtime, &store);
+    let mut results = Vec::new();
+    for variant in [
+        "forced-cpu",
+        "forced-videotoolbox-realtime",
+        "production-default",
+    ] {
+        let began = Instant::now();
+        let statistics = [
+            (
+                "encPre",
+                "-stats_enc_pre:v",
+                root.path().join(format!("{variant}-enc-pre.txt")),
+            ),
+            (
+                "encPost",
+                "-stats_enc_post:v",
+                root.path().join(format!("{variant}-enc-post.txt")),
+            ),
+            (
+                "muxPre",
+                "-stats_mux_pre:v",
+                root.path().join(format!("{variant}-mux-pre.txt")),
+            ),
+        ];
+        println!(
+            "EXPORT_SCALING_DIAGNOSTIC_BEGIN {}",
+            json!({"variant":variant})
+        );
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut plan = engine::build_plan(&store, &runtime, &spec).unwrap();
+            if variant != "production-default" {
+                plan.video = None;
+            }
+            if variant == "forced-videotoolbox-realtime" {
+                let output_start = plan
+                    .args
+                    .iter()
+                    .rposition(|argument| argument == "-i")
+                    .unwrap()
+                    + 2;
+                let mut args = Vec::with_capacity(plan.args.len() + 8);
+                let mut index = 0;
+                while index < plan.args.len() {
+                    if index >= output_start
+                        && ["-c:v", "-crf", "-preset", "-b:v"].contains(&plan.args[index].as_str())
+                    {
+                        index += 2;
+                    } else {
+                        args.push(plan.args[index].clone());
+                        index += 1;
+                    }
+                }
+                args.extend(
+                    [
+                        "-c:v",
+                        "h264_videotoolbox",
+                        "-allow_sw",
+                        "0",
+                        "-realtime",
+                        "1",
+                        "-b:v",
+                        "350000",
+                    ]
+                    .into_iter()
+                    .map(str::to_owned),
+                );
+                plan.args = args;
+            }
+            for (_, option, path) in &statistics {
+                plan.args
+                    .extend([(*option).to_owned(), path.to_string_lossy().into_owned()]);
+            }
+            let output = root.path().join(format!("diagnostic-{variant}.mp4"));
+            let job = export_plan(
+                &runtime,
+                plan,
+                &output,
+                Duration::from_secs(30),
+                Duration::from_secs(90),
+            );
+            assert_eq!(job.encoded_frames, 6000);
+            verify_streams(&runtime, &output, 6000, 600.0, 160, 90);
+        }));
+        let error = attempt.as_ref().err().map(|payload| {
+            payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| {
+                    payload
+                        .downcast_ref::<&str>()
+                        .map(|message| message.to_string())
+                })
+                .unwrap_or_else(|| "non-string panic payload".into())
+        });
+        let statistics: serde_json::Map<String, Value> = statistics
+            .iter()
+            .map(|(name, _, path)| ((*name).to_owned(), summarize_stats(path)))
+            .collect();
+        let result = json!({
+            "variant":variant,"pass":attempt.is_ok(),"elapsedSeconds":began.elapsed().as_secs_f64(),
+            "error":error,"stats":statistics,
+            // The override bypasses selection; its job.backend field alone
+            // cannot describe the manually selected encoder.
+            "encoderSelectionBypassed":variant != "production-default",
+        });
+        println!("EXPORT_SCALING_DIAGNOSTIC {}", result);
+        results.push(result);
+    }
+    println!(
+        "EXPORT_SCALING_DIAGNOSTIC_SUMMARY {}",
+        json!({"variants":results})
+    );
+    assert!(
+        results.iter().all(|result| result["pass"] == true),
+        "one or more encoder variants failed; inspect EXPORT_SCALING_DIAGNOSTIC records"
+    );
 }
