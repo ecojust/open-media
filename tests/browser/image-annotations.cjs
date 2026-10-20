@@ -50,8 +50,8 @@ async function editCrop(page, region) {
   await expect(page.getByRole('dialog')).toHaveCount(0)
   assert.equal(await panel.evaluate(element => !!element.closest('.convert-preview .preview-stage')), true, '裁剪必须属于当前预览区域')
   for (const [name, value] of [['宽', region.width], ['高', region.height], ['X', region.x], ['Y', region.y]]) {
-    await panel.getByLabel(`框选${name}`, { exact: true }).fill(String(value))
-    await panel.getByLabel(`框选${name}`, { exact: true }).press('Tab')
+    await page.getByLabel(`框选${name}`, { exact: true }).fill(String(value))
+    await page.getByLabel(`框选${name}`, { exact: true }).press('Tab')
   }
   return panel
 }
@@ -116,7 +116,7 @@ async function main() {
     const cropped = await inspectPreview(page, [[10, 10]])
     assert.deepEqual(cropped.pixels, [[255, 255, 255, 255]], '确认裁剪后主页必须立即显示裁剪后的实际像素')
     const cancelledCrop = await editCrop(page, { x: 0, y: 0, width: 80, height: 60 })
-    await cancelledCrop.getByRole('button', { name: '取消', exact: true }).click()
+    await page.getByTestId('image-edit-cancel').click()
     assert.equal((await inspectPreview(page)).digest, cropped.digest)
     await page.getByTestId('image-crop-clear').click()
     await expect(page.getByTestId('convert-image-preview')).toHaveJSProperty('naturalWidth', 320)
@@ -187,7 +187,7 @@ async function main() {
     await page.getByTestId('image-add-text').click()
     await expect(page.getByTestId('image-annotation-item')).toHaveCount(2)
     await fill('图片文字内容', '这段取消的内容不能保存')
-    await page.getByRole('region', { name: '图片标注', exact: true }).getByRole('button', { name: '取消', exact: true }).click()
+    await page.getByTestId('image-edit-cancel').click()
     assert.equal((await inspectPreview(page)).digest, textPreview.digest)
     console.log('PASS 文字可插入、编辑、拖动和撤销重做；外部文字/笔触切换复用会话不丢草稿，切换素材自动应用实际字形，取消不污染已保存编辑')
 
@@ -200,8 +200,8 @@ async function main() {
       { style: 'marker', color: '#00ff00', width: 12, opacity: '0.5', start: [180, 140], end: [280, 140] },
       { style: 'dashed', color: '#0000ff', width: 6, opacity: '1', start: [180, 175], end: [280, 175] },
     ]) {
-      await page.getByTestId('image-annotation-brush').click()
-      await page.getByLabel('图片笔触类型').selectOption(stroke.style)
+      await page.getByTestId('image-add-stroke').click()
+      await page.getByRole('button', { name: `使用${{ pen: '画笔', marker: '荧光笔', dashed: '虚线' }[stroke.style]}`, exact: true }).click()
       await fill('图片笔触颜色', stroke.color)
       await fill('图片笔触宽度', stroke.width)
       await fill('图片笔触透明度', stroke.opacity)
@@ -221,7 +221,7 @@ async function main() {
     await expect(page.getByTestId('image-annotation-item')).toHaveCount(4)
     const cropAfterDraft = await editCrop(page, { x: 0, y: 0, width: 320, height: 200 })
     await expect(page.getByTestId('image-annotations-panel')).toHaveCount(0)
-    await cropAfterDraft.getByRole('button', { name: '取消', exact: true }).click()
+    await page.getByTestId('image-edit-cancel').click()
     const points = [[90, 140], [220, 140], [185, 175], [205, 175]]
     await expect.poll(async () => (await inspectPreview(page, points)).pixels[0]).toEqual([255, 0, 0, 255])
     const annotated = await inspectPreview(page, points)
@@ -237,7 +237,7 @@ async function main() {
     assert.deepEqual((await inspectPreview(page, [[90, 80]])).pixels, [[0, 85, 170, 255]])
     await page.getByTestId('image-add-stroke').click()
     await expect(page.getByTestId('image-annotation-item')).toHaveCount(0)
-    await page.getByRole('region', { name: '图片标注', exact: true }).getByRole('button', { name: '取消', exact: true }).click()
+    await page.getByTestId('image-edit-cancel').click()
     await page.locator('.source-details').filter({ hasText: '编辑原图.png' }).first().click()
     await expect.poll(async () => (await inspectPreview(page)).digest).toBe(annotated.digest)
     console.log('PASS 每张图片独立保留文字和笔触，切换图片不会串用标注')
@@ -249,7 +249,7 @@ async function main() {
     await expect.poll(() => compactEditor.evaluate(element => element.getBoundingClientRect().width <= innerWidth && element.scrollWidth <= element.clientWidth)).toBe(true)
     await expect(page.getByTestId('image-annotations-apply')).toBeVisible()
     await page.screenshot({ path: '/tmp/open-media-image-edit/editor-compact.png', fullPage: true })
-    await compactEditor.getByRole('button', { name: '取消', exact: true }).click()
+    await page.getByTestId('image-edit-cancel').click()
     await page.setViewportSize({ width: 1280, height: 1000 })
 
     await editCrop(page, { x: 40, y: 40, width: 260, height: 150 })
