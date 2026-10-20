@@ -1,9 +1,15 @@
 use crate::{
-    asset_tools::{encode_base64, run_process, TaskControl, MEDIA_FORMATS},
+    asset_tools::{encode_base64, run_process, ChildGuard, TaskControl, MEDIA_FORMATS},
     engine::{process, MediaStore, Result, Runtime},
 };
 use serde_json::{json, Value};
-use std::path::Path;
+use std::{
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
+    path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
 
 #[path = "asset_tools_repetition.rs"]
 mod repetition;
@@ -725,6 +731,140 @@ fn idle_intervals(text: &str, duration: f64, minimum: f64, noise_db: f64) -> Vec
     intervals
 }
 
+// Progress timestamps have changed between runtime versions: some report the last
+// frame PTS while others include its duration. Read actual packet boundaries instead.
+// wrapped_avframe packets contain a small frame descriptor, so framecrc does not hash
+// video pixels or introduce another decode pass. Keep only the running end timestamp.
+#[derive(Default)]
+struct DecodedFrameClock {
+    time_base: Option<f64>,
+    end: f64,
+}
+impl DecodedFrameClock {
+    fn observe(&mut self, line: &str, fallback_frame_duration: f64) -> Result<()> {
+        if let Some(value) = line.strip_prefix("#tb 0: ") {
+            let (numerator, denominator) =
+                value.trim().split_once('/').ok_or("视频帧时间基无效。")?;
+            let numerator = numerator.parse::<f64>().map_err(|_| "视频帧时间基无效。")?;
+            let denominator = denominator
+                .parse::<f64>()
+                .map_err(|_| "视频帧时间基无效。")?;
+            let time_base = numerator / denominator;
+            if !time_base.is_finite() || time_base <= 0.0 {
+                return Err("视频帧时间基无效。".into());
+            }
+            self.time_base = Some(time_base);
+        } else if !line.starts_with('#') && !line.trim().is_empty() {
+            let mut fields = line.split(',').map(str::trim);
+            if fields.next() != Some("0") {
+                return Err("视频帧时间戳输出无效。".into());
+            }
+            fields.next(); // Decode timestamp is not the presentation boundary.
+            let time_base = self.time_base.ok_or("视频帧缺少时间基。")?;
+            let pts = fields
+                .next()
+                .ok_or("视频帧缺少时间戳。")?
+                .parse::<f64>()
+                .map_err(|_| "视频帧时间戳无效。")?;
+            let duration = fields
+                .next()
+                .ok_or("视频帧缺少时长。")?
+                .parse::<f64>()
+                .map_err(|_| "视频帧时长无效。")?;
+            if !pts.is_finite() || !duration.is_finite() || duration < 0.0 {
+                return Err("视频帧时间戳无效。".into());
+            }
+            let duration = if duration > 0.0 {
+                duration * time_base
+            } else {
+                fallback_frame_duration
+            };
+            self.end = self.end.max(pts * time_base + duration);
+        }
+        Ok(())
+    }
+}
+
+fn run_freeze_scan(
+    mut command: Command,
+    control: &TaskControl,
+    frame_duration: f64,
+) -> Result<(String, f64)> {
+    control.check()?;
+    let mut errors = tempfile::tempfile().map_err(|error| error.to_string())?;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(errors.try_clone().map_err(|error| error.to_string())?);
+    let mut child = ChildGuard(
+        command
+            .spawn()
+            .map_err(|error| format!("无法开始素材处理：{error}"))?,
+    );
+    let pipe = child.0.stdout.take().ok_or("无法读取视频帧时间戳。")?;
+    let reader = thread::spawn(move || -> Result<f64> {
+        let mut reader = BufReader::new(pipe);
+        let mut clock = DecodedFrameClock::default();
+        let mut line = String::with_capacity(128);
+        loop {
+            line.clear();
+            let bytes = reader
+                .by_ref()
+                .take(1025)
+                .read_line(&mut line)
+                .map_err(|error| error.to_string())?;
+            if bytes == 0 {
+                break;
+            }
+            if bytes > 1024 {
+                return Err("视频帧时间戳输出超过限制。".into());
+            }
+            clock.observe(line.trim_end(), frame_duration)?;
+        }
+        Ok(clock.end)
+    });
+    let status: Result<std::process::ExitStatus> = (|| loop {
+        control.check()?;
+        if errors.metadata().map_err(|error| error.to_string())?.len() > 8 * 1024 * 1024 {
+            return Err("素材分析结果超过限制，请缩短分析范围。".into());
+        }
+        if let Some(status) = child.0.try_wait().map_err(|error| error.to_string())? {
+            break Ok(status);
+        }
+        thread::sleep(Duration::from_millis(20));
+    })();
+    // Always terminate/reap before joining the reader, including cancellation and errors.
+    drop(child);
+    let end = reader
+        .join()
+        .map_err(|_| "读取视频帧时间戳失败。".to_string());
+    let status = status?;
+    errors
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| error.to_string())?;
+    let mut stderr = String::new();
+    errors
+        .take(8 * 1024 * 1024 + 1)
+        .read_to_string(&mut stderr)
+        .map_err(|error| error.to_string())?;
+    if stderr.len() > 8 * 1024 * 1024 {
+        return Err("素材分析结果超过限制。".into());
+    }
+    if !status.success() {
+        let detail = stderr
+            .chars()
+            .rev()
+            .take(2500)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>();
+        return Err(format!("素材处理失败：{}", detail.trim()));
+    }
+    control.check()?;
+    Ok((stderr, end??))
+}
+
 #[derive(Clone, Copy)]
 pub struct IdleOptions {
     pub min_duration: f64,
@@ -868,35 +1008,39 @@ pub fn detect_idle_with_options(
     } else {
         command.arg("-an");
     }
-    command.args([
-        "-sn",
-        "-dn",
-        "-threads",
-        "1",
-        "-filter_threads",
-        "1",
-        "-f",
-        "null",
-        "-",
-    ]);
-    command.args(["-progress", "pipe:1", "-stats_period", "0.5"]);
-    let output = run_process(command, control, MAX_ANALYSIS_BYTES)?;
-    // Container duration can include a nonzero timestamp origin or longer audio.
-    // Close a trailing visual hold at the actual decoded video end, not that metadata.
-    let measured_span = if freeze_only {
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| line.strip_prefix("out_time_us="))
-            .filter_map(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value >= 0.0)
-            .reduce(f64::max)
-            .map(|value| value / 1_000_000.0)
-            .unwrap_or(0.0)
-            .min(span)
+    command.args(["-sn", "-dn", "-threads", "1", "-filter_threads", "1"]);
+    // Container duration may include an offset timestamp origin or longer audio.
+    // The final decoded video packet supplies the actual end of a trailing hold.
+    let (stderr, measured_span) = if freeze_only {
+        command.args([
+            "-fps_mode",
+            "passthrough",
+            "-c:v",
+            "wrapped_avframe",
+            "-f",
+            "framecrc",
+            "-",
+        ]);
+        let frame_duration = video
+            .and_then(frame_rate)
+            .map(|fps| 1.0 / fps)
+            .unwrap_or(0.0);
+        let (stderr, end) = run_freeze_scan(command, control, frame_duration)?;
+        (stderr, end.min(span))
     } else {
-        span
+        command.args([
+            "-f",
+            "null",
+            "-",
+            "-progress",
+            "pipe:1",
+            "-stats_period",
+            "0.5",
+        ]);
+        let output = run_process(command, control, MAX_ANALYSIS_BYTES)?;
+        (output.stderr, span)
     };
-    let mut intervals = idle_intervals(&output.stderr, measured_span, min_duration, noise_db);
+    let mut intervals = idle_intervals(&stderr, measured_span, min_duration, noise_db);
     for interval in &mut intervals {
         interval["start"] = json!(interval["start"].as_f64().unwrap_or(0.0) + start);
         interval["end"] = json!(interval["end"].as_f64().unwrap_or(0.0) + start);
@@ -929,7 +1073,7 @@ pub fn detect_idle_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, sync::atomic::Ordering, time::Duration};
+    use std::{fs, sync::atomic::Ordering};
 
     fn runtime() -> Runtime {
         Runtime::discover(None, None).expect("真实媒体引擎应可用")
@@ -1343,6 +1487,53 @@ mod tests {
         );
         let asset = json!({"id": "freeze-video", "nativePath": path});
         (directory, store, runtime, asset)
+    }
+
+    #[test]
+    fn decoded_frame_clock_counts_actual_packet_duration_without_progress_assumptions() {
+        let mut clock = DecodedFrameClock::default();
+        clock.observe("#tb 0: 1/1000", 0.1).unwrap();
+        clock.observe("0, 0, 0, 100, 440, 0x00000000", 0.1).unwrap();
+        clock
+            .observe("0, 100, 100, 300, 440, 0x00000000", 0.1)
+            .unwrap();
+        clock
+            .observe("0, 400, 400, 50, 440, 0x00000000", 0.1)
+            .unwrap();
+        assert!((clock.end - 0.45).abs() < 1e-9);
+        // Out-of-order decode timestamps must not move the presentation end back.
+        clock
+            .observe("0, 450, 50, 100, 440, 0x00000000", 0.1)
+            .unwrap();
+        assert!((clock.end - 0.45).abs() < 1e-9);
+        // A missing packet duration uses the stream's nominal frame duration only.
+        clock
+            .observe("0, 450, 450, 0, 440, 0x00000000", 0.1)
+            .unwrap();
+        assert!((clock.end - 0.55).abs() < 1e-9);
+        assert!(clock.observe("0, 0, NaN, 100, 440, 0x0", 0.1).is_err());
+    }
+
+    #[test]
+    fn real_freeze_video_end_does_not_include_longer_audio() {
+        let (_directory, store, runtime, asset) =
+            freeze_fixture("color=gray:s=128x96:r=10:d=2", 6.0);
+        let result = detect_idle_with_options(
+            &store,
+            &runtime,
+            &asset,
+            IdleOptions {
+                min_duration: 2.0,
+                freeze_only: true,
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        assert_eq!(result["duration"], 6.0);
+        assert_eq!(result["range"], json!({"start":0.0,"end":2.0}));
+        assert_eq!(result["intervals"].as_array().unwrap().len(), 1, "{result}");
+        assert_eq!(result["intervals"][0]["end"], 2.0);
     }
 
     #[test]

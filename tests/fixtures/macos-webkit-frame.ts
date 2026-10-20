@@ -19,6 +19,44 @@ const emit = (stage: string, data: Record<string, unknown> = {}) => {
 }
 const errorData = (cause: unknown) => cause instanceof Error ? { name: cause.name, message: cause.message, stack: cause.stack } : { message: String(cause) }
 const assert = (condition: unknown, message: string) => { if (!condition) throw new Error(message) }
+export class RealtimeSamplingWindowMiss extends Error {
+  readonly label: string
+  readonly requestedTime: number
+  readonly actualTime: number
+  readonly maxLateness: number
+  constructor(label: string, requestedTime: number, actualTime: number, maxLateness: number) {
+    super(`${label}: RAF missed the transition sampling window (requested ${requestedTime.toFixed(3)}s, observed ${actualTime.toFixed(3)}s, limit ${maxLateness * 1000}ms)`)
+    this.name = 'RealtimeSamplingWindowMiss'
+    this.label = label; this.requestedTime = requestedTime; this.actualTime = actualTime; this.maxLateness = maxLateness
+  }
+}
+export function assertRealtimeSamplingWindow(label: string, requestedTime: number, actualTime: number, maxLateness: number): void {
+  if (!(actualTime - requestedTime < maxLateness)) throw new RealtimeSamplingWindowMiss(label, requestedTime, actualTime, maxLateness)
+}
+type SeekSamplingAttempt = Readonly<{ label: string; attempt: number; maxAttempts: number; start: number; time: number; maxLateness: number }>
+export async function sampleTransitionAfterSeek(runAttempt: (attempt: SeekSamplingAttempt) => Promise<void>, report: (event: Record<string, unknown>) => void): Promise<void> {
+  const label = 'transition-after-seek', time = 2.75, maxLateness = .2
+  // Keep the original playing seek first. If scheduling misses the narrow
+  // transition window, replay from a little earlier rather than sampling after
+  // the transition or pausing/resetting the real media clock to fit the test.
+  const starts = [2.5, 2.25, 1.75]
+  for (const [index, start] of starts.entries()) {
+    const attempt = Object.freeze({ label, attempt: index + 1, maxAttempts: starts.length, start, time, maxLateness })
+    report({ ...attempt, status: 'started' })
+    try {
+      await runAttempt(attempt)
+      report({ ...attempt, status: 'passed' })
+      return
+    } catch (cause) {
+      const missedWindow = cause instanceof RealtimeSamplingWindowMiss && cause.label === label
+      report({ ...attempt, status: missedWindow ? 'missed-window' : 'failed', error: errorData(cause),
+        ...(missedWindow ? { observedTime: cause.actualTime, delayMilliseconds: (cause.actualTime - cause.requestedTime) * 1000 } : {}) })
+      // Renderer/pixel failures, cancellation and a stalled decoder remain
+      // immediate failures; only this checkpoint's missed RAF window can retry.
+      if (!missedWindow || index === starts.length - 1) throw cause
+    }
+  }
+}
 function bounded<T>(promise: Promise<T>, milliseconds: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error(`${label} timed out`)), milliseconds)
@@ -285,7 +323,7 @@ async function verifyRealtimeComposition() {
           const checkpoint = checkpoints[index]!
           if (time >= checkpoint.time && !pendingSeek) {
             emit('realtime-checkpoint-timing', { label: checkpoint.label, requestedTime: checkpoint.time, time, delayMilliseconds: (time - checkpoint.time) * 1000 })
-            if (checkpoint.maxLateness !== undefined) assert(time - checkpoint.time < checkpoint.maxLateness, `${checkpoint.label}: RAF missed the transition sampling window`)
+            if (checkpoint.maxLateness !== undefined) assertRealtimeSamplingWindow(checkpoint.label, checkpoint.time, time, checkpoint.maxLateness)
             await capture(checkpoint.label, time)
             if (generation !== segmentGeneration) return
             abort.signal.throwIfAborted()
@@ -321,8 +359,14 @@ async function verifyRealtimeComposition() {
     await playThrough(4.5, [{ label: 'forward-seek', time: 4.95 }])
     seekPlaying('backward-seek', .2)
     await playThrough(.2, [{ label: 'backward-seek', time: 1.7 }])
-    seekPlaying('transition-after-seek', 2.5, false)
-    await playThrough(2.5, [{ label: 'transition-after-seek', time: 2.75, maxLateness: .2 }])
+    await sampleTransitionAfterSeek(async ({ label, start, time, maxLateness }) => {
+      seekPlaying(label, start, false)
+      try { await playThrough(start, [{ label, time, maxLateness }]) }
+      catch (cause) {
+        assert(errors.length === 0, `Realtime renderer reported errors: ${errors.join('; ')}`)
+        throw cause
+      }
+    }, event => emit('realtime-seek-sample-attempt', event))
     emit('realtime-basic-complete', { success: true, sampleCount: samples.length })
     // Both use actual asset:// video, exercising WebGL texture upload and CPU
     // readback. Snapshot fallback validates the visible result only; renderer
@@ -497,6 +541,6 @@ async function run() {
   return { passed: realtimeCompositionVerified, realtimeCompositionVerified, realtimeBlurVerified, nativeFrameArtifactVerified, realtimeError, evidence: 'Real asset video, animated text, image watermark, transition, playing seeks, color filter, chroma-key video watermark, masked local blur and defocus are composited by TimelinePreview in system WKWebView. Restricted canvas readback uses visible WKWebView snapshots. The separate native frame artifact path uses fixture PNG IPC; native FFmpeg composition is not verified.', events }
 }
 
-void run().then(result => window.webkit.messageHandlers.proof.postMessage({ type: 'result', ...result }), cause => {
+if (typeof window !== 'undefined') void run().then(result => window.webkit.messageHandlers.proof.postMessage({ type: 'result', ...result }), cause => {
   window.webkit.messageHandlers.proof.postMessage({ type: 'result', passed: false, realtimeCompositionVerified, realtimeBlurVerified, nativeFrameArtifactVerified, error: errorData(cause), events })
 })
