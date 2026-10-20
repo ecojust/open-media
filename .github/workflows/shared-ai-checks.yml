@@ -103,6 +103,12 @@ jobs:
         run: |
           set -euo pipefail
           cargo check --manifest-path src-tauri/Cargo.toml --locked --lib 2>&1 | tee test-results/shared-ai/desktop-check.log
+      - name: Verify streamed project archives and file targets
+        id: projects
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib project_ -- --nocapture 2>&1 | tee test-results/shared-ai/project-files.log
       - name: Verify mirror failover and resumable downloads for existing model providers
         id: mirrors
         shell: bash
@@ -133,6 +139,7 @@ jobs:
           SERVICE_OUTCOME: ${{ steps.service.outcome }}
           DESKTOP_OUTCOME: ${{ steps.desktop.outcome }}
           MIRRORS_OUTCOME: ${{ steps.mirrors.outcome }}
+          PROJECTS_OUTCOME: ${{ steps.projects.outcome }}
         with:
           script: |
             const fs = require('node:fs');
@@ -142,12 +149,13 @@ jobs:
               service: process.env.SERVICE_OUTCOME,
               desktop: process.env.DESKTOP_OUTCOME,
               mirrors: process.env.MIRRORS_OUTCOME,
+              projects: process.env.PROJECTS_OUTCOME,
             };
             const values = Object.values(outcomes);
             const conclusion = values.every(value => value === 'success') ? 'success'
               : values.includes('failure') ? 'failure'
               : values.includes('cancelled') ? 'cancelled' : 'neutral';
-            const logs = ['image-contracts', 'music-contracts', 'native-contracts', 'service-contracts', 'desktop-check', 'speech-downloads', 'video-downloads', 'recognition-downloads'];
+            const logs = ['image-contracts', 'music-contracts', 'native-contracts', 'service-contracts', 'desktop-check', 'project-files', 'speech-downloads', 'video-downloads', 'recognition-downloads'];
             const sanitize = value => value.replace(/\u001b\[[0-9;]*m/g, '')
               .replace(/https?:\/\/[^\s"<>]+/g, url => url.split('?')[0])
               .replace(/(Bearer\s+|(?:token|password|secret|authorization)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]');

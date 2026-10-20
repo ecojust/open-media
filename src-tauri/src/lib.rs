@@ -11,6 +11,8 @@ pub mod clip_filters;
 pub mod chroma_key;
 pub mod preview;
 pub mod project_files;
+pub mod project_archive;
+pub mod project_asset_uploads;
 mod media_metadata;
 pub mod video_library;
 pub mod mcp;
@@ -295,6 +297,20 @@ mod desktop {
         require_mcp_window(&window)?;
         let files = state.inner().clone();
         blocking(move || crate::mcp_files::open_project(&files, &path)).await
+    }
+    #[tauri::command]
+    pub async fn mcp_save_project_archive(project: Value, token: Option<String>, path: Option<String>, overwrite: Option<bool>, window: tauri::WebviewWindow, media: State<'_, MediaState>, files: State<'_, ProjectFiles>) -> engine::Result<ProjectTarget> {
+        require_mcp_window(&window)?;
+        let store = media.store.clone();
+        let files = files.inner().clone();
+        blocking(move || crate::mcp_files::save_project_archive(&files, &store, &project, token.as_deref(), path.as_deref(), overwrite.unwrap_or(false))).await
+    }
+    #[tauri::command]
+    pub async fn mcp_open_project_archive(path: String, window: tauri::WebviewWindow, media: State<'_, MediaState>, files: State<'_, ProjectFiles>) -> engine::Result<Value> {
+        require_mcp_window(&window)?;
+        let store = media.store.clone();
+        let files = files.inner().clone();
+        blocking(move || crate::mcp_files::open_project_archive(&files, &store, &path)).await
     }
     #[tauri::command]
     pub async fn mcp_begin_media_job(spec: Value, output_path: String, overwrite: Option<bool>, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<MediaJob> {
@@ -949,6 +965,78 @@ mod desktop {
         .await
     }
     #[tauri::command]
+    pub async fn save_project_archive(
+        name: String, project: Value, token: Option<String>,
+        app: tauri::AppHandle, window: tauri::WebviewWindow,
+        media: State<'_, MediaState>, files: State<'_, ProjectFiles>,
+    ) -> engine::Result<Option<ProjectTarget>> {
+        project_files::require_main_window(window.label())?;
+        let store = media.store.clone();
+        let files = files.inner().clone();
+        blocking(move || {
+            let write = |file: &mut fs::File| crate::project_archive::write_archive(file, &store, &project);
+            if let Some(token) = token { return files.save_registered_with_writer(&token, write).map(Some); }
+            let Some(selected) = app.dialog().file().add_filter("媒体项目", &["omedia"])
+                .set_file_name(&name).blocking_save_file() else { return Ok(None); };
+            let path = selected.into_path().map_err(|_| "请选择本机保存位置。")?;
+            files.save_selected_with_writer(path, true, write).map(Some)
+        }).await
+    }
+    #[tauri::command]
+    pub async fn open_project_archive(
+        app: tauri::AppHandle, window: tauri::WebviewWindow,
+        media: State<'_, MediaState>, files: State<'_, ProjectFiles>,
+    ) -> engine::Result<Option<Value>> {
+        project_files::require_main_window(window.label())?;
+        let store = media.store.clone();
+        let files = files.inner().clone();
+        blocking(move || {
+            let Some(selected) = app.dialog().file().add_filter("媒体项目", &["omedia", "zip"])
+                .blocking_pick_file() else { return Ok(None); };
+            let path = selected.into_path().map_err(|_| "请选择本机项目文件。")?;
+            crate::mcp_files::open_project_archive(&files, &store, &path.to_string_lossy()).map(Some)
+        }).await
+    }
+    #[tauri::command]
+    pub async fn complete_project_archive_import(project: Value, keep: bool, window: tauri::WebviewWindow, media: State<'_, MediaState>) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let store = media.store.clone();
+        blocking(move || if keep { crate::project_archive::accept_imported(&store, &project) }
+            else { crate::project_archive::discard_imported(&store, &project) }).await
+    }
+    #[tauri::command]
+    pub async fn project_asset_begin(name: String, size: u64, window: tauri::WebviewWindow, media: State<'_, MediaState>, uploads: State<'_, crate::project_asset_uploads::ProjectAssetUploads>) -> engine::Result<crate::project_asset_uploads::UploadTicket> {
+        project_files::require_main_window(window.label())?;
+        let store = media.store.clone();
+        let uploads = uploads.inner().clone();
+        blocking(move || uploads.begin(&store, name, size)).await
+    }
+    #[tauri::command]
+    pub async fn project_asset_write(request: tauri::ipc::Request<'_>, window: tauri::WebviewWindow, uploads: State<'_, crate::project_asset_uploads::ProjectAssetUploads>) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let id = request.headers().get("x-upload-id").and_then(|value| value.to_str().ok())
+            .filter(|value| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .ok_or("项目素材传输凭据无效。")?.to_owned();
+        let packet = match request.body() { tauri::ipc::InvokeBody::Raw(bytes) => bytes, _ => return Err("项目素材需要二进制分块传输。".into()) };
+        let offset = crate::project_asset_uploads::packet_offset(packet)?;
+        let bytes = packet[8..].to_vec();
+        let uploads = uploads.inner().clone();
+        blocking(move || uploads.write(&id, offset, &bytes)).await
+    }
+    #[tauri::command]
+    pub async fn project_asset_finish(id: String, window: tauri::WebviewWindow, media: State<'_, MediaState>, uploads: State<'_, crate::project_asset_uploads::ProjectAssetUploads>) -> engine::Result<Asset> {
+        project_files::require_main_window(window.label())?;
+        let media = media.inner().clone();
+        let uploads = uploads.inner().clone();
+        blocking(move || uploads.finish(&id, &media.store, &media.runtime()?)).await
+    }
+    #[tauri::command]
+    pub async fn project_asset_cancel(id: String, window: tauri::WebviewWindow, uploads: State<'_, crate::project_asset_uploads::ProjectAssetUploads>) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let uploads = uploads.inner().clone();
+        blocking(move || uploads.cancel(&id)).await
+    }
+    #[tauri::command]
     pub fn close_native_window(
         app: tauri::AppHandle,
         state: State<'_, Closing>,
@@ -971,6 +1059,7 @@ mod desktop {
             .manage(CapturePicker::default())
             .manage(ImageClipboard::default())
             .manage(ControlsManager::default())
+            .manage(crate::project_asset_uploads::ProjectAssetUploads::default())
             .setup(|app| {
                 app.manage(crate::screenshot_shortcut::ShortcutManager::new(app.handle().clone()));
                 let data = app.path().app_data_dir()?;
@@ -1033,6 +1122,8 @@ mod desktop {
                 mcp_import_media_paths,
                 mcp_save_project_file,
                 mcp_open_project_file,
+                mcp_save_project_archive,
+                mcp_open_project_archive,
                 mcp_begin_media_job,
                 mcp_asset_tool,
                 mcp_asset_cancel,
@@ -1107,6 +1198,13 @@ mod desktop {
                 save_bytes,
                 copy_image_to_clipboard,
                 save_project_file,
+                save_project_archive,
+                open_project_archive,
+                complete_project_archive_import,
+                project_asset_begin,
+                project_asset_write,
+                project_asset_finish,
+                project_asset_cancel,
                 open_project_file,
                 close_native_window
             ])

@@ -143,6 +143,37 @@ pub fn open_project(files: &ProjectFiles, path: &str) -> Result<ProjectFile> {
     files.open_selected(input_path(path, &["omedia", "zip"])?)
 }
 
+pub fn save_project_archive(
+    files: &ProjectFiles,
+    store: &MediaStore,
+    project: &Value,
+    token: Option<&str>,
+    path: Option<&str>,
+    overwrite: bool,
+) -> Result<ProjectTarget> {
+    if token.is_some() && path.is_some() {
+        return Err("项目保存凭据和新的保存路径不能同时指定。".into());
+    }
+    let write = |file: &mut fs::File| crate::project_archive::write_archive(file, store, project);
+    if let Some(token) = token { return files.save_registered_with_writer(token, write); }
+    let path = path.ok_or("项目尚未选择保存位置，请明确提供 .omedia 文件的绝对路径。")?;
+    let path = output_path(path, &["omedia"], store, overwrite)?;
+    files.save_selected_with_writer(path, overwrite, write)
+}
+
+pub fn open_project_archive(files: &ProjectFiles, store: &MediaStore, path: &str) -> Result<Value> {
+    let path = input_path(path, &["omedia", "zip"])?;
+    let project = crate::project_archive::read_archive(store, &path)?;
+    let target = match files.register_opened(path) {
+        Ok(target) => target,
+        Err(error) => {
+            let _ = crate::project_archive::discard_imported(store, &project);
+            return Err(error);
+        }
+    };
+    Ok(serde_json::json!({ "name": target.name, "path": target.path, "token": target.token, "project": project }))
+}
+
 pub fn begin_export(
     store: &MediaStore,
     runtime: &Runtime,
@@ -254,6 +285,46 @@ mod tests {
             .save_selected_with_overwrite(path.clone(), b"replace", false)
             .is_err());
         assert_eq!(fs::read(path).unwrap(), b"preserve");
+    }
+
+    #[test]
+    fn project_archive_bridge_preserves_media_targets_and_failed_overwrites() {
+        let folder = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(folder.path()).unwrap();
+        let files = ProjectFiles::default();
+        let source = store.root.join("original.wav");
+        fs::write(&source, b"original audio contents").unwrap();
+        let mut project = serde_json::json!({
+            "version": 1, "id": "project", "title": "Original", "width": 1920,
+            "height": 1080, "fps": 30, "background": "#000000", "tracks": [],
+            "assets": [{"id": "audio", "name": "original.wav", "kind": "audio",
+                "duration": 1, "width": 0, "height": 0, "size": 23,
+                "mime": "audio/wav", "url": "", "nativePath": source}],
+        });
+        let path = folder.path().join("project.omedia");
+        let target = save_project_archive(&files, &store, &project, None, path.to_str(), false).unwrap();
+        let original = fs::read(&path).unwrap();
+        assert!(save_project_archive(&files, &store, &project, None, path.to_str(), false).is_err());
+        assert!(save_project_archive(&files, &store, &project, Some(&target.token), path.to_str(), true).is_err());
+        project["title"] = "Updated".into();
+        save_project_archive(&files, &store, &project, Some(&target.token), None, false).unwrap();
+        assert_ne!(fs::read(&path).unwrap(), original);
+        fs::remove_file(&source).unwrap();
+        let updated = fs::read(&path).unwrap();
+        assert!(save_project_archive(&files, &store, &project, Some(&target.token), None, false).is_err());
+        assert_eq!(fs::read(&path).unwrap(), updated);
+        let opened = open_project_archive(&files, &store, path.to_str().unwrap()).unwrap();
+        assert!(opened.get("bytes").is_none());
+        assert_eq!(opened["token"], target.token);
+        assert_eq!(opened["project"]["title"], "Updated");
+        let restored = &opened["project"];
+        let media = store.authorized_path(&restored["assets"][0]).unwrap();
+        assert_eq!(fs::read(&media).unwrap(), b"original audio contents");
+        let forbidden = store.root.join("project.omedia");
+        assert!(save_project_archive(&files, &store, restored, None, forbidden.to_str(), true).is_err());
+        save_project_archive(&files, &store, restored, Some(&target.token), None, false).unwrap();
+        crate::project_archive::discard_imported(&store, restored).unwrap();
+        assert!(!media.exists());
     }
 
     #[test]
