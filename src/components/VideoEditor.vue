@@ -7,9 +7,10 @@ import { projectSizeError, videoClipSourceSize } from '../core/project-size'
 import { addEditorAssetToTimeline, projectSourceAssets } from '../core/editor-assets'
 import { useStoredVideos } from '../core/stored-videos'
 import { videoAssetKey } from '../core/video-assets'
+import { videoWorkingCopyResolver, workingVideoAsset } from '../core/video-working-copies'
 import { isSubtitleClip } from '../core/subtitle-style'
 import { DEFAULT_SUBTITLE_TEXT, trackSubtitleIssues } from '../core/subtitle-validation'
-import { addClip, addTrack, applySubtitleStyleToTrack, clipDuration, clipEnd, deleteClip, duplicateClip, findClip, moveClip, projectDuration, removeTrack, reorderTrack, setTrack, splitClip, updateClip } from '../core/timeline'
+import { addAsset, addClip, addTrack, applySubtitleStyleToTrack, clipDuration, clipEnd, deleteClip, duplicateClip, findClip, moveClip, projectDuration, removeTrack, reorderTrack, setTrack, splitClip, updateClip } from '../core/timeline'
 import { closeTimelineGaps, deleteClipAndCloseGap, findNearestSnap, restoreAudioClipLength, trimClipAtPlayhead } from '../core/timeline-editing'
 import { planSpeech } from '../core/speech'
 import { voiceModelName } from '../core/voice-catalog'
@@ -84,7 +85,7 @@ const assetFilter = ref('all')
 const native = isDesktop()
 const assetSource = ref<'recordings' | 'imported'>(native ? 'recordings' : 'imported')
 const search = ref('')
-const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | 'asset-tools' | 'subtitle-tools' | 'project-tools' | 'visual-elements' | 'preview-tools' | 'editing-assist' | 'idle-split' | null>(null)
+const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | 'asset-tools' | 'subtitle-tools' | 'project-tools' | 'visual-elements' | 'preview-tools' | 'editing-assist' | 'idle-split' | 'asset-compression' | null>(null)
 const assistOpened = ref(false), focusPicking = ref(false)
 const focusRegion = shallowRef<NormalizedRect>()
 const modalOpen = computed(() => editorDialog.value !== null)
@@ -93,6 +94,7 @@ const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
 const audioClipPlayer = ref<InstanceType<typeof AudioClipPlayer> | null>(null)
 const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false), segmentBusy = ref(false), sourceImportBusy = ref(false)
 const idleSplitClip = shallowRef<Clip>()
+const compressionAsset = shallowRef<MediaAsset>()
 const toolBusy = ref(false), toolAsset = ref<MediaAsset>(), assetToolAction = ref<AssetToolAction>('probe')
 const projectToolTab = ref<'markers' | 'snapshots' | 'validate'>('markers')
 const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value || sourceImportBusy.value || toolBusy.value)
@@ -155,10 +157,18 @@ const ticks = computed(() => {
 })
 const projectSources = computed(() => projectSourceAssets(activeProject.value))
 const projectAssetIds = computed(() => new Set(activeProject.value.assets.map(asset => asset.id)))
-const { recordings, directory: recordingDirectory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, refresh: refreshRecordings, reveal: revealRecordingDirectory } = useStoredVideos(() => projectSources.value, () => native)
+const { recordings, directory: recordingDirectory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, refresh: refreshRecordings, reveal: revealRecordingDirectory } = useStoredVideos(() => activeProject.value.assets.filter(asset => !asset.libraryRole && !asset.compression), () => native)
 const recordingKeys = computed(() => new Set(recordings.value.map(videoAssetKey)))
-const importedSources = computed(() => projectSources.value.filter(asset => !recordingKeys.value.has(videoAssetKey(asset))))
-const sourceAssets = computed(() => assetSource.value === 'recordings' ? recordings.value : importedSources.value)
+const sourceAssetsById = computed(() => new Map(activeProject.value.assets.map(asset => [asset.id, asset])))
+function originalVideo(asset: MediaAsset): MediaAsset { return asset.compression ? sourceAssetsById.value.get(asset.compression.originalAssetId) ?? asset : asset }
+const recordingSources = computed(() => { const resolve = videoWorkingCopyResolver(activeProject.value); return [...new Map(recordings.value.map(asset => { const current = resolve(asset); return [current.id, current] as const })).values()] })
+const importedSources = computed(() => projectSources.value.filter(asset => !recordingKeys.value.has(videoAssetKey(originalVideo(asset)))))
+const sourceAssets = computed(() => assetSource.value === 'recordings' ? recordingSources.value : importedSources.value)
+function assetBytes(value: number): string {
+  if (!Number.isFinite(value) || value < 1) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'], unit = Math.min(units.length - 1, Math.floor(Math.log(value) / Math.log(1024)))
+  return `${(value / 1024 ** unit).toFixed(unit > 1 ? 1 : 0)} ${units[unit]}`
+}
 const assets = computed(() => sourceAssets.value.filter(asset => (assetSource.value === 'recordings' || assetFilter.value === 'all' || asset.kind === assetFilter.value) && asset.name.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())))
 const assetDateFormat = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
 const assetTimes = computed(() => new Map(sourceAssets.value.filter(asset => asset.addedAt).map(asset => {
@@ -380,6 +390,27 @@ function openAssetTools(action: AssetToolAction, asset?: MediaAsset): void {
   if (!props.runTool || editingBusy.value || props.exportDisabled) return
   toolAsset.value = asset; assetToolAction.value = action
   openEditorDialog('asset-tools')
+}
+function openAssetCompression(asset: MediaAsset): void {
+  if (!props.runTool || editingBusy.value || props.exportDisabled || asset.kind !== 'video') return
+  compressionAsset.value = asset
+  openEditorDialog('asset-compression')
+}
+const runAssetCompression: EditorToolRunner = async (name, args, options) => {
+  if (!props.runTool || !compressionAsset.value || !['open_media_project_video_compress', 'open_media_project_video_restore'].includes(name)) throw new Error('请重新选择需要处理的视频。')
+  options.signal.throwIfAborted()
+  const source = workingVideoAsset(props.project, compressionAsset.value), projectId = props.project.id
+  let registered = props.project.assets.find(asset => asset.id === source.id) ?? props.project.assets.find(asset => videoAssetKey(asset) === videoAssetKey(source))
+  if (!registered) {
+    if (name !== 'open_media_project_video_compress') throw new Error('视频尚未加入工程。')
+    emit('change', addAsset(props.project, source), '视频已加入工程，准备压缩工作副本')
+    await nextTick()
+    options.signal.throwIfAborted()
+    if (editorDestroyed || props.project.id !== projectId) throw new Error('项目已变化，请重新选择视频。')
+    registered = props.project.assets.find(asset => asset.id === source.id)
+    if (!registered) throw new Error('视频未能加入工程，未开始压缩。')
+  }
+  return props.runTool(name, { ...args, assetIds: [registered.id] }, options)
 }
 function openIdleSplit(): void {
   if (!props.runTool || editingBusy.value || props.exportDisabled || !selectedVideo.value || selectedLocked.value || selected.value?.clip.freezeFrame !== undefined) return
@@ -1071,10 +1102,14 @@ async function addAssetToTimeline(asset: MediaAsset, targetTrackId?: string, tim
   sourceImportBusy.value = true
   emit('busy', localEditingBusy.value)
   try {
-    const prepared = native && asset.nativePath && !existing ? await prepareStoredVideoPreview(asset) : asset
+    const base = workingVideoAsset(original, existing ?? asset)
+    const restored = !base.compression && original.assets.some(item => item.compression?.originalAssetId === base.id)
+    const prepared = native && base.nativePath && (!existing || restored) ? await prepareStoredVideoPreview(base) : base
     if (editorDestroyed || generation !== sourceImportGeneration) return
     if (props.project !== original) throw new Error('项目已变化，请重新添加所选素材。')
-    const result = addEditorAssetToTimeline(original, prepared, { trackId: targetTrackId, start: Math.max(0, time) })
+    const insertionProject = original.assets.some(item => item.id === prepared.id) && (prepared.url !== base.url || prepared.sourceUrl !== base.sourceUrl)
+      ? { ...original, assets: original.assets.map(item => item.id === prepared.id ? prepared : item) } : original
+    const result = addEditorAssetToTimeline(insertionProject, prepared, { trackId: targetTrackId, start: Math.max(0, time) })
     emit('change', result.project, '添加素材到时间线')
     await nextTick()
     if (editorDestroyed || generation !== sourceImportGeneration) return
@@ -1468,6 +1503,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
           <button v-for="asset in assets" :key="asset.id" class="asset-card" :data-source-asset-id="asset.id" draggable="true" :title="`${asset.name} · ${assetTimes.get(asset.id)?.full || '加入时间未记录'} · 双击添加到播放头位置`" @dragstart="onAssetDrag($event, asset)" @dblclick="addAssetToTimeline(asset)" @keydown.enter.prevent="addAssetToTimeline(asset)" @contextmenu="openAssetMenu($event, asset)" @keydown.shift.f10="openAssetMenu($event, asset)">
             <div class="asset-thumb" :class="asset.kind"><img v-if="asset.kind === 'image'" :src="asset.url" alt="" /><AssetVideoThumbnail v-else-if="asset.kind === 'video' && (assetSource !== 'recordings' || projectAssetIds.has(asset.id))" :src="asset.url" /><Icon v-else :name="asset.kind === 'video' ? 'video' : 'audio'" :size="28" /><span v-if="asset.duration">{{ formatTime(asset.duration) }}</span></div>
             <span class="asset-name">{{ asset.name }}</span><span class="asset-meta">{{ asset.kind === 'audio' ? '音频素材' : `${asset.width} × ${asset.height}` }}</span>
+            <span v-if="asset.kind === 'video'" class="asset-file-size" data-testid="asset-file-size" :title="asset.compression ? '原视频大小 → 当前剪辑工作副本大小' : '视频文件大小'"><span v-if="asset.compression" class="asset-size-value">{{ assetBytes(originalVideo(asset).size) }} → </span><span class="asset-size-value">{{ assetBytes(asset.size) }}</span><span v-if="asset.compression" class="asset-working-copy">工作副本</span></span>
             <time class="asset-added-time" :datetime="asset.addedAt" :title="assetTimes.get(asset.id)?.full || '旧项目未记录素材加入时间'">{{ assetTimes.get(asset.id)?.short || '时间未记录' }}</time>
           </button>
           <div v-if="!assets.length" class="asset-empty"><Icon name="import" :size="28" /><strong>{{ sourceAssets.length ? '没有匹配的素材' : assetSource === 'recordings' ? libraryLoading ? '正在读取录屏…' : '暂无录屏文件' : '把灵感带进来' }}</strong><span>{{ assetSource === 'recordings' ? '录屏完成后会显示在这里' : '导入视频、图片或音频，拖入时间线开始剪辑' }}</span><button v-if="!sourceAssets.length" @click="importEditorAssets()">导入素材</button></div>
@@ -1635,8 +1671,10 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
         </div>
       <template #footer><button class="editor-primary" :disabled="editingBusy" @click="closeEditorDialog">完成</button></template>
     </EditorDialog>
+    <EditorDialog :open="editorDialog === 'asset-compression'" title="压缩视频" icon="convert" :busy="toolBusy" busy-message="请先完成或取消视频处理。" :return-focus="dialogReturnFocus" @close="closeEditorDialog"><ProjectVideoCompressionPanel v-if="compressionAsset && editorDialog === 'asset-compression'" :key="`${project.id}:${compressionAsset.id}`" :project="project" :asset="compressionAsset" :native="native" :run-tool="runAssetCompression" :disabled="editingBusy || !!exportDisabled" standalone @busy="setToolBusy" @status="emit('status', $event)" /></EditorDialog>
     <Teleport :to="editorRoot?.closest('.app-shell') || 'body'">
       <div v-if="assetMenu" ref="menuElement" class="clip-context-menu" role="menu" tabindex="-1" aria-label="素材操作" :style="{ left: `${assetMenu.x}px`, top: `${assetMenu.y}px` }" @keydown="menuKeyboard" @contextmenu.prevent>
+        <button v-if="assetMenu.asset.kind === 'video' && runTool" role="menuitem" data-testid="asset-compression-open" :disabled="editingBusy || !!exportDisabled" @click="openAssetCompression(assetMenu.asset)"><Icon name="convert" :size="14" />压缩视频…</button>
         <button role="menuitem" @click="openAssetTools('probe', assetMenu.asset)"><Icon name="info" :size="14" />分析素材信息</button>
         <template v-if="assetMenu.asset.kind !== 'audio'"><button role="menuitem" @click="openAssetTools('frame', assetMenu.asset)"><Icon name="image" :size="14" />提取画面</button><button role="menuitem" @click="openAssetTools('ocr', assetMenu.asset)"><Icon name="text" :size="14" />识别画面文字</button></template>
         <template v-if="assetMenu.asset.kind === 'video'"><button role="menuitem" @click="openAssetTools('storyboard', assetMenu.asset)"><Icon name="panel" :size="14" />生成联系表</button><button role="menuitem" @click="openAssetTools('scenes', assetMenu.asset)"><Icon name="scissors" :size="14" />检测场景变化</button></template>
@@ -1673,7 +1711,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
 </template>
 
 <style scoped>
-.asset-panel>.asset-url-shortcut{margin:0 12px 9px;min-height:27px;font-size:10px;border-color:var(--ed-border);color:var(--ed-muted);flex:none}.preview-heading>button{min-height:23px;height:23px;padding:2px 4px;color:var(--ed-muted)}.project-tool-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.project-tool-actions button{font-size:11px;border-color:var(--ed-border)}
+.asset-file-size{display:flex;align-items:center;gap:3px;flex-wrap:wrap;color:var(--ed-muted);font:9px ui-monospace,monospace;padding:0 2px;line-height:14px}.asset-file-size>.asset-size-value{white-space:nowrap}.asset-working-copy{color:var(--ed-accent);font-size:8px;font-family:inherit;border:1px solid color-mix(in srgb,var(--ed-accent) 35%,transparent);border-radius:3px;padding:0 3px}.asset-panel>.asset-url-shortcut{margin:0 12px 9px;min-height:27px;font-size:10px;border-color:var(--ed-border);color:var(--ed-muted);flex:none}.preview-heading>button{min-height:23px;height:23px;padding:2px 4px;color:var(--ed-muted)}.project-tool-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.project-tool-actions button{font-size:11px;border-color:var(--ed-border)}
 .asset-source-tabs{display:flex;gap:4px;padding:0 12px 9px;flex-shrink:0}.asset-source-tabs button{flex:1;font-size:11px;border:1px solid var(--ed-border);color:var(--ed-muted)}.asset-source-tabs button[aria-pressed="true"]{background:color-mix(in srgb,var(--ed-accent) 10%,transparent);color:var(--ed-accent);border-color:color-mix(in srgb,var(--ed-accent) 35%,var(--ed-border))}.asset-panel>.video-library-toolbar{margin:0 12px 9px;max-height:180px;overflow:auto}
 
 .mcp-service-button{width:32px;height:32px;flex:none;padding:6px;color:var(--ed-text)}.editor-output-actions>.mcp-service-button.connected{border-color:transparent;background:linear-gradient(var(--ed-panel),var(--ed-panel)) padding-box,linear-gradient(110deg,#06b6d4,#8b5cf6,#06b6d4,#8b5cf6,#06b6d4) border-box;background-size:100% 100%,400% 100%;background-position:0 0,0% 50%;box-shadow:0 0 7px #06b6d438,0 0 12px #8b5cf626;animation:mcp-connection-flow 4s linear infinite}.mcp-service-button.connected>svg{filter:drop-shadow(0 0 2px #22d3ee42)}@keyframes mcp-connection-flow{to{background-position:0 0,100% 50%}}@media(prefers-reduced-motion:reduce){.editor-output-actions>.mcp-service-button.connected{animation:none;background-position:0 0,50% 50%}}

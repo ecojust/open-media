@@ -153,6 +153,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       if (!/^[a-zA-Z0-9_-]+$/.test(originalAssetId) || originalAssetId === asset.id) throw new Error('原视频标识无效。')
       asset.compression = { originalAssetId, mode: choice(value.mode, ['lossless', 'quality'] as const, '工程视频压缩模式'), createdAt: iso(value.createdAt, '视频压缩时间') }
       if (value.quality !== undefined) asset.compression.quality = choice(value.quality, ['high', 'balanced', 'compact'] as const, '工程视频压缩质量')
+      if (value.active !== undefined) asset.compression.active = boolean(value.active)
       if (asset.compression.mode === 'lossless' && asset.compression.quality !== undefined) throw new Error('无损压缩不能指定有损质量。')
     }
     if (options.trusted) {
@@ -169,9 +170,14 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     return asset
   })
   const assetMap = new Map(assets.map((asset) => [asset.id, asset]))
+  const activeVideoOriginals = new Set<string>()
   for (const asset of assets) if (asset.compression) {
     const original = assetMap.get(asset.compression.originalAssetId)
     if (!original || original.kind !== 'video' || original.compression) throw new Error('压缩视频缺少有效原件；请恢复原视频后重试。')
+    if (asset.compression.active) {
+      if (activeVideoOriginals.has(original.id)) throw new Error('同一原视频只能启用一个剪辑工作副本。')
+      activeVideoOriginals.add(original.id)
+    }
   }
   let clipCount = 0
   const tracks = root.tracks.map((item): Track => {

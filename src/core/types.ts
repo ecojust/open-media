@@ -51,6 +51,8 @@ export interface MediaAsset {
     mode: 'lossless' | 'quality'
     quality?: 'high' | 'balanced' | 'compact'
     createdAt: string
+    /** Explicit preferred working copy, including before any timeline clips exist. */
+    active?: boolean
   }
   name: string
   kind: AssetKind

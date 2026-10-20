@@ -497,6 +497,23 @@ impl AssetTools {
         let (control, _guard) = self.begin_task(task_id)?;
         control.check()?;
         match operation {
+            "asset_prepare_preview" => {
+                let format = args
+                    .get("format")
+                    .filter(|value| !value.is_null())
+                    .map(|value| value.as_str().ok_or("预览格式必须为文本。"))
+                    .transpose()?;
+                let result = crate::preview::create_compression_preview(
+                    store,
+                    runtime,
+                    &args["asset"],
+                    format,
+                    &store.root,
+                    &control,
+                )?;
+                control.check()?;
+                serde_json::to_value(result).map_err(|error| error.to_string())
+            }
             "validate_export" => export_check::validate_export(
                 store,
                 runtime,
@@ -1062,3 +1079,7 @@ pub fn source_metadata(store: &MediaStore, asset: &Value) -> Result<Option<Value
 #[cfg(test)]
 #[path = "asset_tools_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "asset_preview_tests.rs"]
+mod preview_tests;

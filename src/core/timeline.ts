@@ -2,6 +2,7 @@ import { animatedSourceTimeAt, visualClipDuration } from './visual-animation.ts'
 import { cloneProject, createTrack, newId, validateProject } from './project.ts'
 import { isSubtitleClip, SUBTITLE_STYLE_KEYS, subtitleStyleFromClip } from './subtitle-style.ts'
 import { reconcileTransitions } from './transitions.ts'
+import { videoWorkingCopyResolver } from './video-working-copies.ts'
 import type { Clip, MediaAsset, Project, ProjectHistory, Track, TrackKind } from './types.ts'
 
 export function clipDuration(clip: Clip): number { return visualClipDuration(clip) }
@@ -78,10 +79,17 @@ export function reorderTrack(project: Project, trackId: string, index: number): 
   return edit(project, (copy) => { const track = trackById(copy, trackId); editable(track); copy.tracks = copy.tracks.filter((item) => item.id !== trackId); copy.tracks.splice(Math.max(0, Math.min(copy.tracks.length, Math.round(index))), 0, track) })
 }
 export function addClip(project: Project, trackId: string, clip: Clip): Project {
-  return edit(project, (copy) => { const track = trackById(copy, trackId); editable(track); track.clips.push({ ...clip }) })
+  return addClips(project, trackId, [clip])
 }
 export function addClips(project: Project, trackId: string, clips: Clip[]): Project {
-  return edit(project, (copy) => { const track = trackById(copy, trackId); editable(track); track.clips.push(...clips.map((clip) => ({ ...clip }))) })
+  return edit(project, (copy) => {
+    const track = trackById(copy, trackId); editable(track)
+    const assets = new Map(copy.assets.map(asset => [asset.id, asset])), resolve = videoWorkingCopyResolver(copy)
+    track.clips.push(...clips.map(clip => {
+      const asset = clip.assetId ? assets.get(clip.assetId) : undefined
+      return { ...clip, ...(asset ? { assetId: resolve(asset).id } : {}) }
+    }))
+  })
 }
 export interface ClipUpdateOptions { translatePositionKeyframes?: boolean }
 export function updateClip(project: Project, clipId: string, patch: Partial<Omit<Clip, 'id' | 'assetId'>>, options: ClipUpdateOptions = {}): Project {

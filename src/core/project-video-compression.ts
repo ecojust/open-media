@@ -1,5 +1,6 @@
 import { cloneProject, MAX_ASSETS, newId, validateProject } from './project.ts'
 import { videoAssetKey } from './video-assets.ts'
+import { activeCompressedVideos, videoWorkingCopyResolver } from './video-working-copies.ts'
 import type { MediaAsset, Project } from './types.ts'
 import type { EditorToolContext, PreparedEditorTool } from './editor-tool-service.ts'
 import type { CompressionItem, CompressionJob, CompressionMode, CompressionQuality } from '../native-project-compression.ts'
@@ -27,7 +28,7 @@ export interface CompressionReport {
 }
 export interface CompressionRestoreReport { restoredCount: number; restoredAssetIds: string[] }
 export interface CompressionDependencies {
-  native: Pick<typeof import('../native-project-compression.ts'), 'beginProjectVideoCompression' | 'getProjectVideoCompressionJob' | 'cancelProjectVideoCompression' | 'acceptProjectVideoCompression' | 'discardProjectVideoCompression' | 'prepareProjectCompressionAsset'>
+  native: Pick<typeof import('../native-project-compression.ts'), 'beginProjectVideoCompression' | 'getProjectVideoCompressionJob' | 'cancelProjectVideoCompression' | 'acceptProjectVideoCompression' | 'discardProjectVideoCompression' | 'prepareProjectCompressionAsset' | 'prepareProjectVideoOriginal'>
   materialize?: (projectId: string, asset: MediaAsset, context: EditorToolContext) => Promise<MediaAsset>
   pollMs?: number
 }
@@ -42,7 +43,11 @@ function referencedVideos(project: Project): MediaAsset[] {
   return project.assets.filter(asset => asset.kind === 'video' && ids.has(asset.id))
 }
 function selectedVideos(project: Project, assetIds?: string[]): MediaAsset[] {
-  if (assetIds === undefined) return referencedVideos(project)
+  if (assetIds === undefined) {
+    const referenced = new Set(referencedVideos(project).map(asset => asset.compression?.originalAssetId ?? asset.id))
+    const active = new Set(activeCompressedVideos(project).map(asset => asset.compression!.originalAssetId))
+    return project.assets.filter(asset => asset.kind === 'video' && !asset.compression && (!asset.libraryRole || referenced.has(asset.id) || active.has(asset.id)))
+  }
   if (!Array.isArray(assetIds) || !assetIds.length || assetIds.length > MAX_ASSETS || new Set(assetIds).size !== assetIds.length) throw new Error('请选择不重复的视频素材。')
   return assetIds.map(id => {
     const asset = project.assets.find(asset => asset.id === id)
@@ -60,10 +65,11 @@ export function projectCompressionSources(project: Project, assetIds?: string[])
   }
   return [...roots.values()]
 }
-export function projectCompressedSources(project: Project): MediaAsset[] { return referencedVideos(project).filter(asset => asset.compression) }
+export function projectCompressedSources(project: Project): MediaAsset[] { return activeCompressedVideos(project) }
 export function compressionSummary(project: Project): { sourceCount: number; compressedCount: number; sourceBytes: number; currentBytes: number } {
-  const sources = new Map(projectCompressionSources(project).map(asset => [videoAssetKey(asset), asset]))
-  const current = new Map(referencedVideos(project).map(asset => [videoAssetKey(asset), asset]))
+  const originals = projectCompressionSources(project), resolve = videoWorkingCopyResolver(project)
+  const sources = new Map(originals.map(asset => [videoAssetKey(asset), asset]))
+  const current = new Map(originals.map(resolve).map(asset => [videoAssetKey(asset), asset]))
   const byId = new Map(project.assets.map(asset => [asset.id, asset]))
   const compressed = new Set(projectCompressedSources(project).map(asset => videoAssetKey(rootAsset(asset, byId))))
   return { sourceCount: sources.size, compressedCount: compressed.size, sourceBytes: [...sources.values()].reduce((sum, asset) => sum + asset.size, 0), currentBytes: [...current.values()].reduce((sum, asset) => sum + asset.size, 0) }
@@ -104,10 +110,14 @@ export function applyProjectVideoCompression(project: Project, roots: MediaAsset
       const copies = new Map<string, string>()
       for (const source of sourceAssets.values()) {
         // Aliases can share bytes while keeping their own original ID for restoration.
-        const asset: MediaAsset = { ...output, id: copies.size ? newId('compressed-asset') : output.id, duration: source.duration, ...(source.libraryRole ? { libraryRole: source.libraryRole } : {}), compression: { originalAssetId: source.id, mode, ...(mode === 'quality' ? { quality: quality ?? 'high' } : {}), createdAt: new Date().toISOString() } }
+        const asset: MediaAsset = { ...output, id: copies.size ? newId('compressed-asset') : output.id, duration: source.duration, ...(source.libraryRole ? { libraryRole: source.libraryRole } : {}), compression: { originalAssetId: source.id, mode, ...(mode === 'quality' ? { quality: quality ?? 'high' } : {}), createdAt: new Date().toISOString(), active: true } }
         seenOutputs.add(asset.id); copies.set(source.id, asset.id); assets.push(asset); next.assets.push(asset)
       }
-      for (const [id, source] of related) replacements.set(id, copies.get(source.id)!)
+      for (const [id, source] of related) {
+        replacements.set(id, copies.get(source.id)!)
+        const previous = next.assets.find(asset => asset.id === id)
+        if (previous?.compression) previous.compression.active = false
+      }
       entry.assetId = copies.get(original.id)!; entry.assetIds = [...copies.values()]; entry.outputSize = output.size
     } else throw new Error('视频压缩尚未完成，工程未修改。')
     reportItems.push(entry)
@@ -126,6 +136,11 @@ export function restoreProjectVideos(project: Project, assetIds?: string[]): { p
   const affected = affectedAssets(project, sources), compressed = new Set([...affected.keys()].filter(id => project.assets.find(asset => asset.id === id)?.compression))
   assertUnlocked(project, compressed)
   const next = cloneProject(project), restored = new Set<string>()
+  const active = new Set(projectCompressedSources(project).map(asset => asset.id))
+  for (const asset of next.assets) if (asset.compression && compressed.has(asset.id)) {
+    if (active.has(asset.id)) restored.add(asset.id)
+    asset.compression.active = false
+  }
   for (const track of next.tracks) for (const clip of track.clips) if (clip.assetId && compressed.has(clip.assetId)) { restored.add(clip.assetId); clip.assetId = affected.get(clip.assetId)!.id }
   return { project: validateProject(next, { trusted: true }), report: { restoredCount: restored.size, restoredAssetIds: [...restored] } }
 }
@@ -150,13 +165,29 @@ export async function prepareProjectCompressionTool(name: string, args: Record<s
   const assetIds = args.assetIds as string[] | undefined
   if (name === 'open_media_project_video_restore') {
     const result = restoreProjectVideos(context.project, assetIds)
-    return { ...(result.report.restoredCount ? { project: result.project } : {}), data: result.report, label: '恢复工程原视频' }
+    if (!result.report.restoredCount) return { data: result.report, label: '恢复工程原视频' }
+    const deps = dependencies ?? await defaults()
+    const copies = new Map(context.project.assets.map(asset => [asset.id, asset]))
+    const originals = new Set(result.report.restoredAssetIds.map(id => copies.get(id)!.compression!.originalAssetId))
+    const preparedBySource = new Map<string, MediaAsset>(), assets: { asset: MediaAsset }[] = []
+    for (const originalId of originals) {
+      check(context)
+      const index = result.project.assets.findIndex(asset => asset.id === originalId), original = result.project.assets[index]!
+      const key = videoAssetKey(original), cached = preparedBySource.get(key)
+      context.onProgress({ stage: `正在准备原视频预览：${original.name}`, cancelable: true })
+      const ready = cached ? { ...original, url: cached.url, ...(cached.sourceUrl ? { sourceUrl: cached.sourceUrl } : {}) } : await deps.native.prepareProjectVideoOriginal(original, context.signal)
+      check(context)
+      preparedBySource.set(key, ready)
+      result.project.assets[index] = ready
+      assets.push({ asset: ready })
+    }
+    return { project: validateProject(result.project, { trusted: true }), assets, data: result.report, label: '恢复工程原视频' }
   }
   if (name !== 'open_media_project_video_compress') throw new Error('未知工程视频处理操作。')
   const mode = args.mode as CompressionMode, quality = mode === 'quality' ? (args.quality ?? 'high') as CompressionQuality : undefined
   if (!['lossless', 'quality'].includes(mode) || quality && !['high', 'balanced', 'compact'].includes(quality) || mode === 'lossless' && args.quality !== undefined) throw new Error('工程视频压缩模式或质量无效。')
   const roots = projectCompressionSources(context.project, assetIds)
-  if (!roots.length) throw new Error('当前工程没有可压缩的视频，请先把视频加入时间线。')
+  if (!roots.length) throw new Error('当前工程没有可压缩的视频，请先导入视频素材。')
   const affected = affectedAssets(context.project, roots)
   if (context.project.assets.length + new Set([...affected.values()].map(asset => asset.id)).size > MAX_ASSETS) throw new Error('工程素材数量已达到上限，请先移除不再使用的素材。')
   assertUnlocked(context.project, new Set(affected.keys()))

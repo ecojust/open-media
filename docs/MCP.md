@@ -140,8 +140,8 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_timeline_batch_edit` | 原子批量编辑时间线与项目 |
 | `open_media_timeline_markers_set` | 完整替换当前项目的章节、重点和待检查标记 |
 | `open_media_project_snapshot` | 管理当前工程的本地命名版本：create 需要 name；list 列出版本；compare 需要 id，省略 comparisonId 时与当前工程比较；restore 和 delete 需要 id |
-| `open_media_project_video_compress` | 为当前工程引用的视频生成压缩工作副本；按文件去重，原件保留，所有分割片段及视频音频引用一起更新；支持 lossless 与 quality，质量为 high / balanced / compact |
-| `open_media_project_video_restore` | 恢复当前时间线中的工程压缩视频到最初原件；可用 assetIds 限定范围，保留片段时序和效果，支持撤销 |
+| `open_media_project_video_compress` | 为工程已导入的视频生成剪辑工作副本，未加入时间线也可处理；按文件去重，原件保留，所有分割片段及视频音频引用一起更新；支持 lossless 与 quality，质量为 high / balanced / compact |
+| `open_media_project_video_restore` | 恢复工程启用的剪辑工作副本到最初原件，包括尚未加入时间线的素材；可用 assetIds 限定范围，保留片段时序和效果，支持撤销 |
 | `open_media_clip_keyframes_set` | 设置片段关键帧 |
 | `open_media_clip_crop` | 裁剪视频或图片的源画面，坐标及宽高为0..1归一化值 |
 | `open_media_focus_region` | 在当前片段显示矩形内框定归一化区域，生成等比放大、停留与恢复关键帧；保留位置、裁切与画面比例，保护已有动画 |
@@ -379,15 +379,15 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 
 ## Project video compression
 
-这两个工具复用界面“项目设置 → 工程视频压缩”的任务通道，返回 `jobId`，由 `open_media_job_get` 查询阶段、进度与结果，`open_media_job_cancel` 取消。压缩在全部处理完成并通过版本校验后一次提交；失败、取消或工程版本变化均不替换当前素材。
+这两个工具复用项目设置与视频素材右键“压缩视频”的任务通道，返回 `jobId`，由 `open_media_job_get` 查询阶段、进度与结果，`open_media_job_cancel` 取消。导入视频后即可压缩，默认处理工程中的普通视频，也可用 `assetIds` 仅处理指定素材。压缩副本立即用于剪辑播放、拖动和字幕、转场合成预览，后续拖入的片段也使用工作副本。压缩在全部处理完成并通过版本校验后一次提交；失败、取消或工程版本变化均不替换当前素材。
 
 ```json
-{"name":"open_media_project_video_compress","arguments":{"mode":"quality","quality":"high","expectedRevision":12}}
+{"name":"open_media_project_video_compress","arguments":{"mode":"quality","quality":"high","assetIds":["video-id"],"expectedRevision":12}}
 ```
 
 `mode: "lossless"` 保留解码画面，不接受 `quality`；已压缩的视频不保证还能变小，体积不减时跳过。质量模式在高画质、均衡和小体积之间选择；保持原分辨率与时间轴，重复操作从最初原件开始。结果包含 `processedCount`、`skippedCount`、`sourceBytes`、`outputBytes`、`savedBytes` 及逐项状态。加速收益取决于源编码与工程效果，文件变小不等于所有导出都会提速。
 
-原视频及工作副本都随工程保存，因此工程文件大小可能增加。恢复调用 `open_media_project_video_restore`，可通过 `assetIds` 指定原件或压缩副本，省略时恢复当前时间线使用的全部压缩视频。恢复不会删除任何文件，且可撤销；引用待修改视频的锁定轨道需要先解锁。
+原视频及工作副本都随工程保存，因此工程文件大小可能增加。恢复调用 `open_media_project_video_restore`，可通过 `assetIds` 指定原件或压缩副本，省略时恢复全部启用的压缩视频，包括尚未加入时间线的素材。恢复前会验证原视频可以播放，必要时生成可取消的兼容预览。恢复不会删除任何文件，且可撤销；引用待修改视频的锁定轨道需要先解锁。
 
 ## Static frame editing
 

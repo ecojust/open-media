@@ -246,7 +246,7 @@
   },
   {
     "name": "open_media_project_video_compress",
-    "description": "为当前工程视频生成压缩工作副本，按源文件去重处理并一次替换同源的所有视频和音频片段引用。lossless 为严格无损模式，不能设置 quality；quality 模式默认 high，可选 balanced、compact。保留尺寸、时间线和原件，重复压缩始终读取最初原件。体积未减少时跳过；支持取消、撤销和恢复原视频。保留原件会增加工程归档体积，压缩不保证所有特效导出提速。锁定轨道引用的视频需先解锁。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result；使用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "为已导入工程的视频生成剪辑工作副本，未加入时间线也可先压缩；按源文件去重处理并一次替换同源的所有视频和音频片段引用。压缩副本立即用于播放、拖动、字幕与转场合成预览，后续新增片段也使用当前副本。lossless 为严格无损模式，不能设置 quality；quality 模式默认 high，可选 balanced、compact。保留尺寸、时间线和原件，重复压缩始终读取最初原件。体积未减少时跳过；支持取消、撤销和恢复原视频。保留原件会增加工程归档体积，压缩不保证所有特效导出提速。锁定轨道引用的视频需先解锁。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result；使用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -276,7 +276,7 @@
             "maxLength": 160,
             "pattern": "^[a-zA-Z0-9_-]+$"
           },
-          "description": "源视频或工程压缩视频的素材 ID；省略时处理当前时间线引用的视频。"
+          "description": "源视频或工程压缩视频的素材 ID；可传一个 ID 对应素材右键操作，省略时处理工程已导入的普通视频及当前使用的库视频。"
         },
         "expectedRevision": {
           "type": "integer",
@@ -316,7 +316,7 @@
   },
   {
     "name": "open_media_project_video_restore",
-    "description": "将当前时间线的工程压缩视频恢复为最初原视频，同步恢复视频和音频片段引用；保留全部片段时间、画面与效果参数，保留工作副本，可撤销。assetIds 可指定原件或压缩素材，省略时恢复当前时间线的全部工程压缩视频。锁定轨道需先解锁。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result；使用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "将工程当前启用的剪辑工作副本恢复为最初原视频，同步恢复视频和音频片段引用；保留全部片段时间、画面与效果参数，保留工作副本，可撤销。assetIds 可指定原件或压缩素材，省略时恢复全部当前启用的压缩视频，尚未加入时间线的副本也会恢复。恢复前检查原视频可播放性，必要时准备可取消的兼容预览。锁定轨道需先解锁。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result；使用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -331,7 +331,7 @@
             "maxLength": 160,
             "pattern": "^[a-zA-Z0-9_-]+$"
           },
-          "description": "源视频或工程压缩视频的素材 ID；省略时处理当前时间线引用的视频。"
+          "description": "源视频或工程压缩视频的素材 ID；省略时恢复工程全部启用的工作副本。"
         },
         "expectedRevision": {
           "type": "integer",

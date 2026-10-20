@@ -62,3 +62,27 @@ export async function prepareProjectCompressionAsset(asset: MediaAsset, signal?:
     return ready
   } finally { if (abort) signal?.removeEventListener('abort', abort) }
 }
+
+/** Restoring a working source must also provide a playable original before the swap. */
+export async function prepareProjectVideoOriginal(asset: MediaAsset, signal?: AbortSignal): Promise<MediaAsset> {
+  signal?.throwIfAborted()
+  const { ensureMediaPreview } = await import('./core/media-import.ts')
+  let abort: (() => void) | undefined
+  try {
+    const preparing = ensureMediaPreview(asset, async (value, format) => {
+      signal?.throwIfAborted()
+      const { runAssetTool } = await import('./native-asset-tools.ts')
+      const { convertFileSrc } = await import('@tauri-apps/api/core')
+      const result = await runAssetTool<{ path: string }>('asset_prepare_preview', { asset: value, format }, { signal })
+      signal?.throwIfAborted()
+      return convertFileSrc(result.path)
+    })
+    const ready = signal ? await Promise.race([preparing, new Promise<never>((_, reject) => {
+      abort = () => reject(signal.reason ?? new DOMException('处理已取消。', 'AbortError'))
+      signal.addEventListener('abort', abort, { once: true })
+      if (signal.aborted) abort()
+    })]) : await preparing
+    signal?.throwIfAborted()
+    return ready
+  } finally { if (abort) signal?.removeEventListener('abort', abort) }
+}

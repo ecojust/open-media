@@ -2,7 +2,7 @@ import type { MediaAsset } from './core/types'
 import { ensureMediaPreview } from './core/media-import'
 import { createMediaPreview, isDesktop } from './native'
 
-export type AssetToolOperation = 'asset_upload_begin' | 'asset_upload_chunk' | 'asset_upload_status' | 'asset_upload_commit' | 'asset_upload_abort' | 'asset_import_url' | 'asset_probe' | 'asset_get_frame' | 'asset_storyboard' | 'asset_detect_scenes' | 'asset_detect_idle' | 'validate_export'
+export type AssetToolOperation = 'asset_upload_begin' | 'asset_upload_chunk' | 'asset_upload_status' | 'asset_upload_commit' | 'asset_upload_abort' | 'asset_import_url' | 'asset_probe' | 'asset_prepare_preview' | 'asset_get_frame' | 'asset_storyboard' | 'asset_detect_scenes' | 'asset_detect_idle' | 'validate_export'
 export interface AssetToolProgress { stage: string; progress?: number }
 export interface AssetToolOptions { taskId?: string; signal?: AbortSignal; onProgress?: (progress: AssetToolProgress) => void }
 export interface AssetSource { kind: 'upload' | 'url'; name?: string; url?: string; finalUrl?: string; mimeType?: string; sha256: string; size?: number; importedAt: number }

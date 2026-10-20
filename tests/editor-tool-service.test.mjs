@@ -12,7 +12,7 @@ const boundaries = {
  '../src/native.ts':['acceptSpeechJobs','beginSpeechJob','beginSpeechModelDownload','cancelMediaJob','cancelSpeechJob','cancelSpeechModelDownload','discardSpeechJob','getMediaJobs','getSpeechJob','getSpeechStatus','repairSpeechModel','revealMediaJobOutput','importBlobAsset'],
  '../src/native-asset-tools.ts':['runAssetTool'],
  '../src/native-audio-tools.ts':['beginAudioTool','getAudioTool','cancelAudioTool','acceptAudioTool','discardAudioTool'],
- '../src/native-project-compression.ts':['beginProjectVideoCompression','getProjectVideoCompressionJob','cancelProjectVideoCompression','acceptProjectVideoCompression','discardProjectVideoCompression','prepareProjectCompressionAsset'],
+ '../src/native-project-compression.ts':['beginProjectVideoCompression','getProjectVideoCompressionJob','cancelProjectVideoCompression','acceptProjectVideoCompression','discardProjectVideoCompression','prepareProjectCompressionAsset','prepareProjectVideoOriginal'],
  '../src/native-transcription.ts':['getAsrStatus','beginAsrDownload','beginAsrTranscription','getAsrJob','cancelAsrJob'],
  '../src/native-mcp-files.ts':['beginMcpMediaJob','importMcpMediaPaths','openMcpProjectFile','saveMcpProjectFile'],
  '../src/native-video-generation.ts':['getVideoGenerationStatus','beginVideoModelDownload','cancelVideoModelDownload','beginVideoGeneration','getVideoGenerationJob','cancelVideoGeneration'],
@@ -67,6 +67,7 @@ function compressionFixture() {
  const job={id:'compression-native',state:'completed',progress:1,stage:'完成',current:1,total:1,elapsedSeconds:1,items:[{sourceIds:[source.id],sourceSize:1000,outputSize:400,state:'completed',asset}]}
  f.io.beginProjectVideoCompression=async()=>job
  f.io.prepareProjectCompressionAsset=async value=>value
+ f.io.prepareProjectVideoOriginal=async value=>value
  return{...f,source,compressed:asset,job}
 }
 test('MCP compression returns async work then commits every split and sound reference once before acceptance',async()=>{

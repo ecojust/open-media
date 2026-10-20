@@ -219,7 +219,7 @@ async function main() {
       await disabledPage.getByRole('button', { name: '项目设置', exact: true }).click()
       const disabledPanel = disabledPage.getByTestId('project-video-compression')
       await expect(disabledPanel.getByTestId('project-compression-start')).toBeDisabled()
-      await expect(disabledPanel).toContainText(options.empty ? '先将视频加入时间线' : '工程视频压缩需要桌面端')
+      await expect(disabledPanel).toContainText(options.empty ? '先导入视频' : '工程视频压缩需要桌面端')
       assert.equal(await disabledPage.evaluate(() => window.projectCompression.tools.length), 0)
       await disabledPage.close()
     }

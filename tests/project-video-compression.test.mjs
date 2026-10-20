@@ -8,6 +8,7 @@ import { saveProject, loadProject } from '../src/core/storage.ts'
 import { prepareSnapshotRestore } from '../src/core/project-snapshots.ts'
 import { applyProjectVideoCompression, compressionSummary, prepareProjectCompressionTool, projectCompressionSources, projectCompressedSources, restoreProjectVideos } from '../src/core/project-video-compression.ts'
 import { isSharedEditorTool } from '../src/core/editor-tool-service.ts'
+import { projectWorkingAssets, workingVideoAsset } from '../src/core/video-working-copies.ts'
 import { MCP_TOOLS, validateMcpToolArguments } from '../src/core/mcp-tools.ts'
 import projectTools from '../src/mcp-project-tools.json' with { type: 'json' }
 
@@ -32,6 +33,7 @@ function dependencies(overrides = {}) {
     async acceptProjectVideoCompression(id) { calls.push(['accept', id]) },
     async discardProjectVideoCompression(id) { calls.push(['discard', id]) },
     async prepareProjectCompressionAsset(asset) { calls.push(['preview', asset.id]); return asset },
+    async prepareProjectVideoOriginal(asset) { calls.push(['restore-preview', asset.id]); return asset },
     ...overrides,
   }
   return { native, calls, pollMs: 0 }
@@ -39,10 +41,10 @@ function dependencies(overrides = {}) {
 const prepare = (project, deps, args = { mode: 'quality', quality: 'high' }, ctx = context(project)) => prepareProjectCompressionTool('open_media_project_video_compress', args, ctx, deps)
 const sourceReferences = project => project.tracks.flatMap(track => track.clips).filter(clip => clip.assetId).map(clip => clip.assetId)
 
-test('默认仅选择时间线引用的视频，分割视频与其原声只压缩一次', () => {
+test('默认包含已导入但未剪辑的视频，分割视频与其原声只压缩一次', () => {
   const project = fixture(); project.assets.push(source('unused'))
-  assert.deepEqual(projectCompressionSources(project).map(asset => asset.id), ['source'])
-  assert.deepEqual(compressionSummary(project), { sourceCount: 1, compressedCount: 0, sourceBytes: 1000, currentBytes: 1000 })
+  assert.deepEqual(projectCompressionSources(project).map(asset => asset.id), ['source', 'unused'])
+  assert.deepEqual(compressionSummary(project), { sourceCount: 2, compressedCount: 0, sourceBytes: 2000, currentBytes: 2000 })
   assert.deepEqual(projectCompressionSources(project, ['unused']).map(asset => asset.id), ['unused'])
   assert.throws(() => projectCompressionSources(project, ['source', 'source']), /不重复/)
   assert.throws(() => projectCompressionSources(project, ['missing']), /不存在/)
@@ -210,4 +212,98 @@ test('压缩与恢复MCP共用任务协议，架构声明与实际工具清单�
   assert.throws(() => validateMcpToolArguments('open_media_project_video_compress', { mode: 'lossless', quality: 'high' }), /无损/)
   assert.throws(() => validateMcpToolArguments('open_media_project_video_compress', { mode: 'quality', quality: 'bad' }), /选项/)
   assert.throws(() => validateMcpToolArguments('open_media_project_video_restore', { assetIds: [] }), /数量/)
+})
+
+
+test('未加入时间线即可压缩，激活剪辑副本，恢复与撤销不依赖片段引用', async () => {
+  const original = createProject('先压缩再剪辑'), video = source()
+  original.assets.push(video)
+  const prepared = await prepare(original, dependencies())
+  const project = prepared.project
+  assert.equal(project.tracks.flatMap(track => track.clips).length, 0)
+  assert.equal(project.assets[1].compression.active, true)
+  assert.deepEqual(project.assets[0], video)
+  assert.equal(workingVideoAsset(project, video).id, 'compressed')
+  assert.deepEqual(projectWorkingAssets(project).map(asset => asset.id), ['compressed'])
+  assert.deepEqual(compressionSummary(project), { sourceCount: 1, compressedCount: 1, sourceBytes: 1000, currentBytes: 400 })
+  const restored = await prepareProjectCompressionTool('open_media_project_video_restore', {}, context(project), dependencies())
+  assert.equal(restored.data.restoredCount, 1)
+  assert.equal(restored.project.assets[1].compression.active, false)
+  assert.equal(workingVideoAsset(restored.project, video).id, 'source')
+  assert.deepEqual(projectWorkingAssets(restored.project).map(asset => asset.id), ['source'])
+  assert.equal(compressionSummary(restored.project).compressedCount, 0)
+  const history = commitHistory(createHistory(project), restored.project)
+  assert.equal(workingVideoAsset(undoHistory(history).present, video).id, 'compressed')
+  assert.equal(workingVideoAsset(redoHistory(undoHistory(history)).present, video).id, 'source')
+})
+
+test('重复压缩只激活最新副本，跳过不会改变原有工作副本，未使用的库素材不参与默认压缩', () => {
+  const original = createProject('预处理'), video = source()
+  original.assets.push(video, { ...source('watermark'), libraryRole: 'watermark' })
+  assert.deepEqual(projectCompressionSources(original).map(asset => asset.id), ['source'])
+  const first = applyProjectVideoCompression(original, [video], [item()], 'quality').project
+  const second = applyProjectVideoCompression(first, [video], [item(output('smaller', 250))], 'quality').project
+  assert.equal(second.assets.find(asset => asset.id === 'compressed').compression.active, false)
+  assert.equal(second.assets.find(asset => asset.id === 'smaller').compression.active, true)
+  assert.deepEqual(projectCompressedSources(second).map(asset => asset.id), ['smaller'])
+  assert.deepEqual(projectWorkingAssets(second).map(asset => asset.id), ['smaller', 'watermark'])
+  const skipped = applyProjectVideoCompression(second, [video], [{ state: 'skipped', sourceIds: [video.id], sourceSize: video.size }], 'lossless').project
+  assert.equal(workingVideoAsset(skipped, video).id, 'smaller')
+  const duplicateActive = structuredClone(second); duplicateActive.assets[2].compression.active = true
+  assert.throws(() => validateProject(duplicateActive), /只能启用一个/)
+  const badActive = structuredClone(second); badActive.assets[3].compression.active = 'yes'
+  assert.throws(() => validateProject(badActive), /开关/)
+})
+
+test('显式恢复后旧副本不会重新激活，旧工程仅由时间线识别当前压缩副本', () => {
+  const original = fixture(), compressed = applyProjectVideoCompression(original, projectCompressionSources(original), [item()], 'quality').project
+  delete compressed.assets[1].compression.active
+  assert.equal(projectCompressedSources(compressed).length, 1)
+  assert.equal(workingVideoAsset(compressed, compressed.assets[0]).id, 'compressed')
+  const restored = restoreProjectVideos(compressed)
+  assert.equal(restored.report.restoredCount, 1)
+  assert.equal(restored.project.assets[1].compression.active, false)
+  assert.equal(workingVideoAsset(restored.project, restored.project.assets[1]).id, 'source')
+  compressed.tracks.forEach(track => { track.clips = [] })
+  assert.equal(projectCompressedSources(compressed).length, 0)
+  assert.equal(workingVideoAsset(compressed, compressed.assets[0]).id, 'source')
+})
+
+test('空时间线工作副本经保存、重开和快照恢复后仍会被用于剪辑', async () => {
+  const original = createProject('预处理存档'); original.assets.push(source())
+  const project = applyProjectVideoCompression(original, projectCompressionSources(original), [item()], 'quality').project
+  const blobs = new Map(project.assets.map(asset => [asset.id, new Blob([new Uint8Array(asset.size)], { type: asset.mime })]))
+  const imported = await importProjectFile(await exportProjectFile(project, { blobs }))
+  const snapshot = prepareSnapshotRestore(imported)
+  try {
+    assert.equal(snapshot.project.assets[1].compression.active, true)
+    assert.equal(workingVideoAsset(snapshot.project, snapshot.project.assets[0]).id, snapshot.project.assets[1].id)
+    assert.equal(restoreProjectVideos(snapshot.project).report.restoredCount, 1)
+  } finally { snapshot.revoke() }
+})
+
+test('恢复先准备可播放原视频，失败、取消或版本冲突不提交半恢复工程', async () => {
+  const original = fixture(), compressed = applyProjectVideoCompression(original, projectCompressionSources(original), [item()], 'quality').project
+  const before = structuredClone(compressed)
+  const prepared = await prepareProjectCompressionTool('open_media_project_video_restore', {}, context(compressed), dependencies({
+    prepareProjectVideoOriginal: async asset => ({ ...asset, url: 'asset://localhost/original-preview.mp4', sourceUrl: asset.url }),
+  }))
+  assert.ok(sourceReferences(prepared.project).every(id => id === 'source'))
+  assert.equal(prepared.project.assets[0].url, 'asset://localhost/original-preview.mp4')
+  assert.equal(prepared.project.assets[0].sourceUrl, original.assets[0].url)
+  assert.equal(prepared.project.assets[0].nativePath, original.assets[0].nativePath)
+  assert.deepEqual(compressed, before)
+  for (const failure of ['failure', 'cancel', 'revision']) {
+    const controller = new AbortController(), ctx = context(compressed, controller)
+    if (failure === 'revision') ctx.assertCurrent = () => { if (revisionChanged) throw Error('项目已变化') }
+    let revisionChanged = false
+    const deps = dependencies({ prepareProjectVideoOriginal: async asset => {
+      if (failure === 'failure') throw Error('无法准备原片')
+      if (failure === 'cancel') controller.abort()
+      revisionChanged = true
+      return asset
+    } })
+    await assert.rejects(prepareProjectCompressionTool('open_media_project_video_restore', {}, ctx, deps))
+    assert.deepEqual(compressed, before)
+  }
 })

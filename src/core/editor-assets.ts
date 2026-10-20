@@ -2,10 +2,11 @@ import { cloneProject, createClip, createTrack, MAX_ASSETS, MAX_CLIPS, MAX_PROJE
 import { adoptFirstVideoSize } from './project-size.ts'
 import type { MediaAsset, Project, Track } from './types.ts'
 import { videoAssetKey } from './video-assets.ts'
+import { projectWorkingAssets, workingVideoAsset } from './video-working-copies.ts'
 
 /** Only explicit bundled-material roles are hidden; older user assets stay visible. */
 export function projectSourceAssets(project: Project): MediaAsset[] {
-  return project.assets.filter(asset => asset.libraryRole === undefined)
+  return projectWorkingAssets(project).filter(asset => asset.libraryRole === undefined)
 }
 
 export interface EditorAssetInsertion { trackId?: string; start?: number }
@@ -26,7 +27,7 @@ export function addEditorAssetToTimeline(project: Project, asset: MediaAsset, op
     throw new Error('素材标识与现有文件冲突，请刷新素材列表后重试。')
   }
   const existing = byPath ?? byId
-  const source = existing ?? asset
+  const source = workingVideoAsset(project, existing ?? asset)
   const duration = source.kind === 'image' ? Math.max(5, source.duration) : source.duration
   if (!Number.isFinite(duration) || duration < 0.001 || start + duration > MAX_PROJECT_DURATION) throw new Error('素材时长无效或时间线超过 24 小时。')
   const target = options.trackId !== undefined ? project.tracks.find(track => track.id === options.trackId) : project.tracks.find(track => defaultTrack(track, source))
