@@ -725,6 +725,29 @@ fn idle_intervals(text: &str, duration: f64, minimum: f64, noise_db: f64) -> Vec
     intervals
 }
 
+#[derive(Clone, Copy)]
+pub struct IdleOptions {
+    pub min_duration: f64,
+    pub noise_db: f64,
+    pub freeze_noise_db: f64,
+    pub freeze_only: bool,
+    pub start: f64,
+    pub end: Option<f64>,
+}
+impl Default for IdleOptions {
+    fn default() -> Self {
+        Self {
+            min_duration: 2.0,
+            noise_db: -45.0,
+            freeze_noise_db: -60.0,
+            freeze_only: false,
+            start: 0.0,
+            end: None,
+        }
+    }
+}
+
+#[cfg(test)]
 pub fn detect_idle(
     store: &MediaStore,
     runtime: &Runtime,
@@ -733,21 +756,61 @@ pub fn detect_idle(
     noise_db: f64,
     control: &TaskControl,
 ) -> Result<Value> {
+    detect_idle_with_options(
+        store,
+        runtime,
+        asset,
+        IdleOptions {
+            min_duration,
+            noise_db,
+            ..IdleOptions::default()
+        },
+        control,
+    )
+}
+
+pub fn detect_idle_with_options(
+    store: &MediaStore,
+    runtime: &Runtime,
+    asset: &Value,
+    options: IdleOptions,
+    control: &TaskControl,
+) -> Result<Value> {
     control.check()?;
+    let IdleOptions {
+        min_duration,
+        noise_db,
+        freeze_noise_db,
+        freeze_only,
+        start,
+        end,
+    } = options;
     if !min_duration.is_finite()
         || !(0.05..=3600.0).contains(&min_duration)
         || !noise_db.is_finite()
         || !(-120.0..=0.0).contains(&noise_db)
+        || !freeze_noise_db.is_finite()
+        || !(-100.0..=-20.0).contains(&freeze_noise_db)
     {
-        return Err(
-            "空闲检测最短时长需要在 0.05–3600 秒之间，静音阈值需要在 -120–0 dB 之间。".into(),
-        );
+        return Err("空闲检测最短时长需要在 0.05–3600 秒之间，静音阈值需要在 -120–0 dB 之间，静止画面变化阈值需要在 -100–-20 dB 之间。".into());
+    }
+    if !start.is_finite() || start < 0.0 || end.is_some_and(|end| !end.is_finite() || end <= start)
+    {
+        return Err("检测范围必须是有效的源视频时间区间。".into());
     }
     let path = store.authorized_path(asset)?;
     let info = read_probe(runtime, &path, control)?;
     let duration = duration(&info).ok_or("空闲检测需要具有明确时长的音频或视频素材。")?;
+    if start >= duration || end.is_some_and(|end| end > duration + 0.1) {
+        return Err("检测范围超出素材时长。".into());
+    }
+    let end = end.unwrap_or(duration).min(duration);
+    let span = end - start;
     let video = video_stream(&info);
-    let audio = audio_stream(&info);
+    let audio = audio_stream(&info).filter(|_| !freeze_only);
+    if freeze_only && video.is_none() {
+        return Err("静止画面检测需要视频流。".into());
+    }
     if video.is_none() && audio.is_none() {
         return Err("素材没有可检测的音频或视频流。".into());
     }
@@ -763,17 +826,35 @@ pub fn detect_idle(
             "file,pipe",
             "-format_whitelist",
             MEDIA_FORMATS,
-            "-i",
+            "-threads",
+            "2",
+            "-ss",
         ])
-        .arg(&path);
+        .arg(format!("{start:.8}"))
+        .arg("-i")
+        .arg(&path)
+        .arg("-t")
+        .arg(format!("{span:.8}"));
     let mut detectors = Vec::new();
     if let Some(video) = video {
         command.arg("-map").arg(format!(
             "0:{}",
             video["index"].as_u64().ok_or("视频流索引无效。")?
         ));
-        command.arg("-vf").arg(format!("scale=w='min(iw,640)':h='min(ih,640)':force_original_aspect_ratio=decrease,blackdetect=d={min_duration:.8}:pix_th=0.10:pic_th=0.98,freezedetect=n=-60dB:d={min_duration:.8}"));
-        detectors.extend(["black", "freeze"]);
+        // Detection emits an interval only after comparing a subsequent frame. Let the
+        // parser validate its full duration so an exact-threshold hold at EOF is retained.
+        let freeze_detection_duration =
+            (min_duration - frame_rate(video).map(|fps| 1.0 / fps).unwrap_or(0.0)).max(0.001);
+        let black = if freeze_only {
+            String::new()
+        } else {
+            format!("blackdetect=d={min_duration:.8}:pix_th=0.10:pic_th=0.98,")
+        };
+        command.arg("-vf").arg(format!("scale=w='min(iw,640)':h='min(ih,640)':force_original_aspect_ratio=decrease,{black}freezedetect=n={freeze_noise_db:.8}dB:d={freeze_detection_duration:.8}"));
+        if !freeze_only {
+            detectors.push("black");
+        }
+        detectors.push("freeze");
     }
     if let Some(audio) = audio {
         command.arg("-map").arg(format!(
@@ -784,16 +865,60 @@ pub fn detect_idle(
             "silencedetect=n={noise_db:.8}dB:d={min_duration:.8}"
         ));
         detectors.push("silence");
+    } else {
+        command.arg("-an");
     }
-    command.args(["-sn", "-dn", "-threads", "1", "-f", "null", "-"]);
+    command.args([
+        "-sn",
+        "-dn",
+        "-threads",
+        "1",
+        "-filter_threads",
+        "1",
+        "-f",
+        "null",
+        "-",
+    ]);
+    command.args(["-progress", "pipe:1", "-stats_period", "0.5"]);
     let output = run_process(command, control, MAX_ANALYSIS_BYTES)?;
-    let intervals = idle_intervals(&output.stderr, duration, min_duration, noise_db);
+    // Container duration can include a nonzero timestamp origin or longer audio.
+    // Close a trailing visual hold at the actual decoded video end, not that metadata.
+    let measured_span = if freeze_only {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.strip_prefix("out_time_us="))
+            .filter_map(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+            .reduce(f64::max)
+            .map(|value| value / 1_000_000.0)
+            .unwrap_or(0.0)
+            .min(span)
+    } else {
+        span
+    };
+    let mut intervals = idle_intervals(&output.stderr, measured_span, min_duration, noise_db);
+    for interval in &mut intervals {
+        interval["start"] = json!(interval["start"].as_f64().unwrap_or(0.0) + start);
+        interval["end"] = json!(interval["end"].as_f64().unwrap_or(0.0) + start);
+        if interval["kind"] == "freeze" {
+            interval["evidence"]["differenceNoiseDb"] = json!(freeze_noise_db);
+            interval["evidence"]["maximumAnalysisDimension"] = json!(640);
+        }
+    }
     if intervals.len() > MAX_INTERVALS {
         return Err("空闲候选区间超过 4096 个，请提高最短时长。".into());
     }
-    let repeated = repetition::detect_repeated_intervals(store, runtime, asset, control)?;
+    // A freeze-only scan must not launch a second full-source decoding pass.
+    // Ranged inspection similarly avoids claiming repetition coverage outside its bounds.
+    let repeated = if freeze_only || start > 0.0 || end < duration {
+        json!({ "repeatedIntervals": [], "scope": { "skipped": true, "start": start, "end": end },
+            "threshold": null, "limitation": "当前仅扫描指定范围，未运行非相邻重复片段检测。" })
+    } else {
+        repetition::detect_repeated_intervals(store, runtime, asset, control)?
+    };
     Ok(json!({
         "assetId": asset["id"], "duration": duration, "timeBase": "assetSeconds",
+        "range": { "start": start, "end": start + measured_span }, "freezeNoiseDb": freeze_noise_db,
         "repeatedIntervals": repeated["repeatedIntervals"], "repetitionScope": repeated["scope"],
         "repetitionThreshold": repeated["threshold"], "repetitionLimitation": repeated["limitation"],
         "detectors": detectors, "intervals": intervals,
@@ -1177,6 +1302,315 @@ mod tests {
         assert!(intervals
             .iter()
             .all(|interval| interval["evidence"]["detector"].is_string()));
+    }
+
+    fn freeze_fixture(
+        filter: &str,
+        seconds: f64,
+    ) -> (tempfile::TempDir, MediaStore, Runtime, Value) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = MediaStore::new(directory.path()).unwrap();
+        let runtime = runtime();
+        let path = store.root.join("freeze-range.mkv");
+        let output = process(&runtime.encoder)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                filter,
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=16000",
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-t",
+            ])
+            .arg(seconds.to_string())
+            .args(["-c:v", "ffv1", "-c:a", "pcm_s16le", "-threads", "1", "-y"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let asset = json!({"id": "freeze-video", "nativePath": path});
+        (directory, store, runtime, asset)
+    }
+
+    #[test]
+    fn real_freeze_only_range_returns_source_seconds_and_trailing_hold() {
+        let (_directory, store, runtime, asset) = freeze_fixture(
+            "testsrc2=s=128x96:r=10:d=2[a];color=red:s=128x96:r=10:d=3[b];testsrc2=s=128x96:r=10:d=1[c];color=blue:s=128x96:r=10:d=2[d];[a][b][c][d]concat=n=4:v=1:a=0", 8.0);
+        let result = detect_idle_with_options(
+            &store,
+            &runtime,
+            &asset,
+            IdleOptions {
+                min_duration: 2.0,
+                freeze_only: true,
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        let intervals = result["intervals"].as_array().unwrap();
+        assert_eq!(result["detectors"], json!(["freeze"]));
+        assert_eq!(result["repetitionScope"]["skipped"], true);
+        assert_eq!(intervals.len(), 2, "{result}");
+        assert!(
+            (intervals[0]["start"].as_f64().unwrap() - 2.0).abs() < 0.11,
+            "{result}"
+        );
+        assert!(
+            (intervals[0]["end"].as_f64().unwrap() - 5.0).abs() < 0.11,
+            "{result}"
+        );
+        assert!(
+            (intervals[1]["start"].as_f64().unwrap() - 6.0).abs() < 0.11,
+            "{result}"
+        );
+        assert_eq!(intervals[1]["end"], 8.0);
+        let ranged = detect_idle_with_options(
+            &store,
+            &runtime,
+            &asset,
+            IdleOptions {
+                min_duration: 1.0,
+                freeze_only: true,
+                start: 3.0,
+                end: Some(6.0),
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        assert_eq!(ranged["range"], json!({"start":3.0,"end":6.0}));
+        assert_eq!(ranged["intervals"].as_array().unwrap().len(), 1, "{ranged}");
+        assert_eq!(ranged["intervals"][0]["start"], 3.0);
+        assert_eq!(ranged["intervals"][0]["end"], 5.0);
+        let short = detect_idle_with_options(
+            &store,
+            &runtime,
+            &asset,
+            IdleOptions {
+                min_duration: 2.0,
+                freeze_only: true,
+                start: 3.5,
+                end: Some(5.0),
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        assert!(short["intervals"].as_array().unwrap().is_empty(), "{short}");
+    }
+
+    #[test]
+    fn real_freeze_threshold_distinguishes_small_noise_and_exact_length_still() {
+        let (_directory, store, runtime, asset) =
+            freeze_fixture("color=gray:s=128x96:r=10:d=2", 2.0);
+        let still = detect_idle_with_options(
+            &store,
+            &runtime,
+            &asset,
+            IdleOptions {
+                min_duration: 2.0,
+                freeze_only: true,
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        assert_eq!(still["intervals"].as_array().unwrap().len(), 1, "{still}");
+        assert_eq!(still["intervals"][0]["duration"], 2.0);
+        let (_noise_directory, noise_store, runtime, noise_asset) = freeze_fixture(
+            "color=gray:s=128x96:r=10:d=3,noise=alls=3:allf=t+u:all_seed=1",
+            3.0,
+        );
+        let strict = detect_idle_with_options(
+            &noise_store,
+            &runtime,
+            &noise_asset,
+            IdleOptions {
+                min_duration: 1.0,
+                freeze_only: true,
+                freeze_noise_db: -100.0,
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        assert!(
+            strict["intervals"].as_array().unwrap().is_empty(),
+            "{strict}"
+        );
+        let tolerant = detect_idle_with_options(
+            &noise_store,
+            &runtime,
+            &noise_asset,
+            IdleOptions {
+                min_duration: 1.0,
+                freeze_only: true,
+                freeze_noise_db: -40.0,
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        assert_eq!(
+            tolerant["intervals"].as_array().unwrap().len(),
+            1,
+            "{tolerant}"
+        );
+        assert_eq!(
+            tolerant["intervals"][0]["evidence"]["differenceNoiseDb"],
+            -40.0
+        );
+        assert_eq!(tolerant["intervals"][0]["duration"], 3.0);
+    }
+
+    #[test]
+    fn real_freeze_with_nonzero_pts_closes_at_decoded_video_end() {
+        let (_directory, store, runtime, asset) =
+            freeze_fixture("color=gray:s=128x96:r=10:d=4", 4.0);
+        let shifted = store.root.join("offset-video.mkv");
+        let output = process(&runtime.encoder)
+            .args(["-v", "error", "-i"])
+            .arg(asset["nativePath"].as_str().unwrap())
+            .args(["-c", "copy", "-output_ts_offset", "5", "-y"])
+            .arg(&shifted)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let asset = json!({"id":"offset", "nativePath":shifted});
+        let result = detect_idle_with_options(
+            &store,
+            &runtime,
+            &asset,
+            IdleOptions {
+                min_duration: 1.0,
+                freeze_only: true,
+                start: 1.0,
+                ..IdleOptions::default()
+            },
+            &control(),
+        )
+        .unwrap();
+        assert_eq!(result["intervals"].as_array().unwrap().len(), 1, "{result}");
+        assert_eq!(result["intervals"][0]["start"], 1.0);
+        assert_eq!(result["intervals"][0]["end"], 4.0);
+        assert_eq!(result["range"], json!({"start":1.0,"end":4.0}));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelling_freeze_scan_terminates_and_reaps_live_decoder() {
+        use std::{os::unix::fs::PermissionsExt, thread, time::Instant};
+        let (directory, store, mut runtime, asset) =
+            freeze_fixture("color=gray:s=128x96:r=10:d=4", 4.0);
+        let marker = directory.path().join("decoder.pid");
+        let wrapper = directory.path().join("paced-decoder");
+        let quote = |s: &str| format!("'{}'", s.replace('\'', "'\"'\"'"));
+        fs::write(
+            &wrapper,
+            format!(
+                "#!/bin/sh\necho $$ > {}\nexec {} -re \"$@\"\n",
+                quote(marker.to_str().unwrap()),
+                quote(runtime.encoder.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700)).unwrap();
+        runtime.encoder = wrapper;
+        let control = control();
+        let cancel = control.cancelled.clone();
+        let task = thread::spawn(move || {
+            detect_idle_with_options(
+                &store,
+                &runtime,
+                &asset,
+                IdleOptions {
+                    min_duration: 1.0,
+                    freeze_only: true,
+                    ..IdleOptions::default()
+                },
+                &control,
+            )
+        });
+        let began = Instant::now();
+        while !marker.exists() && began.elapsed() < Duration::from_secs(5) {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(marker.exists(), "decoder was not started");
+        let pid = fs::read_to_string(&marker).unwrap().trim().to_owned();
+        thread::sleep(Duration::from_millis(100));
+        let cancelled_at = Instant::now();
+        cancel.store(true, Ordering::Release);
+        assert!(task.join().unwrap().unwrap_err().contains("取消"));
+        assert!(cancelled_at.elapsed() < Duration::from_secs(2));
+        let status = std::process::Command::new("kill")
+            .args(["-0", &pid])
+            .output()
+            .unwrap();
+        assert!(
+            !status.status.success(),
+            "cancelled decoder {pid} still exists"
+        );
+    }
+
+    #[test]
+    fn freeze_ranges_validate_and_cancel_before_media_work() {
+        let (_directory, store, runtime, asset) = fixture();
+        for options in [
+            IdleOptions {
+                start: f64::NAN,
+                ..IdleOptions::default()
+            },
+            IdleOptions {
+                start: -1.0,
+                ..IdleOptions::default()
+            },
+            IdleOptions {
+                start: 2.0,
+                ..IdleOptions::default()
+            },
+            IdleOptions {
+                end: Some(3.0),
+                ..IdleOptions::default()
+            },
+            IdleOptions {
+                start: 1.0,
+                end: Some(1.0),
+                ..IdleOptions::default()
+            },
+            IdleOptions {
+                freeze_noise_db: -10.0,
+                ..IdleOptions::default()
+            },
+        ] {
+            assert!(
+                detect_idle_with_options(&store, &runtime, &asset, options, &control()).is_err()
+            );
+        }
+        let cancelled = control();
+        cancelled.cancelled.store(true, Ordering::Release);
+        assert!(detect_idle_with_options(
+            &store,
+            &runtime,
+            &asset,
+            IdleOptions::default(),
+            &cancelled
+        )
+        .unwrap_err()
+        .contains("取消"));
     }
 
     #[test]

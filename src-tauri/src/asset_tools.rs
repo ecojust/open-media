@@ -574,12 +574,25 @@ impl AssetTools {
                 number(args, "minInterval", 0.5)?,
                 &control,
             ),
-            "asset_detect_idle" => analysis::detect_idle(
+            "asset_detect_idle" => analysis::detect_idle_with_options(
                 store,
                 runtime,
                 &args["asset"],
-                number(args, "minDuration", 2.)?,
-                number(args, "noiseDb", -45.)?,
+                analysis::IdleOptions {
+                    min_duration: number(args, "minDuration", 2.)?,
+                    noise_db: number(args, "noiseDb", -45.)?,
+                    freeze_noise_db: number(args, "freezeNoiseDb", -60.)?,
+                    freeze_only: args
+                        .get("freezeOnly")
+                        .map_or(Some(false), Value::as_bool)
+                        .ok_or("参数 freezeOnly 必须为布尔值。")?,
+                    start: number(args, "start", 0.)?,
+                    end: args
+                        .get("end")
+                        .filter(|v| !v.is_null())
+                        .map(|_| number(args, "end", 0.))
+                        .transpose()?,
+                },
                 &control,
             ),
             _ => Err("不支持的素材操作。".into()),
