@@ -21,7 +21,7 @@ async function inspect(page, label, min = 1) {
     assert.match(value.image, /data:image\/svg\+xml/, `${label} SVG arrow`)
     if (value.disabled) { assert.equal(value.opacity, '0.6'); assert.equal(value.cursor, 'not-allowed') }
   }
-  const editorControls = page.locator('dialog[open] select:visible:enabled, .export-dialog select:visible:enabled, [data-testid="image-crop-panel"] select:visible:enabled, [data-testid="image-annotations-panel"] select:visible:enabled')
+  const editorControls = page.locator('dialog[open] select:visible:enabled, .export-dialog select:visible:enabled, .image-properties-target select:visible:enabled, [data-testid="image-crop-panel"] select:visible:enabled, [data-testid="image-annotations-panel"] select:visible:enabled')
   const focusable = await editorControls.count() ? editorControls.first() : page.locator('select:visible:enabled').first()
   if (await focusable.count()) {
     await focusable.focus()
@@ -29,6 +29,7 @@ async function inspect(page, label, min = 1) {
     assert.deepEqual(outline, ['2px', 'solid'], `${label} focus indicator`)
   }
   checks.push({ label, count: values.length, colors: [...new Set(values.map(v => `${v.color}/${v.background}`))] })
+  return values
 }
 async function mount(page, base, component, props, theme = 'light') {
   await page.goto(`${base}/__controls__`)
@@ -74,18 +75,29 @@ async function main() {
         return canvas.toDataURL('image/png').split(',')[1]
       })
       await page.getByTestId('media-input').setInputFiles({ name: '样式检查.png', mimeType: 'image/png', buffer: Buffer.from(image, 'base64') })
-      await page.getByTestId('image-crop-open').click()
-      const cropPanel = page.getByRole('region', { name: '框选裁剪', exact: true })
-      await expect(cropPanel).toBeVisible()
-      await expect(page.getByRole('dialog')).toHaveCount(0)
-      assert.equal(await cropPanel.evaluate(element => !!element.closest('.convert-preview .preview-stage')), true, '裁剪控件应位于当前图片预览内')
-      await inspect(page, `${theme} image crop inline editor`, 4)
-      await page.setViewportSize({ width: 420, height: 900 })
-      await inspect(page, `${theme} image crop inline editor width 420`, 2)
-      await expect(cropPanel).toBeVisible()
-      await cropPanel.getByRole('button', { name: '取消', exact: true }).click()
-      await expect(cropPanel).toHaveCount(0)
-      await expect(page.locator('.source-cropped')).toHaveCount(0)
+      for (const width of [1440, 420]) {
+        await page.setViewportSize({ width, height: width === 1440 ? 1000 : 900 })
+        const sampledLabels = new Set()
+        const recordControls = async (label, min) => {
+          for (const control of await inspect(page, `${theme} image ${label} width ${width}`, min)) sampledLabels.add(control.label)
+        }
+        await page.getByTestId('image-crop-open').click()
+        const cropPanel = page.getByRole('region', { name: '框选裁剪', exact: true })
+        await expect(cropPanel).toBeVisible()
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        assert.equal(await cropPanel.evaluate(element => !!element.closest('.convert-preview .preview-stage')), true, '裁剪画布应位于当前图片预览内')
+        assert.equal(await page.getByLabel('框选吸附步长', { exact: true }).evaluate(element => !!element.closest('.convert-settings')), true, '裁剪属性应位于当前图片右侧属性面板')
+        await recordControls('crop properties', 1)
+        await page.getByTestId('image-edit-cancel').click()
+        await expect(cropPanel).toHaveCount(0)
+        await expect(page.locator('.source-cropped')).toHaveCount(0)
+        await page.getByRole('tab', { name: '导出设置', exact: true }).click()
+        await recordControls('output properties', 2)
+        await page.getByTestId('image-add-text').click()
+        await recordControls('text properties', 2)
+        await page.getByTestId('image-edit-cancel').click()
+        assert(sampledLabels.size >= 4, `${theme} image width ${width}: expected at least 4 distinct controls across contextual property tabs, got ${sampledLabels.size}`)
+      }
       await page.setViewportSize({ width: 1440, height: 1000 })
       await page.getByTestId('nav-edit').click()
       await page.locator('.asset-card').first().dblclick()
