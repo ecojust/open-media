@@ -11,6 +11,9 @@ REPOSITORY = 'MiniMaxAI/MiniMax-H3'
 REVISION = '42ed227ee7df40d41602854ae760620d6eb651fe'
 ENGINE_REVISION = '8974cc055ea9c02fcd14cc27dfda3e1027c05153'
 ORIGINS = ['https://huggingface.co', 'https://hf-mirror.com']
+CONFIG_MIRROR_REVISION = '29139ad62f28479297e305d690ee1521042133d4'
+CONFIG_MIRROR_SHA256 = '3edd2cdd1ebc823c868be55ef917e1b3b8a398fde4d3150dae44a3bf05d9f627'
+CONFIG_MIRROR_PATHS = {'FL2VA/video_vae/config.json', 'Ref2VA/video_vae/config.json'}
 
 
 def fetch(url):
@@ -40,6 +43,10 @@ def file_entry(entry):
         assert blob_sha == entry['oid'], f'Git blob mismatch: {path}'
         digest = hashlib.sha256(payload).hexdigest()
     assert len(digest) == 64
+    # This additional source has been verified only for the two normalization configs.
+    if path in CONFIG_MIRROR_PATHS:
+        assert entry['size'] == 1807 and digest == CONFIG_MIRROR_SHA256, f'mirror identity changed: {path}'
+        urls.append(f'https://modelscope.cn/models/MiniMax/MiniMax-H3/resolve/{CONFIG_MIRROR_REVISION}/{path}')
     return {'path': path, 'size': entry['size'], 'sha256': digest, 'urls': urls}
 
 

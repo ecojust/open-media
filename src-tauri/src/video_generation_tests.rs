@@ -21,7 +21,12 @@ fn video_generation_catalog_is_pinned_and_deduplicated() {
     assert!(all.iter().any(|f| f.path.starts_with("Ref2VA/")));
     assert!(unique_bytes(&all) < all.iter().map(|file| file.size).sum());
     for file in all {
-        assert!(file.urls.iter().all(|url| url.contains(&catalog.revision)));
+        assert!(file.urls.iter().take(2).all(|url| url.contains(&catalog.revision)));
+        for url in &file.urls {
+            let revision = url.split_once("/resolve/").unwrap().1.split('/').next().unwrap();
+            assert_eq!(revision.len(), 40, "every source must pin a commit: {url}");
+            assert!(revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
     }
 }
 

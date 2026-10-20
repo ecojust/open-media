@@ -41,6 +41,9 @@ assert.equal(digest(await read('licenses/video-generation/MiniMax-H3/Qwen3-VL-LI
 const metadata = await json('licenses/video-generation/MiniMax-H3/metadata.json');
 assert.equal(metadata.revision, lock.revision);
 const indexed = new Map(metadata.entries.map(file => [file.path, file]));
+const configMirrorPaths = new Set(['FL2VA/video_vae/config.json', 'Ref2VA/video_vae/config.json']);
+const configMirrorRevision = '29139ad62f28479297e305d690ee1521042133d4';
+const configMirrorSha256 = '3edd2cdd1ebc823c868be55ef917e1b3b8a398fde4d3150dae44a3bf05d9f627';
 const seen = new Set();
 const models = new Map(lock.models.map(model => [model.id, model]));
 assert.equal(models.size, 2);
@@ -62,9 +65,14 @@ for (const model of lock.models) {
     assert.ok(entry, `missing original metadata: ${file.path}`);
     assert.equal(file.size, entry.size);
     if (entry.lfs) assert.equal(file.sha256, entry.lfs.oid);
-    assert.equal(file.urls.length, 2);
+    assert.equal(file.urls.length, configMirrorPaths.has(file.path) ? 3 : 2);
     for (const [index, origin] of ['https://huggingface.co', 'https://hf-mirror.com'].entries()) {
       assert.equal(file.urls[index], `${origin}/${lock.repository}/resolve/${lock.revision}/${file.path}`);
+    }
+    if (configMirrorPaths.has(file.path)) {
+      assert.equal(file.size, 1807);
+      assert.equal(file.sha256, configMirrorSha256);
+      assert.equal(file.urls[2], `https://modelscope.cn/models/MiniMax/MiniMax-H3/resolve/${configMirrorRevision}/${file.path}`);
     }
     total += file.size;
     hashes.set(file.sha256, file.size);

@@ -352,7 +352,8 @@
           "sha256": "3edd2cdd1ebc823c868be55ef917e1b3b8a398fde4d3150dae44a3bf05d9f627",
           "urls": [
             "https://huggingface.co/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/FL2VA/video_vae/config.json",
-            "https://hf-mirror.com/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/FL2VA/video_vae/config.json"
+            "https://hf-mirror.com/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/FL2VA/video_vae/config.json",
+            "https://modelscope.cn/models/MiniMax/MiniMax-H3/resolve/29139ad62f28479297e305d690ee1521042133d4/FL2VA/video_vae/config.json"
           ]
         },
         {
@@ -699,7 +700,8 @@
           "sha256": "3edd2cdd1ebc823c868be55ef917e1b3b8a398fde4d3150dae44a3bf05d9f627",
           "urls": [
             "https://huggingface.co/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/Ref2VA/video_vae/config.json",
-            "https://hf-mirror.com/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/Ref2VA/video_vae/config.json"
+            "https://hf-mirror.com/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/Ref2VA/video_vae/config.json",
+            "https://modelscope.cn/models/MiniMax/MiniMax-H3/resolve/29139ad62f28479297e305d690ee1521042133d4/Ref2VA/video_vae/config.json"
           ]
         },
         {

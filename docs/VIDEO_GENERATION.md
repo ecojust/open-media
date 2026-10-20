@@ -35,7 +35,14 @@
 bash scripts/repair-video-vae-config.sh
 ```
 
-脚本只处理固定版本的已安装模型，自动切换两个下载来源并核对 SHA-256，不下载或改写大权重，不改动工程。非默认数据目录可作为唯一参数传入；重新运行会跳过已正确的配置。现有配置内容不符时停止，不覆盖未知文件。修复后重新打开应用再生成，失败任务的未输出画面不能从此配置补丁中恢复。
+脚本自带已经核验的原始配置、许可与声明，运行时完全离线，只处理固定版本的已安装模型并核对 SHA-256，不下载或改写大权重，不改动工程。非默认数据目录可作为唯一参数传入；重新运行会跳过已正确的配置。现有配置内容不符时停止，不覆盖未知文件。修复后重新打开应用再生成，失败任务的未输出画面不能从此配置补丁中恢复。
+
+这两个小配置文件另有经过逐字节校验的官方备用来源，已锁定提交并加入下载清单：
+
+- [基础模型配置](https://modelscope.cn/models/MiniMax/MiniMax-H3/resolve/29139ad62f28479297e305d690ee1521042133d4/FL2VA/video_vae/config.json)
+- [参考模型配置](https://modelscope.cn/models/MiniMax/MiniMax-H3/resolve/29139ad62f28479297e305d690ee1521042133d4/Ref2VA/video_vae/config.json)
+
+原文件、SHA-256 和来源记录保存在 `licenses/video-generation/MiniMax-H3/video-vae-config.json` 与相邻的 `video-vae-config-source.json`。该备用来源仅核验了这两个配置，不代表已验证全部大权重的下载。
 
 ## 许可与来源
 

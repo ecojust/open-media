@@ -70,6 +70,13 @@ and official/mirror URLs are locked in
 code is not downloaded or executed. Identical encoder and decoder files are
 reused across model modes without modifying the weights.
 
+The unchanged 1,807-byte video normalization configuration is also retained in
+`licenses/video-generation/MiniMax-H3/video-vae-config.json`, with its pinned
+source and digest in `video-vae-config-source.json`. The standalone
+`scripts/repair-video-vae-config.sh` embeds this same configuration and the
+complete original model LICENSE and NOTICE for offline repair of an existing
+installation. These embedded materials retain their model license.
+
 The complete MiniMax H3 Community License Agreement, required NOTICE and
 the encoder's Apache-2.0 license are retained in
 `licenses/video-generation/MiniMax-H3/`. This community license excludes the
