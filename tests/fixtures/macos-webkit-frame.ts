@@ -57,6 +57,45 @@ export async function sampleTransitionAfterSeek(runAttempt: (attempt: SeekSampli
     }
   }
 }
+type ChromaSamplingMedia = Readonly<{ source: string; currentTime: number; paused: boolean; seeking: boolean; readyState: number; width: number; error?: string | null }>
+type ChromaSamplingLayers = Readonly<{ source?: ChromaSamplingMedia; watermark?: ChromaSamplingMedia }>
+// Let an observed, already-running drift correction settle for at most one
+// second while real playback continues. This samples recovered composition;
+// it does not certify uninterrupted frame delivery during that recorded wait.
+export function createChromaMotionSamplingGate(report: (event: Record<string, unknown>) => void) {
+  let started: number | undefined
+  const timeoutMilliseconds = 1000, maximumDrift = .4
+  return (label: string, time: number, now: number, layers: ChromaSamplingLayers, renderMilliseconds = 0): boolean => {
+    if (label !== 'chroma-watermark-motion') return true
+    const media = (['source', 'watermark'] as const).map(role => ({ role, ...layers[role], drift: layers[role] ? Math.abs(layers[role]!.currentTime - time) : null }))
+    const record = (status: string, error?: string) => report({ label, status, time, media, renderMilliseconds,
+      timeoutMilliseconds, ...(started !== undefined ? { started, deadline: started + timeoutMilliseconds, elapsedMilliseconds: now - started } : {}), ...(error ? { error } : {}) })
+    const fail = (message: string, status = 'failed'): never => { record(status, message); throw new Error(`${label}: ${message}`) }
+    if (!Number.isFinite(time) || !Number.isFinite(now)) fail('Invalid live playback clock')
+    for (const layer of media) {
+      if (!layer.source || !Number.isFinite(layer.currentTime) || !layer.width) fail(`${layer.role} decoder is unavailable`)
+      if (layer.error) fail(`${layer.role} decoder failed: ${layer.error}`)
+      if (layer.paused) fail(`${layer.role} playback paused`)
+      if (!layer.seeking && (layer.readyState! < 2 || layer.drift! >= maximumDrift)) fail(`${layer.role} is not synchronized outside an active seek`)
+    }
+    if (started !== undefined && now - started >= timeoutMilliseconds) fail('Active seek did not recover within the fixed 1000ms deadline', 'timeout')
+    if (started === undefined) {
+      if (!media.some(layer => layer.seeking && layer.drift! >= maximumDrift)) {
+        // The original sample is already within its drift bound. Do not create
+        // a recovery allowance for ordinary playback or small in-flight seeks.
+        if (media.some(layer => layer.readyState! < 2)) fail('No decoded frame is available for sampling')
+        return true
+      }
+      started = now
+      record('entered')
+    }
+    if (media.every(layer => !layer.seeking && layer.readyState! >= 2 && layer.drift! < maximumDrift)) {
+      record('recovered')
+      return true
+    }
+    return false
+  }
+}
 function bounded<T>(promise: Promise<T>, milliseconds: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error(`${label} timed out`)), milliseconds)
@@ -174,6 +213,7 @@ async function verifyRealtimeComposition() {
     preview.seek(target, true)
   }
   const samples: { label: string; time: number; sourceTime: number; motionHash: number; watermarkTime?: number; watermarkHash?: number }[] = []
+  let renderMilliseconds = 0
   type SampleExpectation = Readonly<{ filteredSource: boolean; keyedWatermark: boolean }>
   const basicExpectation: SampleExpectation = Object.freeze({ filteredSource: false, keyedWatermark: false })
   let canvasReadbackAllowed = true
@@ -266,7 +306,7 @@ async function verifyRealtimeComposition() {
     }
     const active = media.find(video => video.source.includes('/source.mp4') && !video.paused && video.readyState >= 2 && video.width > 0)
     const activeWatermark = media.find(video => video.source.includes('/loading-dots.mp4') && !video.paused && video.readyState >= 2 && video.width > 0)
-    emit('realtime-sample', { label, time, pixelReadback: canvasReadbackAllowed ? 'canvas' : 'WKWebView.takeSnapshot', readbackMilliseconds, videoPixel, expectedVideo: underlying, textPixel, expectedText, imagePixel, expectedImage, glyphPixels, motionHash, filteredSource, keyedWatermark, filterDecodeReference, greenPixels, darkForegroundPixels, colorfulForegroundPixels, watermarkHash, media })
+    emit('realtime-sample', { label, time, renderMilliseconds, pixelReadback: canvasReadbackAllowed ? 'canvas' : 'WKWebView.takeSnapshot', readbackMilliseconds, videoPixel, expectedVideo: underlying, textPixel, expectedText, imagePixel, expectedImage, glyphPixels, motionHash, filteredSource, keyedWatermark, filterDecodeReference, greenPixels, darkForegroundPixels, colorfulForegroundPixels, watermarkHash, media })
     assert(errors.length === 0, `Realtime renderer reported errors: ${errors.join('; ')}`)
     near(videoPixel, underlying, `${label}: video and transition`)
     near(textPixel, expectedText, `${label}: moving text background and opacity`)
@@ -285,6 +325,13 @@ async function verifyRealtimeComposition() {
   const captureBasic = (label: string, time: number) => sample(label, time, basicExpectation)
   const playThrough = (start: number, checkpoints: { label: string; time: number; maxLateness?: number }[], capture = captureBasic) => {
     const generation = ++segmentGeneration
+    const canSampleChromaMotion = createChromaMotionSamplingGate(event => emit('realtime-chroma-seek-recovery', event))
+    const currentLayer = (path: string): ChromaSamplingMedia | undefined => {
+      const candidates = videos.filter(video => video.getAttribute('src') && (video.currentSrc || video.src).includes(path))
+      const video = candidates.find(candidate => !candidate.paused) || candidates[0]
+      return video ? { source: video.currentSrc || video.src, currentTime: video.currentTime, paused: video.paused, seeking: video.seeking,
+        readyState: video.readyState, width: video.videoWidth, error: video.error ? `${video.error.code}: ${video.error.message}` : null } : undefined
+    }
     return bounded(new Promise<void>((resolve, reject) => {
       const started = performance.now()
       let index = 0
@@ -293,7 +340,9 @@ async function verifyRealtimeComposition() {
           if (generation !== segmentGeneration) return
           abort.signal.throwIfAborted()
           const time = start + (performance.now() - started) / 1000
+          const renderStarted = performance.now()
           preview.render(time, true)
+          renderMilliseconds = performance.now() - renderStarted
           if (pendingSeek) {
             const seek = pendingSeek
             const recovered = videos.find(video => (video.currentSrc || video.src).includes('/source.mp4') && !video.paused && !video.seeking && video.readyState >= 2 && Math.abs(video.currentTime - time) < .4)
@@ -322,12 +371,17 @@ async function verifyRealtimeComposition() {
           }
           const checkpoint = checkpoints[index]!
           if (time >= checkpoint.time && !pendingSeek) {
-            emit('realtime-checkpoint-timing', { label: checkpoint.label, requestedTime: checkpoint.time, time, delayMilliseconds: (time - checkpoint.time) * 1000 })
-            if (checkpoint.maxLateness !== undefined) assertRealtimeSamplingWindow(checkpoint.label, checkpoint.time, time, checkpoint.maxLateness)
-            await capture(checkpoint.label, time)
-            if (generation !== segmentGeneration) return
-            abort.signal.throwIfAborted()
-            index++
+            if (checkpoint.label === 'chroma-watermark-motion') assert(errors.length === 0, `Realtime renderer reported errors: ${errors.join('; ')}`)
+            const ready = canSampleChromaMotion(checkpoint.label, time, performance.now(),
+              checkpoint.label === 'chroma-watermark-motion' ? { source: currentLayer('/source.mp4'), watermark: currentLayer('/loading-dots.mp4') } : {}, renderMilliseconds)
+            if (ready) {
+              emit('realtime-checkpoint-timing', { label: checkpoint.label, requestedTime: checkpoint.time, time, renderMilliseconds, delayMilliseconds: (time - checkpoint.time) * 1000 })
+              if (checkpoint.maxLateness !== undefined) assertRealtimeSamplingWindow(checkpoint.label, checkpoint.time, time, checkpoint.maxLateness)
+              await capture(checkpoint.label, time)
+              if (generation !== segmentGeneration) return
+              abort.signal.throwIfAborted()
+              index++
+            }
           }
           if (index === checkpoints.length) resolve()
           else frame = requestAnimationFrame(tick)
