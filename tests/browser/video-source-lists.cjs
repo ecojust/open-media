@@ -136,7 +136,7 @@ async function main() {
         // Both opening gestures must survive a scroll queued while revealing the source.
         for (const gesture of ['keyboard', 'mouse']) {
           const previousHeight = await keyboardRow.evaluate((element, gesture) => {
-            const list = element.closest('.gif-source-list'), previous = list.style.maxHeight
+            const list = element.closest('.tool-workspace-library'), previous = list.style.maxHeight
             list.style.maxHeight = '150px'; list.scrollTop = list.scrollHeight
             element.focus()
             if (gesture === 'keyboard') element.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }))
@@ -149,7 +149,7 @@ async function main() {
           await expect(menu).toBeVisible()
           await expect.poll(() => menu.evaluate(element => element.contains(document.activeElement))).toBe(true)
           await page.keyboard.press('Escape'); await expect(keyboardRow).toBeFocused()
-          await keyboardRow.evaluate((element, height) => { element.closest('.gif-source-list').style.maxHeight = height }, previousHeight)
+          await keyboardRow.evaluate((element, height) => { element.closest('.tool-workspace-library').style.maxHeight = height }, previousHeight)
         }
       }
       await keyboardRow.focus(); await page.keyboard.press('Shift+F10')
@@ -310,7 +310,7 @@ async function main() {
         assert.equal(await page.evaluate(() => window.listHarness.calls.some(call => ['list_stored_videos', 'open_media_library_directory'].includes(call.command))), false, '网页不扫描本机目录')
       }
       await page.evaluate(() => { for (let index = 0; index < 25; index++) window.listHarness.append(`extra-${index}`, '2028-01-01T00:00:00Z') })
-      const list = mode === 'gif' ? page.getByTestId('gif-source-list') : page.getByLabel('待转换素材')
+      const list = page.locator('.tool-workspace-library')
       assert(await list.evaluate(element => element.scrollHeight > element.clientHeight), 'many videos must scroll rather than compressing the rows')
       assert((await rows.first().boundingBox()).height >= (mode === 'gif' ? 76 : 65))
       const previewBounds = await preview.boundingBox(), listBounds = await list.boundingBox()

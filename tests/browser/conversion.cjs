@@ -217,6 +217,7 @@ async function main() {
     assert.equal(await page.locator('.source-selection').innerText(), '已选 2 项', 'later asset updates must preserve manual selection instead of reapplying a consumed focus request')
     console.log('PASS screenshot focus waits for import, selects only the screenshot, previews its edited pixels and preserves subsequent manual selection')
 
+    await expect(page.getByTestId('image-preview-caption')).not.toContainText('正在更新编辑预览')
     await page.evaluate(() => {
       const original = HTMLCanvasElement.prototype.toBlob
       HTMLCanvasElement.prototype.toBlob = function (callback, ...args) {
@@ -226,6 +227,7 @@ async function main() {
     })
     await page.getByTestId('convert-start').click()
     await page.waitForFunction(() => typeof window.conversionHarness.finishEncoding === 'function')
+    await expect(page.getByTestId('convert-cancel')).toBeVisible()
     await page.evaluate(() => {
       const nextScreenshot = { ...window.conversionHarness.screenshot, id: 'next-screenshot', name: '下一张截屏.png' }
       window.conversionHarness.focusAssetId.value = nextScreenshot.id
