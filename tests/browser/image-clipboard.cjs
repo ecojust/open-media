@@ -65,8 +65,8 @@ async function main() {
     await expect(page.getByRole('dialog')).toHaveCount(0)
     assert.equal(await crop.evaluate(element => !!element.closest('.convert-preview .preview-stage')), true, '裁剪在当前预览中编辑')
     for (const [field, value] of [['宽', 40], ['高', 40], ['X', 20], ['Y', 10]]) {
-      await crop.getByLabel(`框选${field}`, { exact: true }).fill(String(value))
-      await crop.getByLabel(`框选${field}`, { exact: true }).press('Tab')
+      await page.getByLabel(`框选${field}`, { exact: true }).fill(String(value))
+      await page.getByLabel(`框选${field}`, { exact: true }).press('Tab')
     }
     content = await copy([[5, 5], [35, 5], [5, 35], [35, 35]])
     await expect(crop).toHaveCount(0)

@@ -9,6 +9,7 @@ import VideoLibraryToolbar from './VideoLibraryToolbar.vue'
 import VideoLibraryActions from './VideoLibraryActions.vue'
 import ImageCropEditor from './ImageCropEditor.vue'
 import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
+import ImageCanvasViewport from './ImageCanvasViewport.vue'
 import type { MediaAsset } from '../core/types'
 import { videoImportedTime } from '../core/video-assets'
 import { useStoredVideos } from '../core/stored-videos'
@@ -54,11 +55,15 @@ const cropOpen = ref(false)
 const cropAsset = ref<MediaAsset>()
 const cropDraft = ref<ImageCrop>()
 const annotationsOpen = ref(false)
-const annotationsTool = ref<'text' | 'stroke'>('text')
+const annotationsTool = ref<'select' | 'text' | 'stroke'>('select')
 const annotationsAsset = ref<MediaAsset>()
 const annotationsDraft = ref<ImageAnnotation[]>([])
 const annotationsError = ref('')
 const annotationEditor = ref<InstanceType<typeof ImageAnnotationEditor>>()
+const cropEditor = ref<InstanceType<typeof ImageCropEditor>>()
+const imagePropertiesTarget = ref<HTMLElement>()
+const imageResultsTarget = ref<HTMLElement>()
+const imageSettingsTab = ref<'edit' | 'output'>('output')
 const imageEditing = computed(() => cropOpen.value || annotationsOpen.value)
 const previewOriginal = ref(false)
 const previewConverted = ref(false)
@@ -75,6 +80,10 @@ const completed = computed(() => visibleResults.value.filter(item => item.state 
 const latestImage = computed(() => [...visibleResults.value].reverse().find(item => item.sourceId === active.value?.id && item.state === 'done' && item.url))
 const previewResult = computed(() => !previewOriginal.value && previewConverted.value ? latestImage.value : undefined)
 const previewImageUrl = computed(() => previewOriginal.value ? active.value?.url : previewResult.value?.url ?? (editedPreview.value?.sourceId === active.value?.id ? editedPreview.value.url : active.value?.url))
+const previewDimensions = computed(() => {
+  const shown = previewOriginal.value ? active.value : previewResult.value ?? (editedPreview.value?.sourceId === active.value?.id ? editedPreview.value : active.value)
+  return { width: Math.max(1, shown?.width || active.value?.width || 1), height: Math.max(1, shown?.height || active.value?.height || 1) }
+})
 const currentProgress = computed(() => {
   const items = visibleResults.value.filter(item => currentBatch.has(item.id))
   return items.length ? items.reduce((sum, item) => sum + (['done', 'error', 'cancelled'].includes(item.state) ? 1 : item.progress), 0) / items.length : 0
@@ -179,8 +188,9 @@ function scheduleEditedPreview() {
     }
   }, 80)
 }
-function openAnnotations(tool: 'text' | 'stroke') {
+function openAnnotations(tool: 'select' | 'text' | 'stroke') {
   if (busy.value || active.value?.kind !== 'image') return
+  imageSettingsTab.value = 'edit'
   if (annotationsOpen.value && annotationsAsset.value?.id === active.value.id) {
     annotationsTool.value = tool
     annotationEditor.value?.activateTool(tool)
@@ -194,14 +204,17 @@ function openAnnotations(tool: 'text' | 'stroke') {
   previewOriginal.value = false
   previewConverted.value = false
   annotationsOpen.value = true
+  imageSettingsTab.value = 'edit'
 }
 function applyAnnotations(): boolean {
   const asset = annotationsAsset.value
   if (busy.value) return false
   if (!asset || !available.value.some(item => item.id === asset.id)) { annotationsOpen.value = false; return true }
   try {
+    annotationEditor.value?.flush()
     imageAnnotations[asset.id] = validateImageAnnotations(annotationsDraft.value)
     annotationsOpen.value = false
+    imageSettingsTab.value = 'output'
     previewOriginal.value = false
     previewConverted.value = false
     message.value = ''
@@ -217,16 +230,19 @@ function openCrop() {
   previewOriginal.value = false
   previewConverted.value = false
   cropOpen.value = true
+  imageSettingsTab.value = 'edit'
 }
 function applyCrop(): boolean {
   const asset = cropAsset.value
   if (busy.value) return false
   if (!asset || !available.value.some(item => item.id === asset.id)) { cropOpen.value = false; return true }
   try {
+    cropEditor.value?.flush()
     if (cropDraft.value) imageCrops[asset.id] = validateImageCrop(cropDraft.value, asset.width, asset.height)
     else delete imageCrops[asset.id]
     if (active.value?.id === asset.id) { previewOriginal.value = false; previewConverted.value = false }
     cropOpen.value = false
+    imageSettingsTab.value = 'output'
     annotationsError.value = ''
     return true
   } catch (cause) { annotationsError.value = cause instanceof Error ? cause.message : String(cause); return false }
@@ -236,7 +252,11 @@ function finishImageEdit(): boolean {
   if (annotationsOpen.value && !applyAnnotations()) return false
   return true
 }
-function cancelImageEdit(): void { cropOpen.value = false; annotationsOpen.value = false; annotationsError.value = '' }
+function cancelImageEdit(): void { cropOpen.value = false; annotationsOpen.value = false; annotationsError.value = ''; imageSettingsTab.value = 'output' }
+function selectImageSettings(tab: 'edit' | 'output'): void {
+  if (tab === 'output') { if (finishImageEdit()) imageSettingsTab.value = tab }
+  else { imageSettingsTab.value = tab; if (!imageEditing.value) openAnnotations('select') }
+}
 async function switchImagePreview(target: 'original' | 'result'): Promise<void> {
   const assetId = active.value?.id
   const show = !(target === 'original' ? previewOriginal.value : previewConverted.value)
@@ -463,40 +483,36 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
           <button class="source-details" :title="asset.name" :disabled="busy" @click="selectSource(asset.id)" @keydown.shift.f10="mode === 'video' && assetMenu?.open($event, asset)" @keydown.context-menu="mode === 'video' && assetMenu?.open($event, asset)"><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : duration(asset.duration) }} · {{ fileSize(asset.size) }}</small><time v-if="mode === 'video'" class="source-imported-time" :datetime="asset.addedAt" :title="`视频时间：${videoImportedTime(asset)}`">{{ videoImportedTime(asset) }}</time><small v-if="imageCrops[asset.id]" class="source-cropped">已框选 {{ imageCrops[asset.id]!.width }} × {{ imageCrops[asset.id]!.height }}</small></button>
         </div>
         <p v-if="available.length" class="source-selection">已选 {{ selected.length }} 项</p>
+        <div v-if="mode === 'image'" ref="imageResultsTarget" class="image-library-results" />
       </aside>
     </template>
     <template #default>
       <main class="convert-preview">
         <div class="preview-heading"><span>{{ mode === 'image' ? '图片预览' : '原始媒体' }}</span><span v-if="active">{{ active.name }}</span></div>
-        <div v-if="mode === 'image' && active" class="image-preview-tools">
-          <button :disabled="busy" :aria-pressed="cropOpen" data-testid="image-crop-open" @click="openCrop"><Icon name="crop" :size="14" />框选裁剪</button>
-          <button :disabled="busy" data-testid="image-add-text" @click="openAnnotations('text')"><Icon name="text" :size="14" />插入文字</button>
-          <button :disabled="busy" data-testid="image-add-stroke" @click="openAnnotations('stroke')"><Icon name="pen" :size="14" />自定义笔触</button>
-          <button :disabled="busy || copyingImage || (image.format === 'ico' && !iconSizes.length)" :aria-busy="copyingImage" title="复制当前图片，包含文字、笔触、裁剪与方向设置" data-testid="image-copy" @click="copyCurrentImage"><Icon :name="copyingImage ? 'clock' : 'copy'" :size="14" />复制图片</button>
-          <button v-if="activeCrop" :disabled="busy" data-testid="image-crop-clear" @click="clearCrop">清除裁剪</button>
-          <span v-if="copyMessage" class="image-copy-feedback" :class="{ 'copy-error': copyFailed }" role="status" data-testid="image-copy-status">{{ copyMessage }}</span>
-          <button class="preview-switch" :aria-pressed="previewOriginal" data-testid="image-preview-original" @click="switchImagePreview('original')">{{ previewOriginal ? '返回编辑预览' : '查看原图' }}</button>
-          <button v-if="latestImage" :aria-pressed="previewConverted" data-testid="image-preview-result" @click="switchImagePreview('result')">{{ previewConverted ? '返回编辑预览' : '查看导出结果' }}</button>
+        <div v-if="mode === 'image' && active" class="image-preview-tools" role="toolbar" aria-label="图片画布工具">
+          <div class="image-tool-group"><span>操作</span><div><button :disabled="busy" :aria-pressed="annotationsOpen && annotationsTool === 'select'" title="选择和移动标注" data-testid="image-select-tool" @click="openAnnotations('select')"><Icon name="move" :size="16" />选择</button><button :disabled="busy || !annotationsOpen || !annotationEditor?.canUndo" aria-label="撤销图片编辑" data-testid="image-annotation-undo" @click="annotationEditor?.undo()"><Icon name="undo" :size="16" /></button><button :disabled="busy || !annotationsOpen || !annotationEditor?.canRedo" aria-label="重做图片编辑" data-testid="image-annotation-redo" @click="annotationEditor?.redo()"><Icon name="redo" :size="16" /></button></div></div>
+          <div class="image-tool-group"><span>绘制</span><div><button :disabled="busy" :aria-pressed="annotationsOpen && annotationsTool === 'text'" data-testid="image-add-text" @click="openAnnotations('text')"><Icon name="text" :size="16" />文字</button><button :disabled="busy" :aria-pressed="annotationsOpen && annotationsTool === 'stroke'" data-testid="image-add-stroke" @click="openAnnotations('stroke')"><Icon name="pen" :size="16" />笔触</button></div></div>
+          <div class="image-tool-group"><span>图片</span><div><button :disabled="busy" :aria-pressed="cropOpen" data-testid="image-crop-open" @click="openCrop"><Icon name="crop" :size="16" />框选裁剪</button><button v-if="activeCrop" :disabled="busy" title="恢复完整图片范围" data-testid="image-crop-clear" @click="clearCrop">清除裁剪</button><button :disabled="busy" :aria-pressed="previewOriginal" data-testid="image-preview-original" @click="switchImagePreview('original')"><Icon name="eye" :size="16" />{{ previewOriginal ? '编辑预览' : '原图' }}</button></div></div>
+          <div class="image-tool-group image-tool-output"><span>输出</span><div><button :disabled="busy || copyingImage || (image.format === 'ico' && !iconSizes.length)" :aria-busy="copyingImage" title="复制当前图片，包含文字、笔触、裁剪与方向设置" data-testid="image-copy" @click="copyCurrentImage"><Icon :name="copyingImage ? 'clock' : 'copy'" :size="16" />复制图片</button><button v-if="latestImage" :disabled="busy" :aria-pressed="previewConverted" data-testid="image-preview-result" @click="switchImagePreview('result')">{{ previewConverted ? '编辑预览' : '导出结果' }}</button></div></div>
         </div>
         <div class="preview-stage" :class="{ checkerboard: mode === 'image', 'image-editing': imageEditing }">
           <section v-if="cropOpen && cropAsset" class="image-inline-editor" role="region" aria-label="框选裁剪" data-testid="image-crop-panel" @keydown.esc.stop="cancelImageEdit">
-            <ImageCropEditor :key="cropAsset.id" v-model="cropDraft" :source="cropAsset.url" :width="cropAsset.width" :height="cropAsset.height" :annotations="imageAnnotations[cropAsset.id]" />
-            <p v-if="annotationsError" class="annotation-apply-error" role="alert">{{ annotationsError }}</p>
-            <div class="image-inline-actions"><span>裁剪仅应用于当前图片</span><button @click="cancelImageEdit">取消</button><button class="primary" data-testid="image-crop-apply" @click="applyCrop">应用裁剪</button></div>
+            <ImageCropEditor ref="cropEditor" :key="cropAsset.id" v-model="cropDraft" :source="cropAsset.url" :width="cropAsset.width" :height="cropAsset.height" :annotations="imageAnnotations[cropAsset.id]" :properties-target="imagePropertiesTarget" />
           </section>
-          <section v-else-if="annotationsOpen && annotationsAsset" class="image-inline-editor" role="region" aria-label="图片标注" data-testid="image-annotations-panel" @keydown.esc.stop="cancelImageEdit">
-            <ImageAnnotationEditor ref="annotationEditor" :key="annotationsAsset.id" v-model="annotationsDraft" :source="annotationsAsset.url" :width="annotationsAsset.width" :height="annotationsAsset.height" :crop="imageCrops[annotationsAsset.id]" :initial-tool="annotationsTool" />
-            <p v-if="annotationsError" class="annotation-apply-error" role="alert">{{ annotationsError }}</p>
-            <div class="image-inline-actions"><span>文字和笔触仅应用于当前图片</span><button @click="cancelImageEdit">取消</button><button class="primary" data-testid="image-annotations-apply" @click="applyAnnotations">应用编辑</button></div>
+          <section v-else-if="annotationsOpen && annotationsAsset" class="image-inline-editor" role="region" aria-label="图片标注" data-testid="image-annotations-panel">
+            <ImageAnnotationEditor ref="annotationEditor" :key="annotationsAsset.id" v-model="annotationsDraft" :source="annotationsAsset.url" :width="annotationsAsset.width" :height="annotationsAsset.height" :crop="imageCrops[annotationsAsset.id]" :initial-tool="annotationsTool" :properties-target="imagePropertiesTarget" hide-toolbar @tool-change="annotationsTool = $event" />
           </section>
           <template v-else-if="active">
-            <img v-if="active.kind === 'image'" :src="previewImageUrl" :alt="active.name" data-testid="convert-image-preview">
+            <ImageCanvasViewport v-if="active.kind === 'image'" :key="active.id" :width="previewDimensions.width" :height="previewDimensions.height" label="图片预览画布" readonly>
+              <img :src="previewImageUrl" :alt="active.name" data-testid="convert-image-preview" draggable="false" class="image-canvas-preview" @dblclick="openAnnotations('select')">
+            </ImageCanvasViewport>
             <video v-else-if="active.kind === 'video'" :key="active.id" :src="active.url" controls playsinline preload="metadata" />
             <div v-else class="audio-preview"><Icon name="audio" :size="52" /><audio :src="active.url" controls preload="metadata" /></div>
           </template>
           <div v-else class="preview-placeholder"><Icon :name="mode === 'image' ? 'image' : 'video'" :size="52" /><p>选择素材预览</p></div>
         </div>
-        <div v-if="!imageEditing" class="preview-caption" data-testid="image-preview-caption"><template v-if="mode === 'image' && active"><span v-if="previewOriginal">原图 · {{ active.width }} × {{ active.height }}</span><span v-else-if="previewResult">导出结果 · {{ previewResult.width }} × {{ previewResult.height }} · {{ previewResult.name }}</span><span v-else-if="previewBusy" role="status">正在更新编辑预览…</span><span v-else-if="previewError" role="alert">{{ previewError }}</span><span v-else-if="editedPreview">编辑预览 · {{ editedPreview.width }} × {{ editedPreview.height }}<template v-if="activeAnnotations.length"> · {{ activeAnnotations.length }} 个标注</template></span><span v-else>原始文件始终保留</span></template><span v-else>原始文件始终保留</span></div>
+        <div class="preview-caption"><span data-testid="image-preview-caption"><template v-if="mode === 'image' && active"><span v-if="imageEditing">{{ cropOpen ? '框选裁剪' : '编辑文字与笔触' }} · {{ active.width }} × {{ active.height }} px</span><span v-else-if="previewOriginal">原图 · {{ active.width }} × {{ active.height }}</span><span v-else-if="previewResult">导出结果 · {{ previewResult.width }} × {{ previewResult.height }} · {{ previewResult.name }}</span><span v-else-if="previewBusy" role="status">正在更新编辑预览…</span><span v-else-if="previewError" role="alert">{{ previewError }}</span><span v-else-if="editedPreview">编辑预览 · {{ editedPreview.width }} × {{ editedPreview.height }}<template v-if="activeAnnotations.length"> · {{ activeAnnotations.length }} 个标注</template></span><span v-else>原始文件始终保留</span></template><span v-else>原始文件始终保留</span></span><span v-if="copyMessage" class="image-copy-feedback" :class="{ 'copy-error': copyFailed }" :title="copyMessage" role="status" data-testid="image-copy-status">{{ copyMessage }}</span></div>
+        <Teleport :to="imageResultsTarget || 'body'" :disabled="mode !== 'image' || !imageResultsTarget">
         <section class="convert-results" aria-label="转换结果">
           <div class="convert-section-title"><h2>{{ mode === 'image' ? '导出结果' : '转换队列' }} <span>{{ visibleResults.length }}</span></h2><button v-if="completed.length" data-testid="convert-download-all" @click="downloadAll"><Icon name="download" />打包下载</button></div>
           <div v-if="!visibleResults.length" class="results-empty">{{ mode === 'image' ? '编辑完成后，点击「导出图片」' : '选择格式后，点击「开始转换」' }}</div>
@@ -506,12 +522,20 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
             <button v-if="item.blob" class="result-download" :aria-label="`下载 ${item.name}`" @click="saveOutput(item.blob!, item.name)"><Icon name="download" /></button>
           </article>
         </section>
+        </Teleport>
       </main>
     </template>
     <template #settings>
       <aside class="convert-settings" aria-label="转换设置">
-        <h2>输出设置</h2>
-        <fieldset :disabled="busy" @focusin="finishImageEdit">
+        <div v-if="mode === 'image'" class="image-property-tabs" role="tablist" aria-label="图片属性面板"><button role="tab" :aria-selected="imageSettingsTab === 'edit'" :disabled="busy || !active" @click="selectImageSettings('edit')">编辑属性</button><button role="tab" :aria-selected="imageSettingsTab === 'output'" @click="selectImageSettings('output')">导出设置</button></div>
+        <section v-if="mode === 'image'" v-show="imageSettingsTab === 'edit'" class="image-context-properties" aria-label="当前工具属性">
+          <div ref="imagePropertiesTarget" class="image-properties-target" />
+          <p v-if="!imageEditing" class="setting-help">选择图片中的文字、笔触，或使用上方工具开始编辑。</p>
+          <p v-if="annotationsError" class="annotation-apply-error" role="alert">{{ annotationsError }}</p>
+          <div v-if="imageEditing" class="image-inline-actions"><button data-testid="image-edit-cancel" @click="cancelImageEdit">取消</button><button v-if="cropOpen" class="primary" data-testid="image-crop-apply" @click="applyCrop">应用裁剪</button><button v-else class="primary" data-testid="image-annotations-apply" @click="applyAnnotations">应用编辑</button></div>
+        </section>
+        <h2 v-show="mode !== 'image' || imageSettingsTab === 'output'">输出设置</h2>
+        <fieldset v-show="mode !== 'image' || imageSettingsTab === 'output'" :disabled="busy" @focusin="finishImageEdit">
           <template v-if="mode === 'image'">
             <label>输出格式<select v-model="image.format" data-testid="convert-format"><option v-for="format in supportedFormats" :key="format.value" :value="format.value">{{ format.label }}</option></select></label>
             <p class="setting-help">{{ formatDetails.description }}</p>
@@ -593,4 +617,26 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
 @media(max-width:1100px){.convert-preview{padding:16px 14px}.convert-sources{padding:16px 6px}.convert-source{gap:6px;padding:8px 4px}.convert-source>img,.source-icon{width:30px;height:30px}.convert-settings{padding:18px 14px}}
 @media(max-width:800px){.convert-sources{grid-column:1 / -1;display:flex;align-items:center;gap:8px;overflow:auto;border-right:0;border-bottom:1px solid var(--ui-line,#2a2d3a);padding:10px;max-height:96px}.convert-sources .convert-section-title{flex-shrink:0;margin:0 5px}.convert-source{width:180px;flex-shrink:0;margin:0}.source-selection{display:none}.convert-empty{margin:0;flex-direction:row;gap:12px}.convert-empty>svg{display:none}.convert-preview,.convert-settings{overflow:visible}}
 @media(max-width:560px){.convert-sources{flex-shrink:0;min-height:62px}.convert-preview{overflow:visible;flex-shrink:0}.convert-settings{overflow:visible;border-left:0;border-top:1px solid var(--ui-line,#2a2d3a)}.preview-stage{height:220px;min-height:180px}.convert-settings fieldset{display:grid;grid-template-columns:1fr 1fr;gap:16px}.convert-settings fieldset>.settings-pair,.convert-settings fieldset>.settings-divider,.convert-settings fieldset>.setting-help,.convert-settings fieldset>h3,.convert-settings fieldset>.runtime-select,.convert-settings fieldset>.icon-options{grid-column:1 / -1}.convert-actions{position:static}.convert-preview .convert-results{max-height:340px;overflow:auto}}
+</style>
+
+<style scoped>
+/* Image workspaces reserve the center for navigation and direct editing. */
+.image-convert-workspace .convert-sources{min-width:0;min-height:0;padding:14px 9px;background:var(--ui-surface);overflow:auto;overscroll-behavior:contain}
+.image-convert-workspace .convert-section-title{gap:5px;margin:0 0 12px}.image-convert-workspace .convert-source{min-height:64px;gap:7px;padding:8px 4px;flex-shrink:0}.image-convert-workspace .convert-source>img{width:30px;height:34px}.image-convert-workspace .source-details small{font-size:9px;line-height:1.6}.image-convert-workspace .source-selection{padding:8px 3px;margin:0}
+.image-convert-workspace .convert-preview{min-height:0;min-width:0;padding:0;gap:0;overflow:hidden;background:var(--ui-bg)}
+.image-convert-workspace .preview-heading{height:33px;min-height:33px;flex:none;align-items:center;padding:0 14px;border-bottom:1px solid var(--ui-line);background:var(--ui-surface);font-size:10px}
+.image-convert-workspace .image-preview-tools{flex:none;min-height:64px;gap:10px;padding:7px 12px;flex-wrap:nowrap;overflow-x:auto;align-items:stretch;border-bottom:1px solid var(--ui-line);background:var(--ui-surface);overscroll-behavior:contain}
+.image-tool-group{display:flex;flex:none;flex-direction:column;gap:5px;padding-right:10px;border-right:1px solid var(--ui-line)}.image-tool-group>span{font-size:9px;line-height:12px;color:var(--ui-muted)}.image-tool-group>div{display:flex;gap:3px;align-items:center}.image-tool-group:last-child{border:0;padding-right:0}.image-tool-output{margin-left:auto}
+.image-convert-workspace .image-preview-tools button{height:30px;min-height:30px;white-space:nowrap;padding:0 7px;border-color:transparent;background:transparent;font-size:11px}.image-convert-workspace .image-preview-tools button[aria-pressed=true]{background:var(--ui-accent-soft);color:var(--ui-accent);border-color:var(--ui-accent-soft)}.image-convert-workspace .image-preview-tools button:hover:not(:disabled){background:var(--ui-hover)}
+.image-convert-workspace .preview-stage,.image-convert-workspace .preview-stage.image-editing{display:flex;flex:1;min-height:280px;height:auto;border:0;border-radius:0;overflow:hidden;position:relative;background:var(--ui-bg)}
+.image-convert-workspace .image-inline-editor{display:flex;flex:1;min-height:0;height:100%;width:100%;overflow:hidden}.image-canvas-preview{display:block;position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;object-fit:contain;user-select:none;-webkit-user-drag:none}
+.image-convert-workspace .preview-caption{flex:none;height:28px;min-height:28px;margin:0;display:flex;align-items:center;padding:0 12px;border-top:1px solid var(--ui-line);text-align:left;background:var(--ui-surface);font-size:10px;color:var(--ui-muted)}
+.image-convert-workspace .preview-caption>[data-testid=image-preview-caption]{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.image-convert-workspace .image-copy-feedback{flex:0 1 auto;max-width:65%;margin-left:auto;padding-left:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:10px}
+.image-convert-workspace .convert-settings{min-height:0;padding:0;overflow-y:auto;border-left:1px solid var(--ui-line);background:var(--ui-surface);overscroll-behavior:contain}
+.image-property-tabs{position:sticky;top:0;display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:9px 10px;z-index:3;background:var(--ui-surface);border-bottom:1px solid var(--ui-line)}.image-property-tabs button{height:32px;padding:0 7px;font-size:11px;border-color:transparent;background:transparent}.image-property-tabs button[aria-selected=true]{background:var(--ui-accent-soft);color:var(--ui-accent)}
+.image-convert-workspace .convert-settings>h2{margin:16px 14px}.image-convert-workspace .convert-settings>fieldset{display:flex;flex-direction:column;padding:0 14px;gap:15px}.image-convert-workspace .convert-actions{padding:14px;margin:0;border-top:1px solid var(--ui-line)}.image-context-properties{padding:0;min-width:0}.image-context-properties>.setting-help{padding:14px;margin:0}.image-properties-target{min-width:0}
+.image-convert-workspace .image-inline-actions{position:static;justify-content:flex-end;margin:0;padding:12px 14px;border-radius:0}.image-convert-workspace .annotation-apply-error{margin:10px 14px;font-size:11px}
+.image-library-results{margin-top:12px}.image-library-results .convert-results{max-height:none;overflow:visible;margin:0;padding-top:13px}.image-library-results .convert-result{gap:5px;flex-wrap:wrap;padding:9px 0}.image-library-results .convert-result>svg{width:14px;height:14px}.image-library-results .convert-section-title{align-items:flex-start;flex-wrap:wrap}.image-library-results .convert-section-title button{font-size:10px;padding:3px;gap:3px}.image-library-results .result-description{flex:1 1 100px}.image-library-results .result-description strong{font-size:10px}.image-library-results .results-empty{font-size:10px;line-height:1.7;padding:8px 0}.image-library-results .result-download{padding:4px}
+@media(max-width:850px){.image-convert-workspace .convert-sources{grid-column:1/-1;display:flex;align-items:center;gap:9px;padding:9px;max-height:none;border-bottom:1px solid var(--ui-line);border-right:0;overflow:auto}.image-convert-workspace .convert-sources>.convert-section-title{flex:none;margin:0 7px}.image-convert-workspace .convert-source{flex:none;width:180px;margin:0}.image-convert-workspace .source-selection{display:none}.image-convert-workspace .image-library-results{flex:0 0 230px;max-height:72px;overflow:auto;margin:0;padding-left:8px;border-left:1px solid var(--ui-line)}.image-library-results .convert-results{padding:0;border:0}.image-convert-workspace .convert-preview,.image-convert-workspace .convert-settings{overflow:auto}.image-convert-workspace .convert-preview{overflow:hidden}.image-convert-workspace .preview-stage{min-height:240px}}
+@media(max-width:620px){.image-convert-workspace .convert-sources{min-height:85px;max-height:110px;flex:none}.image-convert-workspace .convert-preview{height:540px;min-height:440px;flex:none}.image-convert-workspace .convert-settings{flex:none;max-height:none;overflow:visible;border-left:0;border-top:1px solid var(--ui-line)}.image-convert-workspace .image-preview-tools{gap:6px;padding-inline:8px}.image-convert-workspace .preview-stage,.image-convert-workspace .preview-stage.image-editing{min-height:280px}.image-property-tabs{position:static}}
 </style>
