@@ -1004,6 +1004,21 @@ fn external_editor_protocol_fixture() {
                         )?)
                         .map_err(|error| error.to_string())
                     }
+                    "mcp_save_project_archive" => {
+                        let path = args["path"].as_str();
+                        if path.is_some_and(|path| !Path::new(path).starts_with(&directory)) {
+                            return Err("fixture path outside temporary directory".into());
+                        }
+                        serde_json::to_value(crate::mcp_files::save_project_archive(
+                            &files,
+                            &store,
+                            &args["project"],
+                            args["token"].as_str(),
+                            path,
+                            args["overwrite"] == true,
+                        )?)
+                        .map_err(|error| error.to_string())
+                    }
                     "mcp_save_project_file" => {
                         let bytes: Vec<u8> = serde_json::from_value(args["bytes"].clone())
                             .map_err(|error| error.to_string())?;

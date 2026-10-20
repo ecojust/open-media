@@ -68,7 +68,7 @@ try {
   })
   await page.exposeFunction('protocolNativeInvoke', async (command, args) => {
     const id = `native-${nativeCalls.length + 1}`, base = join(directory, 'native', id)
-    const call = { id, command, held: command === 'mcp_import_media_paths' && holdImports }
+    const call = { id, command, held: command === 'mcp_import_media_paths' && holdImports, explicitPath: args?.path ?? null, tokenProvided: typeof args?.token === 'string', binaryPayload: Object.hasOwn(args ?? {}, 'bytes') }
     nativeCalls.push(call)
     if (call.held) await writeFile(`${base}.hold`, '')
     await publish(`${base}.request.json`, { command, args })
@@ -196,12 +196,24 @@ try {
   assert.equal(saved.result.path, savePath)
   const entries = unzipSync(new Uint8Array(await readFile(savePath)))
   const manifest = JSON.parse(strFromU8(entries['project.json']))
+  assert.equal(manifest.format, 'open-media-project'); assert.equal(manifest.version, 1)
+  assert.deepEqual(Object.keys(entries).sort(), ['project.json', `media/${afterImport.assets[0].id}`].sort())
   assert.equal(manifest.project.title, '原子提交验证')
   assert.equal(manifest.project.assets.length, 1)
+  assert.equal(manifest.project.assets[0].url, '')
+  assert.equal(Object.hasOwn(manifest.project.assets[0], 'nativePath'), false, 'Portable manifests never expose machine-specific source paths.')
   assert.deepEqual(Buffer.from(entries[`media/${afterImport.assets[0].id}`]), wave())
   await call('project_update', { patch: { title: '同一路径覆盖保存' } })
   await finished(await call('project_save'))
-  assert.equal(JSON.parse(strFromU8(unzipSync(new Uint8Array(await readFile(savePath)))['project.json'])).project.title, '同一路径覆盖保存')
+  const overwritten = unzipSync(new Uint8Array(await readFile(savePath)))
+  assert.equal(JSON.parse(strFromU8(overwritten['project.json'])).project.title, '同一路径覆盖保存')
+  assert.deepEqual(Buffer.from(overwritten[`media/${afterImport.assets[0].id}`]), wave(), 'Overwriting retains the real imported media bytes.')
+  const archiveSaves = nativeCalls.filter(call => call.command === 'mcp_save_project_archive')
+  assert.equal(archiveSaves.length, 2, 'Both saves use the production native streaming archive command.')
+  assert.deepEqual(archiveSaves.map(call => call.explicitPath), [savePath, null])
+  assert.deepEqual(archiveSaves.map(call => call.tokenProvided), [false, true], 'The second save overwrites through the registered target token.')
+  assert(archiveSaves.every(call => !call.binaryPayload), 'Media bytes never pass through the browser IPC archive payload.')
+  assert.equal(nativeCalls.filter(call => call.command === 'mcp_save_project_file').length, 0)
 
   const beforeExpired = await inspect()
   pausedTool = 'open_media_project_update'
@@ -212,7 +224,7 @@ try {
   assert.equal((await inspect()).revision, beforeExpired.revision)
   assert.deepEqual(browserErrors, [])
   if (bridgeError) throw bridgeError
-  evidence = { status: 'passed', client: '@modelcontextprotocol/sdk@1.32.1', transport: 'real native TCP Streamable HTTP', editor: 'production createMcpAutomation in Chromium', native: 'production media import/probe and project save', checks: ['execution metadata', 'asynchronous job/poll/cancel/result contract', 'single atomic batch commit and undo/redo', 'failed batch rollback', 'dry run', 'export validation final structured result', 'queryable blocking job error', 'cancelled import rejects late commit', 'real WAV import and archive bytes', 'overwrite saved target', 'expired request cannot claim or edit'], fixtureBoundary: 'JSON files replace desktop IPC delivery; explicit native completion barrier controls race timing only', completedClaims: claims.filter(claim => claim.claimed).length }
+  evidence = { status: 'passed', client: '@modelcontextprotocol/sdk@1.32.1', transport: 'real native TCP Streamable HTTP', editor: 'production createMcpAutomation in Chromium', native: 'production media import/probe and project save', checks: ['execution metadata', 'asynchronous job/poll/cancel/result contract', 'single atomic batch commit and undo/redo', 'failed batch rollback', 'dry run', 'export validation final structured result', 'queryable blocking job error', 'cancelled import rejects late commit', 'real WAV import and native streaming archive bytes', 'overwrite saved target using its registered token', 'expired request cannot claim or edit'], fixtureBoundary: 'JSON files replace desktop IPC delivery; explicit native completion barrier controls race timing only', completedClaims: claims.filter(claim => claim.claimed).length }
 } finally {
   pausedTool = undefined; bridgeRunning = false
   await bridge

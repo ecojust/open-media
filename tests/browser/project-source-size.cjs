@@ -239,11 +239,13 @@ async function main() {
       const { page, close } = await fixture(browser, url, true)
       await page.getByTestId('nav-record').click()
       await page.evaluate(({ bytes, size }) => {
-        const component = document.querySelector('.recorder-workspace').__vueParentComponent
+        let component = document.querySelector('.recorder-workspace').__vueParentComponent
+        while (component && component.type.__name !== 'RecorderWorkspace') component = component.parent
+        if (!component) throw new Error('录屏组件未挂载。')
         component.emit('asset', { id: 'recorded-source', name: 'recorded.webm', kind: 'video', width: 180, height: 320, duration: .8, size, mime: 'video/webm', url: `data:video/webm;base64,${bytes}` })
       }, { bytes: fs.readFileSync(portrait).toString('base64'), size: fs.statSync(portrait).size })
       await expect.poll(() => dimensions(page)).toEqual([180, 320, false])
-      await page.evaluate(() => document.querySelector('.recorder-workspace').__vueParentComponent.emit('add-to-timeline', 'recorded-source'))
+      await page.getByTitle('将 recorded.webm 添加到时间线', { exact: true }).click()
       await expect(page.getByTestId('video-editor')).toBeVisible()
       await expect(page.locator('.preview-heading')).toContainText('180 × 320')
       await expect(page.locator('.timeline-clip')).toHaveCount(1)
