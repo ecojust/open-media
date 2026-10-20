@@ -97,9 +97,9 @@ impl ProjectFiles {
             let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
             staged.write_all(bytes).map_err(|e| e.to_string())?;
             staged.as_file().sync_all().map_err(|e| e.to_string())?;
-            staged.persist_noclobber(&path).map_err(|e| {
-                format!("无法保存项目（默认不覆盖已有文件）：{}", e.error)
-            })?;
+            staged
+                .persist_noclobber(&path)
+                .map_err(|e| format!("无法保存项目（默认不覆盖已有文件）：{}", e.error))?;
         }
         self.register(&mut targets, token.clone(), path.clone())?;
         Ok(target(&path, token))
@@ -114,6 +114,53 @@ impl ProjectFiles {
         }
         write_atomic(path, bytes)?;
         Ok(target(path, token.into()))
+    }
+
+    /// Stream an already validated project into a same-directory staging file.
+    /// Unlike the legacy byte API, this never holds the archive in memory.
+    pub fn save_selected_with_writer(
+        &self,
+        path: PathBuf,
+        overwrite: bool,
+        write: impl FnOnce(&mut File) -> Result<()>,
+    ) -> Result<ProjectTarget> {
+        validate_target_path(&path)?;
+        let mut targets = self.targets.lock().map_err(|_| "项目保存状态不可用。")?;
+        let token = selected_token(&targets, &path)?;
+        replace_file_with_writer(&path, overwrite, write)?;
+        self.register(&mut targets, token.clone(), path.clone())?;
+        Ok(target(&path, token))
+    }
+
+    pub fn save_registered_with_writer(
+        &self,
+        token: &str,
+        write: impl FnOnce(&mut File) -> Result<()>,
+    ) -> Result<ProjectTarget> {
+        let targets = self.targets.lock().map_err(|_| "项目保存状态不可用。")?;
+        let path = targets.get(token).ok_or(INVALID_TARGET)?;
+        if !path.is_file() {
+            return Err(INVALID_TARGET.into());
+        }
+        replace_file_with_writer(path, true, write)?;
+        Ok(target(path, token.into()))
+    }
+
+    /// Register a user-selected archive after the streaming reader has verified it.
+    pub fn register_opened(&self, path: PathBuf) -> Result<ProjectTarget> {
+        validate_target_path(&path)?;
+        let file = File::open(&path).map_err(|error| error.to_string())?;
+        if !file
+            .metadata()
+            .map_err(|error| error.to_string())?
+            .is_file()
+        {
+            return Err("请选择本机项目文件。".into());
+        }
+        let mut targets = self.targets.lock().map_err(|_| "项目保存状态不可用。")?;
+        let token = selected_token(&targets, &path)?;
+        self.register(&mut targets, token.clone(), path.clone())?;
+        Ok(target(&path, token))
     }
 
     pub fn open_selected(&self, path: PathBuf) -> Result<ProjectFile> {
@@ -278,11 +325,34 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn replace_file(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) -> Result<()> {
+    replace_file_with_writer(path, true, |file| {
+        write(file).map_err(|error| error.to_string())
+    })
+}
+
+fn replace_file_with_writer(
+    path: &Path,
+    overwrite: bool,
+    write: impl FnOnce(&mut File) -> Result<()>,
+) -> Result<()> {
+    if !overwrite {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => return Err("无法保存项目（默认不覆盖已有文件）：文件已存在。".into()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("无法检查项目保存位置：{error}")),
+        }
+    }
     let parent = path.parent().ok_or("保存目录无效。")?;
     let mut staged = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    write(staged.as_file_mut()).map_err(|e| e.to_string())?;
+    write(staged.as_file_mut())?;
     staged.as_file().sync_all().map_err(|e| e.to_string())?;
-    staged.persist(path).map_err(|e| e.error.to_string())?;
+    if overwrite {
+        staged.persist(path).map_err(|e| e.error.to_string())?;
+    } else {
+        staged
+            .persist_noclobber(path)
+            .map_err(|e| format!("无法保存项目（默认不覆盖已有文件）：{}", e.error))?;
+    }
     Ok(())
 }
 
@@ -611,5 +681,67 @@ mod tests {
         assert!(require_main_window("").is_err());
         assert!(validate_project_size(MAX_PROJECT_BYTES).is_ok());
         assert!(validate_project_size(MAX_PROJECT_BYTES + 1).is_err());
+    }
+
+    #[test]
+    fn streamed_writes_keep_token_authorization_and_failed_replacements_are_atomic() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("streamed.omedia");
+        let registry = ProjectFiles::default();
+        let saved = registry
+            .save_selected_with_writer(path.clone(), false, |file| {
+                file.write_all(b"complete project")
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        let failed = registry.save_registered_with_writer(&saved.token, |file| {
+            file.write_all(b"incomplete replacement")
+                .map_err(|error| error.to_string())?;
+            Err("simulated full disk".into())
+        });
+        assert!(failed.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"complete project");
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        assert!(registry
+            .save_registered_with_writer(&saved.path, |_| Ok(()))
+            .is_err());
+        assert!(registry
+            .save_selected_with_writer(path.clone(), false, |file| {
+                file.write_all(b"must not replace")
+                    .map_err(|error| error.to_string())
+            })
+            .is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"complete project");
+        let updated = registry
+            .save_registered_with_writer(&saved.token, |file| {
+                file.write_all(b"updated project")
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        assert_eq!(updated, saved);
+        assert_eq!(fs::read(&path).unwrap(), b"updated project");
+    }
+
+    #[test]
+    fn streamed_target_registration_does_not_read_or_reject_files_over_one_gib() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.omedia");
+        let file = File::create(&path).unwrap();
+        file.set_len(MAX_PROJECT_BYTES + 1).unwrap();
+        drop(file);
+        let registry = ProjectFiles::default();
+        let target = registry.register_opened(path.clone()).unwrap();
+        assert_eq!(target.path, path.to_string_lossy());
+        assert!(
+            registry.open_selected(path.clone()).is_err(),
+            "legacy in-memory API remains bounded"
+        );
+        registry
+            .save_registered_with_writer(&target.token, |file| {
+                file.set_len(MAX_PROJECT_BYTES + 2)
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        assert_eq!(fs::metadata(path).unwrap().len(), MAX_PROJECT_BYTES + 2);
     }
 }
