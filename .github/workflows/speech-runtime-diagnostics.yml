@@ -1,15 +1,13 @@
-name: Speech runtime diagnostics
+name: Existing desktop proof diagnostics
 
 on:
   workflow_dispatch:
     inputs:
       job_id:
-        description: Completed runtime job whose logs should be inspected
+        description: Completed desktop job whose existing proof should be inspected
         type: string
-        default: '117464202971'
+        default: '118424367063'
         required: true
-  push:
-    branches: ['work/speech-runtime-diagnostics-*']
 
 permissions:
   contents: read
@@ -21,116 +19,74 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
-      TARGET_JOB_ID: ${{ inputs.job_id || '117464202971' }}
+      TARGET_JOB_ID: ${{ inputs.job_id }}
       PYTHONUTF8: '1'
     steps:
-      - name: Read the existing job log without rerunning speech generation
+      - name: Identify preserved proof from the selected job
         id: source
         shell: bash
         run: |
           python3 - <<'PY'
-          import json, os, re, urllib.error, urllib.parse, urllib.request
-          from pathlib import Path
+          import json, os, re, urllib.request
           job = os.environ['TARGET_JOB_ID']
           if not re.fullmatch(r'[1-9][0-9]{0,19}', job):
               raise ValueError('Expected a numeric job identifier')
           repository = os.environ['GITHUB_REPOSITORY']
-          api_headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
-                         'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
-          class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, req, fp, code, msg, headers, newurl):
-                  return None
-          def redact(value):
-              value = value.replace(os.environ['GH_TOKEN'], '[redacted]')
-              return re.sub(r'(https?://[^\s?]+)\?[^\s]+', r'\1?[redacted]', value)
-          try:
-              metadata_request = urllib.request.Request(
-                  f'https://api.github.com/repos/{repository}/actions/jobs/{job}', headers=api_headers)
-              with urllib.request.urlopen(metadata_request, timeout=60) as metadata_response:
-                  metadata = json.load(metadata_response)
-              target_platform = next((p for p in ('windows-x64', 'macos-x64', 'macos-arm64') if p in metadata['name']), None)
-              if target_platform and metadata.get('status') == 'completed':
-                  with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as outputs:
-                      outputs.write(f"run_id={int(metadata['run_id'])}\n")
-                      outputs.write(f"artifact_name=speech-runtime-evidence-{target_platform}-{int(metadata['run_id'])}\n")
-              request = urllib.request.Request(
-                  f'https://api.github.com/repos/{repository}/actions/jobs/{job}/logs',
-                  headers=api_headers)
-              try:
-                  with urllib.request.build_opener(NoRedirect).open(request, timeout=60) as response:
-                      data = response.read()
-              except urllib.error.HTTPError as response:
-                  if response.code not in (301, 302, 303, 307, 308):
-                      raise RuntimeError(f'GitHub job logs API HTTP {response.code}: ' + response.read().decode('utf-8', errors='replace'))
-                  location = response.headers.get('Location', '')
-                  if urllib.parse.urlparse(location).scheme != 'https':
-                      raise ValueError('Expected an HTTPS log download location')
-                  # New request deliberately has no GitHub Authorization header.
-                  with urllib.request.urlopen(location, timeout=120) as download:
-                      data = download.read()
-          except Exception as error:
-              detail = redact(str(error)).replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-              print(f'::error title=Log retrieval failure::{detail}')
-              raise SystemExit(1)
-          text = data.decode('utf-8', errors='replace')
-          output = Path('runtime-diagnostics')
-          output.mkdir()
-          (output / f'job-{job}.log').write_text(text, encoding='utf-8')
-          lines = text.splitlines()
-          progress = [line[:800] for line in lines if any(marker in line for marker in (
-              'Downloading ', 'Download ', 'Running:', 'Still running ', 'stage=',
-              'progress=', 'sample=', '::error', '##[error]'))]
-          progress = redact('\n'.join(progress[-18:]))
-          for start in range(0, len(progress), 2500):
-              escaped = progress[start:start + 2500].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-              print(f'::warning title=Latest speech progress {job}, part {start // 2500 + 1}::{escaped}')
-          if metadata.get('status') != 'completed':
-              raise SystemExit(0)
-          indices = set()
-          for i, line in enumerate(lines):
-              if any(word in line for word in ['Traceback (most recent call last)', 'UnicodeEncodeError', 'RuntimeError:', 'ValueError:', 'Error:', 'error:', 'FAILED', 'Process completed with exit code']):
-                  indices.update(range(max(0, i - 8), min(len(lines), i + 22)))
-          selected = redact('\n'.join(lines[i] for i in sorted(indices))[-45000:] if indices else text[-24000:])
-          (output / 'error-extract.log').write_text(selected, encoding='utf-8')
-          for start in range(0, len(selected), 2500):
-              part = selected[start:start + 2500]
-              escaped = part.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-              print(f'::warning title=Runtime job {job}, part {start // 2500 + 1}::{escaped}')
+          headers = {'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                     'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+          def get(path):
+              request = urllib.request.Request('https://api.github.com/repos/' + repository + path, headers=headers)
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  return json.load(response)
+          metadata = get('/actions/jobs/' + job)
+          assert metadata['status'] == 'completed', 'Proof belongs to a completed job'
+          platform = next((p for p in ('macos-x64', 'macos-arm64') if p in metadata['name']), None)
+          assert platform, 'Expected a desktop macOS job'
+          run_id = int(metadata['run_id'])
+          run = get(f'/actions/runs/{run_id}')
+          assert run['path'] == '.github/workflows/desktop-build.yml'
+          artifact_name = f'open-media-webkit-{platform}-{run_id}'
+          artifacts = get(f'/actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
+          selected = [artifact for artifact in artifacts if artifact['name'] == artifact_name and not artifact['expired']]
+          assert len(selected) == 1, 'Expected one preserved proof artifact'
+          artifact = selected[0]
+          assert artifact['size_in_bytes'] < 2 * 1024 * 1024, 'Only small proof artifacts may be inspected'
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as outputs:
+              outputs.write(f"run_id={run_id}\nartifact_name={artifact_name}\nplatform={platform}\nsource_sha={run['head_sha']}\nartifact_id={artifact['id']}\n")
+          print(json.dumps({'jobId':job, 'sourceRun':run_id, 'sourceCommit':run['head_sha'], 'platform':platform, 'artifactId':artifact['id'], 'artifactBytes':artifact['size_in_bytes']}))
           PY
-      - name: Read preserved build diagnostics
-        if: steps.source.outputs.artifact_name != ''
+      - name: Download the existing proof without rerunning the application
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
           run-id: ${{ steps.source.outputs.run_id }}
           name: ${{ steps.source.outputs.artifact_name }}
-          path: existing-runtime-evidence
-      - name: Expose native compilation and runtime audit errors
-        if: steps.source.outputs.artifact_name != ''
+          path: existing-proof
+      - name: Expose full proof and precise realtime media samples
+        env:
+          SOURCE_RUN: ${{ steps.source.outputs.run_id }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_PLATFORM: ${{ steps.source.outputs.platform }}
+          SOURCE_ARTIFACT: ${{ steps.source.outputs.artifact_id }}
         shell: bash
         run: |
           python3 - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
-          for path in Path('existing-runtime-evidence').rglob('normalizer-build.log'):
-              text = path.read_text(encoding='utf-8', errors='replace')[-45000:]
-              Path('runtime-diagnostics/normalizer-build.log').write_text(text, encoding='utf-8')
-              for start in range(0, len(text), 2500):
-                  part = text[start:start + 2500]
-                  escaped = part.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-                  print(f'::warning title=Native compiler, part {start // 2500 + 1}::{escaped}')
-          for path in Path('existing-runtime-evidence').rglob('macos-native-audit.json'):
-              audit = json.loads(path.read_text(encoding='utf-8'))
-              problems = [entry for entry in audit['files'] if entry.get('signatureValid') is False or
-                          any(tuple(int(x) for x in value.split('.')[:2]) > (13, 0) for value in entry.get('minimumMacOS', []))]
-              text = json.dumps({'inspectedFiles': len(audit['files']), 'problemCount': len(problems)}, ensure_ascii=False) + '\n' + '\n'.join(json.dumps(entry, ensure_ascii=False) for entry in problems)
-              Path('runtime-diagnostics/macos-native-audit.json').write_text(path.read_text(encoding='utf-8'), encoding='utf-8')
-              for start in range(0, len(text), 2500):
-                  escaped = text[start:start+2500].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-                  print(f'::warning title=Complete native audit, part {start // 2500 + 1}::{escaped}')
+          paths = list(Path('existing-proof').rglob('webkit-proof.json'))
+          assert len(paths) == 1, 'Expected exactly one preserved JSON proof'
+          proof = json.loads(paths[0].read_text(encoding='utf-8'))
+          assert proof['commit'] == os.environ['SOURCE_SHA'], 'Source commit differs from the selected build'
+          assert proof['arch'] == {'macos-x64':'x64', 'macos-arm64':'arm64'}[os.environ['SOURCE_PLATFORM']]
+          provenance = {'jobId':os.environ['TARGET_JOB_ID'], 'sourceRun':os.environ['SOURCE_RUN'], 'sourceCommit':proof['commit'], 'platform':os.environ['SOURCE_PLATFORM'], 'artifactId':os.environ['SOURCE_ARTIFACT']}
+          def annotate(title, value):
+              text = json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+              for offset in range(0, len(text), 5000):
+                  part = text[offset:offset+5000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::warning title={title} part {offset // 5000 + 1}::{part}')
+          annotate('Proof provenance', provenance)
+          annotate('Complete preserved proof', proof)
+          for event in proof.get('events', []):
+              if event.get('stage') == 'realtime-sample':
+                  annotate('Realtime sample ' + str(event.get('label')) + ' at ' + str(event.get('time')), event)
           PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: speech-runtime-diagnostics-${{ github.run_id }}
-          retention-days: 7
-          path: runtime-diagnostics/
