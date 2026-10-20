@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import { imageRulerTicks } from '../core/image-crop'
 import { fitImageCanvas, IMAGE_CANVAS_MAX_SCALE, IMAGE_CANVAS_MIN_SCALE, resizeImageCanvas, revealImageCanvasBounds, zoomImageCanvas, type ImageCanvasBounds, type ImageCanvasPoint, type ImageCanvasView } from '../core/image-canvas-viewport'
@@ -11,6 +11,7 @@ const view = reactive<ImageCanvasView>({ scale: 1, offsetX: 0, offsetY: 0, viewp
 const fitted = ref(true), grid = ref(true), hand = ref(false), space = ref(false), dragging = ref(false)
 const pointerInside = ref(false), pointerOverSurface = ref(false)
 let observer: ResizeObserver | undefined
+let listening = false, active = true
 let pan: { id: number; x: number; y: number; offsetX: number; offsetY: number } | undefined
 let suppressClick = false
 const canPan = computed(() => hand.value || space.value || props.readonly)
@@ -44,7 +45,7 @@ function ensureVisible(bounds: ImageCanvasBounds): void {
 }
 function measure(): void {
   const element = viewport.value
-  if (!element || element.clientWidth < 1 || element.clientHeight < 1) return
+  if (!active || !element || element.clientWidth < 1 || element.clientHeight < 1) return
   if (fitted.value) fit()
   else update(resizeImageCanvas(view, element.clientWidth, element.clientHeight))
 }
@@ -90,14 +91,17 @@ function releaseKeys(): void { space.value = false; endPan() }
 function focusOut(event: FocusEvent): void {
   if (!(event.relatedTarget instanceof Node) || !viewport.value?.contains(event.relatedTarget)) releaseKeys()
 }
+function modalBlocksNavigation(): boolean {
+  return [...document.querySelectorAll<HTMLElement>('dialog[open],[role="dialog"][aria-modal="true"]')].some(dialog => !dialog.inert && dialog.getClientRects().length > 0 && (!viewport.value || !dialog.contains(viewport.value)))
+}
 function keyDown(event: KeyboardEvent, fromOutside = false): void {
-  if (props.disabled || editableTarget(event.target) || (!fromOutside && controlsTarget(event.target)) || event.ctrlKey || event.metaKey || event.altKey) return
+  if (event.defaultPrevented || props.disabled || editableTarget(event.target) || (!fromOutside && controlsTarget(event.target)) || event.ctrlKey || event.metaKey || event.altKey || modalBlocksNavigation()) return
   if (event.code === 'Space') { event.preventDefault(); event.stopPropagation(); space.value = true }
   else if (event.key.toLowerCase() === 'h') { event.preventDefault(); event.stopPropagation(); hand.value = true }
   else if (event.key.toLowerCase() === 'v') { event.preventDefault(); event.stopPropagation(); selectTool(); emit('select-tool') }
 }
 function hoveredKeyDown(event: KeyboardEvent): void {
-  if (!pointerInside.value || !pointerOverSurface.value || editableTarget(document.activeElement)) return
+  if (event.defaultPrevented || !pointerInside.value || !pointerOverSurface.value || editableTarget(document.activeElement)) return
   if (event.target instanceof Node && viewport.value?.contains(event.target) && !controlsTarget(event.target)) return
   keyDown(event, true)
   if (event.defaultPrevented) viewport.value?.focus({ preventScroll: true })
@@ -121,22 +125,36 @@ function wheel(event: WheelEvent): void {
 }
 watch(() => [props.width, props.height], fit)
 watch(() => props.disabled, disabled => { if (disabled) releaseKeys() })
-onMounted(() => {
-  measure()
-  observer = new ResizeObserver(measure)
-  observer.observe(viewport.value!)
+function startListening(): void {
+  active = true
+  if (listening || !viewport.value) return
+  listening = true
   viewport.value!.addEventListener('wheel', wheel, { passive: false })
   window.addEventListener('blur', releaseKeys)
   window.addEventListener('keydown', hoveredKeyDown, true)
   window.addEventListener('keyup', keyUp)
-})
-onBeforeUnmount(() => {
-  endPan(); observer?.disconnect()
+  observer?.observe(viewport.value)
+  measure()
+}
+function stopListening(): void {
+  active = false
+  pointerInside.value = false; pointerOverSurface.value = false
+  releaseKeys()
+  observer?.disconnect()
+  if (!listening) return
+  listening = false
   viewport.value?.removeEventListener('wheel', wheel)
   window.removeEventListener('blur', releaseKeys)
   window.removeEventListener('keydown', hoveredKeyDown, true)
   window.removeEventListener('keyup', keyUp)
+}
+onMounted(() => {
+  observer = new ResizeObserver(measure)
+  startListening()
 })
+onActivated(startListening)
+onDeactivated(stopListening)
+onBeforeUnmount(stopListening)
 defineExpose({ fit, actualSize, zoomIn, zoomOut, setZoom, ensureVisible, selectTool })
 </script>
 
