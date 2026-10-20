@@ -12,6 +12,7 @@ pub mod chroma_key;
 pub mod preview;
 pub mod project_files;
 pub mod project_archive;
+pub mod project_compression;
 pub mod project_asset_uploads;
 mod media_metadata;
 pub mod video_library;
@@ -87,6 +88,7 @@ mod desktop {
         video_library: VideoLibrary,
         asset_tools: crate::asset_tools::AssetTools,
         audio_tools: crate::audio_tools::AudioToolsManager,
+        project_compression: crate::project_compression::CompressionManager,
         ai: AiService,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
@@ -428,6 +430,85 @@ mod desktop {
             preview::create_preview(&state.store, &state.runtime()?, &asset, format.as_deref())
         })
         .await
+    }
+    #[tauri::command]
+    pub async fn begin_project_video_compression(
+        assets: Vec<Value>,
+        mode: String,
+        quality: Option<String>,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<crate::project_compression::CompressionJob> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || {
+            state.project_compression.begin(
+                &state.store,
+                &state.runtime()?,
+                assets,
+                mode,
+                quality.unwrap_or_else(|| "balanced".into()),
+            )
+        })
+        .await
+    }
+    #[tauri::command]
+    pub fn get_project_video_compression_job(
+        id: String,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<crate::project_compression::CompressionJob> {
+        require_mcp_window(&window)?;
+        state.project_compression.get(&id)
+    }
+    #[tauri::command]
+    pub fn cancel_project_video_compression(
+        id: String,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        state.project_compression.cancel(&id)
+    }
+    #[tauri::command]
+    pub fn accept_project_video_compression(
+        id: String,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        state.project_compression.accept(&id)
+    }
+    #[tauri::command]
+    pub async fn prepare_project_video_compression_preview(
+        id: String,
+        asset_id: String,
+        format: Option<String>,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<PreviewResult> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || {
+            state.project_compression.prepare_preview(
+                &id,
+                &asset_id,
+                format.as_deref(),
+                &state.store,
+                &state.runtime()?,
+            )
+        })
+        .await
+    }
+    #[tauri::command]
+    pub async fn discard_project_video_compression(
+        id: String,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.project_compression.discard(&id)).await
     }
     #[tauri::command]
     pub async fn begin_media_job(
@@ -1078,6 +1159,7 @@ mod desktop {
                     video_library: VideoLibrary::new(data.join("stored-recording-index.json")),
                     asset_tools: crate::asset_tools::AssetTools::new(&data).map_err(std::io::Error::other)?,
                     audio_tools: crate::audio_tools::AudioToolsManager::default(),
+                    project_compression: crate::project_compression::CompressionManager::default(),
                     ai: AiService::new(&data, &resource).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
@@ -1148,6 +1230,12 @@ mod desktop {
                 import_blob_asset,
                 create_media_preview,
                 begin_media_job,
+                begin_project_video_compression,
+                get_project_video_compression_job,
+                cancel_project_video_compression,
+                accept_project_video_compression,
+                discard_project_video_compression,
+                prepare_project_video_compression_preview,
                 get_media_jobs,
                 cancel_media_job,
                 reveal_media_job_output,
@@ -1231,6 +1319,7 @@ mod desktop {
                 state.jobs.shutdown();
                 state.asset_tools.shutdown();
                 state.audio_tools.shutdown();
+                state.project_compression.shutdown();
                 state.capture.lock().unwrap().abort();
             }
         });

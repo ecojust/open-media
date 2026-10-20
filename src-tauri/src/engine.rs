@@ -541,6 +541,27 @@ pub struct RenderPlan {
     pub video: Option<VideoTarget>,
 }
 impl JobManager {
+    /// Internal task owners can inspect and release finished child jobs without
+    /// repeatedly sorting every export in a large source-processing batch.
+    pub(crate) fn get(&self, id: &str) -> Option<MediaJob> {
+        let jobs = self.jobs.lock().ok()?;
+        let entry = jobs.get(id)?;
+        let mut job = entry.job.clone();
+        if job.state == "running" {
+            job.elapsed_seconds = entry.started.elapsed().as_secs_f64();
+        }
+        Some(job)
+    }
+    pub(crate) fn forget_finished(&self, id: &str) {
+        if let Ok(mut jobs) = self.jobs.lock() {
+            if jobs
+                .get(id)
+                .is_some_and(|entry| entry.job.state != "running")
+            {
+                jobs.remove(id);
+            }
+        }
+    }
     pub fn list(&self) -> Vec<MediaJob> {
         let mut jobs = self
             .jobs

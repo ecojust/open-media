@@ -50,6 +50,7 @@ impl Encoder {
     fn options(self, target: &VideoTarget, bitrate: Option<&str>) -> Vec<String> {
         let quality = match target.quality.as_str() {
             "draft" => "30",
+            "compact" => "28",
             "high" => "18",
             _ => "23",
         };
@@ -80,6 +81,7 @@ impl Encoder {
         } else if self == Self::VideoToolbox {
             let factor = match target.quality.as_str() {
                 "draft" => 0.07,
+                "compact" => 0.09,
                 "high" => 0.24,
                 _ => 0.14,
             };

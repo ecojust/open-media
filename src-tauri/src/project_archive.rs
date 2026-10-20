@@ -112,6 +112,7 @@ fn clean_project(project: &Value) -> Result<Value> {
             "size",
             "mime",
             "provenance",
+            "compression",
             "addedAt",
             "libraryRole",
         ] {

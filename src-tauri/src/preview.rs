@@ -1,3 +1,4 @@
+use crate::asset_tools::{run_process, TaskControl};
 use crate::engine::{process, MediaStore, Result, Runtime};
 use serde::Serialize;
 use serde_json::Value;
@@ -15,6 +16,28 @@ pub fn create_preview(
     asset: &Value,
     format: Option<&str>,
 ) -> Result<PreviewResult> {
+    create_preview_inner(store, runtime, asset, format, None)
+}
+
+/// Compression previews share their task cancellation and cleanup directory.
+pub(crate) fn create_compression_preview(
+    store: &MediaStore,
+    runtime: &Runtime,
+    asset: &Value,
+    format: Option<&str>,
+    directory: &Path,
+    control: &TaskControl,
+) -> Result<PreviewResult> {
+    control.check()?;
+    create_preview_inner(store, runtime, asset, format, Some((directory, control)))
+}
+fn create_preview_inner(
+    store: &MediaStore,
+    runtime: &Runtime,
+    asset: &Value,
+    format: Option<&str>,
+    task: Option<(&Path, &TaskControl)>,
+) -> Result<PreviewResult> {
     let original = store.authorized_path(asset)?;
     let kind = asset["kind"].as_str().ok_or("素材类型无效。")?;
     let extension = match (kind, format) {
@@ -24,7 +47,9 @@ pub fn create_preview(
         ("audio", None | Some("wav")) => "wav",
         _ => return Err("不支持这个素材类型的预览格式。".into()),
     };
-    let directory = store.root.join("preview");
+    let directory = task
+        .map(|(directory, _)| directory.join("preview"))
+        .unwrap_or_else(|| store.root.join("preview"));
     fs::create_dir_all(&directory).map_err(|e| format!("无法创建预览目录：{e}"))?;
     let name = original
         .file_name()
@@ -134,19 +159,28 @@ pub fn create_preview(
         }
         _ => unreachable!(),
     }
-    let result = command
-        .arg(temporary.path())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("无法启动兼容预览生成：{e}"))?;
-    if !result.status.success() || !complete_file(temporary.path()) {
-        let detail = String::from_utf8_lossy(&result.stderr);
-        return Err(format!(
-            "无法生成兼容预览；原始素材未修改。{}",
-            detail.chars().take(1000).collect::<String>()
-        ));
+    command.arg(temporary.path());
+    if let Some((_, control)) = task {
+        run_process(command, control, 64 * 1024)
+            .map_err(|error| format!("无法生成兼容预览；原始素材未修改。{error}"))?;
+        control.check()?;
+    } else {
+        let result = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("无法启动兼容预览生成：{e}"))?;
+        if !result.status.success() {
+            let detail = String::from_utf8_lossy(&result.stderr);
+            return Err(format!(
+                "无法生成兼容预览；原始素材未修改。{}",
+                detail.chars().take(1000).collect::<String>()
+            ));
+        }
+    }
+    if !complete_file(temporary.path()) {
+        return Err("无法生成完整的兼容预览；原始素材未修改。".into());
     }
     temporary
         .as_file()
