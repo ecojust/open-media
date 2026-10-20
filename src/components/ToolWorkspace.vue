@@ -38,7 +38,7 @@ withDefaults(defineProps<{
 .tool-workspace-body{flex:1;min-height:0;min-width:0;display:grid;grid-template-columns:220px minmax(0,1fr) 280px;gap:12px;padding:16px;overflow:hidden;align-items:stretch}
 .tool-workspace-panel{min-width:0;min-height:0;border:1px solid var(--ui-line);border-radius:10px;background:var(--ui-surface);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin}
 .tool-workspace-library,.tool-workspace-settings{padding:14px}.tool-workspace-main{padding:14px;display:flex;flex-direction:column;gap:14px}.tool-workspace-main :deep(> *){flex-shrink:0;min-width:0}
-.tool-workspace-panel :deep(h2){font-size:13px;font-weight:600}.tool-workspace-panel :deep(input:not([type=range],[type=checkbox],[type=radio],[type=color])),.tool-workspace-panel :deep(select){min-height:var(--ui-control-height);font-size:var(--ui-control-font-size)}
+.tool-workspace .tool-workspace-library :deep(h2),.tool-workspace .tool-workspace-settings :deep(h2){font-size:13px;font-weight:600}.tool-workspace-panel :deep(input:not([type=range],[type=checkbox],[type=radio],[type=color])),.tool-workspace-panel :deep(select){min-height:var(--ui-control-height);font-size:var(--ui-control-font-size)}
 @container tool-workspace (max-width:1039px){
   .tool-workspace-body{grid-template-columns:minmax(0,1fr) 280px;grid-template-rows:minmax(100px,170px) minmax(0,1fr)}
   .tool-workspace-library{grid-column:1/-1;grid-row:1}.tool-workspace-main{grid-column:1;grid-row:2}.tool-workspace-settings{grid-column:2;grid-row:2}
