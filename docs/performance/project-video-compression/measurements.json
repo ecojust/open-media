@@ -1,0 +1,513 @@
+{
+  "environment": {
+    "platform": "Linux-6.18.55-x86_64-with-glibc2.41",
+    "machine": "x86_64",
+    "logical_cpu_count": 3,
+    "runtime": "ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "fixture": {
+    "seconds": 36,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "scenes": [
+      "static shape grid, 12 s",
+      "moving pattern, 12 s",
+      "different static shape grid, 12 s"
+    ],
+    "creation_seconds": 14.838672153000516
+  },
+  "protocol": {
+    "rounds": 3,
+    "cache": "full decode warm-up per input; no cache flushing",
+    "seek_times": [
+      5.7,
+      11.3,
+      17.9,
+      23.1,
+      29.5,
+      34.7
+    ],
+    "threads_per_input": 2,
+    "hardware_acceleration": false,
+    "concurrent_application_load": "not controlled",
+    "timing_includes_process_startup": true
+  },
+  "variants": {
+    "quality_18": {
+      "compression_seconds": 9.518494050999834,
+      "crf": 18,
+      "gop_frames": 60,
+      "bytes": 12951418,
+      "size_ratio_to_source": 0.6304813560787399,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "codec_type": "video",
+            "width": 1920,
+            "height": 1080,
+            "pix_fmt": "yuv420p",
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "nb_frames": "1080"
+          },
+          {
+            "codec_name": "aac",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels": 1,
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "1689"
+          }
+        ],
+        "format": {
+          "duration": "36.000000",
+          "size": "12951418"
+        }
+      },
+      "decode_seconds": [
+        1.8355712120001044,
+        1.7552342669996506,
+        1.8754084060001333
+      ],
+      "seek_batch_seconds": [
+        0.9599785780010279,
+        0.9552071239995712,
+        0.9434257199982312
+      ],
+      "seek_seconds_by_round": [
+        [
+          0.17829332200017234,
+          0.1258976610006357,
+          0.2505956810000498,
+          0.16987917799997376,
+          0.12862798400055908,
+          0.10668475199963723
+        ],
+        [
+          0.15828192200024205,
+          0.1449604420004107,
+          0.2345539709995137,
+          0.1656921539997711,
+          0.14447110299988708,
+          0.10724753199974657
+        ],
+        [
+          0.15588615299930098,
+          0.12563777800005482,
+          0.2574919669996234,
+          0.16233788299996377,
+          0.13045846599925426,
+          0.11161347300003399
+        ]
+      ],
+      "median_decode_seconds": 1.8355712120001044,
+      "median_seek_batch_seconds": 0.9552071239995712
+    },
+    "quality_23": {
+      "compression_seconds": 9.285874138000509,
+      "crf": 23,
+      "gop_frames": 60,
+      "bytes": 8128953,
+      "size_ratio_to_source": 0.39572140370578274,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "codec_type": "video",
+            "width": 1920,
+            "height": 1080,
+            "pix_fmt": "yuv420p",
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "nb_frames": "1080"
+          },
+          {
+            "codec_name": "aac",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels": 1,
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "1689"
+          }
+        ],
+        "format": {
+          "duration": "36.000000",
+          "size": "8128953"
+        }
+      },
+      "decode_seconds": [
+        1.8232598469994628,
+        1.8568059809995248,
+        1.9006916340003954
+      ],
+      "seek_batch_seconds": [
+        1.0098997779996353,
+        0.9700992970010702,
+        0.9114758339992477
+      ],
+      "seek_seconds_by_round": [
+        [
+          0.18535350499951164,
+          0.12752509599977202,
+          0.24790155600021535,
+          0.176794412000163,
+          0.16415627999958815,
+          0.1081689290003851
+        ],
+        [
+          0.16669309999997495,
+          0.14392343899999105,
+          0.22328513400043448,
+          0.16294271199967625,
+          0.147594943000513,
+          0.1256599690004805
+        ],
+        [
+          0.1426537389997975,
+          0.13493660099993576,
+          0.20538885599944479,
+          0.1734882809996634,
+          0.14279168100074457,
+          0.11221667599966167
+        ]
+      ],
+      "median_decode_seconds": 1.8568059809995248,
+      "median_seek_batch_seconds": 0.9700992970010702
+    },
+    "source": {
+      "crf": 12,
+      "gop_frames": 300,
+      "bytes": 20542111,
+      "size_ratio_to_source": 1.0,
+      "probe": {
+        "programs": [],
+        "stream_groups": [],
+        "streams": [
+          {
+            "codec_name": "h264",
+            "codec_type": "video",
+            "width": 1920,
+            "height": 1080,
+            "pix_fmt": "yuv420p",
+            "r_frame_rate": "30/1",
+            "avg_frame_rate": "30/1",
+            "nb_frames": "1080"
+          },
+          {
+            "codec_name": "aac",
+            "codec_type": "audio",
+            "sample_rate": "48000",
+            "channels": 1,
+            "r_frame_rate": "0/0",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "1689"
+          }
+        ],
+        "format": {
+          "duration": "36.000000",
+          "size": "20542111"
+        }
+      },
+      "decode_seconds": [
+        2.2602082699995663,
+        2.2685668399999486,
+        2.11869255000056
+      ],
+      "seek_batch_seconds": [
+        2.6831298910010446,
+        2.579793736999818,
+        2.634252353001102
+      ],
+      "seek_seconds_by_round": [
+        [
+          0.3412747970005512,
+          0.12973785600024712,
+          0.7952607920005903,
+          0.40939002000050095,
+          0.7617848249992676,
+          0.24568160099988745
+        ],
+        [
+          0.26760572400053206,
+          0.13892143100019894,
+          0.7278857169994808,
+          0.41005856299943844,
+          0.7212601020000875,
+          0.31406220000008034
+        ],
+        [
+          0.28694714399989607,
+          0.1356477890003589,
+          0.8265332020000642,
+          0.4229878900005133,
+          0.7193187410002793,
+          0.24281758699999045
+        ]
+      ],
+      "median_decode_seconds": 2.2602082699995663,
+      "median_seek_batch_seconds": 2.634252353001102
+    }
+  },
+  "commands": [
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=0x202632:s=1920x1080:r=30:d=12,drawgrid=w=160:h=120:t=2:c=0x4b5b72,drawbox=x=100:y=100:w=1000:h=700:c=0x6881ac:t=fill,drawbox=x=140:y=160:w=800:h=40:c=white:t=fill",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc2=s=1920x1080:r=30:d=12",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=0x152b27:s=1920x1080:r=30:d=12,drawgrid=w=240:h=180:t=2:c=0x649b8c,drawbox=x=600:y=160:w=1000:h=700:c=0x2c8574:t=fill,drawbox=x=680:y=220:w=700:h=50:c=white:t=fill",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=330:sample_rate=48000:duration=36",
+      "-filter_complex_threads",
+      "1",
+      "-filter_complex",
+      "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]",
+      "-map",
+      "[v]",
+      "-map",
+      "3:a",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "12",
+      "-threads",
+      "2",
+      "-g",
+      "300",
+      "-keyint_min",
+      "300",
+      "-sc_threshold",
+      "0",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
+      "$WORK/source.mp4"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-y",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/source.mp4",
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a?",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "18",
+      "-threads",
+      "2",
+      "-g",
+      "60",
+      "-keyint_min",
+      "60",
+      "-sc_threshold",
+      "0",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      "$WORK/quality_18.mp4"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-y",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/source.mp4",
+      "-map",
+      "0:v:0",
+      "-map",
+      "0:a?",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "23",
+      "-threads",
+      "2",
+      "-g",
+      "60",
+      "-keyint_min",
+      "60",
+      "-sc_threshold",
+      "0",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      "$WORK/quality_23.mp4"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/source.mp4",
+      "-map",
+      "0:v:0",
+      "-an",
+      "-sn",
+      "-f",
+      "null",
+      "-"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-ss",
+      "TIMESTAMP",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/source.mp4",
+      "-map",
+      "0:v:0",
+      "-frames:v",
+      "1",
+      "-an",
+      "-sn",
+      "-f",
+      "null",
+      "-"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/quality_18.mp4",
+      "-map",
+      "0:v:0",
+      "-an",
+      "-sn",
+      "-f",
+      "null",
+      "-"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-ss",
+      "TIMESTAMP",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/quality_18.mp4",
+      "-map",
+      "0:v:0",
+      "-frames:v",
+      "1",
+      "-an",
+      "-sn",
+      "-f",
+      "null",
+      "-"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/quality_23.mp4",
+      "-map",
+      "0:v:0",
+      "-an",
+      "-sn",
+      "-f",
+      "null",
+      "-"
+    ],
+    [
+      "ffmpeg",
+      "-hide_banner",
+      "-nostdin",
+      "-loglevel",
+      "error",
+      "-ss",
+      "TIMESTAMP",
+      "-threads",
+      "2",
+      "-i",
+      "$WORK/quality_23.mp4",
+      "-map",
+      "0:v:0",
+      "-frames:v",
+      "1",
+      "-an",
+      "-sn",
+      "-f",
+      "null",
+      "-"
+    ]
+  ],
+  "limitations": [
+    "Synthetic 36-second footage, not the user project.",
+    "Measurements exclude timeline compositing, transitions, text rasterization, and final output encoding.",
+    "Lossy CRF values are quality controls, not mathematically lossless.",
+    "Shorter keyframe intervals and lower bitrate may improve seeking; continuous decoding and final export are not guaranteed faster.",
+    "Runtime results describe this CPU-only environment; no hardware encoder performance was measured."
+  ]
+}
