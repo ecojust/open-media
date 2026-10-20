@@ -423,6 +423,7 @@ onMounted(() => {
   window.addEventListener('blur', cancelGesture)
   scheduleDraw()
   if (props.initialTool === 'text') addText()
+  emit('tool-change', tool.value)
 })
 onBeforeUnmount(() => { gesture = undefined; cancelAnimationFrame(paintFrame); releaseGestureLayers(); window.removeEventListener('blur', cancelGesture) })
 </script>
