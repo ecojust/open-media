@@ -37,9 +37,15 @@ async function mount(page, url, desktop = true) {
       invoke: async (command, args) => {
         fixture.calls.push({ command, args })
         if (command === 'list_stored_videos') return { directory: '/recordings', assets: [], warnings: [] }
-        if (command === 'mcp_asset_cancel') { fixture.cancel?.(); return true }
+        if (command === 'mcp_asset_cancel') {
+          if (args.taskId !== fixture.heldTaskId) throw new Error('Cancellation did not target the active asset task')
+          fixture.cancel?.(); return true
+        }
         if (command === 'mcp_asset_tool' && args.operation === 'asset_detect_idle') {
-          if (fixture.held) await new Promise((resolve, reject) => { fixture.cancel = () => { fixture.held = false; reject(new DOMException('已取消', 'AbortError')) } })
+          if (fixture.held) await new Promise((resolve, reject) => {
+            fixture.heldTaskId = args.taskId
+            fixture.cancel = () => { fixture.held = false; fixture.heldTaskId = undefined; fixture.cancel = undefined; reject(new DOMException('已取消', 'AbortError')) }
+          })
           if (fixture.fail) throw new Error('静止画面分析失败，请检查源文件。')
           // Controlled detector results test the GUI/shared-tool transaction only.
           // Native media analysis has its own actual FFmpeg fixtures.
@@ -124,11 +130,22 @@ async function main() {
     await expect(start).toBeDisabled()
     await expect(dialog.getByRole('button', { name: '关闭检测静止画面并分割' })).toBeDisabled()
     await page.keyboard.press('Escape'); await expect(dialog).toBeVisible()
+    // Progress appears before native imports finish. Test cancellation of a started
+    // backend task, rather than cancellation before any native task exists.
+    await page.waitForFunction(() => {
+      const fixture = window.idleFixture
+      return typeof fixture.cancel === 'function' && typeof fixture.heldTaskId === 'string'
+        && fixture.calls.some(call => call.command === 'mcp_asset_tool' && call.args.operation === 'asset_detect_idle' && call.args.taskId === fixture.heldTaskId)
+    })
+    const cancelledTaskId = await page.evaluate(() => window.idleFixture.heldTaskId)
     await panel.getByRole('button', { name: '取消处理', exact: true }).click()
     await expect(panel.getByText('已取消', { exact: true })).toBeVisible()
+    await expect(panel.getByRole('progressbar')).not.toBeVisible()
+    await expect(start).toBeEnabled()
     assert.deepEqual(await state(page), before)
     assert.equal(await page.evaluate(() => window.idleFixture.commits), commits)
-    assert(await page.evaluate(() => window.idleFixture.calls.some(call => call.command === 'mcp_asset_cancel')))
+    assert.deepEqual(await page.evaluate(() => window.idleFixture.calls.filter(call => call.command === 'mcp_asset_cancel').map(call => call.args.taskId)), [cancelledTaskId])
+    assert(await page.evaluate(() => !window.idleFixture.held && !window.idleFixture.cancel && !window.idleFixture.heldTaskId))
     await page.evaluate(() => { window.idleFixture.fail = true })
     await start.click(); await expect(panel.getByRole('alert')).toContainText('静止画面分析失败')
     assert.deepEqual(await state(page), before)
