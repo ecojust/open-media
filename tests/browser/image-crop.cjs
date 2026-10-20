@@ -44,8 +44,13 @@ async function main() {
     }
     assert.deepEqual(await current(), { x: 32, y: 40, width: 120, height: 100 })
     await page.getByLabel('框选预览缩放').selectOption('200')
-    await page.getByTestId('crop-viewport').evaluate(element => { element.scrollLeft = 44; element.scrollTop = 60 })
-    await page.waitForFunction(() => document.querySelector('.crop-ruler-top text').textContent !== undefined)
+    const viewport = page.getByTestId('image-canvas-viewport')
+    const beforePan = await canvas.boundingBox()
+    const viewBounds = await viewport.boundingBox()
+    await page.mouse.move(viewBounds.x + viewBounds.width / 2, viewBounds.y + viewBounds.height / 2)
+    await page.mouse.wheel(44, 60)
+    await page.waitForFunction(previous => Math.abs(document.querySelector('.crop-stage').getBoundingClientRect().x - previous.x + 44) < 1, beforePan)
+    await page.waitForFunction(() => document.querySelector('.image-canvas-ruler-top text').textContent !== undefined)
     const before = await current()
     await drag({ x: 70, y: 80 }, { x: 81, y: 89 })
     assert.deepEqual(await current(), { x: before.x + 11, y: before.y + 9, width: 120, height: 100 })
@@ -54,8 +59,9 @@ async function main() {
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
     await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + 30, box.y + box.height / 2 + 20, { steps: 5 }); await page.mouse.up()
     assert.deepEqual(await current(), { x: 43, y: 49, width: 135, height: 110 })
-    assert.equal(await page.locator('.crop-ruler-top').evaluate(element => element.getBoundingClientRect().width), await page.getByTestId('crop-viewport').evaluate(element => element.clientWidth))
-    console.log('PASS exact numeric coordinates, scrolled 200% movement, corner resize and aligned source-pixel rulers')
+    assert.equal(await page.locator('.image-canvas-ruler-top').evaluate(element => element.getBoundingClientRect().width), await viewport.evaluate(element => element.clientWidth))
+    assert(Math.abs((await handle.boundingBox()).width - 10) < 1, 'crop handle stays 10 screen pixels at 200%')
+    console.log('PASS exact numeric coordinates, actual wheel panning at 200%, corner resize and aligned source-pixel rulers')
 
     await drag({ x: 80, y: 80 }, { x: 94, y: 90 })
     const moved = await current()
@@ -64,6 +70,7 @@ async function main() {
     await page.mouse.down(); await page.mouse.move(stageBounds.x + 110 * 2, stageBounds.y + 110 * 2, { steps: 3 })
     await page.keyboard.press('Escape'); await page.mouse.up()
     assert.deepEqual(await current(), moved, 'Escape restores the selection before the active drag')
+    await page.getByLabel('框选预览缩放').selectOption('fit')
     await page.getByRole('button', { name: '框选', exact: true }).click()
     await page.getByLabel('框选吸附步长').selectOption('10')
     await drag({ x: 50, y: 50 }, { x: 153, y: 128 })
@@ -74,6 +81,33 @@ async function main() {
     assert.equal(await current(), undefined)
     await page.getByLabel('框选预览缩放').selectOption('fit')
     console.log('PASS drag cancellation, snap intervals, numeric boundary clamping and full-image reset')
+
+    const fitBounds = await canvas.boundingBox()
+    const anchor = { x: Math.round(fitBounds.x + 100 * fitBounds.width / 640), y: Math.round(fitBounds.y + 100 * fitBounds.height / 480) }
+    const sourceAnchor = { x: (anchor.x - fitBounds.x) * 640 / fitBounds.width, y: (anchor.y - fitBounds.y) * 480 / fitBounds.height }
+    await page.mouse.move(anchor.x, anchor.y)
+    await page.keyboard.down('Control'); await page.mouse.wheel(0, -60); await page.keyboard.up('Control')
+    await page.waitForFunction(width => document.querySelector('.crop-stage').getBoundingClientRect().width > width, fitBounds.width)
+    const zoomedBounds = await canvas.boundingBox()
+    assert(Math.abs((anchor.x - zoomedBounds.x) * 640 / zoomedBounds.width - sourceAnchor.x) < .001, 'Ctrl+wheel keeps source X under the pointer')
+    assert(Math.abs((anchor.y - zoomedBounds.y) * 480 / zoomedBounds.height - sourceAnchor.y) < .001, 'Ctrl+wheel keeps source Y under the pointer')
+    assert.equal(await current(), undefined, 'zooming never changes the crop')
+    await canvas.focus()
+    await page.keyboard.down('Space')
+    await page.mouse.down(); await page.mouse.move(anchor.x + 36, anchor.y + 24, { steps: 4 }); await page.mouse.up()
+    await page.keyboard.up('Space')
+    const pannedBounds = await canvas.boundingBox()
+    assert(Math.abs(pannedBounds.x - zoomedBounds.x - 36) < 1 && Math.abs(pannedBounds.y - zoomedBounds.y - 24) < 1, 'Space drag moves only the view')
+    assert.equal(await current(), undefined, 'temporary hand mode never creates a crop')
+    await drag({ x: 100, y: 100 }, { x: 200, y: 170 })
+    assert.deepEqual(await current(), { x: 100, y: 100, width: 100, height: 70 }, 'crop coordinates stay in source pixels after zoom and pan')
+    const editBounds = await canvas.boundingBox(), editScale = editBounds.width / 640
+    await page.mouse.move(editBounds.x + 140 * editScale, editBounds.y + 130 * editScale)
+    await page.mouse.down(); await page.mouse.move(editBounds.x + 150 * editScale, editBounds.y + 140 * editScale, { steps: 3 })
+    await page.evaluate(() => window.cropHarness.editor.value.flush())
+    await page.mouse.up()
+    assert.deepEqual(await current(), { x: 110, y: 110, width: 100, height: 70 }, 'flush retains the latest crop before pointerup')
+    console.log('PASS anchored wheel zoom, temporary hand pan, source coordinates after combined transforms and active-drag flush')
 
     await page.evaluate(() => { window.cropHarness.crop.value = { x: 40, y: 60, width: 120, height: 100 }; window.cropHarness.disabled.value = true })
     await canvas.dispatchEvent('keydown', { key: 'ArrowRight', bubbles: true })
@@ -87,8 +121,28 @@ async function main() {
       const heights = await page.locator('select').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().height))
       assert.deepEqual(heights, [32, 32], 'all crop dropdowns use the shared 32px control height')
     }
+    await page.setViewportSize({ width: 980, height: 840 })
+    await page.evaluate(() => { window.cropHarness.docked.value = true })
+    assert.equal(await page.getByTestId('crop-properties-target').getByLabel('框选X', { exact: true }).count(), 1, 'numeric crop controls dock into the workspace property column')
+    assert.equal(await page.getByTestId('image-crop-editor').locator('select,input').count(), 0, 'embedded crop canvas contains no duplicate settings')
+    assert.equal(await page.getByLabel('框选预览缩放').count(), 0, 'embedded canvas uses its common floating zoom controls')
+    await page.getByTestId('crop-properties-target').getByLabel('框选X', { exact: true }).fill('80')
+    await page.evaluate(() => window.cropHarness.editor.value.flush())
+    assert.equal((await current()).x, 80, 'flush commits the active docked coordinate input')
+    await page.evaluate(() => {
+      window.cropHarness.docked.value = false
+      window.cropHarness.width.value = 16000; window.cropHarness.height.value = 10000
+      window.cropHarness.crop.value = { x: 100, y: 100, width: 500, height: 400 }
+      window.cropHarness.annotations.value = [{ id: 'large-stroke', kind: 'stroke', points: [{ x: 80, y: 60 }, { x: 900, y: 900 }], width: 12, color: '#ff0000', opacity: 1, style: 'pen' }]
+    })
+    await page.getByLabel('框选预览缩放').selectOption('800')
+    await page.waitForFunction(() => document.querySelector('[data-testid="crop-annotations"]').width > 1000)
+    const backing = await page.getByTestId('crop-annotations').evaluate(element => ({ width: element.width, height: element.height }))
+    assert(backing.width <= 4096 && backing.height <= 4096 && backing.width * backing.height <= 8_000_000, '800% zoom keeps large-image annotation backing within 4096px and 8MP')
+    assert(Math.abs((await handle.boundingBox()).width - 10) < 1, 'crop handle remains 10 screen pixels at 800%')
     assert.deepEqual(errors, [])
     console.log('PASS disabled state, dark theme, narrow widths and consistent 32px dropdown heights')
+    console.log('PASS docked properties, focused-input flush and bounded annotation backing for 16000×10000 image at 800%')
   } finally { await browser.close(); await server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })
