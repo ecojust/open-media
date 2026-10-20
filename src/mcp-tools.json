@@ -6587,7 +6587,7 @@
   },
   {
     "name": "open_media_clip_classify",
-    "description": "将视频轨道中的视频片段标记为 repeat（黄色），或使用 normal 恢复普通类型；仅改变编辑标记，不改变素材、播放或导出内容。类型随工程保存，分割与复制时保留。支持批量事务及撤销。",
+    "description": "将视频轨道中的视频片段标记为 repeat（黄色），或使用 normal 恢复普通类型；仅改变编辑标记，不改变素材、播放或导出内容。类型随工程保存，分割与复制时保留。支持批量事务及撤销。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
