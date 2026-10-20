@@ -141,8 +141,9 @@ export async function writeClipboardImage(width: number, height: number, rgba: U
   return invoke('copy_image_to_clipboard', packet)
 }
 export interface ProjectFileTarget { name: string; path: string; token: string }
-export async function saveProjectFile(name: string, bytes: Uint8Array, token?: string): Promise<ProjectFileTarget | null> { return call('save_project_file', { name, bytes: Array.from(bytes), token: token ?? null }) }
-export async function openProjectFile(): Promise<(ProjectFileTarget & { bytes: number[] }) | null> { return call('open_project_file') }
+export interface NativeProjectArchive extends ProjectFileTarget { project: Project }
+export async function saveProjectArchive(name: string, project: Project, token?: string): Promise<ProjectFileTarget | null> { return call('save_project_archive', { name, project, token: token ?? null }) }
+export async function openProjectArchive(): Promise<NativeProjectArchive | null> { return call('open_project_archive') }
 
 export async function onNativeCloseRequest(handler: () => void): Promise<() => void> {
   if (!isDesktop()) return () => {}

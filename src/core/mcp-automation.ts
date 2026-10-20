@@ -5,7 +5,7 @@ import { beginMcpMediaJob, importMcpMediaPaths, openMcpProjectFile, saveMcpProje
 import { cloneProject, createProject, newId } from './project.ts'
 import { addAssets } from './timeline.ts'
 import { adoptFirstVideoSize } from './project-size.ts'
-import { exportProjectFile, importProjectFile } from './project-file.ts'
+import { prepareNativeProjectArchive, restoreNativeProjectArchive } from '../native-project-files.ts'
 import { prepareNativeProject } from './native-project.ts'
 import { executeProjectTool, inspectMcpProject, isProjectTool, validateMcpToolArguments } from './mcp-tools.ts'
 import { createMcpSpeechJobs, type McpSpeechJob } from './mcp-speech-jobs.ts'
@@ -196,26 +196,19 @@ export function createMcpAutomation(host: McpAutomationHost) {
           if (host.isDirty() && args.discardUnsaved !== true) throw new Error('当前项目有未保存的修改。请先保存，或明确设置 discardUnsaved=true。')
           changed(operation, '正在读取项目文件')
           const target = await openMcpProjectFile(args.path as string)
-          check(operation)
-          const imported = await importProjectFile(new Uint8Array(target.bytes))
-          try {
-            check(operation)
-            const project = await host.hydrate(imported)
-            check(operation); operation.irrevocable = true; operation.job.cancelable = false
-            await host.adopt(project); await host.didOpen(target)
-            return { projectId: project.id, revision: host.getRevision(), path: target.path }
-          } catch (cause) { imported.revoke(); throw cause }
+          const project = await restoreNativeProjectArchive(target.project, operation.controller.signal)
+          check(operation); operation.irrevocable = true; operation.job.cancelable = false
+          await host.adopt(project); await host.didOpen(target)
+          return { projectId: project.id, revision: host.getRevision(), path: target.path }
         })
       case 'open_media_project_save':
         return startTool('save', '保存工程', async operation => {
           const target = args.path ? undefined : host.getSaveTarget()
           if (!args.path && !target) throw new Error('工程尚无保存位置，请通过 path 指定 .omedia 文件路径。')
-          const blob = await exportProjectFile(operation.source, { blobs: host.getBlobs(), signal: operation.controller.signal,
-            onProgress: (done, total) => changed(operation, '正在打包项目与素材', done / Math.max(1, total) * .9) })
-          check(operation)
-          const bytes = new Uint8Array(await blob.arrayBuffer())
+          const prepared = await prepareNativeProjectArchive(operation.source, { blobs: host.getBlobs(), signal: operation.controller.signal,
+            onProgress: (done, total) => changed(operation, '正在准备项目素材', done / Math.max(1, total) * .9) })
           check(operation); operation.irrevocable = true; operation.job.cancelable = false; changed(operation, '正在写入项目文件', .95)
-          const saved = await saveMcpProjectFile(bytes, { token: target?.token, path: args.path as string | undefined, overwrite: args.overwrite as boolean | undefined })
+          const saved = await saveMcpProjectFile(prepared, { token: target?.token, path: args.path as string | undefined, overwrite: args.overwrite as boolean | undefined })
           await host.didSave(operation.source, saved)
           return { projectId: operation.source.id, path: saved.path, revision: host.getRevision() }
         })

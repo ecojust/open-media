@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { createProject } from '../src/core/project.ts'
 import { addAsset } from '../src/core/timeline.ts'
-import { deleteProject, fetchAssetBlob, listProjects, loadProject, saveProject } from '../src/core/storage.ts'
+import { deleteProject, fetchAssetBlob, listProjects, loadProject, readStoredAssetBlob, saveProject } from '../src/core/storage.ts'
 
 function fixture() {
   const blob = new Blob(['persisted-media'], { type: 'video/webm' })
@@ -315,7 +315,7 @@ test('写入请求完成但事务中止时，不返回新保存时间，也不�
   restored.revoke()
 })
 
-test('原生草稿保留持久预览代理地址，同时保留原件Blob供再次打包', async () => {
+test('原生草稿保留持久预览代理与原件路径，不重复保存传入的Blob', async () => {
   globalThis.indexedDB = new IDBFactory()
   const { project, asset, blob } = fixture()
   const previewUrl = 'http://asset.localhost/app/media/preview/video.mp4'
@@ -327,7 +327,8 @@ test('原生草稿保留持久预览代理地址，同时保留原件Blob供再�
     assert.equal(restored.project.assets[0].url, previewUrl)
     assert.equal(restored.project.assets[0].sourceUrl, sourceUrl)
     assert.equal(restored.project.assets[0].nativePath, '/app/media/original/video.mkv')
-    assert.equal(await restored.blobs.get(asset.id).text(), await blob.text())
+    assert.equal(restored.blobs.size, 0)
+    assert.equal(await readStoredAssetBlob(project.id, asset.id), undefined)
     restored.revoke()
   } finally { URL.revokeObjectURL(asset.url) }
 })
@@ -386,4 +387,23 @@ test('响应体读取时发生NotFoundError也能指出素材名称，不泄漏�
     assert.equal(error.cause, failure)
     return true
   })
+})
+
+
+test('同ID素材切换到新原生文件后，草稿删除旧Blob并恢复新原件路径', async () => {
+  globalThis.indexedDB = new IDBFactory()
+  const { project, asset, blob } = fixture()
+  try {
+    await saveProject(project, new Map([[asset.id, blob]]))
+    assert.equal(await (await readStoredAssetBlob(project.id, asset.id)).text(), await blob.text())
+    const sourceUrl = 'http://asset.localhost/extracted/new-content.webm'
+    Object.assign(project.assets[0], { nativePath: '/extracted/new-content.webm', url: sourceUrl })
+    await saveProject(project, new Map([[asset.id, blob]]))
+    assert.equal(await readStoredAssetBlob(project.id, asset.id), undefined)
+    const restored = await loadProject(project.id)
+    assert.equal(restored.blobs.size, 0)
+    assert.equal(restored.project.assets[0].nativePath, '/extracted/new-content.webm')
+    assert.equal(restored.project.assets[0].url, sourceUrl)
+    restored.revoke()
+  } finally { URL.revokeObjectURL(asset.url) }
 })

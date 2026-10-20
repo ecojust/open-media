@@ -35,7 +35,8 @@ import { exportProjectFile, importProjectFile } from './core/project-file.ts'
 import { pickBrowserProjectFile, prepareBrowserProjectSave, writeBrowserProjectFile, type BrowserProjectFileHandle } from './core/browser-project-files.ts'
 import { loadProjectSaveTarget, storeProjectSaveTarget, type ProjectSaveTarget } from './core/project-save-targets.ts'
 import { downloadBlob, importMediaFile } from './core/media-import.ts'
-import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectFile, pickMediaAssets, saveBytes, saveProjectFile, type ProjectFileTarget, type MediaJob } from './native.ts'
+import { cancelMediaJob, cancelCapturePicker, captureScreenshot, configureScreenshotShortcut, onScreenshotRequested, pickCaptureSource, showMainWindow, closeNativeWindow, getMediaJobs, importBlobAsset, isDesktop, onNativeCloseRequest, openProjectArchive, pickMediaAssets, saveBytes, saveProjectArchive, type ProjectFileTarget, type MediaJob } from './native.ts'
+import { materializeProjectAsset, prepareNativeProjectArchive, restoreNativeProjectArchive, restoreNativeProjectAsset } from './native-project-files.ts'
 import { getDesktopPlatform, type DesktopPlatform } from './native-platform.ts'
 
 type Workspace = 'home' | 'edit' | 'record' | 'gif' | 'image' | 'video' | 'generate' | 'image-generate' | 'song-generate'
@@ -461,6 +462,7 @@ async function adoptProject(next: Project, restored = false, savedAt?: string) {
   lastSaveAt.value = savedAt || ''; lastSaveKind.value = 'draft'
   applyProjectSaveTarget()
   releaseUnusedMedia(next)
+  if (native) for (const asset of next.assets) { if (asset.nativePath) blobs.delete(asset.id); rememberAsset(asset) }
   project.value = next; history.value = createHistory(next); cleanKey.value = contentKey(next); draftState.value = restored ? 'saved' : 'idle'; lastSaved.value = ''; remember()
   view.value = 'edit'; screenshotAssetId.value = ''; error.value = ''; if (!restored) scheduleDraft()
   if (restored) {
@@ -484,19 +486,19 @@ async function changeProject(action: () => Promise<void>): Promise<void> {
 }
 async function newProject() { await changeProject(async () => { await adoptProject(createProject()); announce('已新建项目。') }) }
 function retainImportedMedia(imported: ImportedProject, next: Project) {
-  for (const [id, blob] of imported.blobs) blobs.set(id, blob)
-  hydratedReleases.push({ release: imported.revoke, urls: new Set(imported.project.assets.map(asset => asset.url)) }); next.assets.forEach(rememberAsset)
+  const nativeIds = new Set(next.assets.filter(asset => asset.nativePath).map(asset => asset.id))
+  for (const [id, blob] of imported.blobs) { if (native && nativeIds.has(id)) blobs.delete(id); else blobs.set(id, blob) }
+  const retainedUrls = new Set(next.assets.flatMap(asset => [asset.url, asset.sourceUrl].filter((url): url is string => !!url)))
+  const importedUrls = new Set(imported.project.assets.map(asset => asset.url))
+  if ([...importedUrls].some(url => retainedUrls.has(url))) hydratedReleases.push({ release: imported.revoke, urls: importedUrls })
+  else imported.revoke()
+  next.assets.forEach(rememberAsset)
 }
 async function hydrate(imported: ImportedProject, deferred = false) {
   const next = cloneProject(imported.project)
-  if (native) {
-    for (const asset of next.assets) {
-      const blob = imported.blobs.get(asset.id)
-      if (blob && !asset.nativePath) {
-        const recovered = await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), asset.name)
-        Object.assign(asset, recovered, { id: asset.id, addedAt: asset.addedAt })
-      }
-    }
+  if (native) for (let index = 0; index < next.assets.length; index++) {
+    const asset = next.assets[index]!
+    if (!asset.nativePath) next.assets[index] = await restoreNativeProjectAsset(await materializeProjectAsset(next.id, asset, { blobs: imported.blobs }))
   }
   const checked = validateProject(next, { trusted: true })
   if (deferred) pendingHydration.set(checked, imported)
@@ -520,18 +522,18 @@ async function openProject(file?: File) {
   await changeProject(async () => {
     busy.value = '正在打开项目…'; error.value = ''
     try {
-      const selected = file || await openProjectFile()
+      const selected = file || await openProjectArchive()
       if (!selected) return
-      const imported = await importProjectFile(selected instanceof File ? selected : new Uint8Array(selected.bytes))
+      const imported = selected instanceof File ? await importProjectFile(selected) : undefined
       try {
-        await adoptProject(await hydrate(imported))
+        await adoptProject(imported ? await hydrate(imported) : await restoreNativeProjectArchive((selected as Exclude<typeof selected, File>).project))
         const target: ProjectSaveTarget | undefined = !(selected instanceof File)
           ? { kind: 'native', target: { name: selected.name, path: selected.path, token: selected.token } }
           : browserSelection ? { kind: 'browser', handle: browserSelection.handle } : undefined
         const warning = await rememberProjectSaveTarget(project.value.id, target)
         cleanKey.value = contentKey(project.value); announce(warning || '项目与素材已打开。')
         if (warning) error.value = warning
-      } catch (cause) { imported.revoke(); throw cause }
+      } catch (cause) { imported?.revoke(); throw cause }
     } finally { busy.value = '' }
   })
 }
@@ -556,16 +558,20 @@ async function save(saveAs = false, closing = false): Promise<boolean> {
     const name = `${snapshot.title.replace(/[\\/:*?"<>|]/g, '-') || '媒体项目'}.omedia`
     const browserTarget = native ? undefined : await prepareBrowserProjectSave(name, saveAs ? undefined : browserProjectTarget)
     if (browserTarget === null) return false
-    const blob = await exportProjectFile(snapshot, { blobs, onProgress: (done, total) => { busy.value = `正在打包项目 ${Math.round(done / Math.max(1, total) * 100)}%` } })
     let downloaded = false, targetWarning = ''
     if (native) {
-      const target = await saveProjectFile(name, new Uint8Array(await blob.arrayBuffer()), saveAs ? undefined : nativeProjectTarget?.token)
+      const prepared = await prepareNativeProjectArchive(snapshot, { blobs, onProgress: (done, total) => { busy.value = `正在准备项目素材 ${Math.round(done / Math.max(1, total) * 100)}%` } })
+      busy.value = '正在保存项目与素材…'
+      const target = await saveProjectArchive(name, prepared, saveAs ? undefined : nativeProjectTarget?.token)
       if (!target) return false
       targetWarning = await rememberProjectSaveTarget(snapshot.id, { kind: 'native', target })
-    } else if (browserTarget) {
-      await writeBrowserProjectFile(browserTarget, blob)
-      targetWarning = await rememberProjectSaveTarget(snapshot.id, { kind: 'browser', handle: browserTarget })
-    } else { downloadBlob(blob, name); lastSaved.value = name; downloaded = true }
+    } else {
+      const blob = await exportProjectFile(snapshot, { blobs, onProgress: (done, total) => { busy.value = `正在打包项目 ${Math.round(done / Math.max(1, total) * 100)}%` } })
+      if (browserTarget) {
+        await writeBrowserProjectFile(browserTarget, blob)
+        targetWarning = await rememberProjectSaveTarget(snapshot.id, { kind: 'browser', handle: browserTarget })
+      } else { downloadBlob(blob, name); lastSaved.value = name; downloaded = true }
+    }
     const savedAt = new Date().toISOString()
     if (project.value.id === snapshot.id) cleanKey.value = key
     await persist()

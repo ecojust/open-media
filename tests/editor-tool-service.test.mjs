@@ -15,6 +15,7 @@ const boundaries = {
  '../src/native-mcp-files.ts':['beginMcpMediaJob','importMcpMediaPaths','openMcpProjectFile','saveMcpProjectFile'],
  '../src/native-video-generation.ts':['getVideoGenerationStatus','beginVideoModelDownload','cancelVideoModelDownload','beginVideoGeneration','getVideoGenerationJob','cancelVideoGeneration'],
  '../src/core/native-project.ts':['prepareNativeProject'],
+ '../src/native-project-files.ts':['prepareNativeProjectArchive','restoreNativeProjectArchive'],
 }
 const modules = new Map(Object.entries(boundaries).map(([file,names])=>[new URL(file,import.meta.url).href,names]))
 registerHooks({load(url,context,next){const names=modules.get(url);return names?{format:'module',shortCircuit:true,source:names.map(name=>`export const ${name} = (...args) => globalThis.__editorToolsIo.${name}(...args)`).join('\n')}:next(url,context)}})

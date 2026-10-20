@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict')
 const { existsSync } = require('node:fs')
 const { chromium, expect } = require('@playwright/test')
-const { unzipSync, strFromU8 } = require('fflate')
 
 async function fixture(browser, url, autoSave = false) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
@@ -40,10 +39,10 @@ async function fixture(browser, url, autoSave = false) {
           if (state.jobsMode === 'fail') throw new Error('无法检查正在处理的任务')
           return structuredClone(state.jobs)
         }
-        if (command === 'save_project_file') {
+        if (command === 'save_project_archive') {
           if (state.saveMode === 'cancel') return null
           if (state.saveMode === 'fail') throw new Error('项目文件写入失败')
-          state.saved.push(args.bytes)
+          state.saved.push(args.project)
           return { name: args.name, path: `/saved/${args.name}`, token: 'saved-project' }
         }
         if (command === 'close_native_window') {
@@ -124,12 +123,11 @@ async function main() {
       await expect(page.getByTestId('save-project')).toBeDisabled()
       const saved = await page.evaluate(() => window.closeHarness.saved)
       assert.equal(saved.length, 1)
-      const entries = unzipSync(new Uint8Array(saved[0]))
-      assert.equal(JSON.parse(strFromU8(entries['project.json'])).project.title, '关闭前保存')
+      assert.equal(saved[0].title, '关闭前保存')
       await close(page)
       assert.equal(await calls(page, 'close_native_window'), 1)
       await finish()
-      console.log('PASS 关闭确认、重复请求与取消；项目文件保存取消/失败保持工作台，重试实际打包后仅关闭一次')
+      console.log('PASS 关闭确认、重复请求与取消；项目文件保存取消/失败保持工作台，重试原生保存后仅关闭一次')
     }
     {
       const { page, finish } = await fixture(browser, url)
@@ -166,9 +164,7 @@ async function main() {
       await close(page)
       await dialog(page).getByRole('button', { name: '保存并全部关闭', exact: true }).click()
       await expect.poll(() => calls(page, 'close_native_window')).toBe(1)
-      const bytes = await page.evaluate(() => window.closeHarness.saved[0])
-      const entries = unzipSync(new Uint8Array(bytes))
-      const saved = JSON.parse(strFromU8(entries['project.json'])).project
+      const saved = await page.evaluate(() => window.closeHarness.saved[0])
       assert.equal(saved.title, '输入中也要保存')
       assert.equal(saved.tracks.flatMap(track => track.clips).find(clip => clip.text)?.text, '关闭时正在输入的字幕应完整保留')
       await finish()
@@ -199,7 +195,7 @@ async function main() {
       await close(page)
       await dialog(page).getByRole('button', { name: '全部关闭', exact: true }).click()
       await expect.poll(() => calls(page, 'close_native_window')).toBe(1)
-      assert.equal(await calls(page, 'save_project_file'), 0)
+      assert.equal(await calls(page, 'save_project_archive'), 0)
       assert.deepEqual(await page.evaluate(async () => (await (await import('/src/core/storage.ts')).listProjects()).map(project => project.title)), ['已有本地草稿'])
       await finish()
       console.log('PASS 自动保存草稿后仍提示未写入文件的修改；全部关闭保留已有草稿，不另写项目文件或覆盖草稿')
@@ -223,7 +219,7 @@ async function main() {
       await page.evaluate(() => { const state = window.closeHarness; state.draftMode = 'ready'; state.draftCompletions.splice(0).forEach(complete => complete()) })
       await expect.poll(() => calls(page, 'close_native_window')).toBe(1)
       assert.deepEqual(await readDraft(page, baseline.id), baseline, '关闭前须保留撤销后的 A，不能让旧 B 成为最后草稿')
-      assert.equal(await calls(page, 'save_project_file'), 1, '撤销回已保存版本后关闭只补写草稿，不重写项目文件')
+      assert.equal(await calls(page, 'save_project_archive'), 1, '撤销回已保存版本后关闭只补写草稿，不重写项目文件')
       await finish()
       console.log('PASS 旧草稿写入期间撤销回已保存版本，关闭前先提交撤销后的草稿，不遗留旧版本')
     }

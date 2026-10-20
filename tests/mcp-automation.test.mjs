@@ -13,7 +13,7 @@ const boundaryExports = {
   '../src/native-video-generation.ts': ['getVideoGenerationStatus', 'beginVideoModelDownload', 'cancelVideoModelDownload', 'beginVideoGeneration', 'getVideoGenerationJob', 'cancelVideoGeneration'],
   '../src/native-ai.ts': ['beginAiGeneration', 'cancelAiJob', 'cancelAiModelDownload', 'downloadAiModel', 'getAiJob', 'getAiStatus', 'repairAiModel'],
   '../src/core/native-project.ts': ['prepareNativeProject'],
-  '../src/core/project-file.ts': ['exportProjectFile', 'importProjectFile'],
+  '../src/native-project-files.ts': ['prepareNativeProjectArchive', 'restoreNativeProjectArchive'],
   '../src/core/mcp-materials.ts': ['listMcpMaterials', 'prepareMcpMaterial'],
   '../src/core/editor-preview-tools.ts': ['preparePreviewTool'],
 }
@@ -67,10 +67,10 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
     async getMediaJobs() { return [] }, async cancelMediaJob() {},
     async revealMediaJobOutput() {},
     async importMcpMediaPaths() { return [video()] },
-    async openMcpProjectFile(path) { return { path, token: 'open-file-capability', bytes: [1, 2, 3] } },
-    async saveMcpProjectFile(_bytes, options) { return { path: options.path || '/existing.omedia', token: 'saved-file-capability' } },
-    async exportProjectFile(project, options) { options.onProgress?.(1, 1); return new Blob([JSON.stringify(project)]) },
-    async importProjectFile() { return { project: createProject('已打开工程'), blobs: new Map(), revoke() {} } },
+    async openMcpProjectFile(path) { return { path, token: 'open-file-capability', project: createProject('已打开工程') } },
+    async saveMcpProjectFile(_project, options) { return { path: options.path || '/existing.omedia', token: 'saved-file-capability' } },
+    async prepareNativeProjectArchive(project, options) { options.onProgress?.(1, 1); return clone(project) },
+    async restoreNativeProjectArchive(project) { return clone(project) },
     async prepareNativeProject(project) { return { project: clone(project) } },
     async preparePreviewTool() { throw new Error('unexpected preview operation') },
     async listMcpMaterials(query) { return { kind: query.kind, total: 1, offset: 0, limit: 50, items: [{ id: 'sample', name: '示例' }] } },
@@ -222,6 +222,40 @@ test('failed save keeps dirty state and existing target', async () => {
   assert.equal(f.target.path, '/existing.omedia')
   assert.equal(f.calls.find(call => call.name === 'saveMcpProjectFile').args[1].overwrite, undefined)
   await f.controller.dispose()
+})
+
+test('multi-gigabyte project save passes project metadata to the archive bridge without a portable Blob', async () => {
+  const project = createProject('大型录屏工程')
+  project.assets = [{ ...video(), size: 8 * 1024 ** 3 }]
+  const f = fixture(project)
+  const done = await finished(f.controller, await f.run('project_save', { path: '/large.omedia' }))
+  assert.equal(done.state, 'completed')
+  const call = f.calls.find(call => call.name === 'saveMcpProjectFile')
+  assert.equal(call.args[0].assets[0].size, 8 * 1024 ** 3)
+  assert.equal(call.args[0].assets[0].nativePath, '/private/video.mp4')
+  assert.equal(call.args[0] instanceof Uint8Array, false)
+  assert.equal(call.args[0] instanceof Blob, false)
+  await f.controller.dispose()
+})
+
+test('cancellation and stale revisions during asset preparation never begin the final project write', async () => {
+  for (const mode of ['cancel', 'stale']) {
+    const f = fixture(), pending = deferred()
+    f.setDirty(true)
+    f.setTarget({ path: '/existing.omedia', token: 'existing-capability' })
+    f.io.prepareNativeProjectArchive = () => pending.promise
+    const job = await f.run('project_save')
+    await until(() => f.calls.some(call => call.name === 'prepareNativeProjectArchive'))
+    if (mode === 'cancel') await f.run('job_cancel', { id: job.id })
+    else f.externalChange()
+    pending.resolve(cloneProject(f.project))
+    const done = await finished(f.controller, job)
+    assert.equal(done.state, mode === 'cancel' ? 'cancelled' : 'failed')
+    assert.equal(f.calls.some(call => call.name === 'saveMcpProjectFile'), false)
+    assert.equal(f.target.path, '/existing.omedia')
+    assert.equal(f.dirty, true)
+    await f.controller.dispose()
+  }
 })
 
 test('material insertion uses current playhead, commits once and selects the inserted clip', async () => {

@@ -49,6 +49,7 @@ async function openDatabase(): Promise<IDBDatabase> {
 }
 
 const blobKey = (projectId: string, assetId: string): string => `${projectId}:${assetId}`
+const durableAsset = (asset: MediaAsset): boolean => !!(asset.nativePath && asset.url && !asset.url.startsWith('blob:') && !asset.sourceUrl?.startsWith('blob:'))
 
 export async function fetchAssetBlob(asset: MediaAsset, signal?: AbortSignal): Promise<Blob> {
   const url = asset.sourceUrl || asset.url
@@ -91,7 +92,7 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
   const clean = project
   const db = await openDatabase()
   try {
-    const durable = new Set(clean.assets.filter((asset) => asset.nativePath && asset.url && !asset.url.startsWith('blob:') && !asset.sourceUrl?.startsWith('blob:')).map((asset) => asset.id))
+    const durable = new Set(clean.assets.filter(durableAsset).map((asset) => asset.id))
     const unsupplied = clean.assets.filter((asset) => !blobs.has(asset.id) && !durable.has(asset.id))
     const existing = new Set<string>()
     if (unsupplied.length) {
@@ -104,6 +105,7 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
     }
     const pending = new Map<string, Blob>()
     for (const asset of clean.assets) {
+      if (durable.has(asset.id)) continue
       const provided = blobs.get(asset.id)
       if (provided) {
         if (!provided.size) throw new Error(`素材“${asset.name}”为空，项目未保存。`)
@@ -123,6 +125,9 @@ async function saveProjectNow(project: Project, blobs: Map<string, Blob>): Promi
       const reusableKeys = await Promise.all(reusable.map(([assetId]) => request(blobStore.getKey(blobKey(clean.id, assetId)))))
       const retainedBlobs = new Set(reusable.filter((_, index) => reusableKeys[index] !== undefined).map(([assetId]) => assetId))
       for (const [assetId, blob] of pending) if (!retainedBlobs.has(assetId)) blobStore.put(blob, blobKey(clean.id, assetId))
+      // A native archive may replace an asset while preserving its identifier.
+      // Never retain an older Blob beside the newly authoritative file path.
+      for (const assetId of durable) blobStore.delete(blobKey(clean.id, assetId))
       const retained = new Set(clean.assets.map((asset) => asset.id))
       for (const asset of oldProject?.assets ?? []) if (!retained.has(asset.id)) blobStore.delete(blobKey(clean.id, asset.id))
       const savedAt = new Date().toISOString(), revision = newId()
@@ -151,7 +156,7 @@ export async function loadProject(id: string): Promise<ImportedProject & { saved
     const raw = await request(reading.objectStore('projects').get(id))
     if (!raw) { await done; throw new Error('未找到此本地项目。') }
     const project = validateProject(raw, { trusted: true })
-    const values = await Promise.all(project.assets.map((asset) => request(reading.objectStore('blobs').get(blobKey(id, asset.id)))))
+    const values = await Promise.all(project.assets.map((asset) => durableAsset(asset) ? Promise.resolve(undefined) : request(reading.objectStore('blobs').get(blobKey(id, asset.id)))))
     await done
     const blobs = new Map<string, Blob>()
     project.assets.forEach((asset, index) => {

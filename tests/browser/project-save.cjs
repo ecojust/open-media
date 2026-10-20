@@ -4,7 +4,7 @@ const { existsSync } = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
 const { chromium, expect } = require('@playwright/test')
-const { unzipSync, strFromU8 } = require('fflate')
+const { unzipSync, strFromU8, strToU8, zipSync } = require('fflate')
 
 const artifacts = '/tmp/open-media-project-save'
 
@@ -86,10 +86,20 @@ async function createPage(browser) {
 
 async function nativeChecks(browser, url) {
   const { page, context, errors } = await createPage(browser)
-  const state = { calls: [], mode: 'ready', nextName: 'native-a.omedia', openName: 'native-a.omedia', targets: new Map() }
+  const state = { calls: [], mode: 'ready', nextName: 'native-a.omedia', openName: 'native-a.omedia', targets: new Map(), media: new Map(), uploads: new Map() }
   const target = name => ({ name, path: path.join(artifacts, name), token: createHash('sha256').update(name).digest('hex') })
   try {
-    await page.exposeBinding('projectNativeInvoke', async (_, command, args) => {
+    await page.route('**/__native_project_media__?*', async route => {
+      const mediaPath = new URL(route.request().url()).searchParams.get('path'), bytes = state.media.get(mediaPath)
+      assert(bytes, `未知素材路径 ${mediaPath}`)
+      await route.fulfill({ contentType: 'image/png', body: bytes })
+    })
+    const storedAsset = (name, bytes) => {
+      const nativePath = `/fixture/media/${createHash('sha256').update(bytes).digest('hex')}.png`
+      state.media.set(nativePath, bytes)
+      return { id: `asset-${Date.now()}`, name, kind: 'image', url: '', nativePath, mime: 'image/png', duration: 0, width: 48, height: 32, size: bytes.length }
+    }
+    await page.exposeBinding('projectNativeInvoke', async (_, command, args, options) => {
       if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
       if (command === 'get_media_jobs') return []
       if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
@@ -97,31 +107,61 @@ async function nativeChecks(browser, url) {
       if (command === 'configure_screenshot_shortcut') return args.shortcut
       if (command === 'plugin:event|listen') return 1
       if (command === 'plugin:event|unlisten') return null
-      if (command === 'import_blob_asset') {
-        const bytes = Buffer.from(args.bytes)
-        return { id: `asset-${Date.now()}`, name: args.name, kind: 'image', url: `data:image/png;base64,${bytes.toString('base64')}`, mime: 'image/png', duration: 0, width: 48, height: 32, size: bytes.length }
+      if (command === 'import_blob_asset') return storedAsset(args.name, Buffer.from(args.bytes))
+      if (command === 'project_asset_begin') {
+        const id = `upload-${state.uploads.size}`
+        state.uploads.set(id, { name: args.name, size: args.size, chunks: [], received: 0 })
+        return { id }
       }
-      if (command === 'save_project_file') {
+      if (command === 'project_asset_write') {
+        const upload = state.uploads.get(options.headers['x-upload-id']), packet = Buffer.from(Object.values(args))
+        assert.equal(Number(packet.readBigUInt64LE(0)), upload.received)
+        assert(packet.length <= 1024 * 1024 + 8)
+        upload.chunks.push(packet.subarray(8)); upload.received += packet.length - 8
+        return null
+      }
+      if (command === 'project_asset_finish') {
+        const upload = state.uploads.get(args.id)
+        assert.equal(upload.received, upload.size)
+        return storedAsset(upload.name, Buffer.concat(upload.chunks))
+      }
+      if (command === 'project_asset_cancel' || command === 'complete_project_archive_import') return null
+      if (command === 'save_project_archive') {
         state.calls.push({ token: args.token, name: args.name })
         if (state.mode === 'cancel') { state.mode = 'ready'; return null }
         if (state.mode === 'fail') { state.mode = 'ready'; throw new Error('保存测试：磁盘写入失败') }
         const destination = args.token ? state.targets.get(args.token) : target(state.nextName)
         assert(destination, `未知保存目标 ${args.token}`)
-        await fs.writeFile(destination.path, Buffer.from(args.bytes))
+        assert.equal(args.bytes, undefined, '原生保存只传元数据，不传完整压缩包')
+        const project = structuredClone(args.project), entries = {}
+        for (const asset of project.assets) {
+          const bytes = state.media.get(asset.nativePath)
+          assert(bytes, `保存未授权素材 ${asset.nativePath}`)
+          entries[`media/${asset.id}`] = new Uint8Array(bytes)
+          asset.url = ''; delete asset.nativePath; delete asset.sourceUrl
+        }
+        entries['project.json'] = strToU8(JSON.stringify({ format: 'open-media-project', version: 1, project }))
+        await fs.writeFile(destination.path, zipSync(entries, { level: 0 }))
         state.targets.set(destination.token, destination)
         return destination
       }
-      if (command === 'open_project_file') {
-        const selected = target(state.openName)
+      if (command === 'open_project_archive' || command === 'mcp_open_project_archive') {
+        const selected = target(command === 'mcp_open_project_archive' ? path.basename(args.path) : state.openName)
         state.targets.set(selected.token, selected)
-        return { ...selected, bytes: Array.from(await fs.readFile(selected.path)) }
+        const entries = unzipSync(new Uint8Array(await fs.readFile(selected.path)))
+        const project = JSON.parse(strFromU8(entries['project.json'])).project
+        for (const asset of project.assets) {
+          const stored = storedAsset(asset.name, Buffer.from(entries[`media/${asset.id}`]))
+          asset.nativePath = stored.nativePath
+        }
+        return { ...selected, project }
       }
       throw new Error(`未预期的原生命令：${command}`)
     })
     await page.addInitScript(() => {
       window.__TAURI_INTERNALS__ = {
-        transformCallback: () => 1, unregisterCallback() {}, convertFileSrc: path => path,
-        invoke: (command, args) => window.projectNativeInvoke(command, args),
+        transformCallback: () => 1, unregisterCallback() {}, convertFileSrc: path => `${location.origin}/__native_project_media__?path=${encodeURIComponent(path)}`,
+        invoke: (command, args, options) => window.projectNativeInvoke(command, args, options),
       }
     })
     await page.goto(url)
@@ -202,6 +242,57 @@ async function nativeChecks(browser, url) {
     inspectArchive(await fs.readFile(target('native-a.omedia').path), '恢复后覆盖原文件', media)
     assert.equal(existsSync(target('native-restored.omedia').path), false)
     console.log('PASS 原生桥契约：新项目独立；切换和重载恢复已选目标，打开项目后的保存直接回写原文件')
+    for (const mode of ['gui', 'mcp']) {
+      const replacement = Buffer.from(await page.evaluate(async mode => {
+        const app = document.querySelector('#app').__vue_app__._instance.setupState
+        const current = app.project.assets[0], oldBlob = await (await fetch(current.sourceUrl || current.url)).blob()
+        app.rememberEditorAsset(current, oldBlob)
+        if (!app.blobs.has(current.id)) throw new Error('需要先保留同ID旧素材缓存')
+        const canvas = document.createElement('canvas'); canvas.width = 48; canvas.height = 32
+        const context = canvas.getContext('2d'); context.fillStyle = mode === 'gui' ? '#ffdd00' : '#2222ee'; context.fillRect(0, 0, 48, 32)
+        return [...new Uint8Array(await (await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))).arrayBuffer())]
+      }, mode))
+      const entries = unzipSync(new Uint8Array(await fs.readFile(target('native-a.omedia').path)))
+      const manifest = JSON.parse(strFromU8(entries['project.json']))
+      manifest.project.title = `同ID新素材-${mode}`
+      const sameId = manifest.project.assets[0].id
+      manifest.project.assets[0].size = replacement.length
+      entries[`media/${sameId}`] = new Uint8Array(replacement)
+      entries['project.json'] = strToU8(JSON.stringify(manifest))
+      state.openName = `native-replaced-${mode}.omedia`
+      await fs.writeFile(target(state.openName).path, zipSync(entries, { level: 0 }))
+      if (mode === 'gui') await page.getByTestId('open-project').click()
+      else await page.evaluate(async path => {
+        const controller = document.querySelector('#app').__vue_app__._instance.setupState.mcpAutomation
+        const job = await controller.execute('open_media_project_open', { path })
+        while (controller.status(job.id).state === 'running') await new Promise(resolve => setTimeout(resolve, 10))
+        const done = controller.status(job.id)
+        if (done.state !== 'completed') throw new Error(done.error)
+      }, target(state.openName).path)
+      await expect(page.locator('.project-title')).toHaveText(`同ID新素材-${mode}`)
+      const result = await page.evaluate(async mode => {
+        const app = document.querySelector('#app').__vue_app__._instance.setupState
+        const project = JSON.parse(JSON.stringify(app.project))
+        if (app.blobs.has(project.assets[0].id)) throw new Error('原生打开后仍保留同ID旧素材')
+        const { createProjectSnapshot, loadProjectSnapshot } = await import('/src/core/project-snapshots.ts')
+        const snapshot = await createProjectSnapshot(project, `替换检查-${mode}`, { blobs: new Map(app.blobs) })
+        const imported = await loadProjectSnapshot(project.id, snapshot.id)
+        let snapshotBytes
+        try { snapshotBytes = [...new Uint8Array(await imported.blobs.get(project.assets[0].id).arrayBuffer())] } finally { imported.revoke() }
+        if (!await app.persist()) throw new Error('替换后的草稿保存失败')
+        const { loadProject, readStoredAssetBlob } = await import('/src/core/storage.ts')
+        const draft = await loadProject(project.id)
+        try {
+          const current = draft.project.assets[0]
+          return { snapshotBytes, draftBytes: [...new Uint8Array(await (await fetch(current.sourceUrl || current.url)).arrayBuffer())], blobCount: draft.blobs.size, storedBlob: !!await readStoredAssetBlob(project.id, current.id) }
+        } finally { draft.revoke() }
+      }, mode)
+      assert.deepEqual(Buffer.from(result.snapshotBytes), replacement)
+      assert.deepEqual(Buffer.from(result.draftBytes), replacement)
+      assert.equal(result.blobCount, 0)
+      assert.equal(result.storedBlob, false)
+    }
+    console.log('PASS GUI/MCP 打开同ID但不同原件的项目后清理旧Blob，快照和草稿均读取新内容且不重复存储大素材')
     assert.deepEqual(errors, [])
   } finally { await context.close() }
 }

@@ -15,7 +15,7 @@ const boundaries = {
   '../../src/native.ts': ['acceptSpeechJobs', 'beginSpeechJob', 'beginSpeechModelDownload', 'cancelMediaJob', 'cancelSpeechJob', 'cancelSpeechModelDownload', 'discardSpeechJob', 'getMediaJobs', 'getSpeechJob', 'getSpeechStatus', 'repairSpeechModel', 'revealMediaJobOutput'],
   '../../src/native-mcp-files.ts': ['beginMcpMediaJob', 'importMcpMediaPaths', 'openMcpProjectFile', 'saveMcpProjectFile'],
   '../../src/core/native-project.ts': ['prepareNativeProject'],
-  '../../src/core/project-file.ts': ['exportProjectFile', 'importProjectFile'],
+  '../../src/native-project-files.ts': ['prepareNativeProjectArchive', 'restoreNativeProjectArchive'],
   '../../src/core/mcp-materials.ts': ['listMcpMaterials', 'prepareMcpMaterial'],
   '../../src/core/editor-preview-tools.ts': ['preparePreviewTool'],
 }

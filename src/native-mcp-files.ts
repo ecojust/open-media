@@ -1,6 +1,6 @@
-import type { MediaAsset } from './core/types'
+import type { MediaAsset, Project } from './core/types'
 import { ensureMediaPreview } from './core/media-import'
-import { createMediaPreview, importBlobAsset, isDesktop, type MediaJob, type MediaJobSpec, type ProjectFileTarget } from './native'
+import { createMediaPreview, importBlobAsset, isDesktop, type MediaJob, type MediaJobSpec, type ProjectFileTarget, type NativeProjectArchive } from './native'
 
 async function call<T>(command: string, args: Record<string, unknown>): Promise<T> {
   if (!isDesktop()) throw new Error('MCP 文件操作需要桌面端。')
@@ -23,14 +23,14 @@ export async function importMcpMediaPaths(paths: string[]): Promise<MediaAsset[]
 }
 
 export interface McpProjectSaveOptions { token?: string; path?: string; overwrite?: boolean }
-export async function saveMcpProjectFile(bytes: Uint8Array, options: McpProjectSaveOptions = {}): Promise<ProjectFileTarget> {
-  return call('mcp_save_project_file', {
-    bytes: Array.from(bytes), token: options.token ?? null, path: options.path ?? null, overwrite: options.overwrite ?? false,
+export async function saveMcpProjectFile(project: Project, options: McpProjectSaveOptions = {}): Promise<ProjectFileTarget> {
+  return call('mcp_save_project_archive', {
+    project, token: options.token ?? null, path: options.path ?? null, overwrite: options.overwrite ?? false,
   })
 }
 
-export async function openMcpProjectFile(path: string): Promise<ProjectFileTarget & { bytes: number[] }> {
-  return call('mcp_open_project_file', { path })
+export async function openMcpProjectFile(path: string): Promise<NativeProjectArchive> {
+  return call('mcp_open_project_archive', { path })
 }
 
 async function localAsset(asset: MediaAsset): Promise<MediaAsset> {
