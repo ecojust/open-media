@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from './Icon.vue'
+import ToolWorkspace from './ToolWorkspace.vue'
 import type { MediaAsset } from '../core/types.ts'
 import { VIDEO_GENERATION_MAX_SHOTS, videoGenerationActualSeconds, videoGenerationRequestError, type VideoGenerationJob, type VideoGenerationMode, type VideoGenerationModel, type VideoGenerationRequest, type VideoGenerationShot, type VideoGenerationStatus } from '../core/video-generation.ts'
 import { beginVideoGeneration, cancelVideoGeneration, getVideoGenerationStatus, listVideoGenerationJobs } from '../native-video-generation.ts'
@@ -129,24 +130,21 @@ onBeforeUnmount(() => { destroyed = true; clearTimeout(pollTimer); clearTimeout(
 </script>
 
 <template>
-  <section class="generation-workspace" data-testid="video-generation-workspace">
-    <header class="generation-heading"><div><h1><Icon name="sparkles" :size="22" />视频生成</h1><p>从一句描述到一组镜头，让灵感成为可剪辑的素材。</p></div><button :disabled="!native" title="配置 MCP 服务" aria-label="配置视频生成 MCP 服务" @click="emit('open-mcp')"><Icon name="mcp" /><span>MCP</span></button></header>
-    <p v-if="!native || catalog && !catalog.supported" class="generation-notice" role="status"><Icon name="info" :size="17" />{{ catalog?.reason || '视频生成需要 Apple 芯片 Mac 桌面端；其他平台可查看设置。' }}</p>
+  <ToolWorkspace class="generation-workspace" data-testid="video-generation-workspace" title="视频生成" icon="sparkles" description="从一句描述到一组镜头，让灵感成为可剪辑的素材。" library-label="生成任务" settings-label="生成设置">
+    <template #actions><button :disabled="!native" title="配置 MCP 服务" aria-label="配置视频生成 MCP 服务" @click="emit('open-mcp')"><Icon name="mcp" /><span>MCP</span></button></template>
+    <template #library>
+      <div class="generation-library-heading"><h2>生成任务</h2><small>{{ jobs.length }} 个任务</small></div>
+      <div v-if="jobs.length" class="generation-job-list"><article v-for="job in jobs" :key="job.id" class="generation-job" :class="{ selected: selectedJob?.id === job.id }" :data-job-id="job.id"><button class="generation-job-select" :aria-pressed="selectedJob?.id === job.id" @click="selectedJobId = job.id"><span><Icon :name="job.state === 'running' ? 'clock' : job.state === 'completed' ? 'check' : 'alert'" :size="15" /><strong>{{ jobState(job) }}</strong></span><time>{{ new Date(job.startedAt).toLocaleTimeString('zh-CN', { hour12: false }) }}</time></button><p>{{ job.stage }}<template v-if="job.shotCount > 1"> · 镜头 {{ Math.min(job.shotCount, job.shotIndex + 1) }}/{{ job.shotCount }}</template></p><progress v-if="job.state === 'running'" :value="job.progress === undefined ? undefined : percent(job.progress)" max="100" aria-label="视频生成进度" /><div class="generation-job-metrics"><small>用时 {{ elapsed(job) }}<template v-if="job.progress !== undefined"> · {{ percent(job.progress) }}%</template></small><button v-if="job.state === 'running'" :disabled="cancelling === job.id" @click="cancelJob(job)">{{ cancelling === job.id ? '正在取消…' : '取消生成' }}</button><button v-else-if="(job.state === 'failed' || job.state === 'cancelled') && jobRequests[job.id]" :disabled="working || disabled || !catalog?.supported || !catalog.runtimeReady" @click="generate(jobRequests[job.id])">重新生成</button></div><p v-if="job.error" class="generation-error">{{ job.error }}</p><p v-if="job.warning" class="generation-muted">{{ job.warning }}</p></article></div>
+      <p v-else class="generation-library-empty">暂无生成任务。填写提示词后，点击开始生成。</p>
+    </template>
+    <div class="generation-content">
+      <p v-if="!native || catalog && !catalog.supported" class="generation-notice" role="status"><Icon name="info" :size="17" />{{ catalog?.reason || '视频生成需要 Apple 芯片 Mac 桌面端；其他平台可查看设置。' }}</p>
     <p v-if="pollError || error || draftError" class="generation-error" role="alert">{{ error || pollError || draftError }} <button v-if="pollError" @click="refresh">重新检查</button></p>
-    <div class="generation-columns">
-      <div class="generation-compose">
-        <section class="generation-models"><header><h2>生成模型</h2><button class="icon-button" title="重新检查模型" aria-label="重新检查模型" :disabled="checking" @click="refresh"><Icon name="refresh" :size="16" /></button></header>
-          <p v-if="checking" class="generation-muted"><span class="spinner small" />正在检查模型与设备…</p>
-          <p v-else-if="!catalog?.models.length" class="generation-muted">依靠 MiniMax H3 模型在本机生成视频，模型在 Info 中管理。</p>
-          <div class="generation-model-list"><article v-for="model in catalog?.models" :key="model.id" :data-model-id="model.id" class="generation-model" :class="{ selected: model.id === modelId }">
-            <button class="generation-model-select" :aria-pressed="model.id === modelId" :aria-label="`选择 ${model.name}`" :disabled="working" @click="chooseModel(model)"><Icon :name="model.state === 'ready' ? 'check' : 'download'" :size="18" /><span><strong>{{ model.name }}</strong><small>{{ modelState(model) }}</small></span><span class="generation-radio" /></button>
-            <p>{{ model.modes.map(id => modes.find(item => item.id === id)?.title).join(' · ') }}</p>
-            <p v-if="model.error" class="generation-error">{{ model.error }}</p>
-            <button v-if="model.state !== 'ready'" class="generation-model-link" :disabled="!native || working" :aria-label="`前往 Info 管理 ${model.name}`" @click="emit('open-models', 'video')"><Icon name="info" :size="14" />{{ model.state === 'not-downloaded' ? '请前往下载' : '前往模型管理' }}</button>
-          </article></div>
-          <p v-if="selectedModel" class="generation-muted">依靠 {{ selectedModel.name }} 模型生成。<button class="generation-model-link" :disabled="!native || working" @click="emit('open-models', 'video')">在 Info 中管理模型</button></p>
-        </section>
-        <section class="generation-input"><div class="generation-modes" role="group" aria-label="生成方式"><button v-for="item in modes" :key="item.id" :aria-pressed="mode === item.id" :disabled="working || !modeAvailable(item.id)" :title="!modeAvailable(item.id) ? '请先切换支持此方式的模型' : item.detail" @click="mode = item.id"><Icon :name="item.icon" :size="15" />{{ item.title }}</button></div>
+      <section class="generation-preview-card" aria-label="生成结果预览"><h2>生成预览</h2>
+        <div v-if="previewAsset" class="generation-preview"><video :key="previewAsset.id" :src="previewAsset.url" controls playsinline preload="metadata" data-testid="generation-preview" /><label v-if="results.length > 1">查看结果<select v-model="selectedAssetId" aria-label="查看生成结果"><option v-for="asset in results" :key="asset.id" :value="asset.id">{{ asset.id === selectedJob?.combinedAsset?.id ? '完整视频 · ' : '' }}{{ asset.name }}</option></select></label><strong>{{ previewAsset.name }}</strong><small>{{ previewAsset.width }} × {{ previewAsset.height }} · {{ previewAsset.duration.toFixed(2) }} 秒</small><div class="generation-result-actions"><button :disabled="disabled" @click="emit('add-asset', previewAsset)"><Icon name="import" :size="14" />加入素材</button><button :disabled="disabled" @click="emit('add-timeline', previewAsset)"><Icon name="plus" :size="14" />加入时间线</button><button :disabled="!previewAsset.nativePath" title="打开文件夹" aria-label="打开生成视频文件夹" @click="reveal(previewAsset)"><Icon name="folder" :size="15" /></button></div><p class="generation-muted">添加至当前项目：{{ projectTitle }}</p></div>
+        <div v-else class="generation-empty"><Icon name="film" :size="36" /><strong>从这里开启一段新画面</strong><p>生成过程中可切换工作区。完成后预览视频，再加入当前项目。</p></div>
+      </section>
+      <section class="generation-input"><div class="generation-modes" role="group" aria-label="生成方式"><button v-for="item in modes" :key="item.id" :aria-pressed="mode === item.id" :disabled="working || !modeAvailable(item.id)" :title="!modeAvailable(item.id) ? '请先切换支持此方式的模型' : item.detail" @click="mode = item.id"><Icon :name="item.icon" :size="15" />{{ item.title }}</button></div>
           <p class="generation-muted">{{ modes.find(item => item.id === mode)?.detail }}</p>
           <div class="generation-shots"><article v-for="(shot, index) in shownShots" :key="shot.id" class="generation-shot" :data-shot-id="shot.id">
             <header v-if="mode === 'storyboard'"><span>镜头 {{ index + 1 }}</span><input v-model="shot.title" :disabled="working" maxlength="120" :aria-label="`镜头 ${index + 1} 名称`" placeholder="镜头名称" /><button :disabled="working || !index" :aria-label="`上移镜头 ${index + 1}`" title="上移" @click="moveShot(index, -1)"><Icon name="chevron-up" :size="14" /></button><button :disabled="working || index === shots.length - 1" :aria-label="`下移镜头 ${index + 1}`" title="下移" @click="moveShot(index, 1)"><Icon name="chevron-down" :size="14" /></button><button :disabled="working || shots.length === 1" :aria-label="`移除镜头 ${index + 1}`" title="移除镜头" @click="shots.splice(index, 1)"><Icon name="trash" :size="14" /></button></header>
@@ -156,24 +154,119 @@ onBeforeUnmount(() => { destroyed = true; clearTimeout(pollTimer); clearTimeout(
             <footer><label>时长 <input v-model.number="shot.seconds" :disabled="working" type="number" min="1" max="15" step="0.5" :aria-label="`镜头 ${index + 1} 时长`" />秒</label><small>实际约 {{ videoGenerationActualSeconds(shot.seconds || 1).toFixed(2) }} 秒 · 24 fps</small></footer>
           </article></div>
           <div v-if="mode === 'storyboard'" class="generation-story-actions"><button :disabled="working || shots.length >= VIDEO_GENERATION_MAX_SHOTS" @click="shots.push(newShot())"><Icon name="plus" :size="15" />新增镜头 {{ shots.length }}/{{ VIDEO_GENERATION_MAX_SHOTS }}</button><label><input v-model="joinShots" :disabled="working" type="checkbox" />合并为连续视频</label><small>逐镜结果始终保留</small></div>
-          <div class="generation-parameters"><label>画面尺寸<select v-model="size" :disabled="working" aria-label="生成画面尺寸"><option value="512x288">横屏 512 × 288</option><option value="288x512">竖屏 288 × 512</option><option value="512x512">方形 512 × 512</option><option value="768x448">横屏 768 × 448</option><option value="448x768">竖屏 448 × 768</option><option value="1344x768">横屏 1344 × 768</option><option value="768x1344">竖屏 768 × 1344</option></select></label><label>生成步数<input v-model.number="steps" :disabled="working" aria-label="生成步数" type="number" min="4" max="50" /></label><label>随机种子<input v-model.number="seed" :disabled="working" aria-label="随机种子" type="number" min="0" max="4294967295" /></label></div>
+        </section>
+    </div>
+    <template #settings>
+      <div class="generation-settings"><h2>生成设置</h2>
+        <section class="generation-models"><header><h2>生成模型</h2><button class="icon-button" title="重新检查模型" aria-label="重新检查模型" :disabled="checking" @click="refresh"><Icon name="refresh" :size="16" /></button></header>
+          <p v-if="checking" class="generation-muted"><span class="spinner small" />正在检查模型与设备…</p>
+          <p v-else-if="!catalog?.models.length" class="generation-muted">依靠 MiniMax H3 模型在本机生成视频，模型在 Info 中管理。</p>
+          <div class="generation-model-list"><article v-for="model in catalog?.models" :key="model.id" :data-model-id="model.id" class="generation-model" :class="{ selected: model.id === modelId }">
+            <button class="generation-model-select" :aria-pressed="model.id === modelId" :aria-label="`选择 ${model.name}`" :disabled="working" @click="chooseModel(model)"><Icon :name="model.state === 'ready' ? 'check' : 'download'" :size="18" /><span><strong>{{ model.name }}</strong><small>{{ modelState(model) }}</small></span><span class="generation-radio" /></button>
+            <p>{{ model.modes.map(id => modes.find(item => item.id === id)?.title).join(' · ') }}</p>
+            <p v-if="model.error" class="generation-error">{{ model.error }}</p>
+            <button v-if="model.state !== 'ready'" class="generation-model-link" :disabled="!native || working" :aria-label="`前往 Info 管理 ${model.name}`" @click="emit('open-models', 'video')"><Icon name="info" :size="14" />{{ model.state === 'not-downloaded' ? '请前往下载' : '前往模型管理' }}</button>
+          </article></div>
+          <p v-if="selectedModel" class="generation-muted">依靠 {{ selectedModel.name }} 模型生成。</p><button class="generation-model-link generation-model-manager" :disabled="!native" @click="emit('open-models', 'video')"><Icon name="info" :size="14" />在 Info 中管理模型</button>
+        </section>
+        <div class="generation-parameters"><label>画面尺寸<select v-model="size" :disabled="working" aria-label="生成画面尺寸"><option value="512x288">横屏 512 × 288</option><option value="288x512">竖屏 288 × 512</option><option value="512x512">方形 512 × 512</option><option value="768x448">横屏 768 × 448</option><option value="448x768">竖屏 448 × 768</option><option value="1344x768">横屏 1344 × 768</option><option value="768x1344">竖屏 768 × 1344</option></select></label><label>生成步数<input v-model.number="steps" :disabled="working" aria-label="生成步数" type="number" min="4" max="50" /></label><label>随机种子<input v-model.number="seed" :disabled="working" aria-label="随机种子" type="number" min="0" max="4294967295" /></label></div>
           <label class="generation-low-memory"><input v-model="lowMemory" :disabled="working" type="checkbox" />低内存模式 <small>降低内存占用，需要更多磁盘读取时间</small></label>
           <div class="generation-submit"><p class="generation-muted">{{ unavailable || invalid || '生成在本机进行，首次加载大型模型可能较慢。' }}</p><button class="primary" :disabled="!canGenerate" data-testid="generation-start" @click="generate()"><span v-if="starting" class="spinner small" /><Icon v-else name="sparkles" :size="16" />{{ starting ? '正在启动…' : '开始生成' }}</button></div>
-        </section>
       </div>
-      <aside class="generation-output"><header><h2>生成结果</h2><small>{{ jobs.length }} 个任务</small></header>
-        <div v-if="!jobs.length" class="generation-empty"><Icon name="film" :size="36" /><strong>从这里开启一段新画面</strong><p>生成过程中可切换工作区。完成后预览视频，再加入当前项目。</p></div>
-        <div v-else class="generation-job-list"><article v-for="job in jobs" :key="job.id" class="generation-job" :class="{ selected: selectedJob?.id === job.id }" :data-job-id="job.id"><button class="generation-job-select" :aria-pressed="selectedJob?.id === job.id" @click="selectedJobId = job.id"><span><Icon :name="job.state === 'running' ? 'clock' : job.state === 'completed' ? 'check' : 'alert'" :size="15" /><strong>{{ jobState(job) }}</strong></span><time>{{ new Date(job.startedAt).toLocaleTimeString('zh-CN', { hour12: false }) }}</time></button><p>{{ job.stage }}<template v-if="job.shotCount > 1"> · 镜头 {{ Math.min(job.shotCount, job.shotIndex + 1) }}/{{ job.shotCount }}</template></p><progress v-if="job.state === 'running'" :value="job.progress === undefined ? undefined : percent(job.progress)" max="100" aria-label="视频生成进度" /><div class="generation-job-metrics"><small>用时 {{ elapsed(job) }}<template v-if="job.progress !== undefined"> · {{ percent(job.progress) }}%</template></small><button v-if="job.state === 'running'" :disabled="cancelling === job.id" @click="cancelJob(job)">{{ cancelling === job.id ? '正在取消…' : '取消生成' }}</button><button v-else-if="(job.state === 'failed' || job.state === 'cancelled') && jobRequests[job.id]" :disabled="working || disabled || !catalog?.supported || !catalog.runtimeReady" @click="generate(jobRequests[job.id])">重新生成</button></div><p v-if="job.error" class="generation-error">{{ job.error }}</p><p v-if="job.warning" class="generation-muted">{{ job.warning }}</p></article></div>
-        <div v-if="previewAsset" class="generation-preview"><video :key="previewAsset.id" :src="previewAsset.url" controls playsinline preload="metadata" data-testid="generation-preview" /><label v-if="results.length > 1">查看结果<select v-model="selectedAssetId" aria-label="查看生成结果"><option v-for="asset in results" :key="asset.id" :value="asset.id">{{ asset.id === selectedJob?.combinedAsset?.id ? '完整视频 · ' : '' }}{{ asset.name }}</option></select></label><strong>{{ previewAsset.name }}</strong><small>{{ previewAsset.width }} × {{ previewAsset.height }} · {{ previewAsset.duration.toFixed(2) }} 秒</small><div class="generation-result-actions"><button :disabled="disabled" @click="emit('add-asset', previewAsset)"><Icon name="import" :size="14" />加入素材</button><button :disabled="disabled" @click="emit('add-timeline', previewAsset)"><Icon name="plus" :size="14" />加入时间线</button><button :disabled="!previewAsset.nativePath" title="打开文件夹" aria-label="打开生成视频文件夹" @click="reveal(previewAsset)"><Icon name="folder" :size="15" /></button></div><p class="generation-muted">添加至当前项目：{{ projectTitle }}</p></div>
-      </aside>
-    </div>
-  </section>
+    </template>
+  </ToolWorkspace>
 </template>
 
 <style scoped>
-.generation-workspace{flex:1;min-height:0;overflow:auto;padding:24px 28px 32px;color:var(--ui-text);overscroll-behavior:contain;scrollbar-width:thin}.generation-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}.generation-heading h1{display:flex;align-items:center;gap:10px;margin:0;font-size:23px;letter-spacing:-.5px}.generation-heading h1 svg{color:var(--ui-accent)}.generation-heading p{margin:8px 0 0;color:var(--ui-muted);font-size:12px}.generation-heading>button{padding:7px 11px}.generation-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,.7fr);gap:20px;align-items:start;max-width:1600px;margin:auto}.generation-compose{display:grid;gap:16px;min-width:0}.generation-models,.generation-input,.generation-output{border:1px solid var(--ui-line);border-radius:12px;background:var(--ui-surface);padding:18px;min-width:0}.generation-models>header,.generation-output>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.generation-workspace h2{font-size:13px;font-weight:600;margin:0}.generation-workspace h2 small{font-size:10px;color:var(--ui-muted);font-weight:400;margin-left:7px}.generation-model-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.generation-model{border:1px solid var(--ui-line);border-radius:9px;padding:11px;min-width:0;background:var(--ui-surface-2)}.generation-model.selected{border-color:var(--ui-accent);background:color-mix(in srgb,var(--ui-accent) 4%,var(--ui-surface))}.generation-model-select{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;text-align:left;padding:0;min-height:40px}.generation-model-select>svg{color:var(--ui-accent);flex:none}.generation-model-select>span:nth-child(2){display:grid;gap:5px;flex:1;min-width:0}.generation-model-select strong{font-size:11px;overflow-wrap:anywhere}.generation-workspace small{font-size:10px;color:var(--ui-muted)}.generation-radio{width:13px;height:13px;border:1px solid var(--ui-border-strong);border-radius:50%;flex:none}.selected .generation-radio{border:4px solid var(--ui-accent)}.generation-model p{font-size:10px;line-height:1.6;color:var(--ui-muted);margin:9px 0}.generation-job-metrics{display:flex;align-items:center;justify-content:space-between;gap:8px}.generation-job-metrics button{font-size:10px;padding:4px 8px}.generation-workspace progress{display:block;width:100%;height:5px;margin:9px 0;border:0;border-radius:5px;accent-color:var(--ui-accent);overflow:hidden}.generation-workspace progress::-webkit-progress-bar{background:var(--ui-line)}.generation-workspace progress::-webkit-progress-value{background:var(--ui-accent)}.generation-muted{font-size:11px;color:var(--ui-muted);line-height:1.7;margin:9px 0}.generation-notice{display:flex;align-items:center;gap:8px;padding:12px;border:1px solid var(--ui-line);background:var(--ui-accent-soft);border-radius:8px;font-size:12px}.generation-error{font-size:11px!important;line-height:1.7;color:var(--ui-danger)!important;overflow-wrap:anywhere;white-space:pre-wrap}.generation-error button{display:inline-flex;margin-left:8px;font-size:10px}.generation-modes{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.generation-modes button{font-size:11px;padding:8px 5px;gap:5px;white-space:nowrap}.generation-modes button[aria-pressed=true]{color:var(--ui-accent);background:var(--ui-accent-soft);border-color:var(--ui-accent)}.generation-shots{display:grid;gap:12px}.generation-shot{min-width:0}.generation-shot>header{display:flex;align-items:center;gap:5px;margin:4px 0 8px}.generation-shot>header>span{font-size:11px;white-space:nowrap;margin-right:4px}.generation-shot>header input{min-width:0;width:100%;flex:1;height:30px;font-size:11px}.generation-shot>header button{padding:5px;flex:none}.generation-shot textarea{display:block;resize:vertical;min-height:92px;width:100%;font-size:12px;line-height:1.8;padding:10px 12px;border:1px solid var(--ui-line);border-radius:8px;background:var(--ui-surface-2);color:var(--ui-text);font-family:inherit}.generation-shot>footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0 0}.generation-shot>footer label{display:flex;gap:6px;align-items:center;font-size:11px}.generation-shot>footer input{width:64px;height:30px;font-size:11px}.generation-frames{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:10px}.generation-frame{position:relative;min-width:0}.generation-frame>button:first-child{width:100%;min-height:80px;display:flex;flex-direction:column;gap:7px;font-size:11px;padding:10px;border-style:dashed;background:var(--ui-surface-2)}.generation-frame img{max-height:90px;max-width:100%;object-fit:contain}.generation-frame small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.generation-frame-remove{position:absolute;right:5px;top:5px;padding:4px;background:var(--ui-surface)}.generation-references{margin:10px 0}.generation-references>button{font-size:11px}.generation-reference{display:flex;align-items:center;gap:7px;font-size:11px;border-bottom:1px solid var(--ui-line);padding:8px 0}.generation-reference>span{flex:1;min-width:0;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.generation-reference label{display:flex;gap:5px;align-items:center;font-size:10px;white-space:nowrap}.generation-reference button{padding:3px}.generation-story-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px;font-size:10px}.generation-story-actions button{font-size:11px}.generation-story-actions label,.generation-low-memory{display:flex;align-items:center;gap:6px;font-size:11px}.generation-parameters{display:grid;grid-template-columns:1.5fr .8fr 1fr;gap:10px;padding-top:17px;margin-top:17px;border-top:1px solid var(--ui-line)}.generation-parameters label{display:grid;gap:7px;font-size:11px;min-width:0}.generation-parameters input,.generation-parameters select{width:100%;min-width:0}.generation-parameters input{height:var(--ui-control-height);font-size:var(--ui-control-font-size)}.generation-low-memory{margin-top:14px;flex-wrap:wrap}.generation-workspace input[type=checkbox]{accent-color:var(--ui-accent);width:14px;height:14px;flex:none;margin:0}.generation-submit{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--ui-line);margin-top:17px;padding-top:14px}.generation-submit>button{flex:none;font-size:12px;min-width:106px;padding:9px 13px}.generation-submit p{font-size:10px;margin:0}.generation-output{position:sticky;top:0}.generation-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;min-height:300px;text-align:center;color:var(--ui-muted);padding:20px}.generation-empty>svg{color:var(--ui-accent);opacity:.6}.generation-empty strong{font-size:13px;font-weight:500}.generation-empty p{font-size:11px;line-height:1.8;max-width:240px;margin:0}.generation-job-list{max-height:300px;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;display:grid;gap:8px}.generation-job{padding:11px;border:1px solid var(--ui-line);border-radius:8px}.generation-job.selected{border-color:var(--ui-accent)}.generation-job-select{padding:0;border:0;display:flex;justify-content:space-between;width:100%;background:transparent}.generation-job-select>span{display:flex;align-items:center;gap:7px;font-size:11px}.generation-job-select strong{font-weight:600}.generation-job-select time{font-size:10px;color:var(--ui-muted)}.generation-job>p{font-size:10px;color:var(--ui-muted);line-height:1.6;margin:8px 0}.generation-preview{display:grid;gap:10px;border-top:1px solid var(--ui-line);padding-top:16px;margin-top:16px}.generation-preview video{display:block;max-height:320px;width:100%;aspect-ratio:16/9;background:#111724;border-radius:7px}.generation-preview>strong{font-size:12px;overflow-wrap:anywhere}.generation-preview>label{display:grid;gap:7px;font-size:11px}.generation-preview select{width:100%}.generation-result-actions{display:flex;gap:7px;flex-wrap:wrap}.generation-result-actions button{font-size:11px;flex:1;white-space:nowrap}.generation-result-actions>button:last-child{flex:0}.generation-preview .generation-muted{margin:0;font-size:10px}
+.generation-models,.generation-input,.generation-output{min-width:0}
+.generation-models>header,.generation-output>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.generation-model-list{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+.generation-model{border:1px solid var(--ui-line);border-radius:9px;padding:11px;min-width:0;background:var(--ui-surface-2)}
+.generation-model.selected{border-color:var(--ui-accent);background:color-mix(in srgb,var(--ui-accent) 4%,var(--ui-surface))}
+.generation-model-select{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;text-align:left;padding:0;min-height:40px}
+.generation-model-select>svg{color:var(--ui-accent);flex:none}
+.generation-model-select>span:nth-child(2){display:grid;gap:5px;flex:1;min-width:0}
+.generation-model-select strong{font-size:11px;overflow-wrap:anywhere}
+.generation-radio{width:13px;height:13px;border:1px solid var(--ui-border-strong);border-radius:50%;flex:none}
+.selected .generation-radio{border:4px solid var(--ui-accent)}
+.generation-model p{font-size:10px;line-height:1.6;color:var(--ui-muted);margin:9px 0}
+.generation-job-metrics{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}
+.generation-job-metrics button{font-size:10px;padding:4px 8px}
+.generation-muted{font-size:11px;color:var(--ui-muted);line-height:1.7;margin:9px 0}
+.generation-notice{display:flex;align-items:center;gap:8px;margin:0;padding:10px 12px;border:1px solid var(--ui-line);background:var(--ui-accent-soft);border-radius:8px;font-size:11px;line-height:1.7}
+.generation-error{font-size:11px!important;line-height:1.7;color:var(--ui-danger)!important;overflow-wrap:anywhere;white-space:pre-wrap}
+.generation-error button{display:inline-flex;margin-left:8px;font-size:10px}
+.generation-modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:6px}
+.generation-modes button{font-size:11px;padding:8px 5px;gap:5px;white-space:nowrap}
+.generation-modes button[aria-pressed=true]{color:var(--ui-accent);background:var(--ui-accent-soft);border-color:var(--ui-accent)}
+.generation-shots{display:grid;gap:12px}
+.generation-shot{min-width:0}
+.generation-shot>header{display:flex;align-items:center;gap:5px;margin:4px 0 8px}
+.generation-shot>header>span{font-size:11px;white-space:nowrap;margin-right:4px}
+.generation-shot>header input{min-width:0;width:100%;flex:1;height:30px;font-size:11px}
+.generation-shot>header button{padding:5px;flex:none}
+.generation-shot textarea{display:block;resize:vertical;min-height:92px;width:100%;font-size:12px;line-height:1.8;padding:10px 12px;border:1px solid var(--ui-line);border-radius:8px;background:var(--ui-surface-2);color:var(--ui-text);font-family:inherit}
+.generation-shot>footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:9px 0 0}
+.generation-shot>footer label{display:flex;gap:6px;align-items:center;font-size:11px}
+.generation-shot>footer input{width:64px;height:30px;font-size:11px}
+.generation-frames{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:10px}
+.generation-frame{position:relative;min-width:0}
+.generation-frame>button:first-child{width:100%;min-height:80px;display:flex;flex-direction:column;gap:7px;font-size:11px;padding:10px;border-style:dashed;background:var(--ui-surface-2)}
+.generation-frame img{max-height:90px;max-width:100%;object-fit:contain}
+.generation-frame small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.generation-frame-remove{position:absolute;right:5px;top:5px;padding:4px;background:var(--ui-surface)}
+.generation-references{margin:10px 0}
+.generation-references>button{font-size:11px}
+.generation-reference{display:flex;align-items:center;gap:7px;font-size:11px;border-bottom:1px solid var(--ui-line);padding:8px 0}
+.generation-reference>span{flex:1;min-width:0;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}
+.generation-reference label{display:flex;gap:5px;align-items:center;font-size:10px;white-space:nowrap}
+.generation-reference button{padding:3px}
+.generation-story-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px;font-size:10px}
+.generation-story-actions button{font-size:11px}
+.generation-story-actions label,.generation-low-memory{display:flex;align-items:center;gap:6px;font-size:11px}
+.generation-parameters{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding-top:16px;border-top:1px solid var(--ui-line)}
+.generation-parameters label{display:grid;gap:7px;font-size:11px;min-width:0}
+.generation-parameters input,.generation-parameters select{width:100%;min-width:0}
+.generation-parameters input{height:var(--ui-control-height);font-size:var(--ui-control-font-size)}
+.generation-low-memory{flex-wrap:wrap;line-height:1.7;margin:0}
+.generation-submit{display:grid;gap:12px;border-top:1px solid var(--ui-line);padding-top:14px}
+.generation-submit>button{width:100%;font-size:12px;min-height:38px;padding:9px 13px}
+.generation-submit p{font-size:10px;margin:0}
+.generation-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;height:clamp(220px,36vh,480px);text-align:center;color:var(--ui-muted);padding:20px;border-radius:8px;background:var(--ui-surface-2)}
+.generation-empty>svg{color:var(--ui-accent);opacity:.6}
+.generation-empty strong{font-size:13px;font-weight:500}
+.generation-empty p{font-size:11px;line-height:1.8;max-width:240px;margin:0}
+.generation-job-list{display:flex;flex-direction:column;gap:8px;min-width:0}
+.generation-job{flex-shrink:0;padding:10px;border:1px solid var(--ui-line);border-radius:8px;min-width:0}
+.generation-job.selected{border-color:var(--ui-accent)}
+.generation-job-select{padding:0;border:0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;width:100%;background:transparent;text-align:left}
+.generation-job-select>span{display:flex;align-items:center;gap:7px;font-size:11px}
+.generation-job-select strong{font-weight:600}
+.generation-job-select time{font-size:10px;color:var(--ui-muted)}
+.generation-job>p{font-size:10px;color:var(--ui-muted);line-height:1.6;margin:8px 0}
+.generation-preview{display:grid;gap:10px;min-width:0}
+.generation-preview video{display:block;width:100%;height:clamp(220px,36vh,480px);object-fit:contain;background:#111724;border-radius:8px}
+.generation-preview>strong{font-size:12px;overflow-wrap:anywhere}
+.generation-preview>label{display:grid;gap:7px;font-size:11px}
+.generation-preview select{width:100%}
+.generation-result-actions{display:flex;gap:7px;flex-wrap:wrap}
+.generation-result-actions button{font-size:11px;white-space:nowrap}
+.generation-result-actions>button:last-child{margin-left:auto}
+.generation-preview .generation-muted{margin:0;font-size:10px}
 .generation-model-link{font-size:11px;color:var(--ui-accent);margin-top:4px}
-@media(max-width:1150px){.generation-workspace{padding:20px}.generation-columns{grid-template-columns:minmax(0,1fr) 300px;gap:12px}.generation-models,.generation-input,.generation-output{padding:13px}.generation-model-list{grid-template-columns:1fr}.generation-modes{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:820px){.generation-columns{grid-template-columns:1fr}.generation-output{position:static}.generation-model-list{grid-template-columns:repeat(2,minmax(0,1fr))}.generation-workspace{padding:16px}.generation-empty{min-height:150px}.generation-modes{grid-template-columns:repeat(4,1fr)}}
-@media(max-width:520px){.generation-model-list{grid-template-columns:1fr}.generation-modes{grid-template-columns:repeat(2,1fr)}.generation-parameters{grid-template-columns:1fr 1fr}.generation-parameters>label:first-child{grid-column:1/-1}.generation-heading h1{font-size:19px}.generation-heading p{font-size:10px}.generation-shot>footer{align-items:flex-start;flex-direction:column}.generation-submit{align-items:flex-start}.generation-low-memory small{width:100%;padding-left:20px}}
+.generation-content{display:grid;gap:16px;min-width:0}
+.generation-workspace h2{font-size:13px;font-weight:600;margin:0}
+.generation-workspace small{font-size:10px;color:var(--ui-muted)}
+.generation-workspace input[type=checkbox]{accent-color:var(--ui-accent);width:14px;height:14px;flex:none;margin:0}
+.generation-workspace progress{display:block;width:100%;height:5px;margin:9px 0;border:0;border-radius:5px;accent-color:var(--ui-accent);overflow:hidden}
+.generation-workspace progress::-webkit-progress-bar{background:var(--ui-line)}
+.generation-workspace progress::-webkit-progress-value{background:var(--ui-accent)}
+.generation-library-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.generation-library-empty{font-size:11px;line-height:1.8;color:var(--ui-muted);margin:18px 0}
+.generation-preview-card>h2{margin-bottom:12px}
+.generation-input{border-top:1px solid var(--ui-line);padding-top:16px}
+.generation-settings{display:grid;gap:16px;min-width:0}
+.generation-model-manager{width:100%}
+.generation-low-memory small{width:100%;padding-left:20px}
+
 </style>
