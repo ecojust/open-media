@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Main application window; native dialogs authorize file access.",
   "windows": ["main"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-set-background-color", "core:webview:allow-set-webview-background-color"]
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-set-theme", "core:window:allow-set-background-color", "core:webview:allow-set-webview-background-color"]
 }

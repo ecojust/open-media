@@ -1,11 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
+import { readFileSync } from 'node:fs'
 import { IDBFactory } from 'fake-indexeddb'
-import { createProject, createSubtitleClip, cloneProject } from '../src/core/project.ts'
+import { createClip, createProject, createSubtitleClip, cloneProject } from '../src/core/project.ts'
 import { addClip, commitHistory, createHistory, findClip, redoHistory, undoHistory } from '../src/core/timeline.ts'
 import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../src/core/speech-settings.ts'
 import { storeToolArtifact } from '../src/core/tool-artifacts.ts'
+import { addTransition } from '../src/core/transitions.ts'
 
 // Replace only native/file/canvas I/O boundaries. The controller, project edits,
 // revision checks, undo history, speech settings and speech scheduler are real.
@@ -27,6 +29,9 @@ registerHooks({ load(url, context, nextLoad) {
   return { format: 'module', shortCircuit: true, source: exports.map(name => `export function ${name}(...args) { return globalThis.__openMediaMcpTestIo.${name}(...args) }`).join('\n') }
 } })
 const { createMcpAutomation } = await import('../src/core/mcp-automation.ts')
+// Load the actual material service under a separate URL so these integration
+// cases replace only media I/O, while existing controller tests retain their stub.
+const { prepareMcpMaterial: prepareRealMcpMaterial } = await import('../src/core/mcp-materials.ts?integration')
 const clone = value => structuredClone(value)
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
 const tick = () => new Promise(resolve => setImmediate(resolve))
@@ -461,6 +466,83 @@ test('material insertion uses current playhead, commits once and selects the ins
   assert.equal((await f.run('playback_get')).selectedClipId, done.result.clipId)
   assert.equal(f.commits.length, 1)
   await f.controller.dispose()
+})
+
+function transitionSoundFixture() {
+  let project = createProject('转场音效 MCP')
+  const source = video()
+  project.assets.push(source)
+  project.tracks.find(track => track.kind === 'video').clips = [0, 4, 8].map((start, index) => createClip(source, project, { id: `picture-${index}`, start, trimIn: start, trimOut: Math.min(start + 4, 10) }))
+  project = addTransition(project, 4, 'fade')
+  const f = fixture(project), transitionId = project.tracks.flatMap(track => track.clips).find(clip => clip.transition).id
+  const bytes = readFileSync(new URL('../src/assets/transition-sounds/air-sweep.wav', import.meta.url)), blob = new Blob([bytes], { type: 'audio/wav' })
+  const asset = { id: 'transition-sound-source', name: '风掠.wav', kind: 'audio', duration: 0.8, width: 0, height: 0, size: bytes.length, mime: blob.type, nativePath: '/private/transition-sound.wav', url: 'blob:transition-sound-preview' }
+  const dependencies = {
+    loadTransitionSounds: async () => [{ id: 'air-sweep', title: '风掠', description: '切点风声', duration: 0.8, anchor: 0.35, url: '/assets/air-sweep.wav', filename: 'air-sweep.wav' }],
+    fetchBlob: async () => blob,
+    native: { isDesktop: () => true, importBlobAsset: async imported => { assert.deepEqual(Buffer.from(imported), bytes); return { ...asset } } },
+  }
+  f.io.prepareMcpMaterial = (snapshot, args, options) => prepareRealMcpMaterial(snapshot, args, { ...dependencies, ...options })
+  return { f, transitionId, dependencies, asset, bytes }
+}
+
+test('转场音效 MCP 实际执行选中转场或指定时间，持久化素材且共享片段编辑和撤销', async () => {
+  for (const [target, expectedStart] of [[{}, 3.65], [{ time: 7.9 }, 7.65], [{ time: 7.9, explicitTransition: true }, 3.65]]) {
+    const { f, transitionId, bytes } = transitionSoundFixture(), before = clone(f.project)
+    await f.host.setPlayback({ selectedClipId: transitionId, time: 8 })
+    const { explicitTransition, ...timing } = target
+    const job = await f.run('material_add', { kind: 'transition_sound', id: 'air-sweep', ...timing, ...(explicitTransition ? { transitionClipId: transitionId } : {}), expectedProjectId: f.project.id, expectedRevision: f.revision })
+    assert.equal(job.execution, 'asynchronous')
+    const done = await finished(f.controller, job)
+    assert.equal(done.state, 'completed', done.error)
+    const { clip, track } = findClip(f.project, done.result.clipId)
+    assert.equal(clip.start, expectedStart); assert.equal(track.name, '转场音效')
+    assert.equal(f.commits.length, 1); assert.equal(f.assets.length, 1)
+    assert.equal(f.assets[0].libraryRole, 'transition-sound')
+    assert.equal(f.assets[0].nativePath, '/private/transition-sound.wav')
+    assert.deepEqual(Buffer.from(await f.host.getBlobs().get(f.assets[0].id).arrayBuffer()), bytes)
+    assert.equal((await f.run('playback_get')).selectedClipId, clip.id)
+    await f.run('project_history', { direction: 'undo' })
+    assert.deepEqual(f.project, before)
+    await f.run('project_history', { direction: 'redo' })
+    assert.equal(findClip(f.project, clip.id).clip.start, expectedStart)
+    await f.run('clip_update', { clipId: clip.id, patch: { volume: 0.4, fadeOut: 0.1 } })
+    assert.equal(findClip(f.project, clip.id).clip.volume, 0.4)
+    assert.equal(findClip(f.project, clip.id).clip.fadeOut, 0.1)
+    await f.controller.dispose()
+  }
+  const { f } = transitionSoundFixture()
+  await f.host.setPlayback({ time: 8, selectedClipId: '' })
+  const done = await finished(f.controller, await f.run('material_add', { kind: 'transition_sound', id: 'air-sweep' }))
+  assert.equal(done.state, 'completed', done.error)
+  assert.equal(findClip(f.project, done.result.clipId).clip.start, 7.65)
+  await f.controller.dispose()
+})
+
+test('转场音效 MCP 原生导入期间取消、修改或切换工程均不登记资产和历史', async () => {
+  const previousRevoke = URL.revokeObjectURL, revoked = []
+  URL.revokeObjectURL = url => revoked.push(url)
+  try {
+    for (const mode of ['cancel', 'revision', 'reopen', 'other']) {
+      const { f, dependencies, asset } = transitionSoundFixture(), pending = deferred()
+      let importing = false
+      dependencies.native.importBlobAsset = () => { importing = true; return pending.promise }
+      const job = await f.run('material_add', { kind: 'transition_sound', id: 'air-sweep', time: 4 })
+      await until(() => importing)
+      if (mode === 'cancel') await f.run('job_cancel', { id: job.id })
+      else if (mode === 'revision') f.externalChange()
+      else if (mode === 'reopen') f.reopen()
+      else f.openOther()
+      pending.resolve(asset)
+      const done = await finished(f.controller, job)
+      assert.equal(done.state, mode === 'cancel' ? 'cancelled' : 'failed')
+      assert.equal(f.commits.length, 0); assert.equal(f.assets.length, 0)
+      assert.equal(f.host.getBlobs().size, 0)
+      assert.equal(f.project.assets.some(item => item.id === asset.id), false)
+      await f.controller.dispose()
+    }
+    assert.deepEqual(revoked, Array(4).fill('blob:transition-sound-preview'))
+  } finally { URL.revokeObjectURL = previousRevoke }
 })
 
 test('shared speech settings are used when generation omits voice, rate and alignment', async () => {

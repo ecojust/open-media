@@ -337,11 +337,11 @@ async function main() {
     await expect(page.locator('.status-main')).toContainText('打包')
     await page.evaluate(() => window.releaseBufferReads())
     await download
+    await page.getByTestId('nav-edit').click()
     await expect(page.locator('.project-summary')).toContainText('3 个素材', { timeout: 20000 })
     assert.equal(await page.evaluate(() => window.captureStream.getTracks().every(track => track.readyState === 'ended')), true)
     assert.equal(await page.evaluate(() => window.captureMicrophoneStream.getTracks().every(track => track.readyState === 'ended')), true)
     await page.evaluate(async () => { clearInterval(window.capturePaintTimer); await window.captureAudioContext.close() })
-    await page.getByTestId('nav-edit').click()
     await expect(page.locator('.asset-card')).toHaveCount(3)
     await waitSaved()
   })

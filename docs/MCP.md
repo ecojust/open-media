@@ -2,7 +2,7 @@
 
 Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。视频剪辑顶部“项目设置”左侧的 **M** 按钮打开简洁的服务弹窗，显示连接地址、Token 和“复制配置”按钮，通过服务开关启停。有已认证的客户端连接时，M 按钮显示青紫色流动荧光；连接断开或服务停止后恢复普通样式。自动化任务的进度和取消操作位于“处理任务”中。
 
-服务只操作界面中当前打开的工程，使用其撤销历史和保存位置；新建、打开、切换工程及选择保存位置由用户在界面中完成。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场、背景音乐、片头片尾、配音、共享模型管理、图像／歌曲／视频生成和视频导出，共 **97 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
+服务只操作界面中当前打开的工程，使用其撤销历史和保存位置；新建、打开、切换工程及选择保存位置由用户在界面中完成。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场及转场音效、背景音乐、片头片尾、配音、共享模型管理、图像／歌曲／视频生成和视频导出，共 **97 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
 
 ## 连接
 
@@ -85,8 +85,8 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_speech_generate` | 单条或批量生成配音，完成后加入时间线 |
 | `open_media_speech_align` | 将字幕时长与已关联配音对齐 |
 | `open_media_speech_model` | 查询、下载、取消下载或修复声音模型 |
-| `open_media_material_list` | 搜索并分页浏览水印、配乐、片头片尾素材 |
-| `open_media_material_add` | 添加内置素材，片头片尾支持前插／后插及编辑标题 |
+| `open_media_material_list` | 搜索并分页浏览水印、配乐、片头片尾和转场音效素材 |
+| `open_media_material_add` | 添加内置素材，片头片尾支持前插／后插及编辑标题，转场音效支持指定切点与重音位置 |
 | `open_media_export_start` | 按项目尺寸导出 MP4、WebM、MOV 或 GIF |
 | `open_media_video_generation_status` | 查询平台支持、视频模型大小、下载和校验状态 |
 | `open_media_video_model_download` | 经用户同意许可后按需下载视频模型与运行时，支持统一进度查询和取消 |
@@ -332,6 +332,26 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 通用转场还提供 `iris`（圆形光圈）、`diamond`（菱形开幕）、`blinds`（阶梯百叶）、`flash-white`（柔光闪白）、`defocus`（失焦叠化）、`zoom-through`（推近穿越）、`diagonal`（斜向揭幕）和 `radial`（环弧开幕）。这些效果在画布预览、区间预览、取帧和视频导出中使用一致的时间与几何定义。
 
 碎片与切片转场还提供 `fragment-burst`（碎片爆散）、`fragment-vortex`（旋涡碎片）、`fragment-collapse`（碎片聚拢）、`pixel-dissolve`（像素消散）、`pixel-wave`（像素波浪）、`slice-stagger`（交错横切）、`slice-vertical`（交错纵切）、`checker-flip`（棋盘翻片）、`tile-orbit`（环绕重组）、`glitch-slices`（数字故障）、`zipper-slices`（拉链开幕）和 `stepped-shutter`（阶梯折屏）。效果直接切分原视频画面，以确定的运动规则析出、析入；同一时间点重复预览不改变碎片位置。沿用 `transition_add` / `transition_update`，使用 `transition_parameters_set` 设置缓动和 `scope`（前后两段、仅析出或仅析入），不额外插入素材或改变项目时长。
+
+内置转场音效沿用素材工具，`kind: "transition_sound"` 可查询 10 款音效。目录返回 `id`、`name`、`description`、`duration` 和 `anchor`；`anchor` 是音频中默认重音的位置，单位为秒。支持 `search`、`offset`、`limit` 搜索分页。
+
+```json
+{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"open_media_material_list","arguments":{"kind":"transition_sound","limit":100}}}
+```
+
+添加时可用 `transitionClipId` 指定当前工程的画面转场片段，其绑定切点优先于 `time`；无效或失效的转场会拒绝添加。以下将“风掠”音效的默认重音对齐该转场切点：
+
+```json
+{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"open_media_material_add","arguments":{"kind":"transition_sound","id":"air-sweep","transitionClipId":"current-transition-clip-id","expectedProjectId":"current-project-id","expectedRevision":11}}}
+```
+
+也可用 `time` 查找距离该时间最近的视频切点，无需先创建画面转场；未传 `transitionClipId` 和 `time` 时，优先使用当前选中的画面转场，否则使用当前播放头附近的切点。`anchor` 可覆盖默认重音位置，必须大于等于 0 且小于音频时长。转场音效不接受 `start` 或 `duration`：
+
+```json
+{"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"open_media_material_add","arguments":{"kind":"transition_sound","id":"impact","time":10,"anchor":0.03,"expectedProjectId":"current-project-id","expectedRevision":11}}}
+```
+
+音效使用工程中的本地音频素材，添加到独立的“转场音效”音频轨道，重音对齐切点；超出时间线边界的部分自动裁剪。添加沿用异步任务机制，收到 `jobId` 后使用 `open_media_job_get` 查询，或使用 `open_media_job_cancel` 取消。完成后一次记入当前工程的撤销历史；准备期间切换工程或改变工程版本时不提交。保存工程会保留音效，后续通过返回的片段 ID 使用 `open_media_clip_update`、`open_media_clip_trim` 或 `open_media_clip_move` 调整音量、淡入淡出、时长和位置，也可用 `open_media_project_history` 撤销。
 
 素材目录搜索“科普”可找到 24 款标注/文字水印及 12 款片头片尾，返回的 `collection: "science"` 标识专题，`editableText` 与 `placement` 分别表示文字编辑能力和默认插入位置。动画中的刻度与图表是视觉示意；需要填写真实数值、来源或结论时，可选择原生文字模板。
 

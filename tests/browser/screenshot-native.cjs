@@ -54,6 +54,7 @@ async function installNativeContract(page) {
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_desktop_platform') return 'macos'
         if (command === 'get_media_jobs') return []
+        if (command === 'list_stored_videos') return { directory: '/screenshot-fixture/recordings', assets: [], warnings: [] }
         if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
         if (command === 'mcp_pending') return []
         if (command === 'mcp_get_status') return { running: false, host: '127.0.0.1', port: 39861, url: null, pendingRequests: 0, connectedClients: 0 }
@@ -262,8 +263,9 @@ async function main() {
       await page.reload()
       await expect(page.getByTestId('home-workspace')).toBeVisible()
       await expect.poll(async () => (await calls(page, 'configure_screenshot_shortcut')).length).toBe(1)
-      await page.getByTestId('nav-record').click()
+      await page.getByTestId('nav-edit').click()
       await expect(page.locator('.project-summary')).toContainText(`${fullProject.count} 个素材`)
+      await page.getByTestId('nav-record').click()
       await emitScreenshot(page)
       await expect.poll(() => page.evaluate(() => !!window.screenshotHarness.picker)).toBe(true)
       await page.evaluate(selection => window.screenshotHarness.finishPicker(selection), selection)
@@ -280,8 +282,9 @@ async function main() {
       await expect(page.locator('.status-main')).not.toContainText('已载入图片编辑')
       await expect(page.getByTestId('recorder-workspace')).toBeVisible()
       await expect(page.getByTestId('convert-workspace')).toHaveCount(0)
-      await expect(page.locator('.project-summary')).toContainText(`${fullProject.count} 个素材`)
       await expect.poll(async () => (await calls(page, 'show_main_window')).length).toBe(1)
+      await page.getByTestId('nav-edit').click()
+      await expect(page.locator('.project-summary')).toContainText(`${fullProject.count} 个素材`)
       const retainedAssetIds = await page.evaluate(async id => {
         const { loadProject } = await import('/src/core/storage.ts')
         const saved = await loadProject(id)

@@ -29,7 +29,7 @@ interface Result {
   state: 'waiting' | 'running' | 'done' | 'error' | 'cancelled'
   progress: number; blob?: Blob; url?: string; path?: string; message?: string; width?: number; height?: number
 }
-const { assets: storedVideos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useStoredVideos(() => props.assets, () => props.native && props.mode === 'video')
+const { assets: storedVideos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useStoredVideos(() => props.assets, () => props.native && props.mode === 'video', true)
 const available = computed(() => props.mode === 'image' ? props.assets.filter(asset => asset.kind === 'image') : storedVideos.value)
 const assetMenu = ref<InstanceType<typeof MediaAssetMenu>>()
 const selectedIds = ref<string[]>([])

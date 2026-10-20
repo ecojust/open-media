@@ -263,4 +263,12 @@ test('material text and speech settings schema match actual implementation limit
   assert.throws(() => validateMcpToolArguments('open_media_material_add', { kind: 'video_segment', id: 'midnight-orbit', heading: '甲'.repeat(121) }), /长度/)
   assert.throws(() => validateMcpToolArguments('open_media_material_add', { kind: 'video_segment', id: 'midnight-orbit', subheading: '甲'.repeat(241) }), /长度/)
   assert.doesNotThrow(() => validateMcpToolArguments('open_media_material_add', { kind: 'video_segment', id: 'midnight-orbit', heading: '甲'.repeat(120), subheading: '甲'.repeat(240) }))
+  assert.doesNotThrow(() => validateMcpToolArguments('open_media_material_list', { kind: 'transition_sound', search: '风掠', limit: 10 }))
+  assert.doesNotThrow(() => validateMcpToolArguments('open_media_material_add', { kind: 'transition_sound', id: 'air-sweep', time: 4, transitionClipId: 'transition-1', anchor: 0.2 }))
+  for (const patch of [{ start: 4 }, { duration: 1 }, { heading: '标题' }, { time: -1 }, { anchor: NaN }, { transitionClipId: '' }]) {
+    assert.throws(() => validateMcpToolArguments('open_media_material_add', { kind: 'transition_sound', id: 'air-sweep', ...patch }), /start|时长|仅适用|范围|有效数字|长度/)
+  }
+  for (const patch of [{ time: 4 }, { transitionClipId: 'transition-1' }, { anchor: 0.2 }]) {
+    assert.throws(() => validateMcpToolArguments('open_media_material_add', { kind: 'music', id: 'piano', ...patch }), /仅适用/)
+  }
 })

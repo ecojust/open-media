@@ -14,7 +14,7 @@ export interface EditorAssetEdit { project: Project; assetId: string; clipId: st
 
 function defaultTrack(track: Track, asset: MediaAsset): boolean {
   const kind = asset.kind === 'audio' ? 'audio' : 'video'
-  return track.kind === kind && !track.locked && !['水印轨道', '背景音乐轨道', '视频片段轨道'].includes(track.name)
+  return track.kind === kind && !track.locked && !['水印轨道', '背景音乐轨道', '视频片段轨道', '转场音效'].includes(track.name)
 }
 
 /** Register one selected source and insert its clip as one undoable project edit. */

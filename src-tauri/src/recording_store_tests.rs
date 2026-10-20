@@ -36,25 +36,123 @@ fn recording_directory_is_a_fixed_sibling_of_the_regular_media_store() {
 }
 
 #[test]
-fn main_store_accepts_both_media_roots_but_not_unrelated_siblings() {
+fn main_store_accepts_all_fixed_media_roots_but_not_unrelated_siblings() {
     let app_data = tempfile::tempdir().unwrap();
     let store = MediaStore::new(app_data.path()).unwrap();
     let recordings = store.recording_store().unwrap();
-    for directory in [&store.root, &recordings.root] {
+    let imported = store.import_video_store().unwrap();
+    for directory in [&store.root, &recordings.root, &imported.root] {
         let path = directory.join("video.mp4");
         fs::write(&path, b"media fixture").unwrap();
         assert_eq!(store.authorized_path(&asset_path(&path)).unwrap(), path);
+        assert!(store.is_internal_path(&path));
     }
-    for name in ["other", "media-other", "recordings-other"] {
+    for name in ["other", "media-other", "recordings-other", "import video-other"] {
         let directory = app_data.path().join(name);
         fs::create_dir(&directory).unwrap();
         let path = directory.join("video.mp4");
         fs::write(&path, b"media fixture").unwrap();
         assert!(store.authorized_path(&asset_path(&path)).is_err());
+        assert!(!store.is_internal_path(&path));
     }
     let outside = app_data.path().join("video.mp4");
     fs::write(&outside, b"media fixture").unwrap();
     assert!(store.authorized_path(&asset_path(&outside)).is_err());
+}
+
+#[test]
+fn imported_video_directory_is_a_fixed_sibling_and_preserves_existing_media() {
+    let app_data = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let old_file = store.root.join("previously-imported.mp4");
+    fs::write(&old_file, b"existing media").unwrap();
+    let imported = store.import_video_store().unwrap();
+    let recordings = store.recording_store().unwrap();
+    assert_eq!(
+        imported.root,
+        app_data.path().join("import video").canonicalize().unwrap()
+    );
+    assert_eq!(store.import_video_root().unwrap(), imported.root);
+    assert_eq!(recordings.import_video_root().unwrap(), imported.root);
+    assert_eq!(imported.recording_root().unwrap(), recordings.root);
+    assert!(!imported.root.starts_with(&store.root));
+    assert!(!imported.root.starts_with(&recordings.root));
+    assert_eq!(store.import_video_store().unwrap().root, imported.root);
+    assert_eq!(fs::read(old_file).unwrap(), b"existing media");
+    assert_eq!(fs::read_dir(&imported.root).unwrap().count(), 0);
+}
+
+#[test]
+fn a_regular_file_cannot_be_used_as_the_imported_video_directory() {
+    let app_data = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let path = app_data.path().join("import video");
+    fs::write(&path, b"keep this file").unwrap();
+    assert!(store.import_video_root().is_err());
+    assert!(store.import_video_store().is_err());
+    assert!(store.authorized_path(&asset_path(&path)).is_err());
+    assert_eq!(fs::read(path).unwrap(), b"keep this file");
+}
+
+#[cfg(unix)]
+#[test]
+fn imported_video_directory_cannot_be_redirected_outside_the_application_store() {
+    use std::os::unix::fs::symlink;
+    let app_data = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let file = outside.path().join("video.mp4");
+    fs::write(&file, b"outside fixture").unwrap();
+    symlink(outside.path(), app_data.path().join("import video")).unwrap();
+    assert!(store.import_video_root().is_err());
+    assert!(store.import_video_store().is_err());
+    assert!(store
+        .authorized_path(&asset_path(&app_data.path().join("import video/video.mp4")))
+        .is_err());
+    assert!(store.authorized_path(&asset_path(&file)).is_err());
+    assert!(!store.is_internal_path(&file));
+    let regular_media = store.root.join("ordinary.mp4");
+    fs::write(&regular_media, b"ordinary fixture").unwrap();
+    assert_eq!(
+        store.authorized_path(&asset_path(&regular_media)).unwrap(),
+        regular_media
+    );
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn replacing_an_existing_imported_video_directory_does_not_authorize_its_link_target() {
+    use std::os::unix::fs::symlink;
+    let app_data = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let imported = store.import_video_store().unwrap();
+    fs::write(outside.path().join("video.mp4"), b"outside fixture").unwrap();
+    fs::remove_dir(&imported.root).unwrap();
+    symlink(outside.path(), &imported.root).unwrap();
+    let linked_file = imported.root.join("video.mp4");
+    assert!(store.authorized_path(&asset_path(&linked_file)).is_err());
+    assert!(imported.authorized_path(&asset_path(&linked_file)).is_err());
+    assert!(!store.is_internal_path(&linked_file.canonicalize().unwrap()));
+    assert!(store.import_video_store().is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_inside_imported_videos_does_not_authorize_an_external_media_file() {
+    use std::os::unix::fs::symlink;
+    let app_data = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let imported = store.import_video_store().unwrap();
+    let file = outside.path().join("video.mp4");
+    fs::write(&file, b"outside fixture").unwrap();
+    let linked = imported.root.join("linked.mp4");
+    symlink(&file, &linked).unwrap();
+    assert!(store.authorized_path(&asset_path(&linked)).is_err());
+    assert!(imported.authorized_path(&asset_path(&linked)).is_err());
+    assert!(!store.is_internal_path(&linked.canonicalize().unwrap()));
 }
 
 #[test]
@@ -215,6 +313,171 @@ fn run_export(store: &MediaStore, runtime: &Runtime, spec: &Value, output: &Path
         thread::sleep(Duration::from_millis(20));
     }
     assert_red_video(runtime, output);
+}
+
+#[test]
+fn library_video_imports_and_blobs_keep_sources_and_work_in_conversion_and_gif_export() {
+    let app_data = tempfile::tempdir().unwrap();
+    let runtime =
+        Runtime::discover(None, None).expect("Media runtime required for library import checks");
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let source = app_data.path().join("source.mp4");
+    make_video(&runtime, &source);
+    let bytes = fs::read(&source).unwrap();
+    let ordinary = store.import(&runtime, &source, Some("普通素材.mp4")).unwrap();
+    let imported = store
+        .import_for_library(&runtime, &source, Some("手动导入视频.mp4"))
+        .unwrap();
+    let blob = store
+        .import_bytes_for_library(&runtime, &bytes, "拖入视频.mp4")
+        .unwrap();
+    let imported_store = store.import_video_store().unwrap();
+    assert_eq!(
+        Path::new(&ordinary.native_path).parent(),
+        Some(store.root.as_path())
+    );
+    for asset in [&imported, &blob] {
+        assert_eq!(asset.kind, "video");
+        assert_eq!(
+            Path::new(&asset.native_path).parent(),
+            Some(imported_store.root.as_path())
+        );
+        assert_eq!(fs::read(&asset.native_path).unwrap(), bytes);
+        assert_eq!(
+            store.authorized_path(&serde_json::to_value(asset).unwrap()).unwrap(),
+            Path::new(&asset.native_path)
+        );
+        assert_eq!(
+            media_metadata::original_name(&imported_store, Path::new(&asset.native_path)),
+            Some(asset.name.clone())
+        );
+        assert_eq!(
+            media_metadata::original_name(&store, Path::new(&asset.native_path)),
+            None
+        );
+    }
+    assert_ne!(imported.native_path, blob.native_path);
+    assert_eq!(fs::read(&source).unwrap(), bytes);
+    assert_eq!(fs::read(&ordinary.native_path).unwrap(), bytes);
+
+    let reopened = MediaStore::new(app_data.path()).unwrap();
+    let asset = serde_json::to_value(&imported).unwrap();
+    let preview = create_preview(&reopened, &runtime, &asset, None).unwrap();
+    assert_red_video(&runtime, Path::new(&preview.path));
+    for (name, spec, has_audio) in [
+        (
+            "imported-segment.gif",
+            json!({
+                "kind": "gif", "asset": asset,
+                "segments": [{ "start": 0, "end": 0.5 }],
+                "width": 64, "fps": 10, "loop": false
+            }),
+            false,
+        ),
+        (
+            "converted-import.mp4",
+            json!({
+                "kind": "convert", "asset": asset, "format": "mp4",
+                "width": 64, "height": 48, "fps": 10,
+                "trimStart": 0, "trimEnd": 0.5
+            }),
+            true,
+        ),
+    ] {
+        let output = app_data.path().join(name);
+        run_export(&reopened, &runtime, &spec, &output);
+        let converted = reopened.probe(&runtime, &output, name).unwrap();
+        assert_eq!((converted.width, converted.height), (64, 48), "{name}");
+        assert!((converted.duration - 0.5).abs() < 0.15, "{name}");
+        assert_eq!(reopened.has_audio(&runtime, &output), has_audio, "{name}");
+    }
+    assert_eq!(fs::read(source).unwrap(), bytes);
+}
+
+#[test]
+fn library_imports_keep_audio_and_images_in_media_even_with_video_extensions() {
+    let app_data = tempfile::tempdir().unwrap();
+    let runtime =
+        Runtime::discover(None, None).expect("Media runtime required for import isolation checks");
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let imported_store = store.import_video_store().unwrap();
+    let audio_path = app_data.path().join("audio.mp4");
+    let output = process(&runtime.encoder)
+        .args([
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.2",
+            "-c:a", "pcm_s16le", "-f", "wav",
+        ])
+        .arg(&audio_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let image_path = app_data.path().join("image.mp4");
+    {
+        let output = fs::File::create(&image_path).unwrap();
+        let mut encoder = png::Encoder::new(output, 1, 1);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&[255, 0, 0]).unwrap();
+        writer.finish().unwrap();
+    }
+    for (path, kind) in [(&audio_path, "audio"), (&image_path, "image")] {
+        let original_bytes = fs::read(path).unwrap();
+        let asset = store
+            .import_for_library(&runtime, path, Some("误用视频扩展名.mp4"))
+            .unwrap();
+        let blob = store
+            .import_bytes_for_library(&runtime, &original_bytes, "拖入误用扩展名.mp4")
+            .unwrap();
+        for imported in [&asset, &blob] {
+            assert_eq!(imported.kind, kind);
+            assert_eq!(
+                Path::new(&imported.native_path).parent(),
+                Some(store.root.as_path())
+            );
+            assert_eq!(fs::read(&imported.native_path).unwrap(), original_bytes);
+        }
+        assert_eq!(fs::read(path).unwrap(), original_bytes);
+    }
+    assert_eq!(fs::read_dir(&imported_store.root).unwrap().count(), 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn library_import_probes_each_file_once() {
+    use std::os::unix::fs::PermissionsExt;
+    let app_data = tempfile::tempdir().unwrap();
+    let runtime =
+        Runtime::discover(None, None).expect("Media runtime required for import probe checks");
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let source = app_data.path().join("source.mp4");
+    make_video(&runtime, &source);
+    let count_path = app_data.path().join("probe-count");
+    let wrapper_path = app_data.path().join("count-probe.sh");
+    let quote = |path: &Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+    fs::write(
+        &wrapper_path,
+        format!(
+            "#!/bin/sh\nprintf x >> {}\nexec {} \"$@\"\n",
+            quote(&count_path),
+            quote(&runtime.probe)
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o700)).unwrap();
+    let counted_runtime = Runtime { probe: wrapper_path, ..runtime };
+    let imported = store
+        .import_for_library(&counted_runtime, &source, Some("单次读取.mp4"))
+        .unwrap();
+    assert_eq!(imported.kind, "video");
+    assert_eq!(fs::read(&count_path).unwrap(), b"x");
+    let blob = store
+        .import_bytes_for_library(&counted_runtime, &fs::read(&source).unwrap(), "单次读取拖入.mp4")
+        .unwrap();
+    assert_eq!(blob.kind, "video");
+    assert_eq!(fs::read(count_path).unwrap(), b"xx");
+    assert!(source.is_file());
 }
 
 #[test]

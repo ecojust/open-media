@@ -1,9 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createProject, createTextClip } from '../src/core/project.ts'
+import { readFileSync } from 'node:fs'
+import { createClip, createProject, createTextClip } from '../src/core/project.ts'
 import { listMcpMaterials, prepareMcpMaterial } from '../src/core/mcp-materials.ts'
+import { addTransition } from '../src/core/transitions.ts'
+import { findClip } from '../src/core/timeline.ts'
 
 const music = { id: 'piano', title: '轻柔钢琴', style: '钢琴', description: '安静日常', duration: 30, url: '/assets/piano.mp3', filename: 'piano.mp3' }
+const transitionSounds = JSON.parse(readFileSync(new URL('../src/assets/transition-sounds/manifest.json', import.meta.url), 'utf8')).sounds.map(item => ({ ...item, url: `/assets/${item.filename}` }))
 const segment = { id: 'intro', title: '星光序章', style: '星空', description: '流动星光', placement: 'prepend', heading: '默认标题', subheading: '默认副标题', textColor: '#ffffff', duration: 5, width: 1280, height: 720, url: '/assets/intro.webm', posterUrl: '/assets/intro.jpg', filename: 'intro.webm' }
 const watermark = { id: 'animated', name: '动态提示', category: '提示标注', tags: ['提示', '动画'], kind: 'video', url: '/watermarks/animated.mp4', fallbackUrl: '/watermarks/animated.webm', poster: '/watermarks/animated.png', duration: 4, width: 640, height: 360, placement: 'top-left', chromaKey: true, spillSuppression: true }
 const textWatermark = { id: 'editable', name: '文字卡片', category: '可编辑文字', tags: ['文字', '标签'], kind: 'text', url: '', poster: '/watermarks/editable.png', duration: 5, width: 640, height: 360, placement: 'bottom-center', textTemplate: { text: '可编辑标题', color: '#fff', background: 'transparent', fontFamily: 'sans-serif', fontWeight: 600, textAlign: 'center', fontSize: 32, width: 500, height: 120 } }
@@ -14,6 +18,7 @@ function fixture(kind = 'audio', overrides = {}) {
   const asset = { id: 'prepared-media', name: '内置素材', kind, duration: kind === 'audio' ? 30 : 5, width: kind === 'audio' ? 0 : 1280, height: kind === 'audio' ? 0 : 720, size: blob.size, mime: blob.type, nativePath: '/tmp/open-media/prepared.wav', url: 'asset://localhost/prepared-media' }
   const dependencies = {
     loadMusic: async () => [music],
+    loadTransitionSounds: async () => transitionSounds,
     loadVideoSegments: async () => [segment],
     loadWatermarks: async () => [watermark, textWatermark],
     chooseWatermarkSource: item => item.fallbackUrl ?? item.url,
@@ -24,6 +29,67 @@ function fixture(kind = 'audio', overrides = {}) {
   }
   return { requests, imports, notifications, dependencies, asset, blob }
 }
+
+function transitionProject() {
+  const project = createProject()
+  const video = { id: 'video', name: '视频.mp4', kind: 'video', url: 'blob:video', duration: 12, width: 1280, height: 720, size: 200, mime: 'video/mp4' }
+  project.assets.push(video)
+  project.tracks.find(track => track.kind === 'video').clips = [0, 4, 8].map((start, index) => createClip(video, project, { id: `video-${index}`, start, trimIn: start, trimOut: start + 4 }))
+  return addTransition(project, 4, 'fade')
+}
+
+test('转场音效目录可搜索分页，返回十段音效的重音元数据且不暴露地址', async () => {
+  const f = fixture()
+  const page = await listMcpMaterials({ kind: 'transition_sound', limit: 100 }, f.dependencies)
+  assert.equal(page.total, 10)
+  assert(page.items.every(item => item.mediaKind === 'audio' && item.anchor >= 0 && item.anchor < item.duration))
+  assert.deepEqual(page.items.map(item => item.id), transitionSounds.map(item => item.id))
+  assert.equal((await listMcpMaterials({ kind: 'transition_sound', search: '风掠' }, f.dependencies)).items[0].id, 'air-sweep')
+  assert.equal((await listMcpMaterials({ kind: 'transition_sound', offset: 9, limit: 1 }, f.dependencies)).items.length, 1)
+  assert.doesNotMatch(JSON.stringify(page), /url|filename|nativePath|\/assets\//i)
+})
+
+test('转场音效导入真实 WAV 字节到原生素材，重音优先对齐指定转场且保留独立轨道', async () => {
+  const project = transitionProject(), before = structuredClone(project), f = fixture()
+  const transition = project.tracks.flatMap(track => track.clips).find(clip => clip.transition)
+  const bytes = readFileSync(new URL('../src/assets/transition-sounds/air-sweep.wav', import.meta.url))
+  const blob = new Blob([bytes], { type: 'audio/wav' })
+  f.dependencies.fetchBlob = async url => { assert.equal(url, '/assets/air-sweep.wav'); return blob }
+  f.dependencies.native.importBlobAsset = async (imported, name) => {
+    assert.deepEqual(Buffer.from(imported), bytes)
+    assert.equal(name, '风掠.wav')
+    return { ...f.asset, name, duration: 0.8, mime: blob.type, size: blob.size }
+  }
+  const result = await prepareMcpMaterial(project, { kind: 'transition_sound', id: 'air-sweep', transitionClipId: transition.id, time: 8 }, f.dependencies)
+  const { clip, track } = findClip(result.project, result.selection.clipId)
+  assert.equal(track.kind, 'audio'); assert.equal(track.name, '转场音效')
+  assert.equal(clip.start, 3.65); assert.equal(clip.start + 0.35 - clip.trimIn, 4)
+  assert.equal(clip.volume, 0.7); assert.equal(clip.trimOut, 0.8)
+  assert.equal(result.assets[0].asset.nativePath, '/tmp/open-media/prepared.wav')
+  assert.equal(result.assets[0].asset.libraryRole, 'transition-sound')
+  assert.equal(result.project.assets.at(-1).libraryRole, 'transition-sound')
+  assert.deepEqual(Buffer.from(await result.assets[0].blob.arrayBuffer()), bytes)
+  assert.deepEqual(project, before)
+  assert.deepEqual(result.project.tracks.filter(item => item.kind !== 'audio'), project.tracks.filter(item => item.kind !== 'audio'))
+  const atTime = await prepareMcpMaterial(project, { kind: 'transition_sound', id: 'air-sweep', time: 7.5, anchor: 0.2 }, f.dependencies)
+  assert.equal(findClip(atTime.project, atTime.selection.clipId).clip.start, 7.8)
+})
+
+test('无效音效、切点、参数和过期转场绑定在读取媒体前拒绝，不静默选择其他切点', async () => {
+  const project = transitionProject(), f = fixture(), before = structuredClone(project)
+  for (const patch of [{ id: 'missing' }, { transitionClipId: 'missing' }, { transitionClipId: 'video-0' }, { start: 2 }, { duration: 1 }, { time: NaN }, { time: -1 }, { anchor: 0.8 }, { anchor: Infinity }, { heading: '标题' }, { text: '文字' }]) {
+    await assert.rejects(prepareMcpMaterial(project, { kind: 'transition_sound', id: 'air-sweep', time: 8, ...patch }, f.dependencies), /找不到|切点|start|时长|时间|重音|仅适用/)
+  }
+  const stale = structuredClone(project), transition = stale.tracks.flatMap(track => track.clips).find(clip => clip.transition)
+  transition.transition.fromClipId = 'missing'
+  await assert.rejects(prepareMcpMaterial(stale, { kind: 'transition_sound', id: 'air-sweep', transitionClipId: transition.id, time: 8 }, f.dependencies), /切点/)
+  await assert.rejects(prepareMcpMaterial(createProject(), { kind: 'transition_sound', id: 'air-sweep' }, f.dependencies), /切点/)
+  for (const patch of [{ time: 4 }, { transitionClipId: 'video-0' }, { anchor: 0.1 }]) {
+    await assert.rejects(prepareMcpMaterial(project, { kind: 'music', id: 'piano', ...patch }, f.dependencies), /仅适用/)
+  }
+  assert.equal(f.requests.length, 0); assert.equal(f.imports.length, 0)
+  assert.deepEqual(project, before)
+})
 
 test('素材目录支持关键词与分页，返回可用元数据而不泄漏内部地址', async () => {
   const f = fixture()

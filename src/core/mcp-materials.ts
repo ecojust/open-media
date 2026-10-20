@@ -1,20 +1,25 @@
 import type { MediaAsset, Project } from './types.ts'
 import type { WatermarkMaterial } from './watermark-library.ts'
 import type { BackgroundMusicItem } from './background-music-catalog.ts'
+import type { TransitionSoundItem } from './transition-sound-catalog.ts'
 import type { VideoSegmentItem } from './video-segment-catalog.ts'
 import type { VideoSegmentPlacement } from './video-segment-presets.ts'
 import { addTextWatermark, addWatermark, type TextWatermarkOptions } from './watermark-track.ts'
 import { chooseWatermarkSource } from './watermark-source.ts'
 import { addBackgroundMusic } from './background-music-track.ts'
+import { addTransitionSound, findTransitionSoundCut } from './transition-sound-track.ts'
 import { insertVideoSegment } from './video-segment-track.ts'
 import { MAX_PROJECT_DURATION } from './project.ts'
 
-export type McpMaterialKind = 'watermark' | 'music' | 'video_segment'
+export type McpMaterialKind = 'watermark' | 'music' | 'video_segment' | 'transition_sound'
 export interface McpMaterialQuery { kind: McpMaterialKind; search?: string; collection?: 'general' | 'science'; offset?: number; limit?: number }
 export interface McpMaterialArguments {
   kind: McpMaterialKind
   id: string
   start?: number
+  time?: number
+  transitionClipId?: string
+  anchor?: number
   placement?: VideoSegmentPlacement
   heading?: string
   subheading?: string
@@ -32,6 +37,7 @@ export interface McpMaterialMetadata {
   category: string
   description: string
   duration: number
+  anchor?: number
   mediaKind: 'video' | 'image' | 'audio' | 'text'
   width?: number
   height?: number
@@ -47,6 +53,7 @@ export interface McpMaterialMetadata {
 export interface McpMaterialDependencies {
   loadWatermarks?(): Promise<readonly WatermarkMaterial[]>
   loadMusic?(): Promise<readonly BackgroundMusicItem[]>
+  loadTransitionSounds?(): Promise<readonly TransitionSoundItem[]>
   loadVideoSegments?(): Promise<readonly VideoSegmentItem[]>
   /** Dependency hooks are application-owned, never exposed as MCP arguments. */
   native?: { isDesktop(): boolean; importBlobAsset(bytes: Uint8Array, name: string): Promise<MediaAsset> }
@@ -65,13 +72,16 @@ export interface PreparedMcpMaterial {
 }
 
 function checkKind(kind: unknown): asserts kind is McpMaterialKind {
-  if (!['watermark', 'music', 'video_segment'].includes(kind as string)) throw new Error('内置素材类型无效。')
+  if (!['watermark', 'music', 'video_segment', 'transition_sound'].includes(kind as string)) throw new Error('内置素材类型无效。')
 }
 async function watermarks(dependencies: McpMaterialDependencies): Promise<readonly WatermarkMaterial[]> {
   return dependencies.loadWatermarks ? dependencies.loadWatermarks() : (await import('./watermark-library.ts')).WATERMARK_MATERIALS
 }
 async function music(dependencies: McpMaterialDependencies): Promise<readonly BackgroundMusicItem[]> {
   return dependencies.loadMusic ? dependencies.loadMusic() : (await import('./background-music-catalog.ts')).BACKGROUND_MUSIC
+}
+async function transitionSounds(dependencies: McpMaterialDependencies): Promise<readonly TransitionSoundItem[]> {
+  return dependencies.loadTransitionSounds ? dependencies.loadTransitionSounds() : (await import('./transition-sound-catalog.ts')).TRANSITION_SOUNDS
 }
 async function videoSegments(dependencies: McpMaterialDependencies): Promise<readonly VideoSegmentItem[]> {
   return dependencies.loadVideoSegments ? dependencies.loadVideoSegments() : (await import('./video-segment-catalog.ts')).VIDEO_SEGMENTS
@@ -89,6 +99,8 @@ export async function listMcpMaterials(query: McpMaterialQuery, dependencies: Mc
     items = (await watermarks(dependencies)).map(item => ({ id: item.id, name: item.name, category: item.category, description: item.tags.join(' · '), tags: [...item.tags], ...(item.collection ? { collection: item.collection } : {}), duration: item.duration, mediaKind: item.kind, width: item.width, height: item.height, editableText: item.kind === 'text', ...(item.kind === 'text' ? { text: item.textTemplate?.text } : {}), placement: item.placement }))
   } else if (query.kind === 'music') {
     items = (await music(dependencies)).map(item => ({ id: item.id, name: item.title, category: item.style, description: item.description, duration: item.duration, mediaKind: 'audio' }))
+  } else if (query.kind === 'transition_sound') {
+    items = (await transitionSounds(dependencies)).map(item => ({ id: item.id, name: item.title, category: '转场音效', description: item.description, duration: item.duration, anchor: item.anchor, mediaKind: 'audio' }))
   } else {
     items = (await videoSegments(dependencies)).map(item => ({ id: item.id, name: item.title, category: item.style, description: item.description, ...(item.collection ? { collection: item.collection, tags: [...(item.collection === 'general' ? ['通用', '可编辑'] : ['科普', '科学']), item.placement === 'prepend' ? '片头' : '片尾'] } : {}), duration: item.duration, mediaKind: 'video', width: item.width, height: item.height, editableText: true, placement: item.placement, heading: item.heading, subheading: item.subheading, titleLayout: item.layout ?? 'center' }))
   }
@@ -119,6 +131,14 @@ export async function prepareMcpMaterial(project: Project, args: McpMaterialArgu
   if (typeof args.id !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(args.id)) throw new Error('内置素材标识无效。')
   const start = args.start ?? 0
   if (!Number.isFinite(start) || start < 0 || start > MAX_PROJECT_DURATION) throw new Error('素材起点无效。')
+  if (args.kind !== 'transition_sound' && [args.time, args.transitionClipId, args.anchor].some(value => value !== undefined)) throw new Error('time、transitionClipId 和 anchor 仅适用于转场音效。')
+  if (args.kind === 'transition_sound') {
+    if (args.start !== undefined) throw new Error('转场音效通过 time 或 transitionClipId 选择切点，不使用 start。')
+    if (args.time !== undefined && (!Number.isFinite(args.time) || args.time < 0 || args.time > MAX_PROJECT_DURATION)) throw new Error('转场音效切点时间无效。')
+    if (args.transitionClipId !== undefined && (typeof args.transitionClipId !== 'string' || !args.transitionClipId.trim() || args.transitionClipId.length > 200 || args.transitionClipId.includes('\0'))) throw new Error('转场片段标识无效。')
+    if (args.anchor !== undefined && (!Number.isFinite(args.anchor) || args.anchor < 0)) throw new Error('转场音效重音位置无效。')
+    if (args.duration !== undefined) throw new Error('转场音效的时长请通过音频片段属性调整。')
+  }
   if (args.kind !== 'video_segment' && (args.placement !== undefined || args.heading !== undefined || args.subheading !== undefined || args.titleLayout !== undefined)) throw new Error('片头片尾位置和标题仅适用于视频片段。')
   if (args.placement !== undefined && !['prepend', 'append'].includes(args.placement)) throw new Error('请选择向前或向后添加视频片段。')
   if (args.heading !== undefined && (typeof args.heading !== 'string' || args.heading.length > 120 || args.heading.includes('\0'))) throw new Error('片头片尾标题最多支持 120 个字符。')
@@ -159,6 +179,20 @@ export async function prepareMcpMaterial(project: Project, args: McpMaterialArgu
       expectedKind = 'audio'
       label = 'MCP 添加背景音乐'
       apply = value => addBackgroundMusic(project, value, start)
+    } else if (args.kind === 'transition_sound') {
+      const material = (await transitionSounds(options)).find(item => item.id === args.id)
+      options.signal?.throwIfAborted()
+      if (!material) throw new Error('找不到这个内置转场音效，请重新浏览素材库。')
+      // An explicit transition must resolve its own binding; never silently use another cut.
+      const cut = findTransitionSoundCut(project, args.transitionClipId ? NaN : args.time ?? 0, args.transitionClipId)
+      if (!cut) throw new Error(args.transitionClipId ? '找不到有效的转场片段切点，请重新读取当前工程。' : '当前工程没有可用的相邻视频切点，请先添加或分割视频。')
+      const anchor = args.anchor ?? material.anchor
+      if (!Number.isFinite(anchor) || anchor < 0 || anchor >= material.duration) throw new Error('转场音效重音位置必须在音频时长范围内。')
+      url = bundledUrl(material.url)
+      name = `${material.title}.${material.filename.split('.').pop() || 'wav'}`
+      expectedKind = 'audio'
+      label = 'MCP 添加转场音效'
+      apply = value => addTransitionSound(project, value, cut, anchor)
     } else {
       const material = (await videoSegments(options)).find(item => item.id === args.id)
       options.signal?.throwIfAborted()
@@ -179,7 +213,7 @@ export async function prepareMcpMaterial(project: Project, args: McpMaterialArgu
     asset = await native.importBlobAsset(bytes, name)
     options.signal?.throwIfAborted()
     if (asset.kind !== expectedKind || !asset.nativePath) throw new Error('内置素材没有生成有效的本地媒体文件。')
-    asset = { ...asset, libraryRole: args.kind === 'watermark' ? 'watermark' : args.kind === 'music' ? 'background-music' : 'video-segment' }
+    asset = { ...asset, libraryRole: args.kind === 'watermark' ? 'watermark' : args.kind === 'music' ? 'background-music' : args.kind === 'transition_sound' ? 'transition-sound' : 'video-segment' }
     const edit = apply(asset)
     options.signal?.throwIfAborted()
     options.onAsset?.(asset, blob)

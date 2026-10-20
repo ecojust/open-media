@@ -45,12 +45,12 @@ type Workspace = 'home' | 'edit' | 'record' | 'gif' | 'image' | 'video' | 'gener
 const workspaces: { id: Workspace; title: string; icon: string; description: string; color: string }[] = [
   { id: 'record', title: '录屏', icon: 'record', description: '录制屏幕与声音，随时暂停和继续', color: '#e35764' },
   { id: 'gif', title: '片段转 GIF', icon: 'gif', description: '截取多个精彩片段，生成循环动图', color: '#9161d1' },
-  { id: 'edit', title: '视频剪辑', icon: 'scissors', description: '多轨剪辑、字幕与配乐，组合你的故事', color: '#2563eb' },
   { id: 'generate', title: '视频生成', icon: 'sparkles', description: '提示词、首尾帧与分镜，让灵感成为视频', color: '#8060d6' },
   { id: 'image-generate', title: '图像生成', icon: 'image', description: '从文字或图片出发，创作新的画面', color: '#b15aab' },
   { id: 'song-generate', title: '歌曲生成', icon: 'audio', description: '用风格与歌词创作歌曲，也能生成纯音乐', color: '#3c9e99' },
   { id: 'video', title: '视频转换', icon: 'convert', description: '转换视频格式、压缩体积与提取音频', color: '#dd9635' },
   { id: 'image', title: '图片编辑', icon: 'image', description: '插入文字与自定义笔触，裁剪并导出图片', color: '#2a9d80' },
+  { id: 'edit', title: '视频剪辑', icon: 'scissors', description: '多轨剪辑、字幕与配乐，组合你的故事', color: '#2563eb' },
 ]
 const native = isDesktop(), view = ref<Workspace>('home'), collapsed = ref(false), booting = ref(true), theme = ref<'light' | 'dark' | 'system'>('system'), systemDark = ref(false)
 const generationVisited = ref(false), videoGenerating = ref(false)
@@ -137,7 +137,7 @@ let captureQueue = Promise.resolve()
 let draftTimer: ReturnType<typeof setTimeout> | undefined, draftGeneration = 0, jobsTimer: ReturnType<typeof setTimeout> | undefined, mediaQuery: MediaQueryList | undefined, unlistenClose: (() => void) | undefined, allowClose = false
 const effectiveTheme = computed(() => theme.value === 'system' ? systemDark.value ? 'dark' : 'light' : theme.value)
 const nativeAppearance = createNativeAppearanceSync()
-watch(effectiveTheme, value => { if (native) void nativeAppearance.sync(value) })
+watch([effectiveTheme, theme], ([value, choice]) => { if (native) void nativeAppearance.sync(value, choice === 'system') })
 const duration = computed(() => projectDuration(project.value)), workspaceTitle = computed(() => workspaces.find(item => item.id === view.value)?.title || '开始')
 const visibleRecent = computed(() => recent.value.filter(item => item.title.toLowerCase().includes(search.value.toLowerCase())))
 const runningJobs = computed(() => jobs.value.filter(job => job.state === 'running').length)
@@ -247,7 +247,7 @@ async function importFiles(files?: File[]) {
   if (!files?.length) {
     if (!native) { mediaInput.value?.click(); return }
     busy.value = '正在导入素材…'
-    try { await acceptAssets(await pickMediaAssets()) } catch (cause) { fail(cause) } finally { busy.value = '' }
+    try { await acceptAssets(await pickMediaAssets(true)) } catch (cause) { fail(cause) } finally { busy.value = '' }
     return
   }
   busy.value = '正在读取素材…'; error.value = ''
@@ -257,7 +257,7 @@ async function importFiles(files?: File[]) {
     busy.value = `正在导入 ${index + 1}/${files.length}：${file.name}`
     try {
       if (file.size > 512 * 1024 * 1024) throw new Error('单个网页导入文件不能超过 512 MB；桌面端可用“导入素材”选择较大的文件。')
-      const asset = native ? await importBlobAsset(new Uint8Array(await file.arrayBuffer()), file.name) : await importMediaFile(file)
+      const asset = native ? await importBlobAsset(new Uint8Array(await file.arrayBuffer()), file.name, true) : await importMediaFile(file)
       assets.push(asset); if (!native) imported.set(asset.id, file)
     } catch (cause) { failures.push(`${file.name}：${cause instanceof Error ? cause.message : String(cause)}`) }
   }
@@ -915,7 +915,7 @@ onMounted(async () => {
   mediaQuery = matchMedia('(prefers-color-scheme: dark)'); systemDark.value = mediaQuery.matches; mediaQuery.addEventListener('change', mediaChanged)
   window.addEventListener('keydown', keyboard); window.addEventListener('beforeunload', unload)
   try { autoSave.value = localStorage.getItem('open-media:autosave') !== 'false'; const value = localStorage.getItem('open-media:theme'); if (value === 'light' || value === 'dark' || value === 'system') theme.value = value } catch {}
-  if (native) void nativeAppearance.sync(effectiveTheme.value)
+  if (native) void nativeAppearance.sync(effectiveTheme.value, theme.value === 'system')
   try { await refreshRecent(); const last = localStorage.getItem('open-media:last-project'); if (last && recent.value.some(item => item.id === last)) { const imported = await loadProject(last); const restored = await hydrate(imported); await adoptProject(restored, true, imported.savedAt); view.value = 'home' } } catch (cause) { fail(cause) }
   booting.value = false
   void initializeScreenshot()
@@ -961,7 +961,7 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
         <div class="sidebar-bottom"><div class="local-mark"><Icon name="lock" :size="14"/><span>素材在本机处理</span></div><small v-if="!collapsed">Open Media · {{ buildInfo.version }}</small><HeaderControls v-if="sidebarControls" sidebar :collapsed="collapsed" :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme" :info-open="infoOpen" @open-info="openAiModels()"/></div>
       </aside>
       <main class="main-area">
-        <div v-if="view!=='home'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking || mcpBusy" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div v-if="view==='edit'" class="project-file-actions file-actions">
+        <div v-if="view==='edit'" class="project-bar"><span class="workspace-tag"><Icon :name="workspaces.find(item=>item.id===view)?.icon || 'video'" :size="15"/>{{ workspaceTitle }}</span><span class="divider"/><input v-if="renaming" ref="renameInput" v-model="renameValue" maxlength="300" class="rename-input" aria-label="项目名称" @blur="finishRename" @keydown.enter="finishRename" @keydown.esc="renaming=false"/><button v-else :disabled="speechWorking || mcpBusy" class="project-title" :title="`${project.title}，点击重命名`" @click="rename">{{ project.title }}<i v-if="dirty"/></button><span class="project-summary">{{ project.assets.length }} 个素材 · {{ duration.toFixed(1) }} 秒</span><div class="project-file-actions file-actions">
         <button title="新建工程" aria-label="新建工程" :disabled="!!busy || switching || booting || mediaIsWorking()" data-testid="new-project" @click="newProject()"><Icon name="plus"/><span>新建工程</span></button>
         <button title="打开项目 (Ctrl/⌘+O)" aria-label="打开项目" :disabled="!!busy || switching || booting || mediaIsWorking()" data-testid="open-project" @click="openProject()"><Icon name="folder"/><span>打开</span></button>
         <button :title="lastSaved && (native || browserProjectTarget) ? `保存到 ${lastSaved} (Ctrl/⌘+S)` : '保存项目 (Ctrl/⌘+S)'" aria-label="保存项目" :disabled="!!busy || switching || booting || speechWorking || mcpBusy" data-testid="save-project" @click="save()"><Icon name="save"/><span>保存</span></button>
@@ -984,7 +984,7 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
         <AiGenerationWorkspace v-if="!booting && imageGenerationVisited" v-show="view==='image-generate'" provider="image" :active="view==='image-generate'" :native="native" :project-title="project.title" :disabled="mcpBusy || switching || !!busy" @open-models="openAiModels" @add-asset="acceptGeneratedAsset" @add-timeline="acceptGeneratedAsset($event,true)" @edit-image="editGeneratedImage" @status="announce"/>
         <AiGenerationWorkspace v-if="!booting && songGenerationVisited" v-show="view==='song-generate'" provider="music" :active="view==='song-generate'" :native="native" :project-title="project.title" :disabled="mcpBusy || switching || !!busy" @open-models="openAiModels" @add-asset="acceptGeneratedAsset" @add-timeline="acceptGeneratedAsset($event,true)" @status="announce"/>
         <KeepAlive :key="`record-${project.id}`"><RecorderWorkspace v-if="!booting && view==='record'" :assets="project.assets" :native="native" :screenshot-shortcut="screenshotShortcut" :screenshot-busy="screenshotBusy" :screenshot-disabled="screenshotDisabled" :screenshot-error="screenshotError" :screenshot-configuring="screenshotConfiguring" @screenshot="takeScreenshot" @screenshot-shortcut-change="setScreenshotShortcut" @captured="captured" @asset="acceptAsset" @add-to-timeline="addToTimeline" @recording-change="recording=$event" @status="announce"/></KeepAlive>
-        <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
+        <KeepAlive :key="`gif-${project.id}`"><GifWorkspace @busy-change="gifConverting=$event" v-if="!booting && view==='gif'" :assets="project.assets" :native="native" @import="importFiles()" @imported="importFiles([$event])" @status="announce"/></KeepAlive>
         <KeepAlive :key="`convert-${project.id}`"><ConvertWorkspace @busy-change="convertedBusy" v-if="!booting && (view==='image'||view==='video')" :key="view" :mode="view" :focus-asset-id="view==='image' ? screenshotAssetId : undefined" :assets="project.assets" :native="native" @import="importFiles" @result="acceptConverted" @status="announce"/></KeepAlive>
       </main>
     </div>

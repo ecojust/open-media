@@ -62,7 +62,7 @@ async function main() {
       await page.evaluate(theme => { localStorage.clear(); localStorage.setItem('open-media:theme', theme) }, theme)
       await page.reload()
       await page.getByTestId('create-record').waitFor()
-      const order = ['record', 'gif', 'edit', 'generate', 'image-generate', 'song-generate', 'video', 'image']
+      const order = ['record', 'gif', 'generate', 'image-generate', 'song-generate', 'video', 'image', 'edit']
       assert.deepEqual(await page.locator('[data-testid^="nav-"]').evaluateAll(nodes => nodes.map(n => n.dataset.testid.replace('nav-', ''))), order)
       assert.deepEqual(await page.locator('.workspace-cards [data-testid^="create-"]').evaluateAll(nodes => nodes.map(n => n.dataset.testid.replace('create-', ''))), order)
       for (const workspace of ['record', 'gif', 'generate', 'image-generate', 'song-generate', 'video', 'image']) {

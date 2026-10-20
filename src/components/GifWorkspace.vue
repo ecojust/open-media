@@ -13,7 +13,7 @@ import { createVideoGif, gifFrameCount, validateGifSegments, type GifQuality, ty
 import { beginMediaJob, cancelMediaJob, getMediaJobs } from '../native'
 
 const props = defineProps<{ assets: MediaAsset[]; native: boolean }>()
-const emit = defineEmits<{ imported: [file: File]; status: [message: string]; 'busy-change': [busy: boolean] }>()
+const emit = defineEmits<{ import: []; imported: [file: File]; status: [message: string]; 'busy-change': [busy: boolean] }>()
 const selectedId = ref('')
 const assetMenu = ref<InstanceType<typeof MediaAssetMenu>>()
 const video = ref<HTMLVideoElement | null>(null)
@@ -33,12 +33,13 @@ const jobId = ref('')
 const resultUrl = ref('')
 const resultSize = ref('')
 let awaitingImport = false
+let pendingImportedId = ''
 let nextSegmentId = 1
 let abort: AbortController | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let polling = false
 let destroyed = false
-const { assets: videos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useStoredVideos(() => props.assets, () => props.native)
+const { assets: videos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useStoredVideos(() => props.assets, () => props.native, true)
 const selected = computed(() => videos.value.find(asset => asset.id === selectedId.value))
 const duration = computed(() => selected.value?.duration ?? 0)
 const invalid = computed(() => validateGifSegments(segments.value, duration.value))
@@ -51,12 +52,17 @@ const outputHeight = computed(() => {
 })
 
 watch(videos, values => {
+  if (pendingImportedId && values.some(asset => asset.id === pendingImportedId)) { selectedId.value = pendingImportedId; pendingImportedId = ''; return }
   if (!values.some(asset => asset.id === selectedId.value)) selectedId.value = values[0]?.id ?? ''
 }, { immediate: true })
 watch(() => props.assets.filter(asset => asset.kind === 'video'), (values, previous = []) => {
   if (!awaitingImport) return
   const imported = values.find(asset => !previous.some(old => old.id === asset.id))
-  if (imported) { selectedId.value = imported.id; awaitingImport = false }
+  if (imported) {
+    pendingImportedId = imported.id
+    if (videos.value.some(asset => asset.id === imported.id)) { selectedId.value = imported.id; pendingImportedId = '' }
+    awaitingImport = false
+  }
 })
 watch(() => props.native ? selected.value : undefined, asset => { if (asset) void preparePreview(asset).catch(cause => emit('status', errorMessage(cause, '无法准备视频预览。'))) }, { immediate: true })
 watch(selectedId, () => {
@@ -68,6 +74,11 @@ watch(selectedId, () => {
   clearResult()
 }, { immediate: true })
 function clearResult(): void { if (resultUrl.value) URL.revokeObjectURL(resultUrl.value); resultUrl.value = ''; resultSize.value = '' }
+function requestImport(): void {
+  awaitingImport = true
+  if (props.native) emit('import')
+  else fileInput.value?.click()
+}
 function importFile(event: Event): void {
   const input = event.target as HTMLInputElement
   awaitingImport = !!input.files?.length
@@ -170,7 +181,7 @@ onBeforeUnmount(() => { destroyed = true; abort?.abort(); if (jobId.value) void 
 
 <template>
   <ToolWorkspace class="gif-workspace" data-testid="gif-workspace" title="片段转 GIF" icon="film" description="截取视频片段，自由组合顺序并导出动态图片。" library-label="视频素材库" settings-label="输出设置">
-    <template #actions><button class="import-button" :disabled="exporting" @click="fileInput?.click()"><Icon name="plus" :size="16" />导入视频</button><input ref="fileInput" type="file" accept="video/*,.mkv,.mov,.avi" hidden @change="importFile" /></template>
+    <template #actions><button class="import-button" :disabled="exporting" @click="requestImport"><Icon name="plus" :size="16" />导入视频</button><input ref="fileInput" type="file" accept="video/*,.mkv,.mov,.avi" hidden @change="importFile" /></template>
     <template #library>
       <aside class="gif-sources" aria-label="GIF 视频素材">
         <header><h2>视频素材 <span>{{ videos.length }}</span></h2><VideoLibraryActions v-if="native" :directory="directory" :loading="libraryLoading" :disabled="exporting" @refresh="refreshVideos" @reveal="revealVideoDirectory" /></header>
@@ -185,7 +196,7 @@ onBeforeUnmount(() => { destroyed = true; abort?.abort(); if (jobId.value) void 
     </template>
     <template #default>
       <div class="gif-main">
-        <div class="video-card"><div class="video-toolbar"><span><Icon name="video" :size="16" />视频来源</span><select v-model="selectedId" aria-label="GIF 视频来源" :disabled="exporting || !videos.length"><option v-if="!videos.length" value="">暂无视频素材</option><option v-for="asset in videos" :key="asset.id" :value="asset.id">{{ asset.name }}</option></select><span v-if="selected">{{ duration.toFixed(1) }} 秒</span></div><div class="gif-preview"><video v-if="selected" ref="video" :key="selected.id" :src="selected.url" controls playsinline preload="metadata" aria-label="GIF 来源视频预览" @timeupdate="updatePlayhead" /><div v-else class="empty-video"><div><Icon name="film" :size="40" /></div><h2>把视频变成一个精彩瞬间</h2><p>导入视频，或从素材库中选择已经添加的视频。</p><button class="import-button" @click="fileInput?.click()"><Icon name="plus" :size="15" />选择视频</button></div></div></div>
+        <div class="video-card"><div class="video-toolbar"><span><Icon name="video" :size="16" />视频来源</span><select v-model="selectedId" aria-label="GIF 视频来源" :disabled="exporting || !videos.length"><option v-if="!videos.length" value="">暂无视频素材</option><option v-for="asset in videos" :key="asset.id" :value="asset.id">{{ asset.name }}</option></select><span v-if="selected">{{ duration.toFixed(1) }} 秒</span></div><div class="gif-preview"><video v-if="selected" ref="video" :key="selected.id" :src="selected.url" controls playsinline preload="metadata" aria-label="GIF 来源视频预览" @timeupdate="updatePlayhead" /><div v-else class="empty-video"><div><Icon name="film" :size="40" /></div><h2>把视频变成一个精彩瞬间</h2><p>导入视频，或从素材库中选择已经添加的视频。</p><button class="import-button" @click="requestImport"><Icon name="plus" :size="15" />选择视频</button></div></div></div>
         <div class="segments-card"><div class="segments-heading"><div><h2>截取片段 <span>{{ segments.length }}</span></h2><p>按列表顺序拼接，可重复截取同一段内容。</p></div><button :disabled="!selected || exporting || segments.length >= 100" @click="addSegment"><Icon name="plus" :size="15" />添加片段</button></div><div v-if="!segments.length" class="empty-segments">选择视频后，即可添加截取片段。</div><div v-for="(segment,index) in segments" :key="segment.id" class="segment-row"><span class="segment-number">{{ String(index + 1).padStart(2,'0') }}</span><div class="time-field"><label :for="`gif-start-${segment.id}`">开始时间</label><div><input :id="`gif-start-${segment.id}`" v-model.number="segment.start" type="number" min="0" :max="duration" step="0.01" :disabled="exporting" /><button title="将当前播放位置设为开始时间" aria-label="将当前播放位置设为开始时间" :disabled="exporting" @click="mark(index,'start')"><Icon name="mark-in" :size="14" /></button></div></div><span class="time-divider">—</span><div class="time-field"><label :for="`gif-end-${segment.id}`">结束时间</label><div><input :id="`gif-end-${segment.id}`" v-model.number="segment.end" type="number" min="0" :max="duration" step="0.01" :disabled="exporting" /><button title="将当前播放位置设为结束时间" aria-label="将当前播放位置设为结束时间" :disabled="exporting" @click="mark(index,'end')"><Icon name="mark-out" :size="14" /></button></div></div><span class="segment-duration">{{ Math.max(0,segment.end - segment.start).toFixed(1) }}s</span><div class="segment-actions"><button title="预览片段" aria-label="预览片段" :disabled="exporting" @click="previewSegment(segment)"><Icon name="play" :size="14" /></button><button title="上移片段" aria-label="上移片段" :disabled="index === 0 || exporting" @click="moveSegment(index,-1)"><Icon name="chevron-up" :size="14" /></button><button title="下移片段" aria-label="下移片段" :disabled="index === segments.length - 1 || exporting" @click="moveSegment(index,1)"><Icon name="chevron-down" :size="14" /></button><button title="删除片段" aria-label="删除片段" :disabled="exporting" @click="segments.splice(index,1)"><Icon name="trash" :size="14" /></button></div></div><p v-if="selected && invalid" class="validation-error" role="alert">{{ invalid }}</p></div>
         <div v-if="resultUrl" class="gif-result"><img :src="resultUrl" alt="已生成的 GIF 预览" /><span>已生成 · {{ resultSize }}</span></div>
       </div>

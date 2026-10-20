@@ -86,6 +86,7 @@ mod desktop {
         store: MediaStore,
         jobs: JobManager,
         video_library: VideoLibrary,
+        imported_video_library: VideoLibrary,
         asset_tools: crate::asset_tools::AssetTools,
         audio_tools: crate::audio_tools::AudioToolsManager,
         project_compression: crate::project_compression::CompressionManager,
@@ -329,11 +330,17 @@ mod desktop {
     pub async fn list_stored_videos(
         window: tauri::WebviewWindow,
         state: State<'_, MediaState>,
+        include_imported: Option<bool>,
     ) -> engine::Result<StoredVideos> {
         project_files::require_main_window(window.label())?;
         let state = state.inner().clone();
         blocking(move || {
-            state.video_library.list(&state.store.recording_store()?, &state.runtime()?)
+            state.video_library.list_stored(
+                &state.imported_video_library,
+                &state.store,
+                &state.runtime()?,
+                include_imported.unwrap_or(false),
+            )
         }).await
     }
     #[tauri::command]
@@ -379,6 +386,7 @@ mod desktop {
     pub async fn pick_media_assets(
         app: tauri::AppHandle,
         state: State<'_, MediaState>,
+        library_video: Option<bool>,
     ) -> engine::Result<Vec<Asset>> {
         let state = state.inner().clone();
         blocking(move || {
@@ -402,7 +410,11 @@ mod desktop {
                 .into_iter()
                 .map(|p| {
                     let path = p.into_path().map_err(|_| "请选择本机媒体文件。")?;
-                    let asset = state.store.import(&runtime, &path, None)?;
+                    let asset = if library_video.unwrap_or(false) {
+                        state.store.import_for_library(&runtime, &path, None)?
+                    } else {
+                        state.store.import(&runtime, &path, None)?
+                    };
                     crate::export_files::remember_asset_source(&state.store, &asset, &path)?;
                     Ok(asset)
                 })
@@ -415,9 +427,17 @@ mod desktop {
         bytes: Vec<u8>,
         name: String,
         state: State<'_, MediaState>,
+        library_video: Option<bool>,
     ) -> engine::Result<Asset> {
         let state = state.inner().clone();
-        blocking(move || state.store.import_bytes(&state.runtime()?, &bytes, &name)).await
+        blocking(move || {
+            let runtime = state.runtime()?;
+            if library_video.unwrap_or(false) {
+                state.store.import_bytes_for_library(&runtime, &bytes, &name)
+            } else {
+                state.store.import_bytes(&runtime, &bytes, &name)
+            }
+        }).await
     }
     #[tauri::command]
     pub async fn create_media_preview(
@@ -1157,6 +1177,7 @@ mod desktop {
                     store,
                     jobs: JobManager::default(),
                     video_library: VideoLibrary::new(data.join("stored-recording-index.json")),
+                    imported_video_library: VideoLibrary::new(data.join("stored-import-video-index.json")),
                     asset_tools: crate::asset_tools::AssetTools::new(&data).map_err(std::io::Error::other)?,
                     audio_tools: crate::audio_tools::AudioToolsManager::default(),
                     project_compression: crate::project_compression::CompressionManager::default(),

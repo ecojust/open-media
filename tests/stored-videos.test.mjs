@@ -20,13 +20,13 @@ async function settle() { for (let i = 0; i < 6; i++) await Promise.resolve(); a
 function harness(options = {}) {
   const projectAssets = vue.shallowRef(options.projectAssets ?? []), enabled = vue.ref(options.enabled ?? true)
   const mounted = [], activated = [], deactivated = [], unmounted = [], listeners = new Map()
-  const calls = { scans: 0, reveal: 0, previews: [] }
+  const calls = { scans: 0, scanScopes: [], reveal: 0, previews: [] }
   const injected = {
     computed: vue.computed, ref: vue.ref, shallowRef: vue.shallowRef, watch: vue.watch,
     onMounted: callback => mounted.push(callback), onActivated: callback => activated.push(callback),
     onDeactivated: callback => deactivated.push(callback), onBeforeUnmount: callback => unmounted.push(callback),
     mergeStoredVideoAssets, recentVideoAssets, videoAssetKey,
-    listStoredVideos: async () => { calls.scans++; return options.list ? options.list() : { directory: '/recordings', assets: [], warnings: [] } },
+    listStoredVideos: async includeImported => { calls.scans++; calls.scanScopes.push(includeImported); return options.list ? options.list(includeImported) : { directory: '/recordings', assets: [], warnings: [] } },
     openMediaLibraryDirectory: async () => { calls.reveal++; return options.reveal?.() },
     prepareStoredVideoPreview: async asset => { calls.previews.push(asset); return options.preview ? options.preview(asset) : { ...asset, url: `asset://localhost/preview-${asset.id}.mp4`, sourceUrl: asset.url } },
     window: {
@@ -36,7 +36,7 @@ function harness(options = {}) {
   }
   const useStoredVideos = new Function(...Object.keys(injected), compiled)(...Object.values(injected))
   const scope = vue.effectScope()
-  const state = scope.run(() => useStoredVideos(() => projectAssets.value, () => enabled.value))
+  const state = scope.run(() => useStoredVideos(() => projectAssets.value, () => enabled.value, options.libraryOnly))
   let disposed = false
   return {
     state, projectAssets, enabled, calls, listeners,
@@ -58,6 +58,7 @@ test('shared directory and project videos merge without mutating or duplicating 
   try {
     h.mount(); await h.state.refresh()
     assert.equal(h.calls.scans, 1, 'mount and explicit refresh share the pending scan')
+    assert.deepEqual(h.calls.scanScopes, [false], 'existing consumers retain the recordings-only native scan')
     assert.equal(h.state.assets.value.length, 2)
     assert.equal(h.state.assets.value[0].id, local.id)
     assert.equal(h.state.assets.value[0].name, local.name)
@@ -107,14 +108,127 @@ test('recordings view contains only scanned files and reuses project references 
 })
 
 test('browser-only mode never scans, opens the directory or creates native previews', async () => {
-  const h = harness({ enabled: false, projectAssets: [video('project')] })
+  for (const libraryOnly of [false, true]) {
+    const h = harness({ libraryOnly, enabled: false, projectAssets: [video('project', { nativePath: undefined })] })
+    try {
+      h.mount(); h.activate(); h.focus()
+      await h.state.refresh(); await h.state.reveal(); await h.state.preparePreview(h.projectAssets.value[0])
+      h.projectAssets.value = [...h.projectAssets.value, video('browser-import', { nativePath: undefined, addedAt: '2026-10-20T10:00:00Z' })]
+      await settle()
+      assert.deepEqual(h.calls, { scans: 0, scanScopes: [], reveal: 0, previews: [] })
+      assert.deepEqual(h.state.assets.value.map(asset => asset.id), ['browser-import', 'project'])
+      assert.equal(h.state.loading.value, false)
+      assert.equal(h.state.preparing.value, false)
+    } finally { h.dispose() }
+  }
+})
+
+test('library-only lists merge both scanned directories by path and time without exposing generated or built-in project media', async () => {
+  const recording = video('project-recording', { nativePath: '/recordings/shared.mp4', name: '工程录屏名称', addedAt: '2026-10-18T08:00:00Z' })
+  const imported = video('project-import', { nativePath: '/import video/shared.mp4', name: '工程导入名称', addedAt: '2026-10-18T09:00:00Z' })
+  const generated = video('generated', { nativePath: '/media/generated.mp4', addedAt: '2030-01-01T00:00:00Z' })
+  const builtIn = video('built-in', { nativePath: '/media/built-in.mp4', libraryRole: 'watermark', addedAt: '2030-01-01T00:00:00Z' })
+  const unsaved = video('unsaved', { nativePath: undefined, addedAt: '2030-01-01T00:00:00Z' })
+  const project = [recording, imported, generated, builtIn, unsaved]
+  const files = [
+    video('scan-recording-duplicate', { nativePath: recording.nativePath }),
+    video('scan-import', { nativePath: imported.nativePath, addedAt: '2026-10-20T13:00:00Z' }),
+    video('directory-only', { nativePath: '/import video/other.mp4', addedAt: '2026-10-20T11:00:00Z' }),
+    video('scan-recording', { nativePath: recording.nativePath, addedAt: '2026-10-20T12:00:00Z' }),
+  ]
+  const original = structuredClone({ project, files })
+  const h = harness({ libraryOnly: true, projectAssets: project, list: async () => ({ directory: '/recordings', importDirectory: '/import video', assets: files, warnings: [] }) })
   try {
-    h.mount(); h.activate(); h.focus()
-    await h.state.refresh(); await h.state.reveal(); await h.state.preparePreview(h.projectAssets.value[0])
-    assert.deepEqual(h.calls, { scans: 0, reveal: 0, previews: [] })
-    assert.equal(h.state.assets.value[0].id, 'project')
+    assert.deepEqual(h.state.assets.value, [], 'project files wait until the native directory scan confirms their paths')
+    await h.state.refresh()
+    assert.deepEqual(h.calls.scanScopes, [true])
+    assert.deepEqual(h.state.assets.value.map(asset => asset.id), ['project-import', 'project-recording', 'directory-only'])
+    assert.deepEqual(h.state.assets.value.map(asset => asset.addedAt), ['2026-10-20T13:00:00Z', '2026-10-20T12:00:00Z', '2026-10-20T11:00:00Z'])
+    assert.equal(h.state.assets.value[0].name, imported.name)
+    assert.equal(h.state.assets.value[1].name, recording.name)
+    assert.equal(h.state.assets.value[0].url, imported.url)
+    assert.deepEqual({ project: h.projectAssets.value, files }, original, 'scanning neither adds directory entries to the project nor changes the scan source')
+    assert.deepEqual(h.calls.previews, [], 'listing does not eagerly prepare video previews')
+  } finally { h.dispose() }
+})
+
+test('library-only refresh failures retain confirmed files and a successful removal does not fall back to project-only videos', async () => {
+  const recording = video('project-recording')
+  const imported = video('project-import', { nativePath: '/import video/manual.mp4' })
+  const generated = video('generated', { nativePath: '/media/generated.mp4' })
+  const project = [recording, imported, generated], original = structuredClone(project)
+  let fail = false, files = [recording, imported]
+  const h = harness({ libraryOnly: true, projectAssets: project, list: async () => {
+    if (fail) throw new Error('目录暂时无法访问')
+    return { directory: '/recordings', importDirectory: '/import video', assets: files, warnings: ['一个文件暂时无法读取'] }
+  } })
+  try {
+    await h.state.refresh()
+    const confirmed = structuredClone(h.state.assets.value)
+    fail = true
+    await h.state.refresh()
+    assert.deepEqual(h.state.assets.value, confirmed)
+    assert.equal(h.state.directory.value, '/recordings')
+    assert.deepEqual(h.state.warnings.value, ['一个文件暂时无法读取'])
+    assert.equal(h.state.error.value, '目录暂时无法访问')
     assert.equal(h.state.loading.value, false)
-    assert.equal(h.state.preparing.value, false)
+    fail = false; files = [imported]
+    await h.state.refresh()
+    assert.deepEqual(h.state.assets.value.map(asset => asset.id), [imported.id])
+    assert.equal(h.state.error.value, '')
+    assert.deepEqual(h.projectAssets.value, original, 'removing a scanned file must not delete its project reference')
+  } finally { h.dispose() }
+})
+
+test('an import during an older scan queues one fresh scan and appears only when that scan confirms the new file', async () => {
+  const old = deferred(), fresh = deferred()
+  const recording = video('recording')
+  const imported = video('manual-import', { nativePath: '/import video/manual.mp4', addedAt: '2026-10-20T12:00:00Z' })
+  const secondImport = video('second-import', { nativePath: '/import video/second.mp4', addedAt: '2026-10-20T13:00:00Z' })
+  let scans = 0
+  const h = harness({ libraryOnly: true, projectAssets: [recording], list: () => ++scans === 1 ? Promise.resolve({ directory: '/recordings', assets: [recording], warnings: [] }) : scans === 2 ? old.promise : fresh.promise })
+  try {
+    await h.state.refresh()
+    const pending = h.state.refresh()
+    h.projectAssets.value = [recording, imported]; await settle()
+    h.projectAssets.value = [recording, { ...imported, size: 2000 }, secondImport]; await settle()
+    assert.equal(h.calls.scans, 2, 'changes during a scan share the current request')
+    assert.deepEqual(h.state.assets.value.map(asset => asset.id), ['recording'], 'unconfirmed imports cannot appear through the project merge')
+    old.resolve({ directory: '/recordings', assets: [recording], warnings: [] })
+    await pending; await settle()
+    assert.equal(h.calls.scans, 3, 'all changes during the old scan coalesce into one follow-up request')
+    assert.equal(h.state.loading.value, true, 'the follow-up scan remains visibly pending')
+    assert.deepEqual(h.state.assets.value.map(asset => asset.id), ['recording'])
+    fresh.resolve({ directory: '/recordings', importDirectory: '/import video', assets: [recording, { ...imported, id: 'scanned-import', size: 2000 }, { ...secondImport, id: 'scanned-second' }], warnings: [] })
+    await h.state.refresh(); await settle()
+    assert.deepEqual(h.state.assets.value.map(asset => asset.id), ['second-import', 'manual-import', 'recording'])
+    assert.equal(h.state.assets.value[1].size, 2000)
+    assert.equal(h.calls.scans, 3)
+    assert.deepEqual(h.calls.scanScopes, [true, true, true])
+    assert.equal(h.state.loading.value, false)
+    assert.deepEqual(h.projectAssets.value.map(asset => asset.id), ['recording', 'manual-import', 'second-import'])
+  } finally { h.dispose() }
+})
+
+test('library-only source identity changes refresh automatically while unrelated project edits do not', async () => {
+  const h = harness({ libraryOnly: true, projectAssets: [video('import', { nativePath: '/import video/manual.mp4' })] })
+  try {
+    await h.state.refresh()
+    h.projectAssets.value = [{ ...h.projectAssets.value[0], name: '改名.mp4' }, { ...video('image'), kind: 'image' }]
+    await settle()
+    assert.equal(h.calls.scans, 1, 'renaming a video and adding an image do not invalidate the directory scan')
+    for (const change of [{ id: 'import-replaced' }, { nativePath: '/import video/replaced.mp4' }, { size: 2000 }]) {
+      const before = h.calls.scans
+      h.projectAssets.value = [{ ...h.projectAssets.value[0], ...change }]
+      await settle()
+      assert.equal(h.calls.scans, before + 1, `source change ${JSON.stringify(change)} refreshes the library`)
+    }
+    h.deactivate()
+    h.projectAssets.value = [...h.projectAssets.value, video('background-import', { nativePath: '/import video/background.mp4' })]
+    await settle()
+    assert.equal(h.calls.scans, 4, 'inactive workspaces wait until activation')
+    h.activate(); await h.state.refresh()
+    assert.equal(h.calls.scans, 5)
   } finally { h.dispose() }
 })
 

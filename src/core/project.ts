@@ -145,7 +145,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       asset.provenance = provenance
     }
     if (a.addedAt !== undefined) asset.addedAt = normalizeAssetAddedAt(a.addedAt)
-    if (a.libraryRole !== undefined) asset.libraryRole = choice(a.libraryRole, ['watermark', 'background-music', 'video-segment'] as const, '素材库用途')
+    if (a.libraryRole !== undefined) asset.libraryRole = choice(a.libraryRole, ['watermark', 'background-music', 'video-segment', 'transition-sound'] as const, '素材库用途')
     if (a.compression !== undefined) {
       if (kind !== 'video') throw new Error('仅视频素材可以记录工程压缩信息。')
       const value = record(a.compression, '工程视频压缩信息')

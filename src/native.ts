@@ -45,14 +45,14 @@ export async function getRuntimeStatus(): Promise<RuntimeStatus> {
   return call('get_runtime_status')
 }
 export async function selectRuntime(): Promise<RuntimeStatus> { return call('select_runtime') }
-export async function pickMediaAssets(): Promise<MediaAsset[]> {
-  const assets = await call<MediaAsset[]>('pick_media_assets')
+export async function pickMediaAssets(libraryVideo = false): Promise<MediaAsset[]> {
+  const assets = await call<MediaAsset[]>('pick_media_assets', libraryVideo ? { libraryVideo: true } : undefined)
   const ready: MediaAsset[] = []
   for (const asset of assets) ready.push(await assetUrl(asset))
   return ready
 }
-export async function importBlobAsset(bytes: Uint8Array, name: string): Promise<MediaAsset> {
-  return assetUrl(await call('import_blob_asset', { name, bytes: Array.from(bytes) }))
+export async function importBlobAsset(bytes: Uint8Array, name: string, libraryVideo = false): Promise<MediaAsset> {
+  return assetUrl(await call('import_blob_asset', { name, bytes: Array.from(bytes), ...(libraryVideo ? { libraryVideo: true } : {}) }))
 }
 export async function createMediaPreview(asset: MediaAsset, format?: MediaPreviewFormat): Promise<string> {
   const result = await call<{ path: string }>('create_media_preview', { asset, format })
@@ -79,9 +79,9 @@ export async function getMediaJobs(): Promise<MediaJob[]> { return isDesktop() ?
 export async function cancelMediaJob(id: string): Promise<void> { return call('cancel_media_job', { id }) }
 export async function revealMediaJobOutput(id: string): Promise<void> { return call('reveal_media_job_output', { id }) }
 export async function revealMediaAsset(asset: MediaAsset): Promise<void> { return call('reveal_media_asset', { asset }) }
-export interface StoredVideoLibrary { directory: string; assets: MediaAsset[]; warnings: string[] }
-export async function listStoredVideos(): Promise<StoredVideoLibrary> {
-  const result = await call<{ directory: string; assets: (Omit<MediaAsset, 'addedAt'> & { addedAt: number })[]; warnings: string[] }>('list_stored_videos')
+export interface StoredVideoLibrary { directory: string; importDirectory?: string | null; assets: MediaAsset[]; warnings: string[] }
+export async function listStoredVideos(includeImported = false): Promise<StoredVideoLibrary> {
+  const result = await call<{ directory: string; importDirectory?: string | null; assets: (Omit<MediaAsset, 'addedAt'> & { addedAt: number })[]; warnings: string[] }>('list_stored_videos', includeImported ? { includeImported: true } : undefined)
   const { convertFileSrc } = await import('@tauri-apps/api/core')
   return {
     ...result,

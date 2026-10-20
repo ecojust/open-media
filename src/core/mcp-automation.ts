@@ -3,7 +3,7 @@ import type { MediaJob, ProjectFileTarget } from '../native.ts'
 import { acceptSpeechJobs, beginSpeechJob, beginSpeechModelDownload, cancelMediaJob, cancelSpeechJob, cancelSpeechModelDownload, discardSpeechJob, getMediaJobs, getSpeechJob, getSpeechStatus, repairSpeechModel, revealMediaJobOutput } from '../native.ts'
 import { beginMcpMediaJob, importMcpMediaPaths, saveMcpProjectFile } from '../native-mcp-files.ts'
 import { cloneProject, newId } from './project.ts'
-import { addAssets } from './timeline.ts'
+import { addAssets, findClip } from './timeline.ts'
 import { adoptFirstVideoSize } from './project-size.ts'
 import { prepareNativeProjectArchive } from '../native-project-files.ts'
 import { prepareNativeProject } from './native-project.ts'
@@ -404,7 +404,11 @@ export function createMcpAutomation(host: McpAutomationHost) {
         return startTool('material', '添加内置素材', async operation => {
           const { prepareMcpMaterial } = await import('./mcp-materials.ts')
           check(operation)
-          const result = await prepareMcpMaterial(operation.source, { ...args, ...(args.kind !== 'video_segment' ? { start: args.start ?? host.getPlayback().time } : {}) } as Parameters<typeof prepareMcpMaterial>[1], { signal: operation.controller.signal })
+          const playback = host.getPlayback()
+          const timing = args.kind === 'transition_sound'
+            ? { time: args.time ?? playback.time, ...(args.transitionClipId === undefined && args.time === undefined && findClip(operation.source, playback.selectedClipId)?.clip.transition ? { transitionClipId: playback.selectedClipId } : {}) }
+            : args.kind !== 'video_segment' ? { start: args.start ?? playback.time } : {}
+          const result = await prepareMcpMaterial(operation.source, { ...args, ...timing } as Parameters<typeof prepareMcpMaterial>[1], { signal: operation.controller.signal })
           try { check(operation); commit(operation, result.project, result.label) }
           catch (cause) {
             for (const { asset } of result.assets ?? []) for (const url of new Set([asset.url, asset.sourceUrl])) if (url?.startsWith('blob:')) URL.revokeObjectURL(url)

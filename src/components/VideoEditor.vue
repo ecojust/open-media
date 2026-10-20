@@ -54,6 +54,8 @@ import { chooseWatermarkSource } from '../core/watermark-source'
 import { addRecordedAudio } from '../core/recording-track'
 import { addBackgroundMusic } from '../core/background-music-track'
 import type { BackgroundMusicItem } from '../core/background-music-catalog'
+import { addTransitionSound, findTransitionSoundCut } from '../core/transition-sound-track'
+import type { TransitionSoundItem } from '../core/transition-sound-catalog'
 import { insertVideoSegment } from '../core/video-segment-track'
 import type { VideoSegmentItem, VideoSegmentPlacement, VideoSegmentCaption } from '../core/video-segment-catalog'
 import { addTransition, findTransitionCut, reconcileTransitions, TRANSITION_PRESETS, updateTransition, type TransitionParameters } from '../core/transitions'
@@ -92,12 +94,12 @@ const modalOpen = computed(() => editorDialog.value !== null)
 const dialogReturnFocus = ref<HTMLElement | null>(null)
 const speechPanel = ref<InstanceType<typeof SpeechPanel> | null>(null)
 const audioClipPlayer = ref<InstanceType<typeof AudioClipPlayer> | null>(null)
-const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false), segmentBusy = ref(false), sourceImportBusy = ref(false)
+const speechBusy = ref(false), recordingBusy = ref(false), watermarkBusy = ref(false), musicBusy = ref(false), segmentBusy = ref(false), transitionSoundBusy = ref(false), sourceImportBusy = ref(false)
 const idleSplitClip = shallowRef<Clip>()
 const compressionAsset = shallowRef<MediaAsset>()
 const toolBusy = ref(false), toolAsset = ref<MediaAsset>(), assetToolAction = ref<AssetToolAction>('probe')
 const projectToolTab = ref<'markers' | 'snapshots' | 'validate'>('markers')
-const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value || sourceImportBusy.value || toolBusy.value)
+const localEditingBusy = computed(() => speechBusy.value || recordingBusy.value || watermarkBusy.value || musicBusy.value || segmentBusy.value || transitionSoundBusy.value || sourceImportBusy.value || toolBusy.value)
 const editingBusy = computed(() => localEditingBusy.value || !!props.automationBusy)
 const watermarkError = ref(''), watermarkStart = ref(0)
 const watermarkFile = ref<HTMLInputElement>()
@@ -113,6 +115,10 @@ const segmentTitle = computed(() => segmentPlacement.value === 'prepend' ? '片�
 let segmentAbort: AbortController | undefined
 const transitionError = ref(''), transitionTime = ref(0), transitionTrackId = ref<string>()
 const transitionCut = computed(() => findTransitionCut(props.project, transitionTime.value, transitionTrackId.value))
+const transitionSelectedId = ref(''), transitionSoundError = ref('')
+const transitionSoundCut = computed(() => findTransitionSoundCut(props.project, transitionTime.value, transitionSelectedId.value))
+const transitionSoundAssets = new Map<string, string>()
+let transitionSoundAbort: AbortController | undefined
 const projectSizeControls = ref<InstanceType<typeof ProjectSizeControls> | null>(null)
 const clipSpeechTargetId = ref(''), clipSpeechError = ref(''), clipSpeechNotice = ref('')
 const selectedSpeechBusy = computed(() => speechBusy.value && clipSpeechTargetId.value === selectedId.value && editorDialog.value !== 'speech')
@@ -522,8 +528,60 @@ function openTransitions(): void {
   if (editingBusy.value || props.exportDisabled) return
   transitionTime.value = playhead.value
   transitionTrackId.value = selected.value?.track.kind === 'video' ? selected.value.track.id : undefined
+  transitionSelectedId.value = selectedId.value
   transitionError.value = ''
+  transitionSoundError.value = ''
   openEditorDialog('transition')
+}
+async function insertTransitionSound(item: TransitionSoundItem): Promise<void> {
+  if (editingBusy.value || props.exportDisabled || editorDialog.value !== 'transition' || !transitionSoundCut.value) return
+  const original = props.project, projectId = original.id, cut = transitionSoundCut.value
+  const abort = new AbortController(), key = `${projectId}/${item.id}`
+  transitionSoundAbort = abort
+  transitionSoundBusy.value = true; transitionSoundError.value = ''; emit('busy', localEditingBusy.value)
+  const timeout = window.setTimeout(() => abort.abort(new Error('读取转场音效超时，请重试。')), 30000)
+  let asset: MediaAsset | undefined, blob: Blob | undefined, created = false, committed = false
+  const checkCurrent = () => {
+    abort.signal.throwIfAborted()
+    if (editorDestroyed || props.project.id !== projectId || (!committed && props.project !== original)) throw new Error('项目已变化，本次转场音效未添加。')
+  }
+  try {
+    asset = props.project.assets.find(source => source.id === transitionSoundAssets.get(key))
+    if (!asset) {
+      const response = await fetch(item.url, { signal: abort.signal })
+      if (!response.ok) throw new Error('内置转场音效读取失败，请重试。')
+      blob = await response.blob()
+      checkCurrent()
+      if (!blob.size) throw new Error('转场音效文件为空。')
+      const name = `${item.title}.wav`
+      asset = isDesktop()
+        ? await importBlobAsset(new Uint8Array(await blob.arrayBuffer()), name)
+        : await importMediaFile(new File([blob], name, { type: 'audio/wav' }))
+      asset = { ...asset, libraryRole: 'transition-sound' }
+      created = true
+      checkCurrent()
+    }
+    const result = addTransitionSound(props.project, asset, cut, item.anchor)
+    if (blob) emit('prepared-asset', asset, blob)
+    emit('change', result.project, '已添加转场音效')
+    committed = true
+    await nextTick()
+    checkCurrent()
+    if (!findClip(props.project, result.clipId)) throw new Error('转场音效未能加入项目，请重试。')
+    transitionSoundAssets.set(key, asset.id)
+    selectedId.value = result.clipId; inspectorTab.value = 'properties'; playhead.value = result.start
+    editorDialog.value = null
+    await nextTick()
+    checkCurrent()
+    preview?.seek(result.start, false)
+    timelineScroll.value?.querySelector<HTMLElement>(`[data-clip-id="${result.clipId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  } catch (cause) {
+    if (!editorDestroyed && props.project.id === projectId) transitionSoundError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    window.clearTimeout(timeout)
+    if (created && asset && !props.project.assets.some(source => source.id === asset!.id)) revokeMediaAsset(asset)
+    if (transitionSoundAbort === abort) { transitionSoundAbort = undefined; transitionSoundBusy.value = false; emit('busy', localEditingBusy.value) }
+  }
 }
 async function insertTransition(effect: TransitionEffect, length: number, parameters?: TransitionParameters): Promise<void> {
   if (editingBusy.value || props.exportDisabled || !transitionCut.value) return
@@ -1442,7 +1500,7 @@ watch(() => props.project, project => {
   if (clipMenu.value && !findClip(project, clipMenu.value.clipId)) closeMenus()
   if (trackMenu.value && !project.tracks.some(track => track.id === trackMenu.value?.trackId)) closeMenus()
 })
-watch(() => props.project.id, () => { assistOpened.value = false; cancelTimelineWheelZoom(); cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); musicAssets.clear(); segmentAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
+watch(() => props.project.id, () => { assistOpened.value = false; cancelTimelineWheelZoom(); cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); cancelTransitionSoundImport(); musicAssets.clear(); segmentAssets.clear(); transitionSoundAssets.clear(); pause(); cancelGesture(); closeMenus(); renamingTrackId.value = ''; cancelTrackDelete(); editorDialog.value = null; selectedId.value = ''; seek(0) })
 watch([editingBusy, modalOpen, playing, () => props.exportDisabled], values => { if (values.some(Boolean)) { focusPicking.value = false; cancelTrackDrag(); cancelPreviewPosition() } }, { flush: 'sync' })
 watch(() => props.automationBusy, busy => { if (busy) { pause(); cancelGesture(); closeMenus() } }, { flush: 'sync' })
 watch(selectedId, () => { focusPicking.value = false; focusRegion.value = undefined; cancelPreviewPosition(); clipSpeechError.value = ''; clipSpeechNotice.value = '' }, { flush: 'sync' })
@@ -1473,7 +1531,12 @@ function cancelSegmentImport(): void {
   segmentAbort = undefined
   if (segmentBusy.value) { segmentBusy.value = false; emit('busy', localEditingBusy.value) }
 }
-onBeforeUnmount(() => { editorDestroyed = true; cancelTimelineWheelZoom(); cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
+function cancelTransitionSoundImport(): void {
+  transitionSoundAbort?.abort(new DOMException('已取消转场音效导入', 'AbortError'))
+  transitionSoundAbort = undefined
+  if (transitionSoundBusy.value) { transitionSoundBusy.value = false; emit('busy', localEditingBusy.value) }
+}
+onBeforeUnmount(() => { editorDestroyed = true; cancelTimelineWheelZoom(); cancelSourceImport(); cancelWatermarkImport(); cancelMusicImport(); cancelSegmentImport(); cancelTransitionSoundImport(); pause(); cancelGesture(); resizeObserver?.disconnect(); preview?.dispose(); window.removeEventListener('keydown', keyboard); window.removeEventListener('pointerdown', outsideMenus); window.removeEventListener('resize', closeMenusOnResize) })
 defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayback, getInteractionBusy })
 </script>
 
@@ -1639,8 +1702,8 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
     <EditorDialog :open="editorDialog === 'segment'" :title="segmentTitle" :icon="segmentPlacement === 'prepend' ? 'skip-back' : 'skip-forward'" wide :busy="segmentBusy" :busy-message="`正在准备${segmentTitle}…`" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <VideoSegmentLibrary v-if="editorDialog === 'segment'" :placement="segmentPlacement" :busy="segmentBusy" :error="segmentError" @select="insertSegment" @import-local="importLocalSegment" />
     </EditorDialog>
-    <EditorDialog :open="editorDialog === 'transition'" title="转场" icon="transition" wide :return-focus="dialogReturnFocus" @close="closeEditorDialog">
-      <TransitionLibrary v-if="editorDialog === 'transition'" :cut="transitionCut" :fps="project.fps" :from-name="transitionCut && findClip(project, transitionCut.fromClipId)?.clip.name" :to-name="transitionCut && findClip(project, transitionCut.toClipId)?.clip.name" :error="transitionError" @select="insertTransition" />
+    <EditorDialog :open="editorDialog === 'transition'" title="转场" icon="transition" wide :busy="transitionSoundBusy" busy-message="正在准备转场音效…" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+      <TransitionLibrary v-if="editorDialog === 'transition'" :cut="transitionCut" :sound-cut="transitionSoundCut" :fps="project.fps" :from-name="transitionCut && findClip(project, transitionCut.fromClipId)?.clip.name" :to-name="transitionCut && findClip(project, transitionCut.toClipId)?.clip.name" :error="transitionError" :sound-error="transitionSoundError" :busy="transitionSoundBusy" @select="insertTransition" @select-sound="insertTransitionSound" />
     </EditorDialog>
     <EditorDialog :open="editorDialog === 'music'" title="背景音乐" icon="audio" wide :busy="musicBusy" busy-message="正在准备背景音乐…" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <BackgroundMusicLibrary v-if="editorDialog === 'music'" :busy="musicBusy" :error="musicError" @select="insertBackgroundMusic" @import-local="importLocalMusic" />

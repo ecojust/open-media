@@ -167,55 +167,85 @@ impl MediaStore {
         }
         Ok(&self.root)
     }
-    /// Recording storage is a fixed sibling of the application's media directory.
-    pub fn recording_root(&self) -> Result<PathBuf> {
+    fn sibling_root(&self, name: &str) -> Result<PathBuf> {
         let root = self.checked_root()?;
         if !matches!(
             root.file_name().and_then(|value| value.to_str()),
-            Some("media" | "recordings")
+            Some("media" | "recordings" | "import video")
         ) {
-            return Err("录屏保存目录无效。".into());
+            return Err("媒体保存目录无效。".into());
         }
-        let recordings = root
+        let sibling = root
             .parent()
-            .ok_or("录屏保存目录无效。")?
-            .join("recordings");
-        match fs::symlink_metadata(&recordings) {
+            .ok_or("媒体保存目录无效。")?
+            .join(name);
+        match fs::symlink_metadata(&sibling) {
             Ok(metadata) => {
                 if !metadata.is_dir()
                     || metadata.file_type().is_symlink()
-                    || recordings
+                    || sibling
                         .canonicalize()
                         .map_err(|error| error.to_string())?
-                        != recordings
+                        != sibling
                 {
-                    return Err("录屏保存目录已改变，请重新打开应用。".into());
+                    return Err("媒体保存目录已改变，请重新打开应用。".into());
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("录屏保存目录不可用：{error}")),
+            Err(error) => return Err(format!("媒体保存目录不可用：{error}")),
         }
-        Ok(recordings)
+        Ok(sibling)
     }
-    pub fn recording_store(&self) -> Result<Self> {
-        let root = self.recording_root()?;
+    fn sibling_store(&self, name: &str) -> Result<Self> {
+        let root = self.sibling_root(name)?;
         match fs::create_dir(&root) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(format!("无法创建录屏保存目录：{error}")),
+            Err(error) => return Err(format!("无法创建媒体保存目录：{error}")),
         }
         let store = Self { root };
         store.checked_root()?;
         Ok(store)
     }
+    /// Recording storage is a fixed sibling of the application's media directory.
+    pub fn recording_root(&self) -> Result<PathBuf> {
+        self.sibling_root("recordings")
+    }
+    pub fn recording_store(&self) -> Result<Self> {
+        self.sibling_store("recordings")
+    }
+    pub fn import_video_root(&self) -> Result<PathBuf> {
+        self.sibling_root("import video")
+    }
+    pub fn import_video_store(&self) -> Result<Self> {
+        self.sibling_store("import video")
+    }
     /// Callers pass a canonical existing file or directory.
     pub fn is_internal_path(&self, path: &Path) -> bool {
-        path.starts_with(&self.root)
-            || self
-                .recording_root()
-                .is_ok_and(|root| path.starts_with(root))
+        self.checked_root().is_ok()
+            && (path.starts_with(&self.root)
+                || self.recording_root().is_ok_and(|root| path.starts_with(root))
+                || self.import_video_root().is_ok_and(|root| path.starts_with(root)))
     }
     pub fn import(&self, runtime: &Runtime, input: &Path, name: Option<&str>) -> Result<Asset> {
+        self.import_file(runtime, input, name, false)
+    }
+    pub fn import_for_library(
+        &self,
+        runtime: &Runtime,
+        input: &Path,
+        name: Option<&str>,
+    ) -> Result<Asset> {
+        self.import_file(runtime, input, name, true)
+    }
+    fn import_file(
+        &self,
+        runtime: &Runtime,
+        input: &Path,
+        name: Option<&str>,
+        library_video: bool,
+    ) -> Result<Asset> {
+        self.checked_root()?;
         let meta = fs::metadata(input).map_err(|e| format!("无法读取素材：{e}"))?;
         if !meta.is_file() || meta.len() == 0 {
             return Err("请选择非空媒体文件。".into());
@@ -227,31 +257,81 @@ impl MediaStore {
                 .to_string_lossy()
                 .into()
         });
-        let ext = Path::new(&original)
+        let staged = tempfile::Builder::new()
+            .prefix(".import-")
+            .tempfile_in(&self.root)
+            .map_err(|error| format!("无法保存素材：{error}"))?;
+        fs::copy(input, staged.path()).map_err(|error| format!("无法保存素材：{error}"))?;
+        self.finish_import(runtime, staged, &original, library_video)
+    }
+    fn finish_import(
+        &self,
+        runtime: &Runtime,
+        staged: tempfile::NamedTempFile,
+        name: &str,
+        library_video: bool,
+    ) -> Result<Asset> {
+        let mut asset = self.probe(runtime, staged.path(), name)?;
+        let destination_store = if library_video {
+            if asset.kind == "video" {
+                self.import_video_store()?
+            } else {
+                self.sibling_store("media")?
+            }
+        } else {
+            self.clone()
+        };
+        destination_store.checked_root()?;
+        let ext = Path::new(name)
             .extension()
             .and_then(|s| s.to_str())
             .filter(|s| s.len() <= 12 && s.chars().all(|c| c.is_ascii_alphanumeric()))
             .unwrap_or("media");
-        let destination = self.root.join(format!("{}.{}", new_id(), ext));
-        fs::copy(input, &destination).map_err(|e| format!("无法保存素材：{e}"))?;
-        match self.probe(runtime, &destination, &original) {
-            Ok(asset) => {
-                let _ = crate::media_metadata::remember_name(self, &asset);
-                Ok(asset)
-            }
-            Err(e) => {
-                let _ = fs::remove_file(destination);
-                Err(e)
-            }
-        }
+        // A valid video with an unusual filename must remain discoverable in the library.
+        let ext = if library_video
+            && asset.kind == "video"
+            && !crate::video_library::video_name(&format!("video.{ext}"))
+        {
+            "mp4"
+        } else {
+            ext
+        };
+        let destination = destination_store.root.join(format!("{}.{}", new_id(), ext));
+        staged
+            .persist_noclobber(&destination)
+            .map_err(|error| format!("无法保存素材：{}", error.error))?;
+        asset.native_path = destination.to_string_lossy().into();
+        let _ = crate::media_metadata::remember_name(&destination_store, &asset);
+        Ok(asset)
     }
     pub fn import_bytes(&self, runtime: &Runtime, bytes: &[u8], name: &str) -> Result<Asset> {
+        self.import_blob(runtime, bytes, name, false)
+    }
+    pub fn import_bytes_for_library(
+        &self,
+        runtime: &Runtime,
+        bytes: &[u8],
+        name: &str,
+    ) -> Result<Asset> {
+        self.import_blob(runtime, bytes, name, true)
+    }
+    fn import_blob(
+        &self,
+        runtime: &Runtime,
+        bytes: &[u8],
+        name: &str,
+        library_video: bool,
+    ) -> Result<Asset> {
+        self.checked_root()?;
         if bytes.is_empty() || bytes.len() > 1024 * 1024 * 1024 {
             return Err("素材为空或超过 1 GB 导入上限。".into());
         }
-        let temp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
-        fs::write(temp.path(), bytes).map_err(|e| e.to_string())?;
-        self.import(runtime, temp.path(), Some(name))
+        let staged = tempfile::Builder::new()
+            .prefix(".import-")
+            .tempfile_in(&self.root)
+            .map_err(|error| format!("无法保存素材：{error}"))?;
+        fs::write(staged.path(), bytes).map_err(|error| error.to_string())?;
+        self.finish_import(runtime, staged, name, library_video)
     }
     /// Capture output is already a PNG. Read its dimensions locally instead of
     /// starting a media-probing process for this known still-image format.
@@ -326,10 +406,10 @@ impl MediaStore {
             .unwrap_or_default()
             .to_string_lossy()
             .to_lowercase();
-        let is_image = [
-            "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "avif", "heic", "gif",
-        ]
-        .contains(&ext.as_str());
+        let format = value["format"]["format_name"].as_str().unwrap_or("");
+        let is_image = format.split(',').any(|name| {
+            name.ends_with("_pipe") || matches!(name, "image2" | "image2pipe" | "gif" | "apng")
+        }) || matches!(ext.as_str(), "avif" | "heic");
         let kind = if is_image && video.is_some() {
             "image"
         } else if video.is_some() {

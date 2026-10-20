@@ -81,9 +81,9 @@ function cuts(project: Project): TransitionCut[] {
 }
 
 /** Prefer the selected video track, then the nearest unambiguous cut elsewhere. */
-export function findTransitionCut(project: Project, time: number, preferredTrackId?: string): TransitionCut | undefined {
+export function findTransitionCut(project: Project, time: number, preferredTrackId?: string, options: { includeLocked?: boolean; minimumDuration?: number } = {}): TransitionCut | undefined {
   if (!Number.isFinite(time)) return undefined
-  const candidates = cuts(project).filter(cut => !project.tracks.find(track => track.id === cut.trackId)!.locked && cut.maxDuration >= 2 / project.fps - EPSILON)
+  const candidates = cuts(project).filter(cut => (options.includeLocked || !project.tracks.find(track => track.id === cut.trackId)!.locked) && cut.maxDuration >= (options.minimumDuration ?? 2 / project.fps) - EPSILON)
   const preferred = candidates.filter(cut => cut.trackId === preferredTrackId)
   return (preferred.length ? preferred : candidates).sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time) || a.time - b.time)[0]
 }

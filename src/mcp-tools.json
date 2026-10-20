@@ -2550,7 +2550,7 @@
   },
   {
     "name": "open_media_material_list",
-    "description": "分页浏览内置水印、背景音乐或片头片尾模板。返回material_add所需的id。\n执行方式：同步返回最终结果。",
+    "description": "分页浏览内置水印、背景音乐、片头片尾模板或转场音效。返回material_add所需的id；transition_sound还返回音效名称、说明、duration和重音位置anchor（秒）。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2559,7 +2559,8 @@
           "enum": [
             "watermark",
             "music",
-            "video_segment"
+            "video_segment",
+            "transition_sound"
           ]
         },
         "search": {
@@ -2618,7 +2619,7 @@
   },
   {
     "name": "open_media_material_add",
-    "description": "添加指定内置素材，返回异步jobId。视频片段placement为prepend或append，支持heading/subheading编辑标题；其他素材start为项目时间。可编辑文字水印支持text/color/background/animation/watermarkPlacement；duration可设置文字水印或片头片尾时长（片头片尾0.5–30秒）。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "添加指定内置素材，返回异步jobId。视频片段placement为prepend或append，支持heading/subheading编辑标题；水印和背景音乐start为项目时间。transition_sound在独立音频轨道添加转场音效：优先使用有效transitionClipId绑定的切点，否则查找time附近切点；两者省略时优先当前选中的画面转场，再使用当前播放头，anchor可覆盖默认重音位置，不接受start或duration。可编辑文字水印支持text/color/background/animation/watermarkPlacement；duration可设置文字水印或片头片尾时长（片头片尾0.5–30秒）。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2627,7 +2628,8 @@
           "enum": [
             "watermark",
             "music",
-            "video_segment"
+            "video_segment",
+            "transition_sound"
           ]
         },
         "id": {
@@ -2639,7 +2641,27 @@
         "start": {
           "type": "number",
           "minimum": 0,
-          "maximum": 86400
+          "maximum": 86400,
+          "description": "水印或背景音乐的项目起点（秒）；转场音效使用time，不接受start。"
+        },
+        "transitionClipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "仅用于transition_sound：当前工程中的画面转场片段ID，使用其绑定切点并优先于time；不存在或绑定失效时拒绝添加。"
+        },
+        "time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400,
+          "description": "仅用于transition_sound：查找距离此项目时间最近的视频切点；transitionClipId优先。两者省略时优先当前选中的画面转场，再使用当前播放头。"
+        },
+        "anchor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400,
+          "description": "仅用于transition_sound：音频中的重音位置（秒），须小于音频时长；省略时使用目录默认值，添加时将重音对齐视频切点。"
         },
         "placement": {
           "type": "string",
@@ -2668,7 +2690,7 @@
           "type": "number",
           "minimum": 0.5,
           "maximum": 120,
-          "description": "文字水印0.5–120秒；视频片头片尾0.5–30秒并按完整原视频调整速度。"
+          "description": "文字水印0.5–120秒；视频片头片尾0.5–30秒并按完整原视频调整速度。背景音乐和转场音效的时长请在添加后通过clip_update或clip_trim调整。"
         },
         "text": {
           "type": "string",

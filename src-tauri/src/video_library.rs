@@ -25,11 +25,15 @@ pub struct StoredVideo {
     pub asset: Asset,
     /// Modification time in epoch milliseconds; the UI formats it for the local timezone.
     pub added_at: u64,
+    #[serde(skip)]
+    modified_at: (u64, u32),
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StoredVideos {
     pub directory: String,
+    pub import_directory: Option<String>,
     pub assets: Vec<StoredVideo>,
     pub warnings: Vec<String>,
 }
@@ -88,7 +92,7 @@ pub struct VideoLibrary {
     cache: Arc<Mutex<Cache>>,
 }
 
-fn video_name(name: &str) -> bool {
+pub(crate) fn video_name(name: &str) -> bool {
     if name.starts_with('.')
         || name.len() > 1024
         || Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name)
@@ -102,8 +106,12 @@ fn video_name(name: &str) -> bool {
         .to_ascii_lowercase();
     VIDEO_EXTENSIONS.contains(&extension.as_str())
 }
-fn stable_id(name: &str) -> String {
-    let hash = Sha256::digest(name.as_bytes());
+fn stable_id(root: &Path, name: &str) -> String {
+    let mut hash = Sha256::new();
+    hash.update(root.as_os_str().as_encoded_bytes());
+    hash.update(b"\0");
+    hash.update(name.as_bytes());
+    let hash = hash.finalize();
     format!(
         "stored-video-{}",
         hash.iter()
@@ -198,6 +206,29 @@ impl VideoLibrary {
             path,
             cache: Arc::new(Mutex::new(Cache::default())),
         }
+    }
+
+    pub fn list_stored(
+        &self,
+        imports: &Self,
+        store: &MediaStore,
+        runtime: &Runtime,
+        include_imported: bool,
+    ) -> Result<StoredVideos> {
+        let mut result = self.list(&store.recording_store()?, runtime)?;
+        if include_imported {
+            let imported = imports.list(&store.import_video_store()?, runtime)?;
+            result.import_directory = Some(imported.directory);
+            result.assets.extend(imported.assets);
+            result.warnings.extend(imported.warnings);
+            result.assets.sort_by(|left, right| {
+                right
+                    .modified_at
+                    .cmp(&left.modified_at)
+                    .then_with(|| left.asset.native_path.cmp(&right.asset.native_path))
+            });
+        }
+        Ok(result)
     }
 
     pub fn list(&self, store: &MediaStore, runtime: &Runtime) -> Result<StoredVideos> {
@@ -351,7 +382,7 @@ impl VideoLibrary {
                 warn(format!("已跳过 {name}：{error}"));
             }
             if let Some(mut asset) = entry.asset.clone() {
-                asset.id = stable_id(name);
+                asset.id = stable_id(&store.root, name);
                 asset.name = crate::media_metadata::original_name(store, path)
                     .unwrap_or_else(|| name.clone());
                 asset.native_path = path.to_string_lossy().into();
@@ -360,6 +391,7 @@ impl VideoLibrary {
                 assets.push(StoredVideo {
                     asset,
                     added_at: fingerprint.milliseconds(),
+                    modified_at: (fingerprint.modified_seconds, fingerprint.modified_nanos),
                 });
             }
         }
@@ -387,6 +419,7 @@ impl VideoLibrary {
         }
         Ok(StoredVideos {
             directory: store.root.to_string_lossy().into(),
+            import_directory: None,
             assets,
             warnings,
         })
@@ -569,6 +602,83 @@ mod tests {
         );
         assert!(again.assets[0].asset.url.is_empty());
         assert_eq!(again.assets[0].asset.id, first.assets[0].asset.id);
+    }
+
+    #[test]
+    fn combined_library_is_opt_in_isolated_and_sorted_with_distinct_ids_and_indexes() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = runtime();
+        let source = video(directory.path(), &runtime);
+        let media = MediaStore::new(directory.path()).unwrap();
+        let recordings = media.recording_store().unwrap();
+        let recording = recordings.root.join("shared.mp4");
+        fs::copy(&source, &recording).unwrap();
+        let old_media = media.root.join("built-in.mp4");
+        fs::copy(&source, &old_media).unwrap();
+        let recording_index = directory.path().join("recordings-index.json");
+        let import_index = directory.path().join("imports-index.json");
+        let library = VideoLibrary::new(recording_index.clone());
+        let import_library = VideoLibrary::new(import_index.clone());
+
+        let default = library
+            .list_stored(&import_library, &media, &runtime, false)
+            .unwrap();
+        assert_eq!(default.assets.len(), 1);
+        assert_eq!(default.directory, recordings.root.to_string_lossy());
+        assert!(default.import_directory.is_none());
+        assert!(!media.import_video_root().unwrap().exists());
+        assert!(!import_index.exists());
+
+        let imports = media.import_video_store().unwrap();
+        let imported = imports.root.join("shared.mp4");
+        fs::copy(&source, &imported).unwrap();
+        fs::create_dir(imports.root.join("nested")).unwrap();
+        fs::copy(&source, imports.root.join("nested/hidden.mp4")).unwrap();
+        // Millisecond display timestamps can match while filesystem ordering differs.
+        for (path, nanos) in [(&recording, 100), (&imported, 900)] {
+            fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(
+                    UNIX_EPOCH + Duration::new(1_700_000_000, nanos),
+                ))
+                .unwrap();
+        }
+        let combined = library
+            .list_stored(&import_library, &media, &runtime, true)
+            .unwrap();
+        assert_eq!(combined.directory, recordings.root.to_string_lossy());
+        assert_eq!(
+            combined.import_directory.as_deref(),
+            imports.root.to_str()
+        );
+        assert_eq!(combined.assets.len(), 2);
+        assert_eq!(combined.assets[0].asset.native_path, imported.to_string_lossy());
+        assert_eq!(combined.assets[1].asset.native_path, recording.to_string_lossy());
+        assert_eq!(combined.assets[0].added_at, combined.assets[1].added_at);
+        assert_ne!(combined.assets[0].asset.id, combined.assets[1].asset.id);
+        assert_eq!(combined.assets[1].asset.id, default.assets[0].asset.id);
+        for index in [&recording_index, &import_index] {
+            let index = read_index(index).unwrap().unwrap();
+            assert_eq!(index.entries.len(), 1);
+            assert!(index.entries.contains_key("shared.mp4"));
+        }
+        let serialized = serde_json::to_value(&combined).unwrap();
+        assert_eq!(serialized["importDirectory"], imports.root.to_string_lossy().as_ref());
+        assert!(serialized["assets"][0].get("modifiedAt").is_none());
+        let restarted = VideoLibrary::new(recording_index)
+            .list_stored(&VideoLibrary::new(import_index), &media, &runtime, true)
+            .unwrap();
+        assert_eq!(restarted.assets[0].asset.id, combined.assets[0].asset.id);
+        fs::remove_file(&imported).unwrap();
+        let after_delete = library
+            .list_stored(&import_library, &media, &runtime, true)
+            .unwrap();
+        assert_eq!(after_delete.assets.len(), 1);
+        assert_eq!(after_delete.assets[0].asset.id, default.assets[0].asset.id);
+        assert!(old_media.is_file(), "Listing must preserve built-in media");
+        assert!(source.is_file(), "Listing must preserve external originals");
     }
 
     #[cfg(unix)]

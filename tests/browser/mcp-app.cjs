@@ -12,7 +12,7 @@ async function installNativeBridge(page) {
       counter: 1, running: true, connectedClients: 0, statusFailure: false, omitConnectionCount: false, holdNextStatus: false, holdClaimId: '', unexpected: [],
       mediaJobs: [{ id: 'existing-export', name: '已有视频导出', state: 'completed', progress: 1, outputPath: '/fixture/export.mp4' }],
       config: { host: '127.0.0.1', port: 39861, token: 'a'.repeat(64) },
-      backgroundColors: {},
+      backgroundColors: {}, nativeTheme: 'unset',
     }
     const status = () => ({ running: fixture.running, host: fixture.config.host, port: fixture.config.port,
       url: fixture.running ? `http://${fixture.config.host}:${fixture.config.port}/mcp` : null,
@@ -47,6 +47,11 @@ async function installNativeBridge(page) {
           const id = fixture.counter++; fixture.listeners.set(id, { ...args, id }); return id
         }
         if (command === 'plugin:event|unlisten') { fixture.listeners.delete(args.eventId); return null }
+        if (command === 'plugin:window|set_theme') {
+          if (args.label !== 'main' || !['light', 'dark', null].includes(args.value)) throw new Error('主窗口主题参数无效')
+          fixture.nativeTheme = args.value
+          return null
+        }
         if (command === 'plugin:window|set_background_color' || command === 'plugin:webview|set_webview_background_color') {
           if (args.label !== 'main' || !['#151923', '#f7f9fc'].includes(args.value)) throw new Error('主窗口背景参数无效')
           fixture.backgroundColors[command] = args.value
@@ -599,16 +604,28 @@ async function main() {
     const replay = await completion(page, 'startup-replay')
     assert.equal(replay.isError, false, '渲染器监听建立后应领取遗漏事件的待处理请求')
     await expect(page.getByTestId('home-workspace')).toBeVisible()
-    const backgroundColors = () => page.evaluate(() => window.mcpAppFixture.backgroundColors)
-    const expectedColors = color => ({ 'plugin:window|set_background_color': color, 'plugin:webview|set_webview_background_color': color })
-    await expect.poll(backgroundColors).toEqual(expectedColors('#151923'))
+    const nativeAppearance = () => page.evaluate(() => ({ theme: window.mcpAppFixture.nativeTheme, colors: window.mcpAppFixture.backgroundColors }))
+    const expectedAppearance = (theme, color) => ({ theme, colors: { 'plugin:window|set_background_color': color, 'plugin:webview|set_webview_background_color': color } })
+    await expect.poll(nativeAppearance).toEqual(expectedAppearance('dark', '#151923'))
     await page.getByTestId('theme-light').click()
-    await expect.poll(backgroundColors).toEqual(expectedColors('#f7f9fc'))
+    await expect.poll(nativeAppearance).toEqual(expectedAppearance('light', '#f7f9fc'))
     await page.emulateMedia({ colorScheme: 'dark' })
+    await page.getByTestId('theme-dark').click()
+    await expect.poll(nativeAppearance).toEqual(expectedAppearance('dark', '#151923'))
     await page.getByTestId('theme-system').click()
-    await expect.poll(backgroundColors).toEqual(expectedColors('#151923'))
+    await expect.poll(nativeAppearance).toEqual(expectedAppearance(null, '#151923'))
     await page.emulateMedia({ colorScheme: 'light' })
-    await expect.poll(backgroundColors).toEqual(expectedColors('#f7f9fc'))
+    await expect.poll(nativeAppearance).toEqual(expectedAppearance(null, '#f7f9fc'))
+    await page.getByTestId('theme-light').click()
+    await expect.poll(nativeAppearance).toEqual(expectedAppearance('light', '#f7f9fc'))
+    await page.getByTestId('theme-system').click()
+    await expect.poll(nativeAppearance).toEqual(expectedAppearance(null, '#f7f9fc'))
+    if (process.argv.includes('--appearance-only')) {
+      assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+      assert.deepEqual(errors, [])
+      console.log('PASS 主窗口原生主题及窗口/网页背景契约：初始主题、手动切换、系统跟随、有效颜色不变时释放/恢复主题覆盖')
+      return
+    }
     await page.getByTestId('create-project').click()
     await expect(page.getByTestId('save-project')).toBeEnabled()
     await expect(page.locator('.statusbar > *')).toHaveCount(2)

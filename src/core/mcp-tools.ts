@@ -106,6 +106,9 @@ export function validateMcpToolArguments(name: string, args: unknown): Record<st
   if (name === 'open_media_material_add') {
     if (result.kind === 'video_segment' && result.start !== undefined) throw new Error('视频片段通过 placement 指定前插或后插，不使用 start。')
     if (result.kind !== 'video_segment' && ['placement', 'heading', 'subheading', 'titleLayout'].some(key => result[key] !== undefined)) throw new Error('placement、heading、subheading 和 titleLayout 仅适用于视频片段模板。')
+    if (result.kind !== 'transition_sound' && ['time', 'transitionClipId', 'anchor'].some(key => result[key] !== undefined)) throw new Error('time、transitionClipId 和 anchor 仅适用于转场音效。')
+    if (result.kind === 'transition_sound' && result.start !== undefined) throw new Error('转场音效通过 time 或 transitionClipId 选择切点，不使用 start。')
+    if (result.kind === 'transition_sound' && result.duration !== undefined) throw new Error('转场音效的时长请通过音频片段属性调整。')
   }
   return result
 }

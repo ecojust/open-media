@@ -16,23 +16,30 @@ async function mount(page, url, mode, native, source, options = {}) {
     const vueURL = source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
     const { createApp, h, ref, KeepAlive } = await import(vueURL)
     const Component = (await import(`/src/components/${filename}.vue`)).default
-    const asset = (id, addedAt, kind = 'video', local = true) => ({ id, addedAt, kind, name: `${id}.webm`, url: `/list-video/${id}`, duration: 8, width: 160, height: 90, size: 2048, mime: 'video/webm', ...(local ? { nativePath: `/fixture/${id}.webm` } : {}) })
+    const asset = (id, addedAt, kind = 'video', local = true) => ({ id, addedAt, kind, name: `${id}.webm`, url: `/list-video/${id}`, duration: 8, width: 160, height: 90, size: 2048, mime: 'video/webm', ...(local ? { nativePath: `${id.startsWith('legacy') ? '/recordings' : '/import video'}/${id}.webm` } : {}) })
     const assets = ref([asset('legacy-first'), asset('older', '2026-10-18T01:00:00Z'), asset('audio', '2030-01-01T00:00:00Z', 'audio'), asset('same-first', '2026-10-18T02:00:00Z'), asset('image', '2030-01-01T00:00:00Z', 'image'), asset('newest', '2026-10-18T03:00:00Z'), asset('same-last', '2026-10-18T02:00:00Z'), asset('legacy-last', undefined, 'video', false)])
+    if (native) assets.value.push(
+      { ...asset('generated', '2040-01-01T00:00:00Z'), nativePath: '/generated/output.webm' },
+      { ...asset('media-output', '2041-01-01T00:00:00Z'), nativePath: '/media/output.webm' },
+      { ...asset('builtin-watermark', '2042-01-01T00:00:00Z'), nativePath: '/media/watermark.webm', libraryRole: 'watermark' },
+    )
     if (options.emptyProjectAssets) assets.value = []
     const visible = ref(true), theme = ref('light')
-    const state = window.listHarness = { assets, calls: [], failReveal: false, failScan: false, holdScan: false, stored: [], warnings: [], busy: false,
-      append(id, addedAt) { assets.value.push(asset(id, addedAt)) },
+    const state = window.listHarness = { assets, calls: [], failReveal: false, failScan: false, holdScan: false, stored: [], warnings: [], busy: false, importRequests: 0,
+      append(id, addedAt) { const value = asset(id, addedAt); if (native) state.addStored(`scan-${id}`, addedAt, value.nativePath); assets.value.push(value) },
       addStored(id, addedAt, nativePath = `/recordings/${id}.webm`) { state.stored.push({ ...asset(id), addedAt: Date.parse(addedAt), nativePath }) },
       statuses: [], show(value) { visible.value = value }, theme(value) { theme.value = value } }
+    if (native) for (const value of assets.value) if (value.kind === 'video' && /^\/(?:recordings|import video)\//.test(value.nativePath ?? '')) state.addStored(`scan-${value.id}`, value.addedAt, value.nativePath)
     if (options.directoryOnly) { state.addStored('only-recording-new', '2035-01-01T00:00:00Z'); state.addStored('only-recording-old', '2034-01-01T00:00:00Z') }
-    const library = () => ({ directory: '/Users/demo/Library/Application Support/Open Media/recordings', assets: structuredClone(state.stored), warnings: [...state.warnings] })
+    const library = includeImported => ({ directory: '/Users/demo/Library/Application Support/Open Media/recordings', importDirectory: includeImported ? '/Users/demo/Library/Application Support/Open Media/import video' : null, assets: structuredClone(state.stored.filter(value => value.nativePath.startsWith('/recordings/') || includeImported && value.nativePath.startsWith('/import video/'))), warnings: [...state.warnings] })
     window.__TAURI_INTERNALS__ = { convertFileSrc: nativePath => `/list-video/${nativePath.split('/').pop().replace(/\.[^.]+$/, '')}`, invoke: async (command, args) => {
       state.calls.push({ command, args })
       if (command === 'get_runtime_status') return { ready: true, source: 'fixture', version: 'fixture' }
       if (command === 'list_stored_videos') {
         if (state.failScan) throw new Error('录屏目录暂时不可读取，请重试')
-        if (state.holdScan) return new Promise(resolve => { state.releaseScan = () => { state.holdScan = false; resolve(library()) } })
-        return library()
+        const snapshot = library(args?.includeImported)
+        if (state.holdScan) return new Promise(resolve => { state.releaseScan = () => { state.holdScan = false; delete state.releaseScan; resolve(snapshot) } })
+        return snapshot
       }
       if (command === 'open_media_library_directory') return null
       if (command === 'reveal_media_asset') { if (state.failReveal) throw new Error('原始文件和素材副本均已移除'); return null }
@@ -41,7 +48,7 @@ async function mount(page, url, mode, native, source, options = {}) {
       if (command === 'cancel_media_job') return null
       throw new Error(`Unexpected command: ${command}`)
     } }
-    const app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': theme.value }, h(KeepAlive, null, { default: () => visible.value ? h(Component, { assets: assets.value, native, ...(mode === 'gif' ? {} : { mode: mode === 'image' ? 'image' : 'video' }), onImported: file => state.append(file.name, '2027-01-01T00:00:00Z'), onStatus: value => state.statuses.push(value), onBusyChange: value => { state.busy = value } }) : h('div', { class: 'other-workspace' }) })) })
+    const app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': theme.value }, h(KeepAlive, null, { default: () => visible.value ? h(Component, { assets: assets.value, native, ...(mode === 'gif' ? {} : { mode: mode === 'image' ? 'image' : 'video' }), onImport: () => { state.importRequests++; state.append('fresh-import.webm', '2027-01-01T00:00:00Z') }, onImported: file => state.append(file.name, '2027-01-01T00:00:00Z'), onStatus: value => state.statuses.push(value), onBusyChange: value => { state.busy = value } }) : h('div', { class: 'other-workspace' }) })) })
     app.mount('#app')
     state.dispose = () => app.unmount()
   }, { mode, native, options })
@@ -90,10 +97,14 @@ async function main() {
       page.on('pageerror', error => errors.push(error.message))
       await mount(page, url, mode, native, source)
       const rows = page.locator('[data-source-asset-id]')
-      await expect(rows).toHaveCount(6)
-      assert.deepEqual(await rows.evaluateAll(items => items.map(item => item.dataset.sourceAssetId)), ['newest', 'same-last', 'same-first', 'older', 'legacy-last', 'legacy-first'])
-      await expect(rows.first().locator('time')).toHaveAttribute('datetime', '2026-10-18T03:00:00Z')
-      await expect(rows.filter({ hasText: '导入时间未记录' })).toHaveCount(2)
+      await expect(rows).toHaveCount(native ? 5 : 6)
+      assert.deepEqual(await rows.evaluateAll(items => items.map(item => item.dataset.sourceAssetId)), native ? ['newest', 'same-last', 'same-first', 'older', 'legacy-first'] : ['newest', 'same-last', 'same-first', 'older', 'legacy-last', 'legacy-first'])
+      await expect(rows.first().locator('time')).toHaveAttribute('datetime', native ? '2026-10-18T03:00:00.000Z' : '2026-10-18T03:00:00Z')
+      await expect(rows.filter({ hasText: '导入时间未记录' })).toHaveCount(native ? 1 : 2)
+      if (native) {
+        assert.equal(await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').every(call => call.args?.includeImported === true)), true, '桌面列表必须请求录屏与导入视频两个目录')
+        for (const excluded of ['generated', 'media-output', 'builtin-watermark', 'legacy-last']) await expect(page.locator(`[data-source-asset-id="${excluded}"]`)).toHaveCount(0)
+      }
       const older = page.locator('[data-source-asset-id="older"]')
       await (mode === 'gif' ? older : older.locator('.source-details')).click()
       const preview = mode === 'gif' ? page.getByLabel('GIF 来源视频预览') : page.locator('.preview-stage video')
@@ -101,7 +112,7 @@ async function main() {
       if (mode === 'gif') {
         await expect(page.getByLabel('GIF 视频来源')).toHaveValue('older')
         await page.getByLabel('开始时间', { exact: true }).fill('1')
-      } else await expect(page.locator('.convert-source input:checked')).toHaveCount(6)
+      } else await expect(page.locator('.convert-source input:checked')).toHaveCount(native ? 5 : 6)
       await page.evaluate(() => window.listHarness.append('later', '2026-10-18T04:00:00Z'))
       await expect(rows.first()).toHaveAttribute('data-source-asset-id', 'later')
       await expect(preview).toHaveAttribute('src', '/list-video/older')
@@ -122,9 +133,7 @@ async function main() {
         await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'reveal_media_asset').length)).toBe(1)
         const revealed = await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'reveal_media_asset'))
         assert.deepEqual(revealed.map(call => call.args.asset.id), ['older'])
-        await page.locator('[data-source-asset-id="legacy-last"]').click({ button: 'right' })
-        await expect(menu.getByRole('menuitem')).toBeDisabled()
-        await expect(menu).toContainText('此素材没有可用的本地位置')
+        await expect(page.locator('[data-source-asset-id="legacy-last"]')).toHaveCount(0)
       } else {
         await expect(reveal).toBeDisabled()
         await expect(menu).toContainText('仅桌面端可打开所在文件夹')
@@ -215,7 +224,24 @@ async function main() {
         await expect(page.getByText('原始文件和素材副本均已移除', { exact: true })).toBeVisible()
       }
       if (mode === 'gif') {
-        await page.locator('input[type=file]').setInputFiles({ name: 'fresh-import.webm', mimeType: 'video/webm', buffer: source })
+        if (native) {
+          const scansBeforeImport = await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').length)
+          await page.evaluate(() => { window.listHarness.holdScan = true })
+          await page.getByTestId('video-library-actions').getByRole('button', { name: '刷新本机视频列表' }).click()
+          await page.waitForFunction(() => typeof window.listHarness.releaseScan === 'function')
+          await page.getByRole('button', { name: '导入视频', exact: true }).click()
+          assert.equal(await page.evaluate(() => window.listHarness.importRequests), 1, '桌面 GIF 使用原生导入事件')
+          await expect(page.locator('[data-source-asset-id="fresh-import.webm"]')).toHaveCount(0)
+          await expect(page.getByLabel('GIF 视频来源')).toHaveValue('older')
+          await expect(page.getByLabel('开始时间', { exact: true })).toHaveValue('1')
+          await page.evaluate(() => window.listHarness.releaseScan())
+          await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').length)).toBe(scansBeforeImport + 2)
+        } else {
+          const chooser = page.waitForEvent('filechooser')
+          await page.getByRole('button', { name: '导入视频', exact: true }).click()
+          await (await chooser).setFiles({ name: 'fresh-import.webm', mimeType: 'video/webm', buffer: source })
+          assert.equal(await page.evaluate(() => window.listHarness.importRequests), 0, '网页 GIF 使用文件输入，不请求原生选择器')
+        }
         await expect(rows.first()).toHaveAttribute('data-source-asset-id', 'fresh-import.webm')
         await expect(page.getByLabel('GIF 视频来源')).toHaveValue('fresh-import.webm')
         await expect(preview).toHaveAttribute('src', '/list-video/fresh-import.webm')
@@ -246,7 +272,7 @@ async function main() {
         else await older.getByRole('checkbox').uncheck()
         await page.evaluate(() => {
           window.listHarness.addStored('recording-only', '2031-01-01T00:00:00Z')
-          window.listHarness.addStored('duplicate-older', '2032-01-01T00:00:00Z', '/fixture/older.webm')
+          window.listHarness.addStored('duplicate-older', '2032-01-01T00:00:00Z', '/import video/older.webm')
           window.listHarness.warnings = ['损坏视频.webm：无法读取视频信息']
           window.listHarness.holdScan = true
         })
@@ -303,13 +329,15 @@ async function main() {
         await expect(toolbar.getByRole('alert')).toHaveCount(0)
         await expect(preview).toHaveAttribute('src', '/list-video/recording-only')
         assert.deepEqual(await page.evaluate(() => window.listHarness.assets.value.map(asset => asset.id)), projectAssetsBeforeScan, '目录浏览与预览不能把录屏批量加入当前工程')
-        console.log(`PASS ${mode} 本机目录模拟：默认扫描、路径去重、延迟/失败保留选择与GIF片段、按需解码、激活和窗口聚焦刷新、打开目录与跳过提示`)
+        console.log(`PASS ${mode} 本机目录模拟：录屏及导入目录、排除项目生成/media/内置视频、路径去重、延迟/失败保留选择与GIF片段、按需解码、激活和窗口聚焦刷新、打开目录与跳过提示`)
       } else {
         await expect(page.getByTestId('video-library-toolbar')).toHaveCount(0)
         await expect(page.getByTestId('video-library-actions')).toHaveCount(0)
         assert.equal(await page.evaluate(() => window.listHarness.calls.some(call => ['list_stored_videos', 'open_media_library_directory'].includes(call.command))), false, '网页不扫描本机目录')
       }
+      const beforeMany = await rows.count()
       await page.evaluate(() => { for (let index = 0; index < 25; index++) window.listHarness.append(`extra-${index}`, '2028-01-01T00:00:00Z') })
+      await expect(rows).toHaveCount(beforeMany + 25)
       const list = page.locator('.tool-workspace-library')
       assert(await list.evaluate(element => element.scrollHeight > element.clientHeight), 'many videos must scroll rather than compressing the rows')
       assert((await rows.first().boundingBox()).height >= (mode === 'gif' ? 76 : 65))
