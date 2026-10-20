@@ -18,6 +18,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -78,6 +84,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -158,6 +170,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [],
@@ -189,7 +207,7 @@
   },
   {
     "name": "open_media_artifact_read",
-    "description": "分块读取预览文件的原始二进制数据（base64）。返回总大小、完整文件SHA256、offset和nextOffset；按序拼接即可保存为可播放文件。\n执行方式：同步返回最终结果。",
+    "description": "分块读取预览文件的原始二进制数据（base64）。返回总大小、完整文件SHA256、offset和nextOffset；按序拼接即可保存为可播放文件。 artifactId 仅可在生成它的当前工程会话中读取；切换或重新打开工程后请重新生成预览。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -210,6 +228,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -261,6 +285,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -314,6 +344,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [],

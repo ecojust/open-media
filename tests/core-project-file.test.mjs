@@ -13,6 +13,18 @@ function fixture() {
   return { blob, asset, project: addAsset(createProject('便携测试'), asset) }
 }
 
+test('打开有文件名的工程恢复默认或空白名称，保留自定义名称及其余归档校验', async () => {
+  const archive = title => zipSync({ 'project.json': strToU8(JSON.stringify({ format: 'open-media-project', version: 1, project: { ...createProject(), title } })) })
+  for (const storedTitle of ['未命名项目', '', '   ']) {
+    const imported = await importProjectFile(new File([archive(storedTitle)], '演示.最终版本.OMEDIA'))
+    try { assert.equal(imported.project.title, '演示.最终版本') } finally { imported.revoke() }
+  }
+  const named = await importProjectFile(new File([archive('我的剪辑工程')], '另一文件名.omedia'))
+  try { assert.equal(named.project.title, '我的剪辑工程') } finally { named.revoke() }
+  for (const invalid of [null, 42, {}, '非法\0名称']) await assert.rejects(importProjectFile(new File([archive(invalid)], '不能掩盖错误.omedia')), /项目名称无效/)
+  await assert.rejects(importProjectFile(new Blob([archive('')])), /项目名称无效/, '没有文件名时不能替无效归档猜测名称')
+})
+
 test('便携项目打包真实素材且不包含本机路径，导入恢复可读对象URL', async () => {
   const { project, blob, asset } = fixture()
   try {

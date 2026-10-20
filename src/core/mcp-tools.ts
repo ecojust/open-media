@@ -102,7 +102,7 @@ export function validateMcpToolArguments(name: string, args: unknown): Record<st
   }
   if (name === 'open_media_speech_model' && result.action !== 'status' && !result.modelId) throw new Error('此模型操作需要 modelId。')
   if (name === 'open_media_project_video_compress' && result.mode === 'lossless' && result.quality !== undefined) throw new Error('无损压缩不能指定有损质量。')
-  if (['open_media_playback_set', 'open_media_speech_settings_set'].includes(name) && !Object.keys(result).some(key => key !== 'expectedRevision')) throw new Error('至少提供一个设置字段。')
+  if (['open_media_playback_set', 'open_media_speech_settings_set'].includes(name) && !Object.keys(result).some(key => !['expectedRevision', 'expectedProjectId'].includes(key))) throw new Error('至少提供一个设置字段。')
   if (name === 'open_media_material_add') {
     if (result.kind === 'video_segment' && result.start !== undefined) throw new Error('视频片段通过 placement 指定前插或后插，不使用 start。')
     if (result.kind !== 'video_segment' && ['placement', 'heading', 'subheading', 'titleLayout'].some(key => result[key] !== undefined)) throw new Error('placement、heading、subheading 和 titleLayout 仅适用于视频片段模板。')
@@ -160,7 +160,8 @@ function editedClip(project: Project, clipId: string, label: string): McpProject
 
 /** Pure transaction: the input project is never changed, including validation failures. */
 export function executeProjectTool(project: Project, name: string, rawArgs: unknown): McpProjectToolResult {
-  const args = validateMcpToolArguments(name, rawArgs)
+  const { expectedProjectId, ...args } = validateMcpToolArguments(name, rawArgs)
+  if (expectedProjectId !== undefined && expectedProjectId !== project.id) throw new Error(`当前工程已变化：当前 projectId=${project.id}，请先重新读取当前工程。`)
   if (!isProjectTool(name)) throw new Error('此工具需要桌面运行时执行。')
   if (VISUAL_TOOLS.has(name)) {
     const result = executeVisualTool(project, name, args)

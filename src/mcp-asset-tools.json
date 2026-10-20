@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_asset_upload",
-    "description": "分块上传媒体并导入当前工程。begin 提供 name、size（字节）和完整文件 sha256；chunk 提供 uploadId、offset、base64 和分块 sha256；status/commit/abort 提供 uploadId。每块最多 512 KiB，单文件最多 1 GiB；commit 校验完整哈希和真实媒体类型后导入。\n执行方式：begin/chunk/status/abort 同步返回；commit 异步返回 jobId，使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可使用 open_media_job_cancel 取消。",
+    "description": "分块上传媒体并导入当前工程。uploadId 绑定当前打开的工程会话；切换或重新打开工程后需重新 begin，旧上传仅允许 abort 清理。begin 提供 name、size（字节）和完整文件 sha256；chunk 提供 uploadId、offset、base64 和分块 sha256；status/commit/abort 提供 uploadId。每块最多 512 KiB，单文件最多 1 GiB；commit 校验完整哈希和真实媒体类型后导入。\n执行方式：begin/chunk/status/abort 同步返回；commit 异步返回 jobId，使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可使用 open_media_job_cancel 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -51,6 +51,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },
@@ -120,6 +126,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },
@@ -165,6 +177,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },
@@ -221,6 +239,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },
@@ -302,6 +326,12 @@
           "maximum": 1,
           "default": 0.3,
           "description": "scene模式画面差异阈值；不表示语义识别。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },
@@ -359,6 +389,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },
@@ -436,6 +472,12 @@
           "minimum": -100,
           "maximum": -20,
           "default": -60
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },

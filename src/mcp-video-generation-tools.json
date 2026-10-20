@@ -10,6 +10,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [],
@@ -53,6 +59,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -287,6 +299,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "从 project_get 返回值获取的项目版本；写操作建议提供，版本不一致时拒绝修改。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [

@@ -273,16 +273,19 @@ async function verifyMcpFocus(browser, url) {
     await expectDimmed(true)
     assert.deepEqual(await editorGeometry(page), geometry, '全局暗化和流光不得改变编辑器布局')
     await page.emulateMedia({ reducedMotion: 'no-preference' })
-    const motion = await banner.evaluate(element => {
-      const style = getComputedStyle(element, '::before')
-      return { animation: style.animationName, pointerEvents: style.pointerEvents, background: style.backgroundImage }
-    })
-    assert.match(motion.animation, /^mcp-status-flow(?:-|$)/)
-    assert.equal(motion.pointerEvents, 'none')
-    assert.match(motion.background, /linear-gradient/)
+    const glow = page.getByTestId('mcp-status-glow')
+    await expect(glow).toHaveAttribute('data-motion', 'animated')
+    await expect(glow).toHaveCSS('pointer-events', 'none')
+    await page.clock.runFor(100)
+    const firstGlow = await glow.evaluate(canvas => canvas.toDataURL())
+    await page.clock.runFor(200)
+    assert.notEqual(await glow.evaluate(canvas => canvas.toDataURL()), firstGlow, '流光使用真实 Canvas 逐帧绘制')
     await page.screenshot({ path: '/tmp/open-media-mcp-focus-dimmed.png', fullPage: true })
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    assert.equal(await banner.evaluate(element => getComputedStyle(element, '::before').animationName), 'none')
+    await expect(glow).toHaveAttribute('data-motion', 'static')
+    const stillGlow = await glow.evaluate(canvas => canvas.toDataURL())
+    await page.clock.runFor(200)
+    assert.equal(await glow.evaluate(canvas => canvas.toDataURL()), stillGlow, '减少动态效果时 Canvas 保持静态边框')
     assert.notEqual(await banner.evaluate(element => getComputedStyle(element).boxShadow), 'none', '减少动态效果时保留静态高亮')
     await expectDimmed(true)
     await page.mouse.move(540, 250)
@@ -306,7 +309,7 @@ async function verifyMcpFocus(browser, url) {
     await releaseTool('focus-following-tool')
     await expectNotWorking()
     await expectDimmed(true)
-    console.log('PASS MCP聚焦：开启服务后静止5000ms暗化，无客户端、无任务亦生效，鼠标移动恢复并重新计时，工具完成和断连不重置；流光仅在已连接执行中显示')
+    console.log('PASS MCP聚焦：开启服务后静止5000ms暗化，鼠标移动恢复，任务和连接不重置计时；Canvas执行流光与减少动态静态边框不推移布局')
 
     const imported = await tool(page, 'asset_import', { paths: ['/fixture/focus-import.png'] })
     assert.equal(imported.state, 'running')
@@ -388,6 +391,188 @@ async function verifyMcpFocus(browser, url) {
   } finally { await page.close() }
 }
 
+async function verifyPersistentBanner(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1500, height: 1000 }, deviceScaleFactor: 3 }), errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.setDefaultTimeout(15000)
+  try {
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await installNativeBridge(page)
+    await page.goto(url)
+    await completion(page, 'startup-replay')
+    await page.getByTestId('create-project').click()
+    const banner = page.getByTestId('mcp-processing-banner'), glow = page.getByTestId('mcp-status-glow')
+    await expect(banner).not.toBeVisible()
+    const geometry = await editorGeometry(page), now = await page.evaluate(() => Date.now())
+    await page.clock.install({ time: now })
+    await page.clock.pauseAt(now + 1000)
+    const updateConnection = async count => {
+      await page.evaluate(count => { window.mcpAppFixture.connectedClients = count }, count)
+      await page.clock.runFor(1100)
+    }
+    const expectWaiting = async () => {
+      await expect(banner).toBeVisible()
+      await expect(banner).toHaveAttribute('data-call-state', 'idle')
+      await expect(banner).toHaveClass(/\bconnected\b/)
+      await expect(banner).not.toHaveClass(/\bworking\b/)
+      await expect(banner.locator('.mcp-processing-copy strong')).toHaveText('等待 MCP 操作')
+      await expect(banner.locator('.spinner')).toHaveCount(0)
+      await expect(page.getByTestId('mcp-processing-cancel')).toHaveCount(0)
+    }
+    await updateConnection(1)
+    await expectWaiting()
+    await expect(glow).toHaveAttribute('data-motion', 'animated')
+    await expect(glow).toHaveAttribute('data-mode', 'waiting')
+    await expect(glow).toHaveAttribute('aria-hidden', 'true')
+    await expect(glow).toHaveCSS('pointer-events', 'none')
+    await assertFloatingBar(page)
+    const drawing = await glow.evaluate(canvas => {
+      const rect = canvas.getBoundingClientRect(), pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+      let opaque = 0
+      for (let index = 3; index < pixels.length; index += 4) if (pixels[index]) opaque++
+      return { width: canvas.width, height: canvas.height, cssWidth: rect.width, cssHeight: rect.height, opaque, dpr: devicePixelRatio }
+    })
+    assert.equal(drawing.dpr, 3)
+    assert.ok(drawing.width > 0 && drawing.height > 0 && drawing.opaque > 100, JSON.stringify(drawing))
+    assert.ok(Math.abs(drawing.width / drawing.cssWidth - 2) < .02 && Math.abs(drawing.height / drawing.cssHeight - 2) < .02, '高DPI屏幕限制Canvas像素密度，避免持续绘制浪费')
+    const initialGlow = await glow.evaluate(canvas => canvas.toDataURL())
+    await page.clock.runFor(30000)
+    await expectWaiting()
+    assert.notEqual(await glow.evaluate(canvas => canvas.toDataURL()), initialGlow, '连接空闲时仍有流光')
+    assert.deepEqual(await editorGeometry(page), geometry, '等待状态不会推移预览和时间线')
+
+    await page.getByTestId('mcp-processing-details').click()
+    await expect(page.getByTestId('mcp-processing-detail-panel')).toBeVisible()
+    assert.deepEqual(await editorGeometry(page), geometry)
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('mcp-processing-detail-panel')).not.toBeVisible()
+    await page.screenshot({ path: '/tmp/open-media-mcp-connected-waiting.png', fullPage: true })
+
+    await page.evaluate(() => { window.mcpAppFixture.holdCompleteId = 'persistent-active-tool' })
+    await enqueue(page, 'project_get', {}, { id: 'persistent-active-tool', ttl: 120000 })
+    await page.waitForFunction(() => window.mcpAppFixture.heldCompletions.has('persistent-active-tool'))
+    await expect(banner).toContainText('MCP 正在调用')
+    await expect(banner).toContainText('读取当前工程')
+    await expect(banner).toHaveClass(/\bworking\b/)
+    await expect(glow).toHaveAttribute('data-mode', 'working')
+    await page.evaluate(() => { const f = window.mcpAppFixture; f.holdCompleteId = ''; f.heldCompletions.get('persistent-active-tool')() })
+    await completion(page, 'persistent-active-tool')
+    await expect(banner).toContainText('MCP 调用完成')
+    await page.clock.runFor(1300)
+    await expectWaiting()
+    const failed = await completion(page, await enqueue(page, 'project_update', { expectedProjectId: 'different-project', patch: { title: '不应修改' } }))
+    assert.equal(failed.isError, true)
+    await expect(banner).toContainText('MCP 调用失败')
+    await page.clock.runFor(1300)
+    await expectWaiting()
+
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect(glow).toHaveAttribute('data-motion', 'static')
+    const still = await glow.evaluate(canvas => canvas.toDataURL())
+    await page.clock.runFor(1000)
+    assert.equal(await glow.evaluate(canvas => canvas.toDataURL()), still)
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await expect(glow).toHaveAttribute('data-motion', 'animated')
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')) })
+    await expect(glow).toHaveAttribute('data-motion', 'paused')
+    const hidden = await glow.evaluate(canvas => canvas.toDataURL())
+    await page.clock.runFor(1000)
+    assert.equal(await glow.evaluate(canvas => canvas.toDataURL()), hidden, '文档隐藏时停止绘制')
+    await page.evaluate(() => { delete document.hidden; document.dispatchEvent(new Event('visibilitychange')) })
+    await expect(glow).toHaveAttribute('data-motion', 'animated')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.clock.runFor(100)
+    await assertFloatingBar(page, 390)
+    await page.getByTestId('mcp-processing-details').click()
+    const details = page.getByTestId('mcp-processing-detail-panel')
+    await expect(details).toBeVisible()
+    const bounds = await details.boundingBox()
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 390)
+    await page.keyboard.press('Escape')
+    await expect(details).not.toBeVisible()
+    await page.screenshot({ path: '/tmp/open-media-mcp-connected-waiting-mobile.png', fullPage: true })
+    await page.setViewportSize({ width: 1500, height: 1000 })
+    // Sidebar width transitions use the browser compositor clock, separate from the idle timer.
+    await expect.poll(async () => (await editorGeometry(page))['[data-testid="video-editor"]']).toEqual(geometry['[data-testid="video-editor"]'])
+    await page.clock.runFor(1100)
+    await assertFloatingBar(page, 1500)
+    const restoredGeometry = await editorGeometry(page)
+    await updateConnection(0)
+    await expect(banner).not.toBeVisible()
+    await expect(glow).toHaveCount(0)
+    assert.deepEqual(await editorGeometry(page), restoredGeometry, '断连隐藏悬浮状态不改变当前编辑器布局')
+    await updateConnection(1)
+    await expectWaiting()
+    await page.getByTestId('editor-mcp-open').click()
+    await page.getByTestId('mcp-service-switch').click()
+    await expect(banner).not.toBeVisible()
+    await expect(glow).toHaveCount(0)
+    await page.getByRole('button', { name: '关闭MCP 服务', exact: true }).click()
+    assert.deepEqual(errors, [])
+    assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+    console.log('PASS MCP常驻状态：连接空闲持续等待，调用完成/失败回到等待，Canvas流光有真实像素与动画、减少动态/隐藏时静止，断连停服清理，桌面和窄屏布局稳定且可点击')
+  } finally { await page.close() }
+}
+
+async function verifyCurrentProject(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } }), errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.setDefaultTimeout(15000)
+  try {
+    await installNativeBridge(page)
+    await page.goto(url)
+    await completion(page, 'startup-replay')
+    await page.getByTestId('create-project').click()
+    const original = await tool(page, 'project_get')
+    for (const name of ['project_new', 'project_open']) {
+      const result = await completion(page, await enqueue(page, name, name === 'project_open' ? { path: '/fixture/other.omedia' } : {}))
+      assert.equal(result.isError, true)
+      assert.match(JSON.stringify(result.result), /当前|界面/)
+    }
+    const mismatch = await completion(page, await enqueue(page, 'project_update', { expectedProjectId: 'another-project', patch: { title: '不能写入当前工程' } }))
+    assert.equal(mismatch.isError, true)
+    assert.equal((await tool(page, 'project_get')).title, original.title)
+    assert.equal(await page.evaluate(() => window.mcpAppFixture.calls.some(call => call.command === 'mcp_open_project_archive')), false)
+
+    for (const sameId of [false, true]) {
+      const before = await tool(page, 'project_get'), id = `project-switch-claim-${sameId}`
+      await page.evaluate(id => { window.mcpAppFixture.holdClaimId = id }, id)
+      await enqueue(page, 'project_update', { patch: { title: '领取中的旧请求不能修改新会话' } }, { id })
+      await page.waitForFunction(id => window.mcpAppFixture.heldClaims.has(id), id)
+      const queued = await enqueue(page, 'track_add', { kind: 'text', name: '排队中的旧请求不能增加轨道' })
+      // Exercise the shared opening boundary. GUI archive I/O is covered by project-save/title tests.
+      const adopted = await page.evaluate(async sameId => {
+        const app = document.querySelector('#app').__vue_app__._instance.setupState
+        const { createProject, cloneProject } = await import('/src/core/project.ts')
+        const next = sameId ? cloneProject(app.project) : createProject()
+        next.title = sameId ? '同一工程重新打开' : '另一个当前工程'
+        await app.adoptProject(next)
+        return { id: app.project.id, title: app.project.title }
+      }, sameId)
+      assert.equal(adopted.id === before.projectId, sameId)
+      await page.evaluate(id => {
+        const fixture = window.mcpAppFixture
+        fixture.holdClaimId = ''; fixture.heldClaims.get(id)(); fixture.heldClaims.delete(id)
+      }, id)
+      for (const requestId of [id, queued]) {
+        const rejected = await completion(page, requestId)
+        assert.equal(rejected.isError, true)
+        assert.equal(rejected.result.code, 'PROJECT_CHANGED')
+      }
+      const after = await tool(page, 'project_get', { expectedProjectId: adopted.id })
+      assert.equal(after.title, adopted.title)
+      assert.equal(after.tracks.some(track => track.name === '排队中的旧请求不能增加轨道'), false)
+      await expect(page.locator('.project-title')).toHaveText(adopted.title)
+      await tool(page, 'project_update', { expectedProjectId: after.projectId, expectedRevision: after.revision, patch: { title: `${adopted.title}已更新` } })
+      await expect(page.locator('.project-title')).toHaveText(`${adopted.title}已更新`)
+    }
+    assert.deepEqual(errors, [])
+    assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+    console.log('PASS 当前工程边界：MCP不能新建/打开其他工程；领取和排队期间切换或同ID重开使旧请求失效，新请求仍可正常编辑')
+  } finally { await page.close() }
+}
+
 async function main() {
   const { createServer } = await import('vite')
   const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
@@ -397,6 +582,14 @@ async function main() {
   page.setDefaultTimeout(15000)
   page.on('pageerror', error => errors.push(error.message))
   try {
+    if (process.argv.includes('--banner-only')) {
+      await verifyPersistentBanner(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+      return
+    }
+    if (process.argv.includes('--project-only')) {
+      await verifyCurrentProject(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+      return
+    }
     if (process.argv.includes('--focus-only')) {
       await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
       return
@@ -800,6 +993,8 @@ async function main() {
     assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
     assert.deepEqual(errors, [])
     await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+    await verifyCurrentProject(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+    await verifyPersistentBanner(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
   } finally { await browser.close(); await server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

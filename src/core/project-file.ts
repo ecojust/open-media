@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { MAX_ASSETS, validateProject } from './project.ts'
+import { withProjectFileTitle } from './project-title.ts'
 import { fetchAssetBlob, readStoredAssetBlob } from './storage.ts'
 import type { ImportedProject, MediaAsset, Project } from './types.ts'
 
@@ -141,7 +142,7 @@ export async function importProjectFile(file: Blob | Uint8Array | ArrayBuffer): 
   let manifest: unknown
   try { manifest = JSON.parse(strFromU8(files[MANIFEST]!)) } catch { throw new Error('项目描述不是有效的 JSON 数据。') }
   if (!manifest || typeof manifest !== 'object' || (manifest as { format?: unknown }).format !== 'open-media-project' || (manifest as { version?: unknown }).version !== 1) throw new Error('此文件不是受支持的便携项目。')
-  const project = validateProject((manifest as { project?: unknown }).project)
+  const project = validateProject(withProjectFileTitle((manifest as { project?: unknown }).project, file instanceof File ? file.name : undefined))
   if (entries.size !== project.assets.length + 1) throw new Error('项目素材清单与文件内容不一致。')
   const blobs = new Map<string, Blob>()
   const urls: string[] = []

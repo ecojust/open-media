@@ -28,7 +28,7 @@ function assertUnchangedAfterFailure(project, tool, args, regex) {
 }
 
 test('MCP catalog is unique, restrictive and contains the declared runtime and editing operations', () => {
-  assert.equal(MCP_TOOLS.length, 99)
+  assert.equal(MCP_TOOLS.length, 97)
   assert.equal(new Set(MCP_TOOLS.map(tool => tool.name)).size, MCP_TOOLS.length)
   assert.equal(MCP_TOOLS.filter(tool => isProjectTool(tool.name)).length, 39)
   for (const tool of MCP_TOOLS) {
@@ -37,9 +37,13 @@ test('MCP catalog is unique, restrictive and contains the declared runtime and e
     assert.equal(tool.inputSchema.additionalProperties, false)
     assert.equal(typeof tool.annotations.readOnlyHint, 'boolean')
     assert.ok(tool.inputSchema.properties.expectedRevision)
+    assert.deepEqual(tool.inputSchema.properties.expectedProjectId.type, 'string')
     assert.throws(() => validateMcpToolArguments(tool.name, { undocumented: true }), /不支持参数|缺少必填/)
   }
   assert.equal(isProjectTool('open_media_export_start'), false)
+  for (const name of ['open_media_project_new', 'open_media_project_open']) assert.equal(MCP_TOOLS.some(tool => tool.name === name), false)
+  const save = MCP_TOOLS.find(tool => tool.name === 'open_media_project_save')
+  assert.deepEqual(Object.keys(save.inputSchema.properties).sort(), ['expectedProjectId', 'expectedRevision'])
 })
 
 test('shared AI tool contracts are identical to the published aggregate catalog', () => {
@@ -79,8 +83,20 @@ test('strict arguments reject forged identity, provenance, unsafe values and inc
   assert.throws(() => validateMcpToolArguments('open_media_export_start', { outputPath: 'x.mp4', format: 'mp4', fps: 61 }), /范围/)
   assert.throws(() => validateMcpToolArguments('open_media_asset_import', { paths: ['/a', '/a'] }), /重复/)
   assert.throws(() => validateMcpToolArguments('open_media_project_get', { expectedRevision: -1 }), /范围/)
+  for (const expectedProjectId of ['', ' ', 1, 'x'.repeat(201)]) assert.throws(() => validateMcpToolArguments('open_media_project_get', { expectedProjectId }), /长度|空白|文字/)
+  for (const name of ['playback_set', 'speech_settings_set']) assert.throws(() => validateMcpToolArguments(`open_media_${name}`, { expectedProjectId: project.id, expectedRevision: 1 }), /至少提供/)
   assert.throws(() => validateMcpToolArguments('open_media_unknown', {}), /未知/)
   assert.throws(() => exec(project, 'playback_get'), /桌面运行时/)
+})
+
+test('pure project operations validate expected identity before inspecting or editing a project', () => {
+  const { project } = fixture()
+  for (const [tool, args] of [['project_get', {}], ['project_update', { patch: { title: '不应更新' } }]]) {
+    assertUnchangedAfterFailure(project, tool, { ...args, expectedProjectId: 'another-project' }, /当前工程已变化/)
+  }
+  const next = exec(project, 'project_update', { expectedProjectId: project.id, patch: { title: '当前工程' } }).project
+  assert.equal(next.id, project.id)
+  assert.equal(next.title, '当前工程')
 })
 
 test('project settings resize actual geometry and revalidate transitions atomically', () => {

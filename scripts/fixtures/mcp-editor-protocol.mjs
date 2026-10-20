@@ -4,6 +4,8 @@ import { createMcpAutomation } from '/src/core/mcp-automation.ts'
 import { serializeMcpError } from '/src/core/mcp-response.ts'
 import { createProject } from '/src/core/project.ts'
 import { createHistory, commitHistory, undoHistory, redoHistory } from '/src/core/timeline.ts'
+import { prepareNativeProjectArchive } from '/src/native-project-files.ts'
+import { saveMcpProjectFile } from '/src/native-mcp-files.ts'
 
 export function installProtocolEditor() {
   let history = createHistory(createProject('协议端到端工程', { width: 640, height: 360, fps: 30 }))
@@ -16,16 +18,14 @@ export function installProtocolEditor() {
   }
   const controller = createMcpAutomation({
     getProject: () => history.present, getRevision: () => revision, isBusy: () => false,
-    isDirty: () => dirty, getBlobs: () => blobs, getSaveTarget: () => target,
+    getBlobs: () => blobs, getSaveTarget: () => target,
     commit(project, label, expected) {
       if (expected.projectId !== history.present.id || expected.revision !== revision) return false
       history = commitHistory(history, project); revision++; dirty = true
       commits.push({ label, revision }); return true
     },
-    async adopt(project) { history = createHistory(project); revision++; dirty = false },
     async hydrate() { throw new Error('Project hydration is outside this protocol fixture.') },
     async didSave(project, value) { target = value; if (project.updatedAt === history.present.updatedAt) dirty = false },
-    async didOpen(value) { target = value; dirty = false },
     history(direction) { history = direction === 'undo' ? undoHistory(history) : redoHistory(history); revision++; dirty = true },
     getPlayback: () => structuredClone(playback),
     async setPlayback(patch) { playback = { ...playback, ...patch }; return structuredClone(playback) },
@@ -33,6 +33,14 @@ export function installProtocolEditor() {
     onBusy(value) { busy = value }, onJobsChanged() {}, announce(value) { announcements.push(value) },
   })
   return {
+    // The local user chooses a destination before remote saves can use its native token.
+    // This fixture crosses real native archive I/O without displaying a system picker.
+    async saveLocally(path) {
+      const project = await prepareNativeProjectArchive(history.present, { blobs })
+      target = await saveMcpProjectFile(project, { path })
+      dirty = false
+      return { name: target.name, path: target.path }
+    },
     async execute(request) {
       try { return { result: await controller.execute(request.tool, request.arguments), isError: false } }
       catch (cause) { return { result: serializeMcpError(cause), isError: true } }

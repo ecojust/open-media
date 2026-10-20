@@ -108,6 +108,7 @@ try {
   client = new Client({ name: 'Open Media editor protocol verification', version: '1' }, { capabilities: {} })
   await client.connect(new StreamableHTTPClientTransport(new URL(ready.url), { requestInit: { headers: { Authorization: `Bearer ${ready.token}` } } }), { timeout: 10000 })
   const tools = (await client.listTools()).tools
+  assert(!tools.some(tool => ['open_media_project_new', 'open_media_project_open'].includes(tool.name)), 'Remote tools cannot replace the currently opened project.')
   const metadata = name => tools.find(tool => tool.name === `open_media_${name}`)?._meta?.['openmedia/execution']
   assert.equal(metadata('timeline_batch_edit')?.mode, 'asynchronous')
   assert.equal(metadata('export_validate')?.mode, 'asynchronous')
@@ -139,6 +140,12 @@ try {
   }
   const initial = await call('project_get')
   assert.equal(initial.responseType, 'result'); assert.equal(initial.execution, 'synchronous'); assert.equal(initial.final, true)
+  for (const name of ['project_new', 'project_open']) {
+    await assert.rejects(client.callTool({ name: `open_media_${name}`, arguments: name === 'project_open' ? { path: join(directory, 'other-project.omedia') } : {} }), cause => cause.code === -32602)
+  }
+  const wrongProject = await call('project_update', { patch: { title: '不可写入其他工程' }, expectedProjectId: 'previous-project' }, true)
+  assert.match(wrongProject.error, /当前工程已变化/)
+  assert.equal((await inspect()).project.title, initial.title)
   const textTrack = initial.tracks.find(track => track.kind === 'text').id
   const operations = [
     { tool: 'open_media_project_update', arguments: { patch: { title: '原子提交验证' } } },
@@ -192,7 +199,13 @@ try {
   assert.equal(afterImport.assets[0].kind, 'audio'); assert.equal(afterImport.assets[0].duration, 1)
 
   const savePath = join(directory, 'protocol-project.omedia')
-  const saved = await finished(await call('project_save', { path: savePath }))
+  const noTarget = await finished(await call('project_save'), 'failed')
+  assert.match(noTarget.error, /请先在软件界面中保存工程/)
+  const rejectedSaveAs = await call('project_save', { path: savePath }, true)
+  assert.match(rejectedSaveAs.error, /path/)
+  assert.equal(nativeCalls.filter(call => call.command === 'mcp_save_project_archive').length, 0, 'Remote save cannot choose a destination.')
+  await page.evaluate(path => window.protocolEditor.saveLocally(path), savePath)
+  const saved = await finished(await call('project_save', { expectedProjectId: afterImport.id }))
   assert.equal(saved.result.path, savePath)
   const entries = unzipSync(new Uint8Array(await readFile(savePath)))
   const manifest = JSON.parse(strFromU8(entries['project.json']))
@@ -209,9 +222,9 @@ try {
   assert.equal(JSON.parse(strFromU8(overwritten['project.json'])).project.title, '同一路径覆盖保存')
   assert.deepEqual(Buffer.from(overwritten[`media/${afterImport.assets[0].id}`]), wave(), 'Overwriting retains the real imported media bytes.')
   const archiveSaves = nativeCalls.filter(call => call.command === 'mcp_save_project_archive')
-  assert.equal(archiveSaves.length, 2, 'Both saves use the production native streaming archive command.')
-  assert.deepEqual(archiveSaves.map(call => call.explicitPath), [savePath, null])
-  assert.deepEqual(archiveSaves.map(call => call.tokenProvided), [false, true], 'The second save overwrites through the registered target token.')
+  assert.equal(archiveSaves.length, 3, 'Local target setup and both remote saves use the production native streaming archive command.')
+  assert.deepEqual(archiveSaves.map(call => call.explicitPath), [savePath, null, null])
+  assert.deepEqual(archiveSaves.map(call => call.tokenProvided), [false, true, true], 'Both remote saves overwrite only through the locally registered target token.')
   assert(archiveSaves.every(call => !call.binaryPayload), 'Media bytes never pass through the browser IPC archive payload.')
   assert.equal(nativeCalls.filter(call => call.command === 'mcp_save_project_file').length, 0)
 
@@ -224,7 +237,7 @@ try {
   assert.equal((await inspect()).revision, beforeExpired.revision)
   assert.deepEqual(browserErrors, [])
   if (bridgeError) throw bridgeError
-  evidence = { status: 'passed', client: '@modelcontextprotocol/sdk@1.32.1', transport: 'real native TCP Streamable HTTP', editor: 'production createMcpAutomation in Chromium', native: 'production media import/probe and project save', checks: ['execution metadata', 'asynchronous job/poll/cancel/result contract', 'single atomic batch commit and undo/redo', 'failed batch rollback', 'dry run', 'export validation final structured result', 'queryable blocking job error', 'cancelled import rejects late commit', 'real WAV import and native streaming archive bytes', 'overwrite saved target using its registered token', 'expired request cannot claim or edit'], fixtureBoundary: 'JSON files replace desktop IPC delivery; explicit native completion barrier controls race timing only', completedClaims: claims.filter(claim => claim.claimed).length }
+  evidence = { status: 'passed', client: '@modelcontextprotocol/sdk@1.32.1', transport: 'real native TCP Streamable HTTP', editor: 'production createMcpAutomation in Chromium', native: 'production media import/probe and project save', checks: ['execution metadata', 'asynchronous job/poll/cancel/result contract', 'remote project creation/opening rejected', 'wrong current-project ID rejected before mutation', 'single atomic batch commit and undo/redo', 'failed batch rollback', 'dry run', 'export validation final structured result', 'queryable blocking job error', 'cancelled import rejects late commit', 'real WAV import and native streaming archive bytes', 'remote save requires locally established target and cannot save as', 'overwrite saved target using its registered token', 'expired request cannot claim or edit'], fixtureBoundary: 'JSON files replace desktop IPC delivery; local destination selection is explicit fixture setup; native completion barrier controls race timing only', completedClaims: claims.filter(claim => claim.claimed).length }
 } finally {
   pausedTool = undefined; bridgeRunning = false
   await bridge

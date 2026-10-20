@@ -145,8 +145,8 @@ async function nativeChecks(browser, url) {
         state.targets.set(destination.token, destination)
         return destination
       }
-      if (command === 'open_project_archive' || command === 'mcp_open_project_archive') {
-        const selected = target(command === 'mcp_open_project_archive' ? path.basename(args.path) : state.openName)
+      if (command === 'open_project_archive') {
+        const selected = target(state.openName)
         state.targets.set(selected.token, selected)
         const entries = unzipSync(new Uint8Array(await fs.readFile(selected.path)))
         const project = JSON.parse(strFromU8(entries['project.json'])).project
@@ -242,7 +242,7 @@ async function nativeChecks(browser, url) {
     inspectArchive(await fs.readFile(target('native-a.omedia').path), '恢复后覆盖原文件', media)
     assert.equal(existsSync(target('native-restored.omedia').path), false)
     console.log('PASS 原生桥契约：新项目独立；切换和重载恢复已选目标，打开项目后的保存直接回写原文件')
-    for (const mode of ['gui', 'mcp']) {
+    for (const mode of ['gui', 'mcp-rejected']) {
       const replacement = Buffer.from(await page.evaluate(async mode => {
         const app = document.querySelector('#app').__vue_app__._instance.setupState
         const current = app.project.assets[0], oldBlob = await (await fetch(current.sourceUrl || current.url)).blob()
@@ -261,14 +261,17 @@ async function nativeChecks(browser, url) {
       entries['project.json'] = strToU8(JSON.stringify(manifest))
       state.openName = `native-replaced-${mode}.omedia`
       await fs.writeFile(target(state.openName).path, zipSync(entries, { level: 0 }))
-      if (mode === 'gui') await page.getByTestId('open-project').click()
-      else await page.evaluate(async path => {
-        const controller = document.querySelector('#app').__vue_app__._instance.setupState.mcpAutomation
-        const job = await controller.execute('open_media_project_open', { path })
-        while (controller.status(job.id).state === 'running') await new Promise(resolve => setTimeout(resolve, 10))
-        const done = controller.status(job.id)
-        if (done.state !== 'completed') throw new Error(done.error)
-      }, target(state.openName).path)
+      if (mode === 'mcp-rejected') {
+        const before = await page.locator('.project-title').textContent()
+        const rejected = await page.evaluate(async path => {
+          const controller = document.querySelector('#app').__vue_app__._instance.setupState.mcpAutomation
+          try { await controller.execute('open_media_project_open', { path }); return '' }
+          catch (cause) { return cause.message }
+        }, target(state.openName).path)
+        assert.match(rejected, /只能处理当前打开的工程/)
+        await expect(page.locator('.project-title')).toHaveText(before)
+      }
+      await page.getByTestId('open-project').click()
       await expect(page.locator('.project-title')).toHaveText(`同ID新素材-${mode}`)
       const result = await page.evaluate(async mode => {
         const app = document.querySelector('#app').__vue_app__._instance.setupState
@@ -292,7 +295,7 @@ async function nativeChecks(browser, url) {
       assert.equal(result.blobCount, 0)
       assert.equal(result.storedBlob, false)
     }
-    console.log('PASS GUI/MCP 打开同ID但不同原件的项目后清理旧Blob，快照和草稿均读取新内容且不重复存储大素材')
+    console.log('PASS MCP 拒绝打开其他工程；GUI 打开同ID但不同原件的项目后清理旧Blob，快照和草稿均读取新内容且不重复存储大素材')
     assert.deepEqual(errors, [])
   } finally { await context.close() }
 }

@@ -25,7 +25,11 @@ const { prepareEditorTool } = await import('../src/core/editor-tool-service.ts')
 const { createMcpAutomation } = await import('../src/core/mcp-automation.ts')
 const { readToolArtifact } = await import('../src/core/tool-artifacts.ts')
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
-async function until(check){for(let i=0;i<500;i++){if(check())return;await new Promise(resolve=>setImmediate(resolve))}throw Error('timed out')}
+async function until(check){
+ // Real hashing and artifact storage may finish after many event-loop turns under parallel test load.
+ const deadline=performance.now()+5000
+ while(!check()){if(performance.now()>=deadline)throw Error('timed out after 5 seconds');await new Promise(resolve=>setTimeout(resolve,5))}
+}
 async function finished(controller,job){await until(()=>controller.status(job.id).state!=='running');await new Promise(resolve=>setImmediate(resolve));return controller.status(job.id)}
 function fixture(){
  globalThis.indexedDB=new IDBFactory()

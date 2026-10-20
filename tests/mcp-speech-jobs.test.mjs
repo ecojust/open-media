@@ -13,7 +13,7 @@ function deferred() {
 }
 
 function fixture(overrides = {}) {
-  let project = createProject('远程配音测试'), revision = 1, busy = false
+  let project = createProject('远程配音测试'), revision = 1, projectSession = 1, busy = false
   project.tracks[0].clips.push(createTextClip(project, { id: 'first', text: '第一段字幕。', start: 1, trimOut: 3 }))
   project.tracks[0].clips.push(createTextClip(project, { id: 'second', text: '第二段字幕。', start: 6, trimOut: 3 }))
   const original = structuredClone(project)
@@ -33,12 +33,13 @@ function fixture(overrides = {}) {
   const service = createMcpSpeechJobs({
     getProject: () => project,
     getRevision: () => revision,
+    getProjectSession: () => projectSession,
     isBusy: () => busy,
     onBusy: value => { busy = value },
     onAssets: assets => calls.assets.push(...assets),
     onChange: job => calls.events.push(job),
     commit: (next, label, expected) => {
-      if (expected.projectId !== project.id || expected.revision !== revision || overrides.rejectCommit) return false
+      if (expected.projectId !== project.id || expected.revision !== revision || expected.projectSession !== projectSession || overrides.rejectCommit) return false
       calls.commits.push({ next, label, expected })
       project = next; revision++
       return true
@@ -46,7 +47,7 @@ function fixture(overrides = {}) {
     native,
     pollIntervalMs: 1,
   })
-  return { service, calls, original, completed, get project() { return project }, get busy() { return busy }, edit() { project = structuredClone(project); project.title = '用户最新修改'; revision++ } }
+  return { service, calls, original, completed, get project() { return project }, get busy() { return busy }, edit() { project = structuredClone(project); project.title = '用户最新修改'; revision++ }, reopen() { project = structuredClone(project); projectSession++ } }
 }
 
 async function finish(service, id) {
@@ -132,6 +133,25 @@ test('生成期间项目被修改时，不覆盖最新项目且清理尚未提�
   assert.equal(f.project.title, '用户最新修改')
   assert.equal(f.calls.commits.length, 0)
   assert.equal(f.calls.discard.length, 1)
+})
+
+test('重新打开同一工程且版本相同，也不会接受旧会话的配音结果', async () => {
+  const pending = deferred(), f = fixture({ begin: () => pending.promise })
+  const job = f.service.startSpeech()
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(f.calls.begin.length, 1)
+  f.reopen()
+  assert.equal(f.project.id, job.projectId)
+  pending.resolve(f.completed(f.calls.begin[0]))
+  const done = await finish(f.service, job.id)
+  assert.equal(done.state, 'failed')
+  assert.match(done.error, /项目已经变化/)
+  assert.equal(f.calls.commits.length, 0)
+  assert.equal(f.calls.assets.length, 0)
+  assert.equal(f.calls.discard.length, 1)
+  assert.equal(f.calls.accept.length, 0)
+  assert.deepEqual(f.project, f.original)
+  await f.service.dispose()
 })
 
 test('取消等待中的原生任务，立即显示取消中并在清理后解除忙碌', async () => {

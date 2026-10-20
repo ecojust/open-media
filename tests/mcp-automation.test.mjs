@@ -1,15 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
+import { IDBFactory } from 'fake-indexeddb'
 import { createProject, createSubtitleClip, cloneProject } from '../src/core/project.ts'
 import { addClip, commitHistory, createHistory, findClip, redoHistory, undoHistory } from '../src/core/timeline.ts'
 import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../src/core/speech-settings.ts'
+import { storeToolArtifact } from '../src/core/tool-artifacts.ts'
 
 // Replace only native/file/canvas I/O boundaries. The controller, project edits,
 // revision checks, undo history, speech settings and speech scheduler are real.
 const boundaryExports = {
   '../src/native.ts': ['acceptSpeechJobs', 'beginSpeechJob', 'beginSpeechModelDownload', 'cancelMediaJob', 'cancelSpeechJob', 'cancelSpeechModelDownload', 'discardSpeechJob', 'getMediaJobs', 'getSpeechJob', 'getSpeechStatus', 'repairSpeechModel', 'revealMediaJobOutput'],
   '../src/native-mcp-files.ts': ['beginMcpMediaJob', 'importMcpMediaPaths', 'openMcpProjectFile', 'saveMcpProjectFile'],
+  '../src/native-asset-tools.ts': ['runAssetTool'],
   '../src/native-video-generation.ts': ['getVideoGenerationStatus', 'beginVideoModelDownload', 'cancelVideoModelDownload', 'beginVideoGeneration', 'getVideoGenerationJob', 'cancelVideoGeneration'],
   '../src/native-ai.ts': ['beginAiGeneration', 'cancelAiJob', 'cancelAiModelDownload', 'downloadAiModel', 'getAiJob', 'getAiStatus', 'repairAiModel'],
   '../src/core/native-project.ts': ['prepareNativeProject'],
@@ -40,7 +43,8 @@ const video = (id = 'source-video') => ({ id, name: 'video.mp4', kind: 'video', 
 const voice = { id: 'matcha_zh_en_female', name: 'Matcha 中英', language: 'zh-CN', status: 'bundled' }
 
 function fixture(initialProject = createProject('当前工程', { width: 640, height: 360 })) {
-  let history = createHistory(initialProject), revision = 7, busy = false, dirty = false, target
+  globalThis.indexedDB = new IDBFactory()
+  let history = createHistory(initialProject), revision = 7, projectSession = 1, busy = false, dirty = false, target
   let playback = { time: 2.5, playing: false, selectedClipId: '' }
   const calls = [], announcements = [], assets = [], commits = [], blobs = new Map()
   const io = {
@@ -67,6 +71,11 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
     async getMediaJobs() { return [] }, async cancelMediaJob() {},
     async revealMediaJobOutput() {},
     async importMcpMediaPaths() { return [video()] },
+    async runAssetTool(operation, args) {
+      if (operation === 'asset_upload_commit') return { asset: video('uploaded-video'), source: { kind: 'upload', sha256: 'a'.repeat(64), importedAt: Date.now() } }
+      if (operation === 'asset_upload_abort') return { aborted: true }
+      return { uploadId: args.uploadId || 'upload-source', receivedBytes: 4, totalBytes: 4 }
+    },
     async openMcpProjectFile(path) { return { path, token: 'open-file-capability', project: createProject('已打开工程') } },
     async saveMcpProjectFile(_project, options) { return { path: options.path || '/existing.omedia', token: 'saved-file-capability' } },
     async prepareNativeProjectArchive(project, options) { options.onProgress?.(1, 1); return clone(project) },
@@ -81,17 +90,15 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
   }
   globalThis.__openMediaMcpTestIo = Object.fromEntries(Object.keys(io).map(name => [name, (...args) => { calls.push({ name, args }); return io[name](...args) }]))
   const host = {
-    getProject: () => history.present, getRevision: () => revision, isBusy: () => busy, isDirty: () => dirty,
+    getProject: () => history.present, getRevision: () => revision, getProjectSession: () => projectSession, isBusy: () => busy,
     getBlobs: () => blobs, getSaveTarget: () => target,
     commit(project, label, expected) {
-      if (expected.projectId !== history.present.id || expected.revision !== revision) return false
+      if (expected.projectId !== history.present.id || expected.revision !== revision || expected.projectSession !== projectSession) return false
       commits.push({ project: clone(project), label, expected })
       history = commitHistory(history, project); revision++; dirty = true; return true
     },
-    async adopt(project) { history = createHistory(project); revision++; dirty = false },
     async hydrate(imported) { return imported.project },
-    async didSave(project, value) { target = value; if (project.updatedAt === history.present.updatedAt) dirty = false },
-    async didOpen(value) { target = value; dirty = false },
+    async didSave(project, value, expected) { if (expected.projectId !== history.present.id || expected.projectSession !== projectSession) return; target = value; if (project.updatedAt === history.present.updatedAt) dirty = false },
     history(direction) { history = direction === 'undo' ? undoHistory(history) : redoHistory(history); revision++; dirty = true },
     getPlayback: () => clone(playback), async setPlayback(patch) { playback = { ...playback, ...patch }; return clone(playback) },
     ownAsset(asset, blob) { assets.push(asset); if (blob) blobs.set(asset.id, blob) },
@@ -102,6 +109,8 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
     get project() { return history.present }, get revision() { return revision }, get busy() { return busy }, get dirty() { return dirty }, get target() { return target },
     setBusy(value) { busy = value }, setDirty(value) { dirty = value }, setTarget(value) { target = value },
     externalChange() { history.present.title = '本地更新'; revision++; dirty = true },
+    reopen() { history = createHistory(clone(history.present)); projectSession++ },
+    openOther() { history = createHistory(createProject('其他工程')); projectSession++ },
     run: (name, args = {}) => controller.execute(`open_media_${name}`, args),
   }
 }
@@ -135,22 +144,35 @@ test('busy project remains inspectable but rejects edits, undo and playback cont
   await f.controller.dispose()
 })
 
-test('new and open require explicit discard for dirty projects and switch the authoritative project on completion', async () => {
-  const f = fixture()
+test('expected project identity rejects stale clients before edits, native I/O or settings changes', async () => {
+  const f = fixture(), before = clone(f.project), settings = getSpeechSettings()
+  for (const [name, args] of [['project_get', {}], ['project_update', { patch: { title: '不应修改' } }], ['asset_import', { paths: ['/other.mp4'] }], ['project_save', {}], ['speech_settings_set', { rate: 1.5 }], ['ai_status', {}]]) {
+    await assert.rejects(f.run(name, { ...args, expectedProjectId: 'another-project' }), /当前工程已变化/)
+  }
+  assert.deepEqual(f.project, before)
+  assert.deepEqual(getSpeechSettings(), settings)
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.commits.length, 0)
+  assert.equal(f.controller.list().length, 0)
+  const result = await f.run('project_update', { expectedProjectId: before.id, expectedRevision: f.revision, patch: { title: '当前工程更新' } })
+  assert.equal(result.projectId, before.id)
+  assert.equal(f.commits[0].expected.projectSession, 1)
+  await f.run('speech_settings_set', { expectedProjectId: before.id, rate: settings.rate })
+  assert.equal(Object.hasOwn(getSpeechSettings(), 'expectedProjectId'), false)
+  await f.controller.dispose()
+})
+
+test('MCP cannot create or open another project even with discard consent', async () => {
+  const f = fixture(), before = clone(f.project)
   f.setDirty(true)
-  const rejected = await finished(f.controller, await f.run('project_new', { title: '新工程' }))
-  assert.equal(rejected.state, 'failed')
-  assert.match(rejected.error, /未保存/)
-  assert.equal(f.project.title, '当前工程')
-  const created = await finished(f.controller, await f.run('project_new', { title: '新工程', width: 800, height: 600, discardUnsaved: true }))
-  assert.equal(created.state, 'completed')
-  assert.equal(f.project.title, '新工程')
-  assert.equal(f.project.width, 800)
-  const opened = await finished(f.controller, await f.run('project_open', { path: '/document.omedia' }))
-  assert.equal(opened.state, 'completed')
-  assert.equal(f.project.title, '已打开工程')
-  assert.equal(f.target.path, '/document.omedia')
-  assert.ok(!JSON.stringify(opened.result).includes('open-file-capability'))
+  for (const [name, args] of [['project_new', { title: '新工程' }], ['project_new', { discardUnsaved: true }], ['project_open', { path: '/other.omedia', discardUnsaved: true }]]) {
+    await assert.rejects(f.run(name, args), /MCP 只能处理当前打开的工程/)
+  }
+  assert.deepEqual(f.project, before)
+  assert.equal(f.dirty, true)
+  assert.equal(f.target, undefined)
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.controller.list().length, 0)
   await f.controller.dispose()
 })
 
@@ -171,13 +193,155 @@ test('import runs once as an atomic undo step and adopts source size for a fresh
   await f.controller.dispose()
 })
 
+test('upload capabilities belong to the current project session while old uploads may be aborted', async () => {
+  for (const change of ['reopen', 'openOther']) {
+    const f = fixture()
+    const upload = await f.run('asset_upload', { action: 'begin', name: 'sample.mp4', size: 4, sha256: 'a'.repeat(64) })
+    await f.run('asset_upload', { action: 'status', uploadId: upload.uploadId })
+    f[change]()
+    const priorCalls = f.calls.length
+    for (const action of ['status', 'commit', 'chunk']) {
+      await assert.rejects(f.run('asset_upload', { action, uploadId: upload.uploadId, ...(action === 'chunk' ? { offset: 0, base64: 'dGVzdA==', sha256: 'a'.repeat(64) } : {}) }), /不属于当前打开的工程会话/)
+    }
+    assert.equal(f.calls.length, priorCalls)
+    assert.equal(f.project.assets.length, 0)
+    assert.equal((await f.run('asset_upload', { action: 'abort', uploadId: upload.uploadId })).aborted, true)
+    await assert.rejects(f.run('asset_upload', { action: 'abort', uploadId: upload.uploadId }), /失效/)
+    await f.controller.dispose()
+  }
+})
+
+test('upload capabilities survive edits in the same session and commit to its current project', async () => {
+  const f = fixture()
+  const upload = await f.run('asset_upload', { action: 'begin', name: 'sample.mp4', size: 4, sha256: 'a'.repeat(64) })
+  await f.run('project_update', { patch: { title: '继续编辑当前工程' } })
+  const done = await finished(f.controller, await f.run('asset_upload', { action: 'commit', uploadId: upload.uploadId }))
+  assert.equal(done.state, 'completed')
+  assert.equal(done.result.assetId, 'uploaded-video')
+  assert.equal(f.project.title, '继续编辑当前工程')
+  assert.equal(f.project.assets.length, 1)
+  await f.controller.dispose()
+})
+
+test('nested preview artifacts stay readable only in the session that generated them', async () => {
+  for (const change of ['reopen', 'openOther']) {
+    const f = fixture()
+    const artifact = await storeToolArtifact(new Blob(['preview'], { type: 'image/png' }), 'frame.png')
+    f.io.preparePreviewTool = async () => ({ data: { frames: [{ sheet: artifact }] } })
+    const job = await finished(f.controller, await f.run('timeline_get_frame', { time: 0 }))
+    assert.equal(job.state, 'completed')
+    const read = await f.run('artifact_read', { artifactId: artifact.artifactId })
+    assert.equal(Buffer.from(read.data, 'base64').toString(), 'preview')
+    await f.run('project_update', { patch: { title: '同工程更新' } })
+    assert.equal((await f.run('artifact_read', { artifactId: artifact.artifactId })).bytes, 7)
+    f[change]()
+    assert.equal((await f.run('job_get', { id: job.id })).result, undefined)
+    assert.equal(f.controller.status(job.id).result.frames[0].sheet.artifactId, artifact.artifactId)
+    await assert.rejects(f.run('artifact_read', { artifactId: artifact.artifactId }), /不属于当前打开的工程会话/)
+    await f.controller.dispose()
+  }
+})
+
+test('remote old-session jobs expose only status while internal history retains inline preview results', async () => {
+  for (const change of ['reopen', 'openOther']) {
+    const f = fixture()
+    f.io.preparePreviewTool = async () => ({ data: { base64: 'private-frame-payload', nested: { artifactId: 'private-artifact' }, sourceName: '私有素材名称' } })
+    const job = await finished(f.controller, await f.run('timeline_get_frame', { time: 0 }))
+    assert.equal((await f.run('job_get', { id: job.id })).projectCurrent, true)
+    f[change]()
+    for (const response of [await f.run('job_get', { id: job.id }), (await f.run('job_list')).find(item => item.id === job.id), await f.run('job_cancel', { id: job.id })]) {
+      assert.equal(response.state, 'completed')
+      assert.equal(response.projectCurrent, false)
+      assert.equal(response.resultAvailable, false)
+      for (const field of ['result', 'error', 'errorDetails', 'warning']) assert.equal(Object.hasOwn(response, field), false)
+      assert.equal(JSON.stringify(response).includes('private-'), false)
+      assert.equal(JSON.stringify(response).includes('私有素材名称'), false)
+    }
+    assert.equal(f.controller.status(job.id).result.base64, 'private-frame-payload')
+    assert.equal(f.controller.list()[0].result.base64, 'private-frame-payload')
+    await f.controller.dispose()
+  }
+})
+
+test('old-session speech job responses omit generated IDs and skipped subtitle contents', async () => {
+  let project = createProject('配音状态归属')
+  project = addClip(project, project.tracks[0].id, createSubtitleClip(project, { id: 'private-caption', name: '私有字幕名称', text: '字幕内容' }))
+  project = addClip(project, project.tracks[0].id, createSubtitleClip(project, { id: 'private-empty', name: '私有空字幕名称', text: '' }))
+  const f = fixture(project)
+  const job = await finished(f.controller, await f.run('speech_generate'))
+  assert.equal(job.state, 'completed')
+  assert.ok(job.skipped.length)
+  assert.ok(job.result.assetIds.length)
+  f.reopen()
+  for (const response of [await f.run('job_get', { id: job.id }), (await f.run('job_list')).find(item => item.id === job.id), await f.run('job_cancel', { id: job.id })]) {
+    assert.equal(response.projectCurrent, false)
+    assert.equal(response.result, undefined)
+    assert.equal(response.skipped, undefined)
+    assert.equal(response.currentClipId, undefined)
+    assert.equal(response.voiceId, undefined)
+    assert.equal(JSON.stringify(response).includes('private-'), false)
+    assert.equal(JSON.stringify(response).includes('私有'), false)
+  }
+  assert.ok(f.controller.status(job.id).result.assetIds.length)
+  await f.controller.dispose()
+})
+
+test('remote cancel checks project ownership after an awaited native cancellation', async () => {
+  const f = fixture(), started = deferred(), cancelled = deferred()
+  f.io.beginMcpMediaJob = async () => ({ id: 'native-active', state: 'running', stage: '私有视频正在导出' })
+  f.io.cancelMediaJob = async () => { started.resolve(); await cancelled.promise }
+  const job = await f.run('export_start', { outputPath: '/private/result.mp4', format: 'mp4' })
+  await until(() => f.calls.some(call => call.name === 'beginMcpMediaJob'))
+  const response = f.run('job_cancel', { id: job.id })
+  await started.promise
+  f.reopen()
+  cancelled.resolve()
+  const result = await response
+  assert.equal(result.projectCurrent, false)
+  assert.equal(result.result, undefined)
+  assert.equal(JSON.stringify(result).includes('私有'), false)
+  assert.equal(JSON.stringify(result).includes('/private/'), false)
+  await finished(f.controller, job)
+  await f.controller.dispose()
+})
+
+test('a late upload start never grants its capability to a replacement project session', async () => {
+  const f = fixture(), pending = deferred()
+  f.io.runAssetTool = () => pending.promise
+  const upload = f.run('asset_upload', { action: 'begin', name: 'sample.mp4', size: 4, sha256: 'a'.repeat(64) })
+  await until(() => f.calls.some(call => call.name === 'runAssetTool'))
+  f.reopen()
+  pending.resolve({ uploadId: 'late-upload', receivedBytes: 0, totalBytes: 4 })
+  await assert.rejects(upload, /当前工程会话已变化/)
+  await assert.rejects(f.run('asset_upload', { action: 'commit', uploadId: 'late-upload' }), /不属于当前打开的工程会话/)
+  assert.equal(f.project.assets.length, 0)
+  await f.controller.dispose()
+})
+
+test('failed or cancelled previews never expose artifact capabilities in a later session', async () => {
+  for (const action of ['reopen', 'cancel']) {
+    const f = fixture(), pending = deferred()
+    const artifact = await storeToolArtifact(new Blob(['preview'], { type: 'image/png' }), 'frame.png')
+    f.io.preparePreviewTool = () => pending.promise
+    const job = await f.run('timeline_get_frame', { time: 0 })
+    await until(() => f.calls.some(call => call.name === 'preparePreviewTool'))
+    if (action === 'cancel') await f.run('job_cancel', { id: job.id })
+    else f.reopen()
+    pending.resolve({ data: { artifact } })
+    assert.equal((await finished(f.controller, job)).state, action === 'cancel' ? 'cancelled' : 'failed')
+    await assert.rejects(f.run('artifact_read', { artifactId: artifact.artifactId }), /不属于当前打开的工程会话/)
+    await f.controller.dispose()
+  }
+})
+
 test('cancelled and stale imports never overwrite the active project', async () => {
-  for (const mode of ['cancel', 'stale']) {
+  for (const mode of ['cancel', 'stale', 'reopen']) {
     const f = fixture(), pending = deferred()
     f.io.importMcpMediaPaths = () => pending.promise
     const job = await f.run('asset_import', { paths: ['/slow.mp4'] })
     await until(() => f.calls.some(call => call.name === 'importMcpMediaPaths'))
     if (mode === 'cancel') await f.run('job_cancel', { id: job.id })
+    else if (mode === 'reopen') f.reopen()
     else f.externalChange()
     pending.resolve([video()])
     const done = await finished(f.controller, job)
@@ -190,7 +354,7 @@ test('cancelled and stale imports never overwrite the active project', async () 
   }
 })
 
-test('save reuses the existing target without another path, and explicit save-as preserves overwrite consent', async () => {
+test('save writes only the existing GUI target and rejects path or overwrite overrides', async () => {
   const f = fixture()
   f.setDirty(true)
   f.setTarget({ path: '/existing.omedia', token: 'existing-capability' })
@@ -201,13 +365,39 @@ test('save reuses the existing target without another path, and explicit save-as
   assert.equal(firstCall.args[1].path, undefined)
   assert.equal(f.dirty, false)
   assert.ok(!JSON.stringify(first.result).includes('capability'))
-  const saved = await finished(f.controller, await f.run('project_save', { path: '/copy.omedia', overwrite: true }))
-  assert.equal(saved.state, 'completed')
-  const lastCall = f.calls.filter(call => call.name === 'saveMcpProjectFile').at(-1)
-  assert.equal(lastCall.args[1].token, undefined)
-  assert.equal(lastCall.args[1].path, '/copy.omedia')
-  assert.equal(lastCall.args[1].overwrite, true)
-  assert.equal(f.target.path, '/copy.omedia')
+  for (const args of [{ path: '/copy.omedia' }, { overwrite: true }, { token: 'forged-capability' }]) {
+    await assert.rejects(f.run('project_save', args), /不支持参数/)
+  }
+  assert.equal(f.calls.filter(call => call.name === 'saveMcpProjectFile').length, 1)
+  assert.equal(f.target.path, '/existing.omedia')
+  await f.controller.dispose()
+})
+
+test('save without a GUI-granted target requests a local save without preparing or writing files', async () => {
+  for (const target of [undefined, { path: '/unselected.omedia', token: '' }]) {
+    const f = fixture()
+    f.setTarget(target)
+    const done = await finished(f.controller, await f.run('project_save'))
+    assert.equal(done.state, 'failed')
+    assert.match(done.error, /请先在软件界面中保存工程/)
+    assert.equal(f.calls.length, 0)
+    await f.controller.dispose()
+  }
+})
+
+test('changing the GUI save target during preparation never writes the prior target', async () => {
+  const f = fixture(), pending = deferred()
+  f.setTarget({ path: '/prior.omedia', token: 'prior-capability' })
+  f.io.prepareNativeProjectArchive = () => pending.promise
+  const job = await f.run('project_save')
+  await until(() => f.calls.some(call => call.name === 'prepareNativeProjectArchive'))
+  f.setTarget({ path: '/new.omedia', token: 'new-capability' })
+  pending.resolve(clone(f.project))
+  const done = await finished(f.controller, job)
+  assert.equal(done.state, 'failed')
+  assert.match(done.error, /保存位置已变化/)
+  assert.equal(f.calls.some(call => call.name === 'saveMcpProjectFile'), false)
+  assert.equal(f.target.path, '/new.omedia')
   await f.controller.dispose()
 })
 
@@ -215,8 +405,8 @@ test('failed save keeps dirty state and existing target', async () => {
   const f = fixture()
   f.setDirty(true)
   f.setTarget({ path: '/existing.omedia', token: 'existing-capability' })
-  f.io.saveMcpProjectFile = async () => { throw new Error('目标文件已存在，请明确允许覆盖') }
-  const done = await finished(f.controller, await f.run('project_save', { path: '/copy.omedia' }))
+  f.io.saveMcpProjectFile = async () => { throw new Error('无法写入当前工程') }
+  const done = await finished(f.controller, await f.run('project_save'))
   assert.equal(done.state, 'failed')
   assert.equal(f.dirty, true)
   assert.equal(f.target.path, '/existing.omedia')
@@ -228,7 +418,8 @@ test('multi-gigabyte project save passes project metadata to the archive bridge 
   const project = createProject('大型录屏工程')
   project.assets = [{ ...video(), size: 8 * 1024 ** 3 }]
   const f = fixture(project)
-  const done = await finished(f.controller, await f.run('project_save', { path: '/large.omedia' }))
+  f.setTarget({ path: '/large.omedia', token: 'large-capability' })
+  const done = await finished(f.controller, await f.run('project_save'))
   assert.equal(done.state, 'completed')
   const call = f.calls.find(call => call.name === 'saveMcpProjectFile')
   assert.equal(call.args[0].assets[0].size, 8 * 1024 ** 3)
@@ -239,7 +430,7 @@ test('multi-gigabyte project save passes project metadata to the archive bridge 
 })
 
 test('cancellation and stale revisions during asset preparation never begin the final project write', async () => {
-  for (const mode of ['cancel', 'stale']) {
+  for (const mode of ['cancel', 'stale', 'reopen']) {
     const f = fixture(), pending = deferred()
     f.setDirty(true)
     f.setTarget({ path: '/existing.omedia', token: 'existing-capability' })
@@ -247,6 +438,7 @@ test('cancellation and stale revisions during asset preparation never begin the 
     const job = await f.run('project_save')
     await until(() => f.calls.some(call => call.name === 'prepareNativeProjectArchive'))
     if (mode === 'cancel') await f.run('job_cancel', { id: job.id })
+    else if (mode === 'reopen') f.reopen()
     else f.externalChange()
     pending.resolve(cloneProject(f.project))
     const done = await finished(f.controller, job)
@@ -400,7 +592,8 @@ test('stale prepared materials are discarded and never registered in the current
 test('final file write cannot be cancelled after overwrite has begun', async () => {
   const f = fixture(), pending = deferred()
   f.io.saveMcpProjectFile = () => pending.promise
-  const job = await f.run('project_save', { path: '/writing.omedia' })
+  f.setTarget({ path: '/writing.omedia', token: 'writing-capability' })
+  const job = await f.run('project_save')
   await until(() => f.calls.some(call => call.name === 'saveMcpProjectFile'))
   assert.equal((await f.run('job_get', { id: job.id })).cancelable, false)
   await assert.rejects(f.run('job_cancel', { id: job.id }), /无法取消/)
@@ -408,6 +601,25 @@ test('final file write cannot be cancelled after overwrite has begun', async () 
   const done = await finished(f.controller, job)
   assert.equal(done.state, 'completed')
   assert.equal(f.target.path, '/writing.omedia')
+  await f.controller.dispose()
+})
+
+test('a completed write from a prior session does not replace the reopened project target or saved state', async () => {
+  const f = fixture(), pending = deferred()
+  f.setTarget({ path: '/original.omedia', token: 'original-capability' })
+  f.io.saveMcpProjectFile = () => pending.promise
+  const job = await f.run('project_save')
+  await until(() => f.calls.some(call => call.name === 'saveMcpProjectFile'))
+  f.reopen()
+  f.setTarget({ path: '/reopened.omedia', token: 'reopened-capability' })
+  f.setDirty(true)
+  pending.resolve({ path: '/original.omedia', token: 'saved-original-capability' })
+  const done = await finished(f.controller, job)
+  assert.equal(done.state, 'completed')
+  assert.equal(done.result.path, '/original.omedia')
+  assert.equal(f.target.path, '/reopened.omedia')
+  assert.equal(f.target.token, 'reopened-capability')
+  assert.equal(f.dirty, true)
   await f.controller.dispose()
 })
 
@@ -420,7 +632,7 @@ test('running speech remains exclusive even if the UI host does not preserve the
   await until(() => f.calls.some(call => call.name === 'beginSpeechJob'))
   f.setBusy(false)
   await assert.rejects(f.run('project_update', { patch: { title: '不应修改' } }), /正在处理/)
-  await assert.rejects(f.run('project_new', { title: '不应切换' }), /正在处理/)
+  await assert.rejects(f.run('asset_import', { paths: ['/blocked.mp4'] }), /正在处理/)
   await f.run('job_cancel', { id: job.id })
   pending.resolve({ id: f.calls.find(call => call.name === 'beginSpeechJob').args[0].requestId, state: 'cancelled', stage: '取消' })
   const done = await finished(f.controller, job)

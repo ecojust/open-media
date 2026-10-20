@@ -70,6 +70,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "当前项目 revision，不一致时拒绝操作。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -155,6 +161,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "当前项目 revision，不一致时拒绝操作。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -213,6 +225,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "当前项目 revision，不一致时拒绝操作。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -283,6 +301,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "当前项目 revision，不一致时拒绝操作。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [
@@ -338,6 +362,12 @@
           "minimum": 0,
           "maximum": 9007199254740991,
           "description": "当前项目 revision，不一致时拒绝操作。"
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       },
       "required": [],
@@ -397,6 +427,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },
@@ -450,6 +486,12 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
         }
       }
     },

@@ -47,10 +47,11 @@ export interface McpSpeechNative {
 export interface McpSpeechJobsOptions {
   getProject(): Project
   getRevision(): number
+  getProjectSession?(): number
   isBusy(): boolean
   onBusy(value: boolean): void
   /** Must synchronously reject a stale revision or commit the whole project as one undo step. */
-  commit(project: Project, label: string, expected: { projectId: string; revision: number }): boolean | void
+  commit(project: Project, label: string, expected: { projectId: string; revision: number; projectSession?: number }): boolean | void
   onAssets?(assets: MediaAsset[]): void
   onChange?(job: McpSpeechJob): void
   native: McpSpeechNative
@@ -60,6 +61,7 @@ export interface McpSpeechJobsOptions {
 interface Operation {
   job: McpSpeechJob
   project: Project
+  projectSession?: number
   controller: AbortController
   nativeJobs: Set<string>
   currentNativeJob?: string
@@ -81,7 +83,7 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
   function publish(operation: Operation): void { options.onChange?.(snapshot(operation)) }
   function check(operation: Operation): void {
     if (operation.controller.signal.aborted || disposed) throw new Error('已取消语音生成，时间线保持原样。')
-    if (options.getProject().id !== operation.job.projectId || options.getRevision() !== operation.job.revision) throw new Error('项目已经变化，本次语音未写入时间线，请重新生成。')
+    if (options.getProject().id !== operation.job.projectId || options.getRevision() !== operation.job.revision || options.getProjectSession?.() !== operation.projectSession) throw new Error('项目已经变化，本次语音未写入时间线，请重新生成。')
   }
   function wait(operation: Operation): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -149,7 +151,7 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
       operation.job.stage = '正在加入时间线'
       publish(operation)
       check(operation)
-      const accepted = options.commit(edit.project, `MCP 已为 ${results.length} 段文字生成语音`, { projectId: operation.job.projectId, revision: operation.job.revision })
+      const accepted = options.commit(edit.project, `MCP 已为 ${results.length} 段文字生成语音`, { projectId: operation.job.projectId, revision: operation.job.revision, projectSession: operation.projectSession })
       if (accepted === false || options.getProject().id !== operation.job.projectId || !results.every(item => options.getProject().assets.some(asset => asset.id === item.asset.id)) || !edit.audioClipIds.every(id => options.getProject().tracks.some(track => track.clips.some(clip => clip.id === id)))) throw new Error('语音没有写入项目，请重试。')
       operation.committed = true
       operation.job.result = { assetIds: results.map(item => item.asset.id), audioClipIds: edit.audioClipIds, overlaps: edit.overlaps }
@@ -192,7 +194,7 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
     if (request.clipIds && plan.skipped.length) throw new Error(`部分指定字幕无法生成：${plan.skipped.map(item => `${item.name}：${item.reason}`).join('；')}`)
     validateSpeechPlanCapacity(project, plan)
     const job: McpSpeechJob = { id: crypto.randomUUID(), name: `字幕转语音 · ${plan.sources.length} 段`, kind: 'speech', projectId: project.id, revision, state: 'running', cancelling: false, cancelable: true, startedAt: Date.now(), elapsedSeconds: 0, total: plan.sources.length, completed: 0, stage: '正在检查声音', ...settings, skipped: plan.skipped }
-    const operation: Operation = { job, project, controller: new AbortController(), nativeJobs: new Set(), committed: false }
+    const operation: Operation = { job, project, projectSession: options.getProjectSession?.(), controller: new AbortController(), nativeJobs: new Set(), committed: false }
     while (operations.size >= 50) { const oldest = operations.keys().next().value; if (oldest) operations.delete(oldest); else break }
     active = operation
     operations.set(job.id, operation)
