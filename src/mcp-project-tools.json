@@ -26,6 +26,7 @@
                   "open_media_clip_update",
                   "open_media_clip_move",
                   "open_media_clip_split",
+                  "open_media_clip_classify",
                   "open_media_clip_trim",
                   "open_media_clip_duplicate",
                   "open_media_clip_remove",
@@ -240,6 +241,229 @@
           "failed",
           "cancelled"
         ]
+      }
+    }
+  },
+  {
+    "name": "open_media_project_video_compress",
+    "description": "为当前工程视频生成压缩工作副本，按源文件去重处理并一次替换同源的所有视频和音频片段引用。lossless 为严格无损模式，不能设置 quality；quality 模式默认 high，可选 balanced、compact。保留尺寸、时间线和原件，重复压缩始终读取最初原件。体积未减少时跳过；支持取消、撤销和恢复原视频。保留原件会增加工程归档体积，压缩不保证所有特效导出提速。锁定轨道引用的视频需先解锁。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result；使用 open_media_job_cancel({id:jobId}) 取消。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "lossless",
+            "quality"
+          ]
+        },
+        "quality": {
+          "type": "string",
+          "enum": [
+            "high",
+            "balanced",
+            "compact"
+          ]
+        },
+        "assetIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "description": "源视频或工程压缩视频的素材 ID；省略时处理当前时间线引用的视频。"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
+  },
+  {
+    "name": "open_media_project_video_restore",
+    "description": "将当前时间线的工程压缩视频恢复为最初原视频，同步恢复视频和音频片段引用；保留全部片段时间、画面与效果参数，保留工作副本，可撤销。assetIds 可指定原件或压缩素材，省略时恢复当前时间线的全部工程压缩视频。锁定轨道需先解锁。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result；使用 open_media_job_cancel({id:jobId}) 取消。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assetIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "description": "源视频或工程压缩视频的素材 ID；省略时处理当前时间线引用的视频。"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "当前项目 revision，不一致时拒绝操作。"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
+  },
+  {
+    "name": "open_media_clip_split_idle",
+    "description": "检测所选视频片段中持续静止的源画面，按最短时间线时长与画面变化阈值自动分割，并将静止段标记为黄色 repeat。保留全部内容、片段位置及声音，不删除、不接拢；可一次撤销。仅扫描片段源范围，支持裁剪、倍速及分段变速。minDuration 默认 3 秒，freezeNoiseDb 默认 -60，数值越接近 0 判定越宽松。返回源区间、时间线分段、repeatCount、splitCount、repeatDuration。主动定格不参与检测；切点若会破坏淡入淡出或已有转场，将拒绝整次修改。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可通过 open_media_job_cancel({id:jobId}) 取消；取消或失败不会分割时间线。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clipId"
+      ],
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "minDuration": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 3600,
+          "default": 3
+        },
+        "freezeNoiseDb": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": -20,
+          "default": -60
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
+  },
+  {
+    "name": "open_media_clip_classify",
+    "description": "将视频轨道中的视频片段标记为 repeat（黄色），或使用 normal 恢复普通类型；仅改变编辑标记，不改变素材、播放或导出内容。类型随工程保存，分割与复制时保留。支持批量事务及撤销。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "clipId",
+        "classification"
+      ],
+      "properties": {
+        "clipId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "repeat",
+            "normal"
+          ]
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result",
+        "final": true
       }
     }
   }

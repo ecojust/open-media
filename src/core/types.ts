@@ -45,6 +45,13 @@ export interface MediaAsset {
   /** Built-in library material role; ordinary imported files have no role. */
   provenance?: { kind: 'upload' | 'url'; name?: string; url?: string; finalUrl?: string; mimeType?: string; sha256: string; size?: number; importedAt: number }
   libraryRole?: 'watermark' | 'background-music' | 'video-segment'
+  /** Generated working copy; the original remains an ordinary project asset. */
+  compression?: {
+    originalAssetId: string
+    mode: 'lossless' | 'quality'
+    quality?: 'high' | 'balanced' | 'compact'
+    createdAt: string
+  }
   name: string
   kind: AssetKind
   url: string
@@ -92,6 +99,8 @@ export interface Clip {
   id: string
   /** Last creation or text-content generation time; absent in older documents. */
   generatedAt?: string
+  /** Editorial classification; omitted for ordinary clips. */
+  classification?: 'repeat'
   assetId?: string
   name: string
   start: number

@@ -10,6 +10,7 @@ import { trackSubtitleIssues } from './subtitle-validation.ts'
 import { alignTextToSpeech, planSpeech, validateSpeechPlanCapacity } from './speech.ts'
 import { executeVisualTool } from './visual-tools.ts'
 import { setTimelineMarkers } from './project-operations.ts'
+import { classifyVideoClip } from './clip-idle.ts'
 import type { Clip, ClipChromaKey, ClipFilters, MediaAsset, Project, Track, TrackKind, TransitionEffect } from './types.ts'
 
 export interface McpSchema {
@@ -100,6 +101,7 @@ export function validateMcpToolArguments(name: string, args: unknown): Record<st
     if (source === playhead || source && (result.trimIn === undefined || result.trimOut === undefined) || playhead && (result.side === undefined || result.time === undefined)) throw new Error('裁剪需提供 trimIn 和 trimOut，或 side 和 time，不能混用。')
   }
   if (name === 'open_media_speech_model' && result.action !== 'status' && !result.modelId) throw new Error('此模型操作需要 modelId。')
+  if (name === 'open_media_project_video_compress' && result.mode === 'lossless' && result.quality !== undefined) throw new Error('无损压缩不能指定有损质量。')
   if (['open_media_playback_set', 'open_media_speech_settings_set'].includes(name) && !Object.keys(result).some(key => key !== 'expectedRevision')) throw new Error('至少提供一个设置字段。')
   if (name === 'open_media_material_add') {
     if (result.kind === 'video_segment' && result.start !== undefined) throw new Error('视频片段通过 placement 指定前插或后插，不使用 start。')
@@ -112,7 +114,7 @@ const VISUAL_TOOLS = new Set(['clip_keyframes_set', 'clip_crop', 'focus_region',
 const PROJECT_TOOLS = new Set([
   ...VISUAL_TOOLS, 'open_media_timeline_markers_set', ...[
   'project_get', 'project_validate', 'project_update', 'asset_list', 'asset_remove', 'track_add', 'track_update', 'track_remove', 'track_reorder',
-  'clip_add', 'text_add', 'clip_update', 'clip_move', 'clip_split', 'clip_trim', 'clip_duplicate', 'clip_remove', 'clip_restore_audio_length', 'clip_extract_audio',
+  'clip_add', 'text_add', 'clip_update', 'clip_move', 'clip_split', 'clip_classify', 'clip_trim', 'clip_duplicate', 'clip_remove', 'clip_restore_audio_length', 'clip_extract_audio',
   'subtitle_apply_style', 'timeline_close_gaps', 'filter_list', 'transition_list', 'transition_add', 'transition_update', 'transition_remove', 'speech_plan', 'speech_align',
 ].map(name => `open_media_${name}`)])
 export function isProjectTool(name: string): boolean { return PROJECT_TOOLS.has(name) }
@@ -227,6 +229,7 @@ export function executeProjectTool(project: Project, name: string, rawArgs: unkn
       if (Object.hasOwn(input, 'chromaKey')) patch.chromaKey = input.chromaKey === null ? undefined : { ...DEFAULT_CHROMA_KEY, ...clip.chromaKey, ...(input.chromaKey as Partial<ClipChromaKey>) }
       return editedClip(updateClip(project, clip.id, patch, { translatePositionKeyframes: args.translatePositionKeyframes === true }), clip.id, '更新片段属性')
     }
+    case 'open_media_clip_classify': return classifyVideoClip(project, string('clipId'), string('classification') as 'repeat' | 'normal')
     case 'open_media_clip_move': return editedClip(moveClip(project, string('clipId'), string('trackId'), number('start')), string('clipId'), '移动片段')
     case 'open_media_clip_split': case 'open_media_clip_duplicate': {
       const oldIds = new Set(project.tracks.flatMap(track => track.clips.map(clip => clip.id)))

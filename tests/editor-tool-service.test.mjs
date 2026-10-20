@@ -10,7 +10,9 @@ import { getSpeechPronunciation, setSpeechPronunciation } from '../src/core/spee
 const boundaries = {
  '../src/native-ai.ts':['getAiStatus','downloadAiModel','repairAiModel','beginAiGeneration','getAiJob','cancelAiJob','cancelAiModelDownload'],
  '../src/native.ts':['acceptSpeechJobs','beginSpeechJob','beginSpeechModelDownload','cancelMediaJob','cancelSpeechJob','cancelSpeechModelDownload','discardSpeechJob','getMediaJobs','getSpeechJob','getSpeechStatus','repairSpeechModel','revealMediaJobOutput','importBlobAsset'],
+ '../src/native-asset-tools.ts':['runAssetTool'],
  '../src/native-audio-tools.ts':['beginAudioTool','getAudioTool','cancelAudioTool','acceptAudioTool','discardAudioTool'],
+ '../src/native-project-compression.ts':['beginProjectVideoCompression','getProjectVideoCompressionJob','cancelProjectVideoCompression','acceptProjectVideoCompression','discardProjectVideoCompression','prepareProjectCompressionAsset'],
  '../src/native-transcription.ts':['getAsrStatus','beginAsrDownload','beginAsrTranscription','getAsrJob','cancelAsrJob'],
  '../src/native-mcp-files.ts':['beginMcpMediaJob','importMcpMediaPaths','openMcpProjectFile','saveMcpProjectFile'],
  '../src/native-video-generation.ts':['getVideoGenerationStatus','beginVideoModelDownload','cancelVideoModelDownload','beginVideoGeneration','getVideoGenerationJob','cancelVideoGeneration'],
@@ -55,3 +57,95 @@ test('acknowledgment failure after commit must not discard media referenced by t
 test('artifact acceptance is noncancelable while deleting its copied temporary audition',async()=>{const f=controllerFixture(),accept=deferred();try{f.io.discardSpeechJob=()=>accept.promise;const job=await f.controller.execute('open_media_speech_generate_preview',{text:'测试试听'});await until(()=>f.calls.some(c=>c.name==='discardSpeechJob'));assert.equal(f.controller.status(job.id).cancelable,false);await assert.rejects(f.controller.cancel(job.id),/无法取消/);accept.resolve();const done=await finished(f.controller,job);assert.equal(done.state,'completed');assert.equal(f.calls.filter(c=>c.name==='discardSpeechJob').length,1)}finally{accept.resolve();await f.controller.dispose();f.close()}})
 test('post-commit asset registration failure still acknowledges media and never discards it',async()=>{const f=controllerFixture();try{f.host.ownAsset=()=>{throw Error('registration unavailable')};const done=await finished(f.controller,await f.controller.execute('open_media_audio_normalize',{clipId:'audio-clip'}));assert.equal(done.state,'failed');assert.equal(f.commits.length,1);assert.equal(f.calls.filter(c=>c.name==='acceptAudioTool').length,1);assert.equal(f.calls.filter(c=>c.name==='discardAudioTool').length,0)}finally{await f.controller.dispose();f.close()}})
 test('ASR status rejects transcription-only fields instead of silently ignoring requested subtitle creation',async()=>{const f=fixture();try{await assert.rejects(prepareEditorTool('open_media_audio_transcribe',{action:'status',createSubtitles:true},f.context),/不适用/);assert.equal(f.calls.filter(c=>c.name==='getAsrStatus').length,0)}finally{f.close()}})
+
+function compressionFixture() {
+ const f=controllerFixture(), source={...f.asset,id:'video-original',name:'录屏.mp4',kind:'video',width:640,height:360,duration:10,size:1000,nativePath:'/private/media/video.mp4',url:'asset://localhost/private/video.mp4',mime:'video/mp4'}
+ f.project.assets.push(source)
+ f.project.tracks[1].clips.push(createClip(source,f.project,{id:'video-one',trimOut:4}),createClip(source,f.project,{id:'video-two',start:4,trimIn:4,trimOut:10}))
+ f.project.tracks[2].clips.push(createClip(source,f.project,{id:'video-sound',trimOut:4}))
+ const asset={...source,id:'video-compressed',size:400,nativePath:'/private/media/compressed.mp4',url:'asset://localhost/private/compressed.mp4'}
+ const job={id:'compression-native',state:'completed',progress:1,stage:'完成',current:1,total:1,elapsedSeconds:1,items:[{sourceIds:[source.id],sourceSize:1000,outputSize:400,state:'completed',asset}]}
+ f.io.beginProjectVideoCompression=async()=>job
+ f.io.prepareProjectCompressionAsset=async value=>value
+ return{...f,source,compressed:asset,job}
+}
+test('MCP compression returns async work then commits every split and sound reference once before acceptance',async()=>{
+ const f=compressionFixture();try{
+  f.io.acceptProjectVideoCompression=async()=>{assert.equal(f.commits.length,1);assert.ok(f.host.getProject().tracks[1].clips.every(clip=>clip.assetId==='video-compressed'))}
+  const started=await f.controller.execute('open_media_project_video_compress',{mode:'quality',quality:'high',expectedRevision:4})
+  assert.equal(started.final,false);assert.ok(started.jobId)
+  const finishedJob=await finished(f.controller,started)
+  assert.equal(finishedJob.state,'completed');assert.equal(finishedJob.result.processedCount,1);assert.equal(finishedJob.result.savedBytes,600)
+  assert.equal(f.host.getProject().tracks[2].clips.find(clip=>clip.id==='video-sound').assetId,'video-compressed')
+  assert.equal(f.commits.length,1);assert.equal(f.owned.length,1)
+  assert.ok(!JSON.stringify(finishedJob.result).includes('/private/'))
+  const restored=await finished(f.controller,await f.controller.execute('open_media_project_video_restore',{}))
+  assert.equal(restored.state,'completed');assert.equal(restored.result.restoredCount,1)
+  assert.ok(f.host.getProject().tracks[1].clips.every(clip=>clip.assetId==='video-original'))
+  assert.equal(f.host.getProject().assets.length,3);assert.equal(f.commits.length,2)
+ }finally{await f.controller.dispose();f.close()}
+})
+test('MCP compression revision race discards its output without replacing newer project state',async()=>{
+ const f=compressionFixture(),gate=deferred();try{
+  f.io.beginProjectVideoCompression=()=>gate.promise
+  const started=await f.controller.execute('open_media_project_video_compress',{mode:'quality'})
+  await until(()=>f.calls.some(call=>call.name==='beginProjectVideoCompression'))
+  f.externalChange();gate.resolve(f.job)
+  const done=await finished(f.controller,started)
+  assert.equal(done.state,'failed');assert.equal(f.commits.length,0);assert.equal(f.host.getProject().title,'本地新修改')
+  assert.ok(f.calls.some(call=>call.name==='discardProjectVideoCompression'))
+  assert.equal(f.calls.some(call=>call.name==='acceptProjectVideoCompression'),false)
+ }finally{gate.resolve(f.job);await f.controller.dispose();f.close()}
+})
+test('MCP compression canceled during start cleans late output and leaves all source references intact',async()=>{
+ const f=compressionFixture(),gate=deferred();try{
+  f.io.beginProjectVideoCompression=()=>gate.promise
+  const started=await f.controller.execute('open_media_project_video_compress',{mode:'lossless'})
+  await until(()=>f.calls.some(call=>call.name==='beginProjectVideoCompression'))
+  await f.controller.cancel(started.id);gate.resolve(f.job)
+  const done=await finished(f.controller,started)
+  assert.equal(done.state,'cancelled');assert.equal(f.commits.length,0)
+  assert.ok(f.host.getProject().tracks[1].clips.every(clip=>clip.assetId==='video-original'))
+  assert.ok(f.calls.some(call=>call.name==='cancelProjectVideoCompression'))
+  assert.ok(f.calls.some(call=>call.name==='discardProjectVideoCompression'))
+ }finally{gate.resolve(f.job);await f.controller.dispose();f.close()}
+})
+
+function idleFixture(){
+ const f=controllerFixture(),asset={...f.asset,id:'static-video',kind:'video',name:'静止检测.mp4',duration:20,width:640,height:360,url:'asset://localhost/private/static.mp4',nativePath:'/private/static.mp4'}
+ f.project.assets.push(asset);f.project.tracks[1].clips.push(createClip(asset,f.project,{id:'static-clip',start:4,trimIn:2,trimOut:18}))
+ f.io.runAssetTool=async()=>({intervals:[{kind:'freeze',start:6,end:12,confidence:.9}]})
+ return f
+}
+test('MCP static split has one asynchronous job and one atomic commit; classification is immediately queryable',async()=>{
+ const f=idleFixture();try{
+  const started=await f.controller.execute('open_media_clip_split_idle',{clipId:'static-clip',minDuration:3,expectedRevision:4})
+  assert.equal(started.final,false);assert.ok(started.jobId)
+  const done=await finished(f.controller,started)
+  assert.equal(done.state,'completed');assert.equal(done.result.repeatCount,1);assert.equal(done.result.splitCount,2)
+  assert.equal(f.commits.length,1);assert.equal(f.current.tracks[1].clips.length,3)
+  const marked=f.current.tracks[1].clips.find(clip=>clip.classification==='repeat')
+  assert.ok(marked);assert.equal(marked.start,8)
+  const cleared=await f.controller.execute('open_media_clip_classify',{clipId:marked.id,classification:'normal'})
+  assert.equal(cleared.classification,'normal');assert.equal(f.current.tracks[1].clips.find(clip=>clip.id===marked.id).classification,undefined)
+  assert.equal(f.commits.length,2)
+ }finally{await f.controller.dispose();f.close()}
+})
+test('MCP idle detection cancellation does not commit late detections',async()=>{
+ const f=idleFixture(),gate=deferred();try{
+  f.io.runAssetTool=()=>gate.promise
+  const started=await f.controller.execute('open_media_clip_split_idle',{clipId:'static-clip'})
+  await until(()=>f.calls.some(call=>call.name==='runAssetTool'))
+  await f.controller.cancel(started.id);gate.resolve({intervals:[{kind:'freeze',start:6,end:12}]})
+  const done=await finished(f.controller,started);assert.equal(done.state,'cancelled');assert.equal(f.commits.length,0);assert.equal(f.current.tracks[1].clips.length,1)
+ }finally{gate.resolve({intervals:[]});await f.controller.dispose();f.close()}
+})
+test('MCP idle detection revision conflict leaves the newer project intact',async()=>{
+ const f=idleFixture(),gate=deferred();try{
+  f.io.runAssetTool=()=>gate.promise
+  const started=await f.controller.execute('open_media_clip_split_idle',{clipId:'static-clip'})
+  await until(()=>f.calls.some(call=>call.name==='runAssetTool'))
+  f.externalChange();gate.resolve({intervals:[{kind:'freeze',start:6,end:12}]})
+  const done=await finished(f.controller,started);assert.equal(done.state,'failed');assert.equal(f.commits.length,0);assert.equal(f.current.title,'本地新修改');assert.equal(f.current.tracks[1].clips.length,1)
+ }finally{gate.resolve({intervals:[]});await f.controller.dispose();f.close()}
+})

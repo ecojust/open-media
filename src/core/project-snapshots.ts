@@ -174,6 +174,11 @@ export function prepareSnapshotRestore(imported: ImportedProject): ImportedProje
       if (!id) throw new Error('版本中的片段引用了缺失素材。')
       clip.assetId = id
     }
+    for (const asset of project.assets) if (asset.compression) {
+      const id = ids.get(asset.compression.originalAssetId)
+      if (!id) throw new Error('版本中的压缩视频缺少原件。')
+      asset.compression.originalAssetId = id
+    }
     return { project: validateProject(project, { trusted: true }), blobs, revoke: () => { urls.splice(0).forEach(url => URL.revokeObjectURL(url)) } }
   } catch (cause) { urls.forEach(url => URL.revokeObjectURL(url)); throw cause }
   finally { imported.revoke() }
@@ -221,7 +226,8 @@ export async function compareProjectSnapshot(project: Project, id: string, compa
   const available = before.project.assets.filter(asset => !afterIds.has(asset.id))
   const aliases = new Map<string, string>()
   const signature = (asset: Project['assets'][number], hashes: Record<string, string>) => { const { id: _id, ...properties } = asset; return JSON.stringify({ ...properties, sha256: hashes[asset.id] }) }
-  for (const asset of afterProject.assets) {
+  for (const asset of [...afterProject.assets].sort((a, b) => Number(!!a.compression) - Number(!!b.compression))) {
+    if (asset.compression && aliases.has(asset.compression.originalAssetId)) asset.compression.originalAssetId = aliases.get(asset.compression.originalAssetId)!
     if (before.project.assets.some(previous => previous.id === asset.id)) continue
     const index = available.findIndex(previous => signature(previous, before.assetHashes) === signature(asset, after.assetHashes))
     if (index < 0) continue

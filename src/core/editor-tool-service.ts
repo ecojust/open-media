@@ -29,7 +29,7 @@ export interface PreparedEditorTool {
   discard?: () => void | Promise<void>
 }
 
-const EXTRA_NAMES = new Set(['asset_upload', 'asset_import_url', 'asset_probe', 'asset_get_frame', 'asset_storyboard', 'asset_detect_scenes', 'asset_detect_idle', 'asset_ocr', 'timeline_get_frame', 'preview_render', 'audio_preview', 'artifact_read', 'timeline_batch_edit', 'project_snapshot', 'export_validate'].map(name => `open_media_${name}`))
+const EXTRA_NAMES = new Set(['asset_upload', 'asset_import_url', 'asset_probe', 'asset_get_frame', 'asset_storyboard', 'asset_detect_scenes', 'asset_detect_idle', 'asset_ocr', 'timeline_get_frame', 'preview_render', 'audio_preview', 'artifact_read', 'timeline_batch_edit', 'project_snapshot', 'export_validate', 'project_video_compress', 'project_video_restore', 'clip_split_idle'].map(name => `open_media_${name}`))
 export function isSharedEditorTool(name: string): boolean { return EXTRA_NAMES.has(name) || isAudioEditorTool(name) }
 
 import { executeProjectTool, isProjectTool, validateMcpToolArguments } from './mcp-tools.ts'
@@ -52,7 +52,13 @@ export async function prepareEditorTool(name: string, input: Record<string, unkn
   assertProjectRevision(args.expectedRevision as number | undefined, context.revision)
   if (isProjectTool(name)) return executeProjectTool(context.project, name, args)
   let result: PreparedEditorTool
-  if (isAudioEditorTool(name)) {
+  if (name === 'open_media_clip_split_idle') {
+    const { prepareIdleSplit } = await import('./clip-idle.ts')
+    result = await prepareIdleSplit(args, context)
+  } else if (name === 'open_media_project_video_compress' || name === 'open_media_project_video_restore') {
+    const { prepareProjectCompressionTool } = await import('./project-video-compression.ts')
+    result = await prepareProjectCompressionTool(name, args, context)
+  } else if (isAudioEditorTool(name)) {
     result = await prepareAudioEditorTool(name, args, context)
     if (name === 'open_media_speech_generate_preview') {
       const data = result.data as { asset: MediaAsset }, { artifactFromAsset } = await import('./editor-preview-tools.ts')

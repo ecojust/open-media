@@ -388,7 +388,7 @@
   },
   {
     "name": "open_media_asset_detect_idle",
-    "description": "检测真实黑场、画面冻结和静音区间，返回源时间范围、置信依据和检测阈值。结果仅表示技术条件满足，不代表内容没有价值，也不会自动删除片段。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "检测真实黑场、画面冻结和静音区间，返回源时间范围、置信依据和检测阈值。支持 start/end 指定源素材秒数范围，返回仍为源素材时间；freezeOnly=true 仅扫描静止画面，freezeNoiseDb 调整画面差异阈值（越接近 0 越宽松）。结果仅表示技术条件满足，不代表内容没有价值，也不会自动删除片段。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -416,6 +416,26 @@
         "expectedRevision": {
           "type": "integer",
           "minimum": 0
+        },
+        "freezeOnly": {
+          "type": "boolean",
+          "default": false
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "end": {
+          "type": "number",
+          "minimum": 0.001,
+          "maximum": 86400
+        },
+        "freezeNoiseDb": {
+          "type": "number",
+          "minimum": -100,
+          "maximum": -20,
+          "default": -60
         }
       }
     },

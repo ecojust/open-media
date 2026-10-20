@@ -11,7 +11,7 @@ export interface TimelineBatchContext {
 /** Only synchronous, in-memory mutations may participate in one editor transaction. */
 export const BATCH_EDIT_TOOLS = new Set([
   'project_update', 'asset_remove', 'track_add', 'track_update', 'track_remove', 'track_reorder',
-  'clip_add', 'text_add', 'clip_update', 'clip_move', 'clip_split', 'clip_trim', 'clip_duplicate', 'clip_remove',
+  'clip_add', 'text_add', 'clip_update', 'clip_move', 'clip_split', 'clip_classify', 'clip_trim', 'clip_duplicate', 'clip_remove',
   'clip_restore_audio_length', 'clip_extract_audio', 'subtitle_apply_style', 'timeline_close_gaps',
   'transition_add', 'transition_update', 'transition_remove', 'speech_align', 'timeline_markers_set',
   'clip_keyframes_set', 'clip_crop', 'focus_region', 'overlay_add', 'title_add', 'template_customize',

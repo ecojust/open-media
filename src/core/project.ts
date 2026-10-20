@@ -146,6 +146,15 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     }
     if (a.addedAt !== undefined) asset.addedAt = normalizeAssetAddedAt(a.addedAt)
     if (a.libraryRole !== undefined) asset.libraryRole = choice(a.libraryRole, ['watermark', 'background-music', 'video-segment'] as const, '素材库用途')
+    if (a.compression !== undefined) {
+      if (kind !== 'video') throw new Error('仅视频素材可以记录工程压缩信息。')
+      const value = record(a.compression, '工程视频压缩信息')
+      const originalAssetId = text(value.originalAssetId, '原视频标识', 160)
+      if (!/^[a-zA-Z0-9_-]+$/.test(originalAssetId) || originalAssetId === asset.id) throw new Error('原视频标识无效。')
+      asset.compression = { originalAssetId, mode: choice(value.mode, ['lossless', 'quality'] as const, '工程视频压缩模式'), createdAt: iso(value.createdAt, '视频压缩时间') }
+      if (value.quality !== undefined) asset.compression.quality = choice(value.quality, ['high', 'balanced', 'compact'] as const, '工程视频压缩质量')
+      if (asset.compression.mode === 'lossless' && asset.compression.quality !== undefined) throw new Error('无损压缩不能指定有损质量。')
+    }
     if (options.trusted) {
       const url = text(a.url ?? '', '素材地址', 2 * 1024 * 1024, true)
       if (url && !/^(?:blob:|data:(?:image|video|audio)\/|https?:\/\/|asset:\/\/)/i.test(url)) throw new Error('素材地址协议不受支持。')
@@ -160,6 +169,10 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
     return asset
   })
   const assetMap = new Map(assets.map((asset) => [asset.id, asset]))
+  for (const asset of assets) if (asset.compression) {
+    const original = assetMap.get(asset.compression.originalAssetId)
+    if (!original || original.kind !== 'video' || original.compression) throw new Error('压缩视频缺少有效原件；请恢复原视频后重试。')
+  }
   let clipCount = 0
   const tracks = root.tracks.map((item): Track => {
     const t = record(item, '轨道')
@@ -173,6 +186,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       const clip: Clip = { id: id(c.id), name: text(c.name, '片段名称', 1000), start: number(c.start, '片段开始时间', 0, MAX_PROJECT_DURATION), trimIn: number(c.trimIn, '片段源起点', 0, MAX_PROJECT_DURATION), trimOut: number(c.trimOut, '片段源终点', 0.001, MAX_PROJECT_DURATION), speed: number(c.speed, '播放速度', 0.1, 16), volume: number(c.volume, '音量', 0, 2), opacity: number(c.opacity, '不透明度', 0, 1), x: number(c.x, '横坐标', -65536, 65536), y: number(c.y, '纵坐标', -65536, 65536), width: number(c.width, '片段宽度', 1, 65536), height: number(c.height, '片段高度', 1, 65536), rotation: number(c.rotation, '旋转角度', -3600, 3600), fit: choice(c.fit, ['contain', 'cover', 'fill'] as const, '画面适配'), fadeIn: number(c.fadeIn ?? 0, '淡入时间', 0, MAX_PROJECT_DURATION), fadeOut: number(c.fadeOut ?? 0, '淡出时间', 0, MAX_PROJECT_DURATION) }
       if (c.animationOffset !== undefined) clip.animationOffset = number(c.animationOffset, '动画时间偏移', 0, MAX_PROJECT_DURATION)
       if (c.generatedAt !== undefined) clip.generatedAt = iso(c.generatedAt, '片段生成时间')
+      if (c.classification !== undefined) clip.classification = choice(c.classification, ['repeat'] as const, '片段类型')
       if (c.speedRamp !== undefined) {
         if (!['video', 'audio'].includes(kind)) throw new Error('变速曲线只适用于媒体片段。')
         clip.speedRamp = validateSpeedRamp(c.speedRamp)
