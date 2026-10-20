@@ -3,6 +3,7 @@
 #include "h3.h"
 #include "h3_gpu.h"
 #include "h3_metal.h"
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +46,57 @@ static BOOL integerValue(NSDictionary *request, NSString *key, NSInteger fallbac
 static BOOL absolutePath(NSString *path) {
     return path.length > 0 && path.isAbsolutePath &&
         [path rangeOfString:[NSString stringWithFormat:@"%C", (unichar)0]].location == NSNotFound;
+}
+
+static NSString *normalizationConfigError(NSString *path, NSUInteger channels) {
+    NSDictionary *attributes = [NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
+    if (!attributes || ![attributes[NSFileType] isEqualToString:NSFileTypeRegular])
+        return [NSString stringWithFormat:@"Missing model configuration: %@. Repair the model in Info before retrying.", path];
+    if ([attributes fileSize] < 1 || [attributes fileSize] > 1024 * 1024)
+        return [NSString stringWithFormat:@"Invalid model configuration size: %@", path];
+    NSData *data = [NSData dataWithContentsOfFile:path options:0 error:NULL];
+    id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    if (![parsed isKindOfClass:NSDictionary.class])
+        return [NSString stringWithFormat:@"Model configuration must be a readable JSON object: %@", path];
+    for (NSString *key in @[@"latents_mean", @"latents_std"]) {
+        id values = parsed[key];
+        if (![values isKindOfClass:NSArray.class] || [values count] != channels)
+            return [NSString stringWithFormat:@"Invalid %@ in %@: expected %lu numbers", key, path, (unsigned long)channels];
+        for (id value in values) {
+            BOOL number = [value isKindOfClass:NSNumber.class] &&
+                CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID();
+            double numeric = number ? [value doubleValue] : NAN;
+            if (!isfinite(numeric) || fabs(numeric) > FLT_MAX ||
+                (numeric != 0 && fabs(numeric) < FLT_MIN) ||
+                ([key isEqualToString:@"latents_std"] && (float)numeric <= 0))
+                return [NSString stringWithFormat:@"Invalid %@ in %@: values must fit finite floats and standard deviations must be positive", key, path];
+        }
+    }
+    return nil;
+}
+
+static NSString *modelConfigurationError(NSString *modelDir, BOOL referenceMode) {
+    // Validate normalization before loading weights or starting the GPU. The
+    // video encoder and decoder both read the parent config, not source/config.
+    NSArray<NSString *> *families = referenceMode ? @[@"FL2VA", @"Ref2VA"] : @[@"FL2VA"];
+    for (NSString *family in families) {
+        NSString *video = [modelDir stringByAppendingPathComponent:[family stringByAppendingString:@"/video_vae/config.json"]];
+        NSString *error = normalizationConfigError(video, 24);
+        if (error) return error;
+        NSString *audio = [modelDir stringByAppendingPathComponent:[family stringByAppendingString:@"/audio_vae/config.json"]];
+        error = normalizationConfigError(audio, 32);
+        if (error) return error;
+    }
+    return nil;
+}
+
+static int checkModelConfigurations(NSString *modelDir, NSString *family) {
+    if (!absolutePath(modelDir) || ![@[@"FL2VA", @"Ref2VA"] containsObject:family])
+        return fail(@"Expected an absolute model path and FL2VA or Ref2VA");
+    NSString *error = modelConfigurationError(modelDir, [family isEqualToString:@"Ref2VA"]);
+    if (error) return fail(error);
+    emit(@{@"type": @"configuration-check", @"family": family, @"valid": @YES});
+    return 0;
 }
 
 static int progress(const char *phase, int completed, int total, void *unused) {
@@ -157,6 +209,10 @@ static int generate(NSString *requestPath) {
     params.references = references.count ? parsedReferences : NULL;
     params.reference_count = references.count;
     params.on_progress = progress;
+    emit(@{@"type": @"progress", @"stage": @"model configuration", @"completed": @0, @"total": @1});
+    NSString *configurationError = modelConfigurationError(modelDir, references.count > 0);
+    if (configurationError) return fail(configurationError);
+    emit(@{@"type": @"progress", @"stage": @"model configuration", @"completed": @1, @"total": @1});
     emit(@{@"type": @"progress", @"stage": @"loading", @"completed": @0, @"total": @1});
     h3_ctx *context = h3_load_dir(modelDir.fileSystemRepresentation);
     if (!context) return fail(@(h3_last_error(NULL)));
@@ -180,11 +236,13 @@ int main(int argc, const char **argv) {
         if (@available(macOS 15.0, *)) {
             if (argc == 2 && !strcmp(argv[1], "--probe")) return probe(NO);
             if (argc == 2 && !strcmp(argv[1], "--self-test")) return probe(YES);
+            if (argc == 4 && !strcmp(argv[1], "--check-model-configs"))
+                return checkModelConfigurations(@(argv[2]), @(argv[3]));
             if (argc == 3 && !strcmp(argv[1], "--request")) {
                 @try { return generate(@(argv[2])); }
                 @catch (NSException *exception) { return fail(exception.reason); }
             }
-            return fail(@"Expected --request FILE, --probe, or --self-test");
+            return fail(@"Expected --request FILE, --check-model-configs DIR FAMILY, --probe, or --self-test");
         }
         return fail(@"Video generation requires macOS 15 or later");
     }

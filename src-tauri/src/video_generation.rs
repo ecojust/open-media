@@ -953,6 +953,7 @@ impl Worker {
 
 fn stage_label(stage: &str) -> &'static str {
     match stage {
+        "model configuration" => "检查模型配置",
         "loading" | "model" | "load transformer core" => "加载模型",
         "text encoder" | "tokenizer" | "conditioning" | "encoding" | "text" => "编码提示词",
         "Qwen vision" | "video VAE encoder" => "编码参考画面",

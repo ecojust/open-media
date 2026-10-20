@@ -205,6 +205,7 @@ fn video_generation_symlinks_cannot_escape_cache() {
 #[test]
 fn video_generation_real_engine_phase_names_are_descriptive() {
     for name in [
+        "model configuration",
         "text encoder",
         "video VAE load",
         "audio VAE",

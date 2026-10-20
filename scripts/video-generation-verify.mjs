@@ -73,9 +73,10 @@ for (const model of lock.models) {
   assert.equal([...hashes].filter(([sha]) => !seen.has(sha)).reduce((n, [, size]) => n + size, 0), model.uniqueBytes);
   hashes.forEach((_, sha) => seen.add(sha));
   const family = model.id === 'h3-base-fl2va' ? 'FL2VA' : 'Ref2VA';
-  for (const required of ['tokenizer/tokenizer.json', 'transformer/config.json',
+  for (const required of ['tokenizer/tokenizer.json', 'transformer/config.json', 'text_encoder/config.json',
     'text_encoder/model.safetensors.index.json', 'transformer/model.safetensors.index.json',
-    'audio_vae/model.safetensors', 'video_vae/source/model.safetensors']) {
+    'audio_vae/config.json', 'audio_vae/model.safetensors',
+    'video_vae/config.json', 'video_vae/source/config.json', 'video_vae/source/model.safetensors']) {
     assert.ok(paths.has(`${family}/${required}`), `missing required model file: ${required}`);
   }
   assert.equal(model.files.filter(file => file.path.includes('/text_encoder/model-')).length, 14);

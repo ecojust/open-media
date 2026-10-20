@@ -37,8 +37,8 @@
         "storyboard"
       ],
       "requires": [],
-      "totalBytes": 144023550208,
-      "uniqueBytes": 144023550208,
+      "totalBytes": 144023552015,
+      "uniqueBytes": 144023552015,
       "files": [
         {
           "path": "FL2VA/audio_vae/config.json",
@@ -347,6 +347,15 @@
           ]
         },
         {
+          "path": "FL2VA/video_vae/config.json",
+          "size": 1807,
+          "sha256": "3edd2cdd1ebc823c868be55ef917e1b3b8a398fde4d3150dae44a3bf05d9f627",
+          "urls": [
+            "https://huggingface.co/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/FL2VA/video_vae/config.json",
+            "https://hf-mirror.com/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/FL2VA/video_vae/config.json"
+          ]
+        },
+        {
           "path": "FL2VA/video_vae/source/config.json",
           "size": 1164,
           "sha256": "66c68f541e6578ce613ce7a0fc985eb59097038829e49f7535e6d08e6d95ab12",
@@ -375,7 +384,7 @@
       "requires": [
         "h3-base-fl2va"
       ],
-      "totalBytes": 144023550208,
+      "totalBytes": 144023552015,
       "uniqueBytes": 66280485936,
       "files": [
         {
@@ -682,6 +691,15 @@
           "urls": [
             "https://huggingface.co/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/Ref2VA/transformer/model.safetensors.index.json",
             "https://hf-mirror.com/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/Ref2VA/transformer/model.safetensors.index.json"
+          ]
+        },
+        {
+          "path": "Ref2VA/video_vae/config.json",
+          "size": 1807,
+          "sha256": "3edd2cdd1ebc823c868be55ef917e1b3b8a398fde4d3150dae44a3bf05d9f627",
+          "urls": [
+            "https://huggingface.co/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/Ref2VA/video_vae/config.json",
+            "https://hf-mirror.com/MiniMaxAI/MiniMax-H3/resolve/42ed227ee7df40d41602854ae760620d6eb651fe/Ref2VA/video_vae/config.json"
           ]
         },
         {

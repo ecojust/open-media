@@ -849,6 +849,71 @@ mod tests {
         assert!(!installed_ready(&installed, &worker.catalog, model, &files));
         assert!(!cached(&root, &file));
     }
+
+    #[test]
+    fn missing_vae_config_updates_existing_install_without_downloading_weights() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        safe_directory(&root, "blobs").unwrap();
+        safe_directory(&root, "models").unwrap();
+        let mut catalog: Catalog = serde_json::from_str(MODEL_CATALOG).unwrap();
+        catalog.models.truncate(1);
+        let mut weights = small_file(b"existing-verified-weights");
+        weights.path = "FL2VA/video_vae/source/model.safetensors".into();
+        catalog.models[0].files = vec![weights.clone()];
+        fs::write(blob(&root, &weights), b"existing-verified-weights").unwrap();
+        remember_blob(&root, &weights).unwrap();
+        let original_stamp = stamp(&blob(&root, &weights)).unwrap();
+        let mut worker = Worker {
+            root: root.clone(),
+            catalog: Arc::new(catalog),
+            shared: Arc::new(Mutex::new(State {
+                models: vec![],
+                jobs: vec![],
+                active: None,
+                early_cancelled: HashSet::new(),
+                closing: false,
+                process: None,
+            })),
+            runner: Arc::new(OnceLock::new()),
+            gate: AiExecutionGate::default(),
+        };
+        let cancelled = AtomicBool::new(false);
+        let old_model = worker.catalog.models[0].clone();
+        install_dependencies(&worker, &old_model, &cancelled, &mut HashSet::new()).unwrap();
+        let installed = model_root(&root, &worker.catalog, &old_model);
+        assert!(installed_ready(&installed, &worker.catalog, &old_model, &old_model.files));
+
+        let config_bytes = br#"{"latents_mean":[0],"latents_std":[1]}"#;
+        let mut config = small_file(config_bytes);
+        config.path = "FL2VA/video_vae/config.json".into();
+        let (url, server) = local_response(config_bytes.to_vec(), None, 0);
+        config.urls = vec![url];
+        let mut updated = (*worker.catalog).clone();
+        updated.models[0].files.push(config.clone());
+        worker.catalog = Arc::new(updated);
+        let model = &worker.catalog.models[0];
+        let files = model_files(&worker.catalog, model).unwrap();
+        assert_eq!(model_root(&root, &worker.catalog, model), installed);
+        assert!(!installed_ready(&installed, &worker.catalog, model, &files));
+        assert_eq!(cached_bytes(&root, &files), weights.size);
+
+        let client = reqwest::blocking::Client::builder().no_proxy().build().unwrap();
+        let mut sources = Vec::new();
+        for file in &files {
+            ensure_blob_with_source(
+                &root, &client, file, &cancelled, |_, _| {},
+                |url| sources.push(url.to_owned()),
+            ).unwrap();
+        }
+        assert_eq!(sources, config.urls, "only the missing small config uses the network");
+        assert!(server.join().unwrap().starts_with("GET "));
+        install_dependencies(&worker, model, &cancelled, &mut HashSet::new()).unwrap();
+        assert!(installed_ready(&installed, &worker.catalog, model, &files));
+        assert_eq!(fs::read(installed.join(&config.path)).unwrap(), config_bytes);
+        assert!(matches_stamp(&stamp(&blob(&root, &weights)).unwrap(), &original_stamp));
+        assert_eq!(cached_bytes(&root, &files), weights.size + config.size);
+    }
 }
 
 #[cfg(test)]

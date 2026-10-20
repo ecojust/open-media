@@ -376,6 +376,12 @@
     },
     {
       "type": "file",
+      "oid": "20f91e40ea9bc24c21a0e757715f93acf49eb841",
+      "size": 1807,
+      "path": "FL2VA/video_vae/config.json"
+    },
+    {
+      "type": "file",
       "oid": "fb5105116e094aface836f5182b126bb4fbdc699",
       "size": 1164,
       "path": "FL2VA/video_vae/source/config.json"
@@ -763,6 +769,12 @@
       "oid": "89d6b0862f66080854b239ad7a0b50c31a6de986",
       "size": 38323,
       "path": "Ref2VA/transformer/model.safetensors.index.json"
+    },
+    {
+      "type": "file",
+      "oid": "20f91e40ea9bc24c21a0e757715f93acf49eb841",
+      "size": 1807,
+      "path": "Ref2VA/video_vae/config.json"
     },
     {
       "type": "file",

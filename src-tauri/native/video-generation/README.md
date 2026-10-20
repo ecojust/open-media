@@ -51,6 +51,11 @@ SHA-256 内容缓存复用后映射到各自目录。
 默认开启 SSD 流式加载以降低权重常驻内存，同时把文本编码器预取深度限制为一层；
 默认不启用占用额外内存的中途解码预览。
 
+加载权重前先检查视频与音频的归一化配置。视频使用 `video_vae/config.json`
+中的 24 维 `latents_mean` / `latents_std`，并非 `video_vae/source/config.json`；
+音频使用 `audio_vae/config.json` 中的 32 维数组。缺文件、损坏 JSON、
+数组长度不匹配或无效标准差会立即失败；参考模式同时检查两个模型目录。
+
 输出固定 24 fps。帧数向上对齐到 `5 + 17n`，因此实际时长需读取结果，不能
 把请求秒数当作精确结果；最长 362 帧。宽高均为 32 的倍数，最多 768×1344 像素。
 
@@ -74,6 +79,9 @@ SHA-256 内容缓存复用后映射到各自目录。
 
 - `./open-media-video-generation --probe` 查询真实 GPU 和统一内存。
 - `./open-media-video-generation --self-test` 编译完整内核并执行、读回真实 GPU 小矩阵运算。
+- `./open-media-video-generation --check-model-configs /absolute/models/snapshot FL2VA`
+  只检查基础模型归一化配置；最后一个参数改为 `Ref2VA` 时同时检查参考模型。
+  此操作不读取大权重，也不启动 GPU。
 
 这些检查不需要下载权重，**不代表完成真实视频生成质量或性能验证**。
 完整生成验证另需用户安装约 144 GB 基础模型；参考模式增量约 66 GB。

@@ -24,7 +24,7 @@ def needed(entry):
         path.endswith('.safetensors') or path.endswith('model.safetensors.index.json')
         or path.split('/', 1)[1] in ('transformer/config.json', 'text_encoder/config.json',
                                    'tokenizer/tokenizer.json', 'audio_vae/config.json',
-                                   'video_vae/source/config.json'))
+                                   'video_vae/config.json', 'video_vae/source/config.json'))
 
 
 def file_entry(entry):
