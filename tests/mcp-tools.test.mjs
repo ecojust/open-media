@@ -56,9 +56,9 @@ test('shared AI tool contracts are identical to the published aggregate catalog'
   }
 })
 
-test('motion composition advertises bounded asset-driven inputs and distinct execution contracts', () => {
+test('motion clip generation advertises real-video destinations, bounded inputs and distinct execution contracts', () => {
   const list = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_style_list')
-  const compose = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_compose')
+  const compose = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_clip_generate')
   assert.equal(list.annotations.readOnlyHint, true)
   assert.equal(list._meta['openmedia/execution'].mode, 'synchronous')
   assert.equal(compose.annotations.readOnlyHint, false)
@@ -66,11 +66,14 @@ test('motion composition advertises bounded asset-driven inputs and distinct exe
   assert.equal(compose._meta['openmedia/execution'].mode, 'asynchronous')
   assert.equal(compose._meta['openmedia/execution'].pollingTool, 'open_media_job_get')
   assert.equal(compose._meta['openmedia/execution'].cancelTool, 'open_media_job_cancel')
+  assert.equal(MCP_TOOLS.some(tool => tool.name === 'open_media_motion_compose'), false)
+  assert.equal(compose.inputSchema.properties.destination.default, 'assets')
+  assert.deepEqual(compose.inputSchema.properties.destination.enum, ['assets', 'timeline'])
   assert.deepEqual(compose.inputSchema.properties.styleId.enum, MOTION_STYLES.map(style => style.id))
   const validate = args => validateMcpToolArguments(compose.name, args)
   const scene = { assetId: 'existing-video', heading: '标题', caption: '素材说明', duration: 4, trimIn: 1 }
   const base = { styleId: 'tech-hud', scenes: [scene] }
-  assert.doesNotThrow(() => validate({ ...base, placement: 'prepend', title: '说明片', accent: '#abcdef', background: '#010203', textColor: '#FFFFFF', musicAssetId: 'existing-audio', musicVolume: 0.25, sourceAudio: true, tempo: 'energetic', logoAssetId: 'existing-image', dryRun: true, expectedRevision: 7, expectedProjectId: 'current-project' }))
+  assert.doesNotThrow(() => validate({ ...base, destination: 'timeline', insert: { trackId: 'existing-track', start: 12 }, title: '说明片', accent: '#abcdef', background: '#010203', textColor: '#FFFFFF', musicAssetId: 'existing-audio', musicVolume: 0.25, sourceAudio: true, tempo: 'energetic', logoAssetId: 'existing-image', dryRun: true, expectedRevision: 7, expectedProjectId: 'current-project' }))
   assert.doesNotThrow(() => validate({ ...base, scenes: Array.from({ length: 16 }, () => ({ ...scene, heading: '字'.repeat(120), caption: '字'.repeat(240), duration: 12 })) }))
   for (const patch of [
     { styleId: 'unknown-style' }, { scenes: [] }, { scenes: Array(17).fill(scene) },
@@ -79,7 +82,11 @@ test('motion composition advertises bounded asset-driven inputs and distinct exe
     { scenes: [{ ...scene, heading: '字'.repeat(121) }] }, { scenes: [{ ...scene, caption: '字'.repeat(241) }] },
     { scenes: [{ assetId: '  ' }] }, { scenes: [{ ...scene, url: 'https://example.test/source.mp4' }] },
     { title: '字'.repeat(121) }, { accent: 'red' }, { textColor: '#fff' }, { background: 'url(file:///private/source)' },
-    { musicVolume: -0.01 }, { musicVolume: 1.01 }, { placement: 'replace' }, { tempo: 'random' },
+    { musicVolume: -0.01 }, { musicVolume: 1.01 }, { placement: 'append' }, { tempo: 'random' },
+    { destination: 'generated' }, { destination: 'timeline', insert: { trackId: ' ' } },
+    { destination: 'timeline', insert: { start: -1 } }, { destination: 'timeline', insert: { start: Infinity } },
+    { destination: 'timeline', insert: { start: 86401 } }, { destination: 'timeline', insert: { path: '/tmp/video.mp4' } },
+    { outputPath: '/tmp/video.mp4' }, { project: { title: 'temporary-project' } },
     { width: 1920 }, { sourceAudio: 'yes' }, { dryRun: 'yes' },
   ]) assert.throws(() => validate({ ...base, ...patch }), undefined, JSON.stringify(patch))
   assert.throws(() => validateMcpToolArguments(list.name, { search: '字'.repeat(201) }), /长度/)

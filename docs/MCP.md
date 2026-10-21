@@ -2,7 +2,7 @@
 
 Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。视频剪辑顶部“项目设置”左侧的 **M** 按钮打开简洁的服务弹窗，显示连接地址、Token 和“复制配置”按钮，通过服务开关启停。有已认证的客户端连接时，M 按钮显示青紫色流动荧光；连接断开或服务停止后恢复普通样式。自动化任务的进度和取消操作位于“处理任务”中。
 
-服务只操作界面中当前打开的工程，使用其撤销历史和保存位置；新建、打开、切换工程及选择保存位置由用户在界面中完成。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场及转场音效、背景音乐、片头片尾、风格成片、配音、共享模型管理、图像／歌曲／视频生成和视频导出，共 **99 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
+服务只操作界面中当前打开的工程，使用其撤销历史和保存位置；新建、打开、切换工程及选择保存位置由用户在界面中完成。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场及转场音效、背景音乐、片头片尾、素材二创、配音、共享模型管理、图像／歌曲／视频生成和视频导出，共 **99 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
 
 ## 连接
 
@@ -87,8 +87,8 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_speech_model` | 查询、下载、取消下载或修复声音模型 |
 | `open_media_material_list` | 搜索并分页浏览水印、配乐、片头片尾和转场音效素材 |
 | `open_media_material_add` | 添加内置素材，片头片尾支持前插／后插及编辑标题，转场音效支持指定切点与重音位置 |
-| `open_media_motion_style_list` | 搜索 15 类风格成片方案，返回配色、标签和可编辑二维包装能力说明 |
-| `open_media_motion_compose` | 按分镜组织工程已有图片／视频，生成背景、装饰、文字、入退场动画与可选配乐，支持预检和整体撤销 |
+| `open_media_motion_style_list` | 搜索 15 类素材二创风格，返回配色、标签和二维效果能力说明 |
+| `open_media_motion_clip_generate` | 将工程已有图片／视频二创为真实视频素材，默认回到项目素材，可选插入一个普通视频片段 |
 | `open_media_export_start` | 按项目尺寸导出 MP4、WebM、MOV 或 GIF |
 | `open_media_video_generation_status` | 查询平台支持、视频模型大小、下载和校验状态 |
 | `open_media_video_model_download` | 经用户同意许可后按需下载视频模型与运行时，支持统一进度查询和取消 |
@@ -381,15 +381,17 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"open_media_material_add","arguments":{"kind":"video_segment","id":"returned-material-id","placement":"prepend","heading":"我的创作日记","subheading":"从录制到成片","expectedRevision":11}}}
 ```
 
-## 风格成片
+## 素材二创
 
-先用 `open_media_asset_list` 获取当前工程的素材 ID，再查询风格。`open_media_motion_style_list` 同步返回 `items`、`total`、`count` 和 `capabilities`；可按名称、标签、说明或 ID 搜索。内置纸感手绘、等轴卡片、扁平跃动、极简线描、柔光立体、柔形律动、知识贴纸、科技视窗、杂志拼贴、极光玻璃、几何构成、霓虹复古、像素节拍、流彩色团、活力花字，共 15 类。
+先在当前工程导入图片或视频，再将这些素材按风格生成一个真实视频文件。生成的视频默认出现在项目素材中，随后可以作为普通片段加入时间线，继续裁剪、调整速度、叠加字幕、衔接转场或与其他素材融合。整个过程不新建或切换当前工程，也不会将内部合成图层展开成多条工程轨道。
+
+用 `open_media_asset_list` 获取当前工程素材 ID，再查询风格。`open_media_motion_style_list` 同步返回 `items`、`total`、`count` 和 `capabilities`；可按名称、标签、说明或 ID 搜索。内置纸感手绘、等轴卡片、扁平跃动、极简线描、柔光立体、柔形律动、知识贴纸、科技视窗、杂志拼贴、极光玻璃、几何构成、霓虹复古、像素节拍、流彩色团、活力花字，共 15 类。
 
 ```json
 {"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"open_media_motion_style_list","arguments":{"search":"科技"}}}
 ```
 
-`open_media_motion_compose` 按 `scenes` 顺序创建 1–16 个场景，每场引用工程中的图片或视频。`title` 和 `heading` 最多 120 字，`caption` 最多 240 字，`duration` 默认 4 秒，可设置 2–12 秒；视频可用 `trimIn` 选择源起点。剩余源视频不足时缩短场景并返回 `warnings`。可以指定 `accent`、`background`、`textColor` 六位十六进制颜色，选择 `calm`、`balanced`、`energetic` 节奏，并引用工程内的 `musicAssetId` 音频和 `logoAssetId` 图片。
+`open_media_motion_clip_generate` 按 `scenes` 顺序合成 1–16 个场景，每场引用工程中的图片或视频。`title` 和 `heading` 最多 120 字，`caption` 最多 240 字，`duration` 默认 4 秒，可设置 2–12 秒；视频可用 `trimIn` 选择源起点。剩余源视频不足时缩短场景并返回 `warnings`。可以指定 `accent`、`background`、`textColor` 六位十六进制颜色，选择 `calm`、`balanced`、`energetic` 节奏，并引用工程内的 `musicAssetId` 音频和 `logoAssetId` 图片。
 
 ```json
 {
@@ -397,7 +399,7 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
   "id": 41,
   "method": "tools/call",
   "params": {
-    "name": "open_media_motion_compose",
+    "name": "open_media_motion_clip_generate",
     "arguments": {
       "styleId": "tech-hud",
       "title": "探索日常中的科学",
@@ -405,7 +407,7 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
         { "assetId": "imported-video-id", "heading": "从观察开始", "caption": "发现一个值得追问的问题", "trimIn": 2, "duration": 5 },
         { "assetId": "imported-image-id", "heading": "理解背后的原理", "caption": "用清晰的画面解释关键步骤", "duration": 4 }
       ],
-      "placement": "append",
+      "destination": "assets",
       "tempo": "balanced",
       "accent": "#5BE2DA",
       "musicAssetId": "imported-audio-id",
@@ -419,11 +421,23 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 }
 ```
 
-示例 ID 需替换为当前工程查询结果。`dryRun: true` 只检查素材、时长和编排计划；确认计划后，将其改为 `false` 或省略。预检和正式编排都会立即返回 `jobId`，用 `open_media_job_get` 查询，完成后读取 `result`；正式结果包含 `clipIds`、`trackIds`、`sceneCount`、`start`、`duration`、`warnings`。任务可取消，失败或取消不会留下部分时间线。
+示例 ID 需替换为当前工程查询结果。`dryRun: true` 只检查素材、场景时长和目的地，不编码视频、不导入文件、不修改工程；确认计划后，将其改为 `false` 或省略，再次调用生成。预检和正式生成都会立即返回 `jobId`，使用以下调用查询，直到 `state` 为 `completed` 后读取 `result`；`failed` 时读取 `errorDetails`，`cancelled` 表示没有提交生成结果。
 
-生成尺寸沿用当前工程。`append` 追加到工程结尾，`prepend` 插到开头并顺延原时间线和标记，保留原素材与剪辑内容。成功后一次记入撤销历史；生成的文字、素材、动画关键帧与入退场动画可继续通过界面或现有片段工具编辑。准备期间若切换工程或工程版本变化，不写回旧结果。
+```json
+{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"open_media_job_get","arguments":{"id":"returned-job-id"}}}
+```
 
-这些风格使用二维背景、装饰图层和关键帧呈现动态包装。立体、玻璃和流彩风格的能力边界会在目录的 `note` 中说明；不包含真实三维建模、流体模拟、逐帧折射或用户素材的轮廓变形。
+正式结果包含 `assetId`、`sourceAssetIds`、`styleId`、`duration`、`width`、`height`、`destination`、`renderer` 和 `warnings`。视频经过实际编码，桌面端生成 MP4，网页端生成 WebM；`renderer` 区分原生编码与网页编码。没有本地文件路径或临时工程对象。收到 `assetId` 后，可读取最新工程版本并通过普通片段工具将视频加入当前工程中未锁定的视频轨道：
+
+```json
+{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"open_media_clip_add","arguments":{"assetId":"returned-video-asset-id","trackId":"current-video-track-id","options":{"start":12,"name":"科技视窗片段"},"expectedProjectId":"current-project-id","expectedRevision":13}}}
+```
+
+也可以在生成时指定 `destination: "timeline"`，并提供 `insert: {"trackId":"current-video-track-id","start":12}`；`insert` 仅适用于此目的地。省略 `start` 时使用当前工程结尾，省略 `trackId` 时新建一个普通视频轨道。成功后只插入一个编码视频片段，结果额外返回 `clipId` 和 `trackId`；默认 `destination: "assets"` 完全不改变原有轨道和时间线标记。
+
+尺寸与帧率沿用当前工程。素材加入及可选插入共用一个撤销步骤，准备或编码期间切换工程、修改版本、取消任务或生成失败均不会写入部分结果。标题、背景、装饰和入退场动画已经合成到视频内，需要改变这些内容时可使用原素材重新生成；视频本身仍可继续普通剪辑。
+
+这些风格使用二维背景、装饰图层和关键帧呈现动态效果。立体、玻璃和流彩风格的能力边界会在目录的 `note` 中说明；不包含真实三维建模、流体模拟、逐帧折射或用户素材的轮廓变形。
 
 ## 文件路径和导出
 

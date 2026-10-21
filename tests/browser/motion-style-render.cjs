@@ -29,10 +29,11 @@ async function main() {
       const { MOTION_STYLES } = await import('/src/core/motion-style-catalog.ts')
       const { renderMotionStyleArt } = await import('/src/core/motion-style-art.ts')
       const { composeMotionProject } = await import('/src/core/motion-style-composer.ts')
-      const { createProject } = await import('/src/core/project.ts')
+      const { createProject, createClip, validateProject } = await import('/src/core/project.ts')
       const { importMediaFile } = await import('/src/core/media-import.ts')
       const { TimelinePreview, drawTextClip } = await import('/src/core/preview.ts')
-      const { exportTimelineWebM } = await import('/src/core/browser-export.ts')
+      const { prepareEditorTool } = await import('/src/core/editor-tool-service.ts')
+      const { exportProjectFile, importProjectFile } = await import('/src/core/project-file.ts')
       const files = new Map()
       const importBlob = async (blob, name) => { const asset = await importMediaFile(new File([blob], name, { type: blob.type })); files.set(asset.id, blob); return asset }
       const image = document.createElement('canvas'); image.width = 640; image.height = 360
@@ -42,7 +43,7 @@ async function main() {
       const still = await importBlob(await new Promise(resolve => image.toBlob(resolve,'image/png')), 'source-image.png')
       const video = await importBlob(await (await fetch('/__source.webm')).blob(),'source.webm')
       const sound = await importBlob(await (await fetch('/__music.wav')).blob(),'music.wav')
-      const project = createProject('风格成片验证', {width:640,height:360,fps:24}); project.assets.push(still,video,sound)
+      let project = createProject('效果片段验证', {width:640,height:360,fps:24}); project.assets.push(still,video,sound)
       const stats = canvas => {
         const pixels = canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data
         let hash = 2166136261, luma = 0, visible = 0
@@ -53,7 +54,7 @@ async function main() {
       for(const style of MOTION_STYLES){
         const art=await renderMotionStyleArt(style.id,{},640,360)
         const resources={background:await importBlob(art.background,`${style.id}-background.png`),decoration:await importBlob(art.decoration,`${style.id}-decoration.png`)}
-        const options={styleId:style.id,scenes:[{assetId:still.id,heading:'创意，从此动起来',caption:'素材 · 文字 · 节奏',duration:2},{assetId:video.id,heading:'每一个画面，保持可编辑',duration:2}],musicAssetId:sound.id}
+        const options={styleId:style.id,scenes:[{assetId:still.id,heading:'创意，从此动起来',caption:'素材 · 文字 · 节奏',duration:2},{assetId:video.id,heading:'生成效果片段，继续剪辑',duration:2}],musicAssetId:sound.id}
         const composed=composeMotionProject(project,options,resources).project
         const cell=document.createElement('div'), canvas=document.createElement('canvas'),label=document.createElement('p');canvas.width=640;canvas.height=360;label.textContent=style.name;cell.append(canvas,label);document.querySelector('.grid').append(cell)
         const preview=new TimelinePreview(canvas,composed);await preview.prepare();const samples=[]
@@ -67,8 +68,32 @@ async function main() {
         if(style.id==='neon-retro')exportProject=composed
       }
       const base64 = async blob => new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.readAsDataURL(blob)})
-      const output=await exportTimelineWebM(exportProject,{fps:24,videoBitsPerSecond:1800000})
+      // Exercise the public shared tool with an occupied, locked source timeline.
+      // Only the returned encoded video belongs in the live project, not the
+      // internal composition's artwork or text tracks.
+      const sourceTrack=project.tracks.find(track=>track.kind==='video')
+      sourceTrack.clips.push(createClip(video,project,{trimOut:2}));sourceTrack.locked=true
+      project.markers=[{id:'existing-marker',time:1,label:'Existing edit',kind:'chapter',color:'#33aaff'}]
+      project=validateProject(project,{trusted:true})
+      const before=JSON.stringify(project),progress=[]
+      const prepared=await prepareEditorTool('open_media_motion_clip_generate',{
+        styleId:'neon-retro',title:'效果片段',scenes:[{assetId:still.id,heading:'创意，从此动起来',duration:2},{assetId:video.id,heading:'生成后继续剪辑',duration:2}],musicAssetId:sound.id,
+        expectedRevision:9,expectedProjectId:project.id,
+      },{project,revision:9,blobs:files,source:'mcp',signal:new AbortController().signal,onProgress:update=>progress.push(update),assertCurrent:()=>{if(JSON.stringify(project)!==before)throw new Error('Original project was mutated')}})
+      if(!prepared.project||prepared.assets?.length!==1||prepared.project.assets.length!==project.assets.length+1)throw new Error('Generation must add exactly one actual video asset')
+      if(JSON.stringify(prepared.project.tracks)!==JSON.stringify(project.tracks)||JSON.stringify(prepared.project.markers)!==JSON.stringify(project.markers))throw new Error('Asset-only generation changed original timeline')
+      const generated=prepared.assets[0]
+      if(generated.asset.kind!=='video'||!generated.blob?.size||prepared.data.assetId!==generated.asset.id)throw new Error('Missing encoded video result')
+      if(JSON.stringify(prepared.data).includes('blob:'))throw new Error('MCP result leaked frontend-only URLs')
+      await prepared.accept?.()
+      const output=generated.blob
       await window.saveArtifact('motion-export.webm',await base64(output))
+      const archive=await exportProjectFile(prepared.project,{blobs:new Map([...files,[generated.asset.id,output]])})
+      const reopened=await importProjectFile(archive)
+      const recovered=reopened.project.assets.find(asset=>asset.id===generated.asset.id)
+      const decoded=await importMediaFile(new File([reopened.blobs.get(recovered.id)],recovered.name,{type:recovered.mime}))
+      if(decoded.width!==640||decoded.height!==360||Math.abs(decoded.duration-4)>.3)throw new Error('Generated video did not survive save/reopen')
+      URL.revokeObjectURL(decoded.url);reopened.revoke()
       const nativeProject=structuredClone(exportProject),textAssets={}
       for(const asset of nativeProject.assets)asset.nativePath=await window.saveArtifact(`${asset.id}-${asset.name}`,await base64(files.get(asset.id)))
       for(const track of nativeProject.tracks.filter(track=>track.kind==='text'))for(const clip of track.clips){
@@ -77,7 +102,7 @@ async function main() {
         textAssets[clip.id]={id:`text-${clip.id}`,name:`${clip.id}.png`,kind:'image',url:nativePath,nativePath,mime:'image/png',size:blob.size,width:canvas.width,height:canvas.height,duration:0}
       }
       await window.saveArtifact('native-project.json',await base64(new Blob([JSON.stringify({project:nativeProject,textAssets})],{type:'application/json'})))
-      return {checks,outputBytes:output.size}
+      return {checks,outputBytes:output.size,generated:prepared.data,progress,savedProjectBytes:archive.size}
     })
     assert.equal(result.checks.length,15)
     assert.equal(new Set(result.checks.map(row=>row.samples[1].hash)).size,15,'15 distinct compositions')
@@ -98,7 +123,7 @@ async function main() {
     assert.equal(frames[0].length,64*36*3);assert.equal(frames[1].length,64*36*3);assert(!frames[0].equals(frames[1]))
     assert.deepEqual(errors,[])
     fs.writeFileSync(path.join(directory,'report.json'),JSON.stringify({...result,streams:probe.streams.map(s=>({codec:s.codec_name,type:s.codec_type,width:s.width,height:s.height})),errors},null,2))
-    console.log(`PASS 15 distinct styles, landscape/portrait compositing, animated pixels, real video+music export and complete decode. Artifacts: ${directory}`)
+    console.log(`PASS 15 styles, landscape/portrait motion, shared MCP tool encoding to one project asset, locked timeline preserved, save/reopen, video+music and complete decode. Artifacts: ${directory}`)
   } finally {await browser?.close();await server.close()}
 }
 main().catch(error=>{console.error(error);process.exitCode=1})

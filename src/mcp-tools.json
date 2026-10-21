@@ -7107,7 +7107,7 @@
   },
   {
     "name": "open_media_motion_style_list",
-    "description": "查询风格成片的 15 类可编辑二维包装风格，返回 items、total、count、配色、标签和能力说明。search 可按名称、说明、标签或风格 ID 过滤。使用当前工程素材组合背景、装饰、文字、关键帧和入退场动画，不生成真实三维模型、流体模拟或素材轮廓变形。\n执行方式：同步返回最终结果，只读查询。",
+    "description": "查询素材二创的 15 类二维效果风格，返回 items、total、count、配色、标签和能力说明。search 可按名称、说明、标签或风格 ID 过滤。以当前工程素材生成真实视频片段后回到项目素材继续剪辑；不生成真实三维模型、流体模拟或素材轮廓变形。\n执行方式：同步返回最终结果，只读查询。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -7143,8 +7143,8 @@
     }
   },
   {
-    "name": "open_media_motion_compose",
-    "description": "使用当前工程已导入的图片或视频，按指定风格编排可编辑的多轨成片：背景、装饰、素材、标题说明、关键帧、入退场动画及可选配乐与 Logo。按 scenes 顺序排列，尺寸沿用当前工程；默认 append 追加，prepend 前插并顺延原时间线和标记，不新建或替换工程。每场默认 4 秒，可设置 2–12 秒；视频可从 trimIn 开始，剩余不足时缩短场景并返回 warnings，不自动循环补足。dryRun=true 只预检并返回编排计划，不导入装饰或修改工程；正式成功只产生一次撤销记录，返回 clipIds、trackIds、sceneCount、start、duration、warnings。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可通过 open_media_job_cancel({id:jobId}) 取消；失败或取消不会写入部分时间线。",
+    "name": "open_media_motion_clip_generate",
+    "description": "对当前工程已导入的图片或视频进行素材二创，按风格与场景顺序真实编码为一个视频素材，包含背景、装饰、文案、入退场动画及可选配乐与 Logo。尺寸与帧率沿用当前工程。默认 destination=assets 只加入项目素材，原有轨道保持不变；destination=timeline 可通过 insert 指定未锁定的视频轨道与 start，默认放在工程结尾，未指定轨道时新建一个普通视频轨道。成功只新增一个视频素材及可选的一个普通视频片段；不会把内部合成图层展开到工程，不新建或切换工程。每场默认 4 秒，可设置 2–12 秒；视频剩余不足时缩短场景并返回 warnings。dryRun=true 只预检并返回场景计划与目的地，不编码、不导入、不修改工程。完成结果含 assetId、styleId、sourceAssetIds、duration、width、height、destination、renderer，插入时间线时含 clipId 与 trackId。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可通过 open_media_job_cancel({id:jobId}) 取消；生成失败、取消或工程变化不会写入部分结果，成功可一次撤销。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -7212,14 +7212,6 @@
             }
           }
         },
-        "placement": {
-          "type": "string",
-          "enum": [
-            "append",
-            "prepend"
-          ],
-          "default": "append"
-        },
         "title": {
           "type": "string",
           "maxLength": 120
@@ -7240,7 +7232,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 160,
-          "description": "当前工程中的音频素材 ID，添加到配乐轨道。"
+          "description": "当前工程中的音频素材 ID，用作效果视频配乐（合成在生成的视频内）。"
         },
         "musicVolume": {
           "type": "number",
@@ -7277,6 +7269,33 @@
           "minLength": 1,
           "maxLength": 200,
           "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
+        },
+        "destination": {
+          "type": "string",
+          "enum": [
+            "assets",
+            "timeline"
+          ],
+          "default": "assets",
+          "description": "默认只将编码视频加入项目素材；timeline 额外插入一个普通视频片段。"
+        },
+        "insert": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "仅适用于 destination=timeline；start 默认当前工程结尾。",
+          "properties": {
+            "trackId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "description": "当前工程中未锁定的视频轨道；省略时新建一个普通视频轨道。"
+            },
+            "start": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 86400
+            }
+          }
         }
       }
     },

@@ -23,6 +23,7 @@ pub mod clip_animation;
 pub mod audio_tools;
 pub mod audio_tools_asr;
 pub mod preview_tools;
+pub mod motion_clip;
 #[cfg(any(feature = "desktop", test))]
 pub mod image_clipboard;
 pub mod speech;
@@ -90,6 +91,7 @@ mod desktop {
         asset_tools: crate::asset_tools::AssetTools,
         audio_tools: crate::audio_tools::AudioToolsManager,
         project_compression: crate::project_compression::CompressionManager,
+        motion_clips: crate::motion_clip::MotionClipManager,
         ai: AiService,
         capture: Arc<Mutex<CaptureManager>>,
         capture_starts: Arc<CaptureStartCancellation>,
@@ -150,6 +152,42 @@ mod desktop {
         require_mcp_window(&window)?;
         let state = state.inner().clone();
         blocking(move || crate::preview_tools::discard(&state.store, &state.jobs, &id)).await
+    }
+    #[tauri::command]
+    pub async fn create_motion_clip_scope(window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<String> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.motion_clips.create_scope(&state.store)).await
+    }
+    #[tauri::command]
+    pub async fn import_motion_clip_asset(scope_id: String, bytes: Vec<u8>, name: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Asset> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.motion_clips.import_asset(&state.store, &state.runtime()?, &scope_id, &bytes, &name)).await
+    }
+    #[tauri::command]
+    pub async fn begin_motion_clip_render(spec: Value, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<MediaJob> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.motion_clips.begin(&state.store, &state.runtime()?, &state.jobs, &spec)).await
+    }
+    #[tauri::command]
+    pub async fn motion_clip_result(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Asset> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.motion_clips.result(&state.store, &state.runtime()?, &state.jobs, &id)).await
+    }
+    #[tauri::command]
+    pub async fn accept_motion_clip(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.motion_clips.accept(&state.store, &state.jobs, &id)).await
+    }
+    #[tauri::command]
+    pub async fn discard_motion_clip(id: String, window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<()> {
+        require_mcp_window(&window)?;
+        let state = state.inner().clone();
+        blocking(move || state.motion_clips.discard(&state.store, &state.jobs, &id)).await
     }
     #[tauri::command]
     pub async fn asr_status(window: tauri::WebviewWindow, state: State<'_, MediaState>) -> engine::Result<Value> {
@@ -1181,6 +1219,7 @@ mod desktop {
                     asset_tools: crate::asset_tools::AssetTools::new(&data).map_err(std::io::Error::other)?,
                     audio_tools: crate::audio_tools::AudioToolsManager::default(),
                     project_compression: crate::project_compression::CompressionManager::default(),
+                    motion_clips: crate::motion_clip::MotionClipManager::default(),
                     ai: AiService::new(&data, &resource).map_err(std::io::Error::other)?,
                     capture: Arc::new(Mutex::new(CaptureManager::default())),
                     capture_starts: Arc::new(CaptureStartCancellation::default()),
@@ -1233,6 +1272,12 @@ mod desktop {
                 begin_tool_preview,
                 tool_preview_result,
                 tool_preview_discard,
+                create_motion_clip_scope,
+                import_motion_clip_asset,
+                begin_motion_clip_render,
+                motion_clip_result,
+                accept_motion_clip,
+                discard_motion_clip,
                 asr_status,
                 asr_download,
                 asr_transcribe,

@@ -1,176 +1,225 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createProject, validateProject } from '../src/core/project.ts'
-import { prepareMotionStyleTool } from '../src/core/motion-style-service.ts'
+import { createClip, createProject, createTextClip, createTrack, MAX_ASSETS, MAX_PROJECT_DURATION, MAX_TRACKS, validateProject } from '../src/core/project.ts'
+import { prepareMotionStyleTool, planMotionClipGeneration } from '../src/core/motion-style-service.ts'
 import { isSharedEditorTool, prepareEditorTool } from '../src/core/editor-tool-service.ts'
 import { projectSourceAssets } from '../src/core/editor-assets.ts'
+import { commitHistory, createHistory, projectDuration, undoHistory } from '../src/core/timeline.ts'
 
-const tool = 'open_media_motion_compose'
-const png = () => new Blob([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])], { type: 'image/png' })
-function fixture() {
-  const project = createProject('素材风格编排', { width: 1280, height: 720 })
-  project.assets.push({ id: 'photo', name: '照片.png', kind: 'image', mime: 'image/png', url: 'blob:original-photo', width: 1200, height: 800, duration: 0, size: 2048 })
+const tool = 'open_media_motion_clip_generate'
+const png = () => new Blob([Uint8Array.from([137,80,78,71,13,10,26,10])],{type:'image/png'})
+const webm = () => new Blob([Uint8Array.from([26,69,223,163])],{type:'video/webm'})
+const image = (id,patch={}) => ({id,name:`${id}.png`,kind:'image',mime:'image/png',url:`blob:${id}`,width:1280,height:720,duration:0,size:2048,...patch})
+function fixture(size={width:1280,height:720}) {
+  const project = createProject('原始剪辑工程',size)
+  project.assets.push(image('photo'),image('unused'))
+  project.tracks[0].clips.push(createTextClip(project,{start:7,trimOut:5,text:'原字幕不参与短片渲染'}))
+  project.markers=[{id:'original-marker',time:8,label:'原章节',kind:'chapter'}]
   return project
 }
-const options = () => ({ styleId: 'flat-pop', scenes: [{ assetId: 'photo', heading: '观察细节', caption: '保留可编辑图层', duration: 4 }] })
-function context(project, controller = new AbortController()) {
-  return { project, revision: 3, source: 'gui', blobs: new Map(), signal: controller.signal, onProgress() {} }
-}
-function dependencies(overrides = {}) {
-  const calls = [], revoked = []
-  let serial = 0
-  const imported = (name, size, native = false) => ({ id: `art-${++serial}`, name, kind: 'image', mime: 'image/png', url: `blob:art-${serial}`, width: 1280, height: 720, duration: 0, size, ...(native ? { nativePath: `/media/art-${serial}.png` } : {}) })
-  return {
-    calls, revoked,
-    async renderArt(...args) { calls.push(['render', ...args]); return { background: png(), decoration: png() } },
-    isDesktop: () => false,
-    async importBrowser(file) { calls.push(['browser', file]); return imported(file.name, file.size) },
-    async importNative(bytes, name) { calls.push(['native', bytes, name]); return imported(name, bytes.byteLength, true) },
-    revokeAsset(asset) { revoked.push(asset.id) },
+const options = () => ({styleId:'flat-pop',scenes:[{assetId:'photo',heading:'观察细节',caption:'生成独立视频素材',duration:4}]})
+function context(project,controller=new AbortController()) { return {project,revision:3,source:'gui',blobs:new Map(),signal:controller.signal,onProgress(){}} }
+function dependencies(overrides={}) {
+  const calls=[],revoked=[],nativeEvents=[]
+  let serial=0,rendered
+  const deps={
+    calls,revoked,nativeEvents,
+    async renderArt(...args){calls.push(['art',...args]);return {background:png(),decoration:png()}},
+    isDesktop:()=>false,
+    async importBrowser(file){
+      const id=`generated-${++serial}`;calls.push(['import',file])
+      return image(id,{name:file.name,size:file.size,...(file.type.startsWith('video/')?{kind:'video',mime:file.type,width:rendered.width,height:rendered.height,duration:projectDuration(rendered)}:{})})
+    },
+    async renderBrowser(project,options){rendered=structuredClone(project);calls.push(['browser',rendered,options]);options.onProgress?.(.5);return webm()},
+    async renderNative(project,signal,onProgress){
+      rendered=structuredClone(project);calls.push(['native',rendered,signal]);onProgress({stage:'编码中',progress:.5,encodedFrames:48,outputTime:2})
+      return {asset:image('native-video',{kind:'video',mime:'video/mp4',width:Math.floor(project.width/2)*2,height:Math.floor(project.height/2)*2,duration:projectDuration(project),nativePath:'/generated/clip.mp4'}),accept:async()=>{nativeEvents.push('accept')},discard:async()=>{nativeEvents.push('discard')}}
+    },
+    revokeAsset(asset){revoked.push(asset.id)},
     ...overrides,
   }
+  return deps
 }
 
-test('catalog and dry-run are side-effect free and need no drawing or native runtime', async () => {
-  const project = fixture(), before = structuredClone(project), deps = dependencies({ renderArt() { throw Error('must not render') } })
-  const list = await prepareMotionStyleTool('open_media_motion_style_list', {}, context(project), deps)
-  assert.equal(list.data.total, 15); assert.equal(list.data.items.length, 15)
-  list.data.items[0].name = 'changed'
-  const again = await prepareMotionStyleTool('open_media_motion_style_list', {}, context(project), deps)
-  assert.notEqual(again.data.items[0].name, 'changed')
-  const prepared = await prepareMotionStyleTool(tool, { ...options(), dryRun: true, expectedRevision: 3, expectedProjectId: project.id }, context(project), deps)
-  assert.equal(prepared.data.dryRun, true); assert.equal(prepared.data.scenes.length, 1)
-  assert.equal(prepared.project, undefined); assert.equal(prepared.assets, undefined)
-  assert.deepEqual(project, before); assert.deepEqual(deps.calls, [])
+test('catalog and dry run are side-effect free; isolated scenes always start at zero',async()=>{
+  const project=fixture(),before=structuredClone(project),deps=dependencies({renderArt(){throw Error('must not render')}})
+  const list=await prepareMotionStyleTool('open_media_motion_style_list',{},context(project),deps)
+  assert.equal(list.data.total,15);list.data.items[0].name='changed'
+  assert.notEqual((await prepareMotionStyleTool('open_media_motion_style_list',{},context(project),deps)).data.items[0].name,'changed')
+  const result=await prepareMotionStyleTool(tool,{...options(),dryRun:true,expectedRevision:3,expectedProjectId:project.id},context(project),deps)
+  assert.equal(result.data.start,0);assert.equal(result.data.scenes[0].start,0);assert.equal(result.data.duration,4)
+  assert.equal(result.data.destination,'assets');assert.equal(result.data.placement,undefined)
+  assert.equal(result.data.width,1280);assert.equal(result.data.height,720);assert.deepEqual(result.data.sourceAssetIds,['photo'])
+  assert.equal(result.project,undefined);assert.equal(result.assets,undefined);assert.equal(result.data.dryRun,true)
+  assert.deepEqual(project,before);assert.deepEqual(deps.calls,[])
 })
 
-test('invalid input, project drift and stale revisions reject before artwork is created', async () => {
-  const project = fixture(), before = structuredClone(project), deps = dependencies()
-  for (const args of [
-    { ...options(), styleId: 'unknown-style' },
-    { ...options(), scenes: [{ assetId: 'missing', duration: 4 }] },
-    { ...options(), dryRun: 'yes' },
-    { ...options(), arbitraryCode: 'ignored' },
-    { ...options(), expectedProjectId: 'other-project' },
-    { ...options(), expectedRevision: 2 },
-  ]) await assert.rejects(prepareMotionStyleTool(tool, args, context(project), deps))
-  await assert.rejects(prepareMotionStyleTool(tool, options(), { ...context(project), assertCurrent() { throw Error('project switched') } }, deps), /project switched/)
-  assert.deepEqual(project, before); assert.deepEqual(deps.calls, [])
+test('asset generation is independent of locked/full/long existing timelines and reserves only one final asset',()=>{
+  const project=fixture()
+  project.tracks=Array.from({length:MAX_TRACKS},()=>({...createTrack('text'),locked:true}))
+  project.tracks[0].clips.push(createTextClip(project,{start:MAX_PROJECT_DURATION-4,trimOut:4}))
+  project.assets.push(...Array.from({length:MAX_ASSETS-1-project.assets.length},(_,index)=>image(`extra-${index}`)))
+  const plan=planMotionClipGeneration(project,options())
+  assert.equal(plan.start,0);assert.equal(plan.duration,4);assert.deepEqual(plan.warnings,[])
+  assert.throws(()=>planMotionClipGeneration(project,{...options(),destination:'timeline'}),/24 小时/)
+  project.assets.push(image('last-slot'))
+  assert.throws(()=>planMotionClipGeneration(project,options()),/1000 个素材/)
 })
 
-test('browser preparation owns both artwork blobs and returns one detached editable project', async () => {
-  const project = fixture(), before = structuredClone(project), deps = dependencies(), progress = []
-  const prepared = await prepareMotionStyleTool(tool, options(), { ...context(project), onProgress(update) { progress.push(update) } }, deps)
-  assert.deepEqual(project, before)
-  assert.equal(prepared.assets.length, 2)
-  assert.equal(deps.calls.filter(call => call[0] === 'browser').length, 2)
-  assert.equal(deps.calls.filter(call => call[0] === 'native').length, 0)
-  assert.deepEqual(deps.calls[0].slice(-2), [1280, 720])
-  for (const entry of prepared.assets) {
-    assert.equal(entry.blob.type, 'image/png')
-    assert.ok(prepared.project.assets.some(asset => asset.id === entry.asset.id))
-    assert.ok(prepared.project.tracks.some(track => track.clips.some(clip => clip.assetId === entry.asset.id)))
+test('browser rendering commits one visible ordinary video with its blob, preserving original tracks/markers and one-step undo',async()=>{
+  const project=fixture(),before=structuredClone(project),deps=dependencies(),progress=[]
+  const result=await prepareMotionStyleTool(tool,options(),{...context(project),onProgress:update=>progress.push(update)},deps)
+  assert.deepEqual(project,before);assert.deepEqual(result.project.tracks,project.tracks);assert.deepEqual(result.project.markers,project.markers)
+  assert.equal(result.project.title,project.title);assert.equal(result.project.width,1280);assert.equal(result.project.height,720)
+  assert.equal(result.project.assets.length,project.assets.length+1);assert.equal(result.assets.length,1)
+  const entry=result.assets[0]
+  assert.equal(entry.asset.kind,'video');assert.equal(entry.asset.libraryRole,undefined);assert.equal(entry.blob.type,'video/webm')
+  assert.ok(projectSourceAssets(result.project).some(asset=>asset.id===entry.asset.id))
+  assert.equal(result.data.assetId,entry.asset.id);assert.equal(result.data.renderer,'browser');assert.equal(result.data.destination,'assets')
+  assert.equal(result.selection,undefined);assert.equal(result.data.clipId,undefined)
+  const temporary=deps.calls.find(call=>call[0]==='browser')[1]
+  assert.equal(temporary.width,project.width);assert.equal(temporary.fps,project.fps);assert.equal(projectDuration(temporary),4)
+  assert(!temporary.assets.some(asset=>asset.id==='unused'))
+  assert(!temporary.tracks.flatMap(track=>track.clips).some(clip=>clip.text==='原字幕不参与短片渲染'))
+  assert(!temporary.markers.some(marker=>marker.id==='original-marker'))
+  assert.deepEqual(deps.revoked,['generated-1','generated-2'])
+  assert.equal(progress.at(-1).progress,1)
+  assert.deepEqual(undoHistory(commitHistory(createHistory(project),result.project)).present,project)
+  validateProject(result.project,{trusted:true})
+  await result.accept();await result.accept();await result.discard()
+  assert.deepEqual(deps.revoked,['generated-1','generated-2'])
+})
+
+test('timeline destination inserts exactly one ordinary video clip on a new track at playhead or project end',async()=>{
+  for(const start of [undefined,2]){
+    const project=fixture(),deps=dependencies()
+    const input={...options(),destination:'timeline',...(start===undefined?{}:{insert:{start}})}
+    const plan=planMotionClipGeneration(project,input)
+    assert.deepEqual(plan.insert,{start:start??12})
+    const result=await prepareMotionStyleTool(tool,input,context(project),deps)
+    assert.equal(result.project.tracks.length,project.tracks.length+1)
+    assert.deepEqual(result.project.tracks.slice(1),project.tracks)
+    const track=result.project.tracks[0]
+    assert.equal(track.kind,'video');assert.equal(track.clips.length,1)
+    assert.equal(track.clips[0].start,start??12);assert.equal(track.clips[0].assetId,result.data.assetId)
+    assert.deepEqual(result.selection,{trackId:track.id,clipId:track.clips[0].id})
+    assert.equal(result.data.start,start??12);assert.equal(result.data.duration,4)
+    assert.deepEqual(result.project.markers,project.markers)
+    await result.discard()
   }
-  assert.ok(prepared.project.tracks.some(track => track.clips.some(clip => clip.text === '观察细节')))
-  assert.equal(prepared.data.sceneCount, 1); assert.equal(prepared.data.dryRun, false)
-  assert.deepEqual(prepared.data.selection, prepared.selection)
-  validateProject(prepared.project, { trusted: true })
-  assert.equal(progress.at(-1).progress, 1)
-  await prepared.accept()
-  await prepared.discard()
-  assert.deepEqual(deps.revoked, [])
 })
 
-test('native preparation sends PNG bytes through native import and preserves native paths', async () => {
-  const project = fixture(), deps = dependencies({ isDesktop: () => true })
-  const prepared = await prepareMotionStyleTool(tool, options(), context(project), deps)
-  assert.equal(deps.calls.filter(call => call[0] === 'browser').length, 0)
-  const imports = deps.calls.filter(call => call[0] === 'native')
-  assert.equal(imports.length, 2)
-  assert.ok(imports.every(call => call[1] instanceof Uint8Array && call[2].endsWith('.png')))
-  assert.ok(prepared.assets.every(({ asset }) => asset.nativePath))
-  await prepared.discard()
-  await prepared.discard()
-  assert.deepEqual(deps.revoked, ['art-1', 'art-2'])
+test('explicit destination track is validated before rendering and never shifts existing clips',async()=>{
+  const project=fixture(),track=project.tracks[1]
+  track.clips.push(createClip(project.assets[0],project,{start:5,trimOut:5}))
+  const input={...options(),destination:'timeline',insert:{trackId:track.id,start:1}}
+  const result=await prepareMotionStyleTool(tool,input,context(project),dependencies())
+  assert.equal(result.project.tracks.length,project.tracks.length)
+  assert.deepEqual(result.project.tracks[1].clips[0],track.clips[0]);assert.equal(result.project.tracks[1].clips.length,2)
+  for(const insert of [{trackId:track.id,start:6},{trackId:'missing'},{trackId:project.tracks[0].id},{start:NaN},{start:'1'},{start:-1},{start:1,extra:1}])assert.throws(()=>planMotionClipGeneration(project,{...options(),destination:'timeline',insert}))
+  track.locked=true
+  assert.throws(()=>planMotionClipGeneration(project,input),/解锁/)
+  assert.doesNotThrow(()=>planMotionClipGeneration(project,options()))
+  await result.discard()
 })
 
-test('generated artwork stays in its own library category after save data is reloaded', async () => {
-  const project = fixture(), prepared = await prepareMotionStyleTool(tool, options(), context(project), dependencies())
-  const reopened = validateProject(JSON.parse(JSON.stringify(prepared.project)), { trusted: true })
-  assert.ok(prepared.assets.every(({ asset }) => asset.libraryRole === 'motion-style'))
-  assert.deepEqual(reopened.assets.filter(asset => asset.libraryRole === 'motion-style').map(asset => asset.id), prepared.assets.map(({ asset }) => asset.id))
-  assert.deepEqual(projectSourceAssets(prepared.project).map(asset => asset.id), ['photo'])
-  assert.deepEqual(projectSourceAssets(reopened).map(asset => asset.id), ['photo'])
-  assert.equal(reopened.assets.find(asset => asset.id === 'photo').libraryRole, undefined)
-  await prepared.discard()
+test('native render owns only the final file and accepts at most once; odd project dimensions stay unchanged',async()=>{
+  const project=fixture({width:1281,height:721}),deps=dependencies({isDesktop:()=>true})
+  const result=await prepareMotionStyleTool(tool,options(),context(project),deps)
+  assert.equal(deps.calls.filter(call=>call[0]==='import').length,2)
+  assert.equal(result.assets.length,1);assert.equal(result.assets[0].blob,undefined)
+  assert.equal(result.assets[0].asset.nativePath,'/generated/clip.mp4')
+  assert.equal(result.data.renderer,'native');assert.equal(result.data.width,1280);assert.equal(result.data.height,720)
+  assert.equal(result.project.width,1281);assert.equal(result.project.height,721)
+  assert.deepEqual(deps.revoked,['generated-1','generated-2'])
+  await Promise.all([result.accept(),result.accept()]);await result.discard()
+  assert.deepEqual(deps.nativeEvents,['accept'])
 })
 
-test('pre-cancelled and cancelled artwork generation never import assets or change the project', async () => {
-  const project = fixture(), before = structuredClone(project), controller = new AbortController(), deps = dependencies()
-  controller.abort()
-  await assert.rejects(prepareMotionStyleTool(tool, options(), context(project, controller), deps), { name: 'AbortError' })
-  assert.deepEqual(deps.calls, [])
-  const during = new AbortController()
-  deps.renderArt = async () => { during.abort(); return { background: png(), decoration: png() } }
-  await assert.rejects(prepareMotionStyleTool(tool, options(), context(project, during), deps), { name: 'AbortError' })
-  assert.deepEqual(deps.calls, []); assert.deepEqual(deps.revoked, []); assert.deepEqual(project, before)
+test('current active compressed source is rendered without materializing original or unrelated assets',async()=>{
+  const project=fixture(),video=image('source',{kind:'video',mime:'video/mp4',duration:10,nativePath:'/source/large-original.mp4'})
+  project.assets.push(video,image('working',{kind:'video',mime:'video/mp4',duration:10,nativePath:'/working/small.mp4',compression:{originalAssetId:'source',mode:'quality',quality:'balanced',active:true,createdAt:new Date().toISOString()}}))
+  const deps=dependencies({isDesktop:()=>true}),before=structuredClone(project)
+  const result=await prepareMotionStyleTool(tool,{...options(),scenes:[{assetId:'source',duration:4}]},context(project),deps)
+  const temporary=deps.calls.find(call=>call[0]==='native')[1]
+  assert.deepEqual(result.data.sourceAssetIds,['working'])
+  assert.deepEqual(temporary.assets.filter(asset=>!asset.id.startsWith('generated-')).map(asset=>asset.id),['working'])
+  assert.equal(temporary.assets.find(asset=>asset.id==='working').compression,undefined)
+  assert.deepEqual(project,before)
+  await result.discard();assert.deepEqual(deps.nativeEvents,['discard'])
 })
 
-test('late import completion after cancellation is reclaimed instead of leaking its object URL', async () => {
-  const project = fixture(), before = structuredClone(project), controller = new AbortController(), deps = dependencies()
-  const importBrowser = deps.importBrowser
-  deps.importBrowser = async file => { const asset = await importBrowser(file); controller.abort(); return asset }
-  await assert.rejects(prepareMotionStyleTool(tool, options(), context(project, controller), deps), { name: 'AbortError' })
-  assert.deepEqual(deps.revoked, ['art-1'])
-  assert.equal(deps.calls.filter(call => call[0] === 'browser').length, 1)
-  assert.deepEqual(project, before)
+test('unknown options, old placement, invalid target, revision drift and project switch fail before drawing',async()=>{
+  const project=fixture(),before=structuredClone(project),deps=dependencies()
+  for(const patch of [{styleId:'missing'},{scenes:[{assetId:'missing'}]},{placement:'append'},{destination:'replace'},{insert:{start:0}},{dryRun:'yes'},{unknown:true},{expectedRevision:2},{expectedProjectId:'different'}])await assert.rejects(prepareMotionStyleTool(tool,{...options(),...patch},context(project),deps))
+  await assert.rejects(prepareMotionStyleTool(tool,options(),{...context(project),assertCurrent(){throw Error('project changed')}},deps),/project changed/)
+  await assert.rejects(prepareMotionStyleTool('open_media_motion_compose',options(),context(project),deps),/未知/)
+  assert.deepEqual(project,before);assert.deepEqual(deps.calls,[])
 })
 
-test('partial import failure and revision drift reclaim all previously owned artwork', async () => {
-  const project = fixture(), before = structuredClone(project), deps = dependencies()
-  const importBrowser = deps.importBrowser
-  let count = 0
-  deps.importBrowser = async file => { if (++count === 2) throw Error('cannot decode decoration'); return importBrowser(file) }
-  await assert.rejects(prepareMotionStyleTool(tool, options(), context(project), deps), /cannot decode decoration/)
-  assert.deepEqual(deps.revoked, ['art-1'])
-  const driftDeps = dependencies(), original = driftDeps.importBrowser
-  let changed = false
-  driftDeps.importBrowser = async file => { const asset = await original(file); changed = true; return asset }
-  await assert.rejects(prepareMotionStyleTool(tool, options(), { ...context(project), assertCurrent() { if (changed) throw Error('project changed') } }, driftDeps), /project changed/)
-  assert.deepEqual(driftDeps.revoked, ['art-1']); assert.deepEqual(project, before)
+test('cancellation before drawing, during drawing and during partial art import cleans all owned URLs',async()=>{
+  const project=fixture(),controller=new AbortController(),deps=dependencies()
+  controller.abort();await assert.rejects(prepareMotionStyleTool(tool,options(),context(project,controller),deps),{name:'AbortError'})
+  assert.deepEqual(deps.calls,[])
+  const duringArt=new AbortController(),artDeps=dependencies({async renderArt(){duringArt.abort();return {background:png(),decoration:png()}}})
+  await assert.rejects(prepareMotionStyleTool(tool,options(),context(project,duringArt),artDeps),{name:'AbortError'})
+  assert.deepEqual(artDeps.revoked,[])
+  const duringImport=new AbortController(),importDeps=dependencies(),importer=importDeps.importBrowser
+  importDeps.importBrowser=async file=>{const asset=await importer(file);duringImport.abort();return asset}
+  await assert.rejects(prepareMotionStyleTool(tool,options(),context(project,duringImport),importDeps),{name:'AbortError'})
+  assert.deepEqual(importDeps.revoked,['generated-1'])
 })
 
-test('invalid artwork or metadata cannot prepare a malformed project', async () => {
-  const project = fixture(), before = structuredClone(project)
-  const empty = dependencies({ async renderArt() { return { background: new Blob([], { type: 'image/png' }), decoration: png() } } })
-  await assert.rejects(prepareMotionStyleTool(tool, options(), context(project), empty), /有效图片/)
-  assert.equal(empty.calls.length, 0)
-  const invalid = dependencies(), importer = invalid.importBrowser
-  invalid.importBrowser = async file => ({ ...await importer(file), width: 0 })
-  await assert.rejects(prepareMotionStyleTool(tool, options(), context(project), invalid), /导入失败/)
-  assert.deepEqual(invalid.revoked, ['art-1']); assert.deepEqual(project, before)
+test('cancelled native render completion and current-project drift discard final file and temporary art without mutation',async()=>{
+  for(const reason of ['cancel','project','revision']){
+    const project=fixture(),before=structuredClone(project),controller=new AbortController(),deps=dependencies({isDesktop:()=>true}),renderer=deps.renderNative
+    let changed=false
+    deps.renderNative=async(...args)=>{const output=await renderer(...args);if(reason==='cancel')controller.abort();else changed=true;return output}
+    const ctx={...context(project,controller),assertCurrent(){if(changed)throw Error(`${reason} changed`)}}
+    await assert.rejects(prepareMotionStyleTool(tool,options(),ctx,deps))
+    assert.deepEqual(deps.nativeEvents,['discard']);assert.deepEqual(deps.revoked,['generated-1','generated-2']);assert.deepEqual(project,before)
+  }
 })
 
-test('host rejection discards all art URLs, including distinct blob source URLs', async () => {
-  const project = fixture(), deps = dependencies(), importer = deps.importBrowser
-  const sourceUrls = [], originalRevoke = URL.revokeObjectURL
-  deps.importBrowser = async file => ({ ...await importer(file), sourceUrl: URL.createObjectURL(png()) })
-  URL.revokeObjectURL = url => { sourceUrls.push(url); originalRevoke.call(URL, url) }
-  try {
-    const prepared = await prepareMotionStyleTool(tool, options(), context(project), deps)
-    await prepared.discard(); await prepared.discard()
-    assert.deepEqual(deps.revoked, ['art-1', 'art-2'])
-    assert.equal(sourceUrls.length, 2)
-    assert.deepEqual(sourceUrls, prepared.assets.map(({ asset }) => asset.sourceUrl))
-  } finally { URL.revokeObjectURL = originalRevoke }
+test('browser encode cancellation never imports its video; late video decode cancellation reclaims all three URLs',async()=>{
+  const project=fixture(),controller=new AbortController(),deps=dependencies(),renderer=deps.renderBrowser
+  deps.renderBrowser=async(...args)=>{const result=await renderer(...args);controller.abort();return result}
+  await assert.rejects(prepareMotionStyleTool(tool,options(),context(project,controller),deps),{name:'AbortError'})
+  assert.equal(deps.calls.filter(call=>call[0]==='import').length,2);assert.deepEqual(deps.revoked,['generated-1','generated-2'])
+  const late=new AbortController(),lateDeps=dependencies(),importer=lateDeps.importBrowser
+  lateDeps.importBrowser=async file=>{const asset=await importer(file);if(file.type.startsWith('video/'))late.abort();return asset}
+  await assert.rejects(prepareMotionStyleTool(tool,options(),context(project,late),lateDeps),{name:'AbortError'})
+  assert.deepEqual(lateDeps.revoked,['generated-1','generated-2','generated-3'])
 })
 
-test('shared GUI runner advertises the feature and validates its published arguments before work', async () => {
-  const project = fixture()
-  assert.equal(isSharedEditorTool(tool), true)
-  assert.equal(isSharedEditorTool('open_media_motion_style_list'), true)
-  const prepared = await prepareEditorTool(tool, { ...options(), dryRun: true, expectedRevision: 3 }, context(project))
-  assert.equal(prepared.project, undefined); assert.equal(prepared.data.dryRun, true)
-  await assert.rejects(prepareEditorTool(tool, { ...options(), dryRun: true, expectedRevision: 2 }, context(project)), /revision/)
-  await assert.rejects(prepareEditorTool(tool, { ...options(), dryRun: true, arbitraryCode: 'must reject' }, context(project)))
+test('encoder, decoding and malformed/truncated final output failures reclaim resources',async()=>{
+  const project=fixture(),before=structuredClone(project)
+  const encode=dependencies({async renderBrowser(){throw Error('encode failed')}})
+  await assert.rejects(prepareMotionStyleTool(tool,options(),context(project),encode),/encode failed/)
+  assert.deepEqual(encode.revoked,['generated-1','generated-2'])
+  for(const patch of [{duration:1},{duration:Infinity},{kind:'image'},{width:640},{url:''},{size:0},{id:'photo'}]){
+    const deps=dependencies({isDesktop:()=>true}),render=deps.renderNative
+    deps.renderNative=async(...args)=>{const output=await render(...args);return {...output,asset:{...output.asset,...patch}}}
+    await assert.rejects(prepareMotionStyleTool(tool,options(),context(project),deps))
+    assert.deepEqual(deps.nativeEvents,['discard']);assert.deepEqual(deps.revoked,['generated-1','generated-2'])
+  }
+  assert.deepEqual(project,before)
+})
+
+test('host rejection releases final output once while accepted outputs remain owned by the host',async()=>{
+  for(const desktop of [false,true]){
+    const project=fixture(),deps=dependencies({isDesktop:()=>desktop}),result=await prepareMotionStyleTool(tool,options(),context(project),deps)
+    await result.discard();await result.discard();await result.accept()
+    assert.deepEqual(deps.nativeEvents,desktop?['discard']:[])
+    assert.deepEqual(deps.revoked,desktop?['generated-1','generated-2']:['generated-1','generated-2','generated-3'])
+  }
+})
+
+test('shared GUI runner exposes renamed capability and validates arguments before rendering',async()=>{
+  const project=fixture()
+  assert.equal(isSharedEditorTool(tool),true);assert.equal(isSharedEditorTool('open_media_motion_compose'),false)
+  const result=await prepareEditorTool(tool,{...options(),dryRun:true,expectedRevision:3},context(project))
+  assert.equal(result.data.dryRun,true);assert.equal(result.data.destination,'assets');assert.equal(result.project,undefined)
+  await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true,expectedRevision:2},context(project)),/revision/)
+  await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true,placement:'append'},context(project)))
 })

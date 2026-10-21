@@ -176,9 +176,9 @@ export function createMcpAutomation(host: McpAutomationHost) {
       return {
         items: structuredClone(items), total: MOTION_STYLES.length, count: items.length,
         capabilities: {
-          editable: true, rendering: '2d',
-          description: '利用当前工程素材编排背景、装饰、文字、关键帧和入退场动画，生成可继续编辑的多轨时间线。',
-          limitations: ['不生成真实三维模型或物理模拟。', '不执行流体模拟、逐帧折射或用户素材轮廓变形。'],
+          editable: true, rendering: '2d', output: 'video-asset', layered: false,
+          description: '使用当前工程的图片或视频生成真实效果视频，加入项目素材后作为普通片段继续剪辑与融合。',
+          limitations: ['文字、背景与动画会合成到视频内，修改这些内容需要重新生成。', '不生成真实三维模型或物理模拟。', '不执行流体模拟、逐帧折射或用户素材轮廓变形。'],
         },
         projectId: host.getProject().id, revision: host.getRevision(),
       }

@@ -75,10 +75,17 @@ fn browser_composed_motion_style_exports_real_frames_and_audio() {
     let output = folder.join("native-export.mp4");
     let jobs = JobManager::default();
     let started = Instant::now();
-    let pending = jobs.begin(&rt, plan, output.clone()).unwrap();
+    // Exercise the same owned render path used by generated editor video clips.
+    let manager = crate::motion_clip::MotionClipManager::default();
+    let mut render_request = spec.clone();
+    render_request.as_object_mut().unwrap().remove("kind");
+    let pending = manager.begin(&store, &rt, &jobs, &render_request).unwrap();
     let completed = wait(&jobs, &pending.id);
     assert_eq!(completed.state, "completed", "{:?}", completed.error);
     assert!(completed.encoded_frames > 0);
+    let generated = manager.result(&store, &rt, &jobs, &pending.id).unwrap();
+    manager.accept(&store, &jobs, &pending.id).unwrap();
+    fs::copy(&generated.native_path, &output).unwrap();
     let probe = process(&rt.probe)
         .args([
             "-v",

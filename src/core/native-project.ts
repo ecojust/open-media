@@ -10,10 +10,13 @@ export interface NativeProjectOptions {
   visualOnly?: boolean
   range?: { start: number; end?: number }
   rasterScale?: number
+  /** Render owners can keep generated raster layers in a disposable scope. */
+  importAsset?: (bytes: Uint8Array, name: string) => Promise<MediaAsset>
   onProgress?: (update: { stage: string; progress?: number }) => void
 }
 export async function prepareNativeProject(source: Project, signal?: AbortSignal, options: NativeProjectOptions = {}): Promise<{ project: Project; textAssets: Record<string, MediaAsset> }> {
   signal?.throwIfAborted()
+  const importAsset = options.importAsset ?? importBlobAsset
   const range = options.range
   if (range && (!Number.isFinite(range.start) || range.start < 0 || range.end !== undefined && (!Number.isFinite(range.end) || range.end <= range.start))) throw new Error('素材准备范围无效。')
   const rasterScale = options.rasterScale ?? 1
@@ -35,7 +38,7 @@ export async function prepareNativeProject(source: Project, signal?: AbortSignal
       const bytes = new Uint8Array(await response.arrayBuffer())
       signal?.throwIfAborted()
       stage = '素材导入'
-      const imported = await importBlobAsset(bytes, asset.name)
+      const imported = await importAsset(bytes, asset.name)
       signal?.throwIfAborted()
       Object.assign(asset, imported, { id: asset.id })
     } catch (cause) { throw mediaToolError(stage, cause, { resource: { assetId: asset.id, name: asset.name } }) }
@@ -64,7 +67,7 @@ export async function prepareNativeProject(source: Project, signal?: AbortSignal
         const bytes = new Uint8Array(await blob.arrayBuffer())
         signal?.throwIfAborted()
         stage = '字幕图层导入'
-        textAssets[clip.id] = await importBlobAsset(bytes, `字幕-${clip.id}.png`)
+        textAssets[clip.id] = await importAsset(bytes, `字幕-${clip.id}.png`)
         signal?.throwIfAborted()
       } catch (cause) { throw mediaToolError(stage, cause, { resource: { clipId: clip.id, name: clip.name } }) }
       finally { if (canvas) canvas.width = canvas.height = 1 }
