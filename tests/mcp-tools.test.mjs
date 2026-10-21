@@ -29,7 +29,7 @@ function assertUnchangedAfterFailure(project, tool, args, regex) {
 }
 
 test('MCP catalog is unique, restrictive and contains the declared runtime and editing operations', () => {
-  assert.equal(MCP_TOOLS.length, 99)
+  assert.equal(MCP_TOOLS.length, 100)
   assert.equal(new Set(MCP_TOOLS.map(tool => tool.name)).size, MCP_TOOLS.length)
   assert.equal(MCP_TOOLS.filter(tool => isProjectTool(tool.name)).length, 39)
   for (const tool of MCP_TOOLS) {
@@ -68,11 +68,13 @@ test('motion clip generation advertises real-video destinations, bounded inputs 
   assert.equal(compose._meta['openmedia/execution'].cancelTool, 'open_media_job_cancel')
   assert.equal(MCP_TOOLS.some(tool => tool.name === 'open_media_motion_compose'), false)
   assert.equal(compose.inputSchema.properties.destination.default, 'assets')
+  assert.deepEqual(compose.inputSchema.required, ['scenes'])
   assert.deepEqual(compose.inputSchema.properties.destination.enum, ['assets', 'timeline'])
   assert.deepEqual(compose.inputSchema.properties.styleId.enum, MOTION_STYLES.map(style => style.id))
   const validate = args => validateMcpToolArguments(compose.name, args)
   const scene = { assetId: 'existing-video', heading: '标题', caption: '素材说明', duration: 4, trimIn: 1 }
   const base = { styleId: 'tech-hud', scenes: [scene] }
+  assert.doesNotThrow(() => validate({ scenes: [scene] }))
   assert.doesNotThrow(() => validate({ ...base, destination: 'timeline', insert: { trackId: 'existing-track', start: 12 }, title: '说明片', accent: '#abcdef', background: '#010203', textColor: '#FFFFFF', musicAssetId: 'existing-audio', musicVolume: 0.25, sourceAudio: true, tempo: 'energetic', logoAssetId: 'existing-image', dryRun: true, expectedRevision: 7, expectedProjectId: 'current-project' }))
   assert.doesNotThrow(() => validate({ ...base, scenes: Array.from({ length: 16 }, () => ({ ...scene, heading: '字'.repeat(120), caption: '字'.repeat(240), duration: 12 })) }))
   for (const patch of [
@@ -90,6 +92,18 @@ test('motion clip generation advertises real-video destinations, bounded inputs 
     { width: 1920 }, { sourceAudio: 'yes' }, { dryRun: 'yes' },
   ]) assert.throws(() => validate({ ...base, ...patch }), undefined, JSON.stringify(patch))
   assert.throws(() => validateMcpToolArguments(list.name, { search: '字'.repeat(201) }), /长度/)
+})
+
+test('MCP motion brief is read only and no project patch can rewrite user settings', () => {
+  const brief = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_brief_get')
+  assert.equal(brief.annotations.readOnlyHint, true)
+  assert.equal(brief._meta['openmedia/execution'].mode, 'synchronous')
+  assert.deepEqual(Object.keys(brief.inputSchema.properties).sort(), ['expectedProjectId', 'expectedRevision'])
+  for (const args of [{ enabled: true }, { styleId: 'tech-hud' }, { assetIds: ['source-video'] }, { prompt: '替换目标' }]) {
+    assert.throws(() => validateMcpToolArguments(brief.name, args), /不支持/)
+  }
+  assert.throws(() => validateMcpToolArguments('open_media_project_update', { patch: { mcpMotion: { enabled: true } } }), /不支持/)
+  assert.equal(MCP_TOOLS.some(tool => /motion.*(?:set|update|enable)$/.test(tool.name)), false)
 })
 
 test('project inspection returns IDs and timing while omitting private asset capabilities', () => {

@@ -4,6 +4,7 @@ import { validateChromaKey } from './chroma-key.ts'
 import { normalizeAssetAddedAt } from './asset-times.ts'
 import { validateKeyframes, validateNormalizedRect, validateOverlay, validateSpeedRamp, validateTransitionParameters, visualClipDuration } from './visual-animation.ts'
 import { TRANSITION_PRESETS, validateTransitionBindings } from './transitions.ts'
+import { normalizeMcpMotion } from './mcp-motion.ts'
 
 export const MAX_PROJECT_DURATION = 24 * 60 * 60
 export const MAX_ASSETS = 1000
@@ -291,5 +292,5 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       return marker
     })
   }
-  return { ...(markers !== undefined ? { markers } : {}), version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks, ...(root.autoSizeFromVideo !== undefined ? { autoSizeFromVideo: boolean(root.autoSizeFromVideo) } : {}), ...(root.subtitleStyle !== undefined ? { subtitleStyle: validateSubtitleStyle(root.subtitleStyle) } : {}) }
+  return { ...(markers !== undefined ? { markers } : {}), version: 1, id: projectId, title: text(root.title, '项目名称', 300), width: number(root.width, '项目宽度', 16, 16384), height: number(root.height, '项目高度', 16, 16384), fps: number(root.fps, '帧率', 1, 240), background: color(root.background, '项目背景'), createdAt: iso(root.createdAt), updatedAt: iso(root.updatedAt), assets, tracks, ...(root.autoSizeFromVideo !== undefined ? { autoSizeFromVideo: boolean(root.autoSizeFromVideo) } : {}), ...(root.subtitleStyle !== undefined ? { subtitleStyle: validateSubtitleStyle(root.subtitleStyle) } : {}), ...(root.mcpMotion !== undefined ? { mcpMotion: normalizeMcpMotion(root.mcpMotion) } : {}) }
 }

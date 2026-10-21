@@ -17,6 +17,7 @@ import { applyMcpVideoGeneration, prepareMcpVideoGeneration } from './mcp-video-
 import { beginAiGeneration, cancelAiJob, cancelAiModelDownload, downloadAiModel, getAiJob, getAiStatus, repairAiModel } from '../native-ai.ts'
 import { applyMcpAiGeneration, prepareMcpAiGeneration, publicAiJob, publicAiStatus } from './mcp-ai-generation.ts'
 import { MOTION_STYLES } from './motion-style-catalog.ts'
+import { getMcpMotionBrief } from './mcp-motion.ts'
 
 export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
 export interface McpAutomationHost {
@@ -170,13 +171,17 @@ export function createMcpAutomation(host: McpAutomationHost) {
     if (expectedProjectId !== undefined && expectedProjectId !== host.getProject().id) throw new Error(`当前工程已变化：当前 projectId=${host.getProject().id}，请先重新读取当前工程。`)
     const startTool = (kind: string, label: string, action: (operation: Operation) => Promise<unknown>) => start(kind, label, action, name)
     if (args.expectedRevision !== undefined && args.expectedRevision !== host.getRevision()) throw new Error(`项目版本已变化：当前 revision=${host.getRevision()}，请先重新读取项目。`)
+    if (name === 'open_media_motion_brief_get') return { ...getMcpMotionBrief(host.getProject()), projectId: host.getProject().id, revision: host.getRevision() }
     if (name === 'open_media_motion_style_list') {
       const search = typeof args.search === 'string' ? args.search.trim().toLocaleLowerCase() : ''
       const items = MOTION_STYLES.filter(style => !search || [style.id, style.name, style.description, ...style.tags].join(' ').toLocaleLowerCase().includes(search))
+      const brief = getMcpMotionBrief(host.getProject())
       return {
         items: structuredClone(items), total: MOTION_STYLES.length, count: items.length,
         capabilities: {
           editable: true, rendering: '2d', output: 'video-asset', layered: false,
+          configurationTool: 'open_media_motion_brief_get', configurationOwner: 'user', execution: 'external-agent',
+          enabled: brief.enabled, ready: brief.ready,
           description: '使用当前工程的图片或视频生成真实效果视频，加入项目素材后作为普通片段继续剪辑与融合。',
           limitations: ['文字、背景与动画会合成到视频内，修改这些内容需要重新生成。', '不生成真实三维模型或物理模拟。', '不执行流体模拟、逐帧折射或用户素材轮廓变形。'],
         },

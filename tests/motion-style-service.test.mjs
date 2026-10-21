@@ -13,12 +13,13 @@ const image = (id,patch={}) => ({id,name:`${id}.png`,kind:'image',mime:'image/pn
 function fixture(size={width:1280,height:720}) {
   const project = createProject('原始剪辑工程',size)
   project.assets.push(image('photo'),image('unused'))
+  project.mcpMotion={enabled:true,assetIds:['photo'],styleId:'flat-pop'}
   project.tracks[0].clips.push(createTextClip(project,{start:7,trimOut:5,text:'原字幕不参与短片渲染'}))
   project.markers=[{id:'original-marker',time:8,label:'原章节',kind:'chapter'}]
   return project
 }
 const options = () => ({styleId:'flat-pop',scenes:[{assetId:'photo',heading:'观察细节',caption:'生成独立视频素材',duration:4}]})
-function context(project,controller=new AbortController()) { return {project,revision:3,source:'gui',blobs:new Map(),signal:controller.signal,onProgress(){}} }
+function context(project,controller=new AbortController()) { return {project,revision:3,source:'mcp',blobs:new Map(),signal:controller.signal,onProgress(){}} }
 function dependencies(overrides={}) {
   const calls=[],revoked=[],nativeEvents=[]
   let serial=0,rendered
@@ -70,6 +71,7 @@ test('browser rendering commits one visible ordinary video with its blob, preser
   const project=fixture(),before=structuredClone(project),deps=dependencies(),progress=[]
   const result=await prepareMotionStyleTool(tool,options(),{...context(project),onProgress:update=>progress.push(update)},deps)
   assert.deepEqual(project,before);assert.deepEqual(result.project.tracks,project.tracks);assert.deepEqual(result.project.markers,project.markers)
+  assert.deepEqual(result.project.mcpMotion,project.mcpMotion)
   assert.equal(result.project.title,project.title);assert.equal(result.project.width,1280);assert.equal(result.project.height,720)
   assert.equal(result.project.assets.length,project.assets.length+1);assert.equal(result.assets.length,1)
   const entry=result.assets[0]
@@ -82,6 +84,7 @@ test('browser rendering commits one visible ordinary video with its blob, preser
   assert(!temporary.assets.some(asset=>asset.id==='unused'))
   assert(!temporary.tracks.flatMap(track=>track.clips).some(clip=>clip.text==='原字幕不参与短片渲染'))
   assert(!temporary.markers.some(marker=>marker.id==='original-marker'))
+  assert.equal(temporary.mcpMotion,undefined)
   assert.deepEqual(deps.revoked,['generated-1','generated-2'])
   assert.equal(progress.at(-1).progress,1)
   assert.deepEqual(undoHistory(commitHistory(createHistory(project),result.project)).present,project)
@@ -139,6 +142,11 @@ test('native render owns only the final file and accepts at most once; odd proje
 test('current active compressed source is rendered without materializing original or unrelated assets',async()=>{
   const project=fixture(),video=image('source',{kind:'video',mime:'video/mp4',duration:10,nativePath:'/source/large-original.mp4'})
   project.assets.push(video,image('working',{kind:'video',mime:'video/mp4',duration:10,nativePath:'/working/small.mp4',compression:{originalAssetId:'source',mode:'quality',quality:'balanced',active:true,createdAt:new Date().toISOString()}}))
+  project.mcpMotion.assetIds=['source']
+  for(const selectedId of ['source','working'])for(const requestedId of ['source','working']){
+    const authorized={...project,mcpMotion:{...project.mcpMotion,assetIds:[selectedId]}}
+    assert.deepEqual(planMotionClipGeneration(authorized,{...options(),scenes:[{assetId:requestedId,duration:4}]}).sourceAssetIds,['working'])
+  }
   const deps=dependencies({isDesktop:()=>true}),before=structuredClone(project)
   const result=await prepareMotionStyleTool(tool,{...options(),scenes:[{assetId:'source',duration:4}]},context(project),deps)
   const temporary=deps.calls.find(call=>call[0]==='native')[1]
@@ -215,11 +223,52 @@ test('host rejection releases final output once while accepted outputs remain ow
   }
 })
 
-test('shared GUI runner exposes renamed capability and validates arguments before rendering',async()=>{
+test('shared MCP runner exposes the capability and validates arguments before rendering',async()=>{
   const project=fixture()
   assert.equal(isSharedEditorTool(tool),true);assert.equal(isSharedEditorTool('open_media_motion_compose'),false)
   const result=await prepareEditorTool(tool,{...options(),dryRun:true,expectedRevision:3},context(project))
   assert.equal(result.data.dryRun,true);assert.equal(result.data.destination,'assets');assert.equal(result.project,undefined)
   await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true,expectedRevision:2},context(project)),/revision/)
   await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true,placement:'append'},context(project)))
+})
+
+test('effect generation and dry run require an enabled ready current-project MCP configuration',async()=>{
+  for(const config of [undefined,{enabled:false,assetIds:['photo'],styleId:'flat-pop'},{enabled:true,assetIds:[],styleId:'flat-pop'},{enabled:true,assetIds:['photo']},{enabled:true,assetIds:['missing'],styleId:'flat-pop'}]){
+    const project=fixture(),deps=dependencies()
+    if(config===undefined)delete project.mcpMotion
+    else project.mcpMotion=config
+    for(const dryRun of [false,true])await assert.rejects(prepareMotionStyleTool(tool,{...options(),dryRun},context(project),deps))
+    assert.throws(()=>planMotionClipGeneration(project,options()))
+    assert.deepEqual(deps.calls,[])
+  }
+})
+
+test('configured style is authoritative and omitted style uses it; scene and logo sources must be selected',async()=>{
+  const project=fixture(),deps=dependencies(),{styleId:_style,...withoutStyle}=options()
+  const plan=planMotionClipGeneration(project,withoutStyle)
+  assert.equal(plan.styleId,'flat-pop')
+  const prepared=await prepareMotionStyleTool(tool,{...withoutStyle,dryRun:true},context(project),deps)
+  assert.equal(prepared.data.styleId,'flat-pop')
+  for(const patch of [{styleId:'paper-ink'},{scenes:[{assetId:'unused',duration:4}]},{logoAssetId:'unused'},{scenes:undefined},{scenes:[]}]){
+    await assert.rejects(prepareMotionStyleTool(tool,{...options(),...patch,dryRun:true},context(project),deps))
+  }
+  const selectedLogo=await prepareMotionStyleTool(tool,{...withoutStyle,logoAssetId:'photo',dryRun:true},context(project),deps)
+  assert.deepEqual(selectedLogo.data.sourceAssetIds,['photo'])
+  assert.deepEqual(deps.calls,[])
+})
+
+test('GUI callers cannot bypass MCP-only generation even with valid configuration or dry run',async()=>{
+  const project=fixture(),deps=dependencies()
+  for(const dryRun of [false,true])await assert.rejects(prepareMotionStyleTool(tool,{...options(),dryRun},{...context(project),source:'gui'},deps),/仅供 MCP/)
+  await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true},{...context(project),source:'gui'}),/MCP/)
+  assert.deepEqual(deps.calls,[])
+})
+
+test('current-project background audio remains available without authorizing unrelated visual materials',async()=>{
+  const project=fixture(),deps=dependencies()
+  project.assets.push(image('music',{kind:'audio',mime:'audio/wav',width:0,height:0,duration:2}))
+  const prepared=await prepareMotionStyleTool(tool,{...options(),musicAssetId:'music',dryRun:true},context(project),deps)
+  assert.deepEqual(prepared.data.sourceAssetIds,['photo','music'])
+  await assert.rejects(prepareMotionStyleTool(tool,{...options(),musicAssetId:'unused',dryRun:true},context(project),deps))
+  assert.deepEqual(deps.calls,[])
 })

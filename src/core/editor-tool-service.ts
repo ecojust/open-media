@@ -53,6 +53,7 @@ export async function prepareEditorTool(name: string, input: Record<string, unkn
   if (isProjectTool(name)) return executeProjectTool(context.project, name, args)
   let result: PreparedEditorTool
   if (name === 'open_media_motion_style_list' || name === 'open_media_motion_clip_generate') {
+    if (name === 'open_media_motion_clip_generate' && context.source !== 'mcp') throw new Error('素材二创由外部 MCP Agent 执行。请在 MCP 弹窗启用并配置素材与风格，再连接 Agent。')
     if (args.insert !== undefined && args.destination !== 'timeline') throw new Error('insert 仅适用于 destination=timeline。')
     const { prepareMotionStyleTool } = await import('./motion-style-service.ts')
     result = await prepareMotionStyleTool(name, args, context)
@@ -100,6 +101,7 @@ export async function prepareEditorTool(name: string, input: Record<string, unkn
         try {
           const project = context.hydrate ? await context.hydrate(imported) : imported.project
           context.signal.throwIfAborted()
+          if (context.source === 'mcp') project.mcpMotion = structuredClone(context.project.mcpMotion)
           result = { project, data: { restoredId: args.id }, label: '恢复项目版本', assets: project.assets.map(asset => ({ asset, blob: imported.blobs.get(asset.id) })),
             accept: async () => { if (!project.assets.some(asset => imported.project.assets.some(original => original.url === asset.url || original.url === asset.sourceUrl))) imported.revoke() }, discard: imported.revoke }
         } catch (cause) { imported.revoke(); throw cause }

@@ -655,7 +655,7 @@ async fn handle(
             };
             success(
                 id,
-                json!({"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"Open Media","version":env!("CARGO_PKG_VERSION")},"instructions":"通过工具编辑当前桌面工程。长任务返回 jobId，请使用任务查询工具读取进度；修改会同步到桌面，保存需调用保存工具。"}),
+                json!({"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"Open Media","version":env!("CARGO_PKG_VERSION")},"instructions":"通过工具编辑当前桌面工程。素材二创前先调用 open_media_motion_brief_get，遵循用户启用状态、所选素材、风格与创作要求，分析素材后策划镜头并生成效果片段，再通过剪辑工具组合成片。长任务返回 jobId，请使用任务查询工具读取进度；修改会同步到桌面，保存需调用保存工具。"}),
             )
         }
         "ping" => {

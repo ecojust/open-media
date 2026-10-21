@@ -40,9 +40,9 @@ node scripts/screenshots-editor.cjs
 
 需要本地浏览器；视频列表脚本还需要媒体编码命令。各脚本启动临时开发服务，结束时释放浏览器与服务。
 
-## 效果片段截图
+## 素材二创截图
 
-`motion-style-light.png` 与 `motion-style-dark.png` 用于展示 v0.3.4 的效果片段界面：从当前工程素材的“生成效果片段”入口，在右侧面板配置分镜、文字、配色和音乐，生成效果视频并加入项目素材，再通过普通轨道工具剪辑。`motion-style-gallery.png` 展示同一组素材的 15 种风格配色与版式。
+`motion-style-light.png` 与 `motion-style-dark.png` 用于展示 v0.3.4 的 MCP 素材二创配置：启用开关、当前工程素材选择、视觉风格和可选创作目标。配置由外部 Agent 读取；用户在 Agent 中发起任务后，才开始分析与生成。`motion-style-gallery.png` 展示同一组素材的 15 种风格配色与版式。
 
 ```sh
 node tests/browser/motion-style-ui.cjs
@@ -51,4 +51,4 @@ node tests/browser/motion-style-render.cjs
 
 截图脚本使用本地示例图片、视频和配乐，不调用录屏或麦克风；设置 `BROWSER_ARTIFACTS` 可指定报告位置。界面截图展示配置方式，视频编码、解码及生成后素材入库需要分别通过测试确认；截图本身不作为生成成功的依据。
 
-目录中其余图片为历史文档配图，当前 README 使用上表 11 组工作区截图及新增效果片段截图。
+目录中其余图片为历史文档配图，当前 README 使用上表 11 组工作区截图及素材二创截图。

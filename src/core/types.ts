@@ -159,6 +159,15 @@ export interface Track {
   clips: Clip[]
 }
 
+/** User-selected scope for external agents; missing configuration is disabled. */
+export interface McpMotionConfig {
+  enabled: boolean
+  assetIds: string[]
+  /** Empty until the user chooses a style. */
+  styleId: string
+  prompt?: string
+}
+
 /** Tracks are ordered from foreground to background. */
 export interface Project {
   version: 1
@@ -176,6 +185,7 @@ export interface Project {
   tracks: Track[]
   subtitleStyle?: SubtitleStyle
   markers?: TimelineMarker[]
+  mcpMotion?: McpMotionConfig
 }
 
 export type MediaProject = Project

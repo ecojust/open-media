@@ -11,6 +11,7 @@ import { alignTextToSpeech, planSpeech, validateSpeechPlanCapacity } from './spe
 import { executeVisualTool } from './visual-tools.ts'
 import { setTimelineMarkers } from './project-operations.ts'
 import { classifyVideoClip } from './clip-idle.ts'
+import { getMcpMotionBrief } from './mcp-motion.ts'
 import type { Clip, ClipChromaKey, ClipFilters, MediaAsset, Project, Track, TrackKind, TransitionEffect } from './types.ts'
 
 export interface McpSchema {
@@ -135,7 +136,7 @@ function publicAsset(asset: MediaAsset): Omit<MediaAsset, 'url' | 'sourceUrl' | 
 /** Return a detached view without capability URLs or local filesystem paths. */
 export function inspectMcpProject(project: Project) {
   const copy = cloneProject(project)
-  return { ...copy, assets: copy.assets.map(publicAsset), duration: projectDuration(project),
+  return { ...copy, assets: copy.assets.map(publicAsset), duration: projectDuration(project), mcpMotionBrief: getMcpMotionBrief(project),
     tracks: copy.tracks.map(track => ({ ...track, clipCount: track.clips.length, clips: track.clips.map(clip => ({ ...clip, duration: clipDuration(clip), end: clipEnd(clip) })), subtitleIssues: trackSubtitleIssues(track) })) }
 }
 function requireTrack(project: Project, id: string): Track {

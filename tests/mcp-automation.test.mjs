@@ -33,6 +33,7 @@ registerHooks({ load(url, context, nextLoad) {
   return { format: 'module', shortCircuit: true, source: passthrough + exports.map(name => `export function ${name}(...args) { return globalThis.__openMediaMcpTestIo.${name}(...args) }`).join('\n') }
 } })
 const { createMcpAutomation } = await import('../src/core/mcp-automation.ts')
+const { prepareEditorTool } = await import('../src/core/editor-tool-service.ts')
 // Load the actual material service under a separate URL so these integration
 // cases replace only media I/O, while existing controller tests retain their stub.
 const { prepareMcpMaterial: prepareRealMcpMaterial } = await import('../src/core/mcp-materials.ts?integration')
@@ -173,6 +174,11 @@ test('motion style discovery is synchronous, searchable and isolated from projec
   assert.equal(all.capabilities.rendering, '2d')
   assert.equal(all.capabilities.output, 'video-asset')
   assert.equal(all.capabilities.layered, false)
+  assert.equal(all.capabilities.configurationTool, 'open_media_motion_brief_get')
+  assert.equal(all.capabilities.configurationOwner, 'user')
+  assert.equal(all.capabilities.execution, 'external-agent')
+  assert.equal(all.capabilities.enabled, false)
+  assert.equal(all.capabilities.ready, false)
   assert.equal(all.projectId, f.project.id)
   const filtered = await f.run('motion_style_list', { search: '  TECH-HUD  ' })
   assert.deepEqual(filtered.items.map(style => style.id), ['tech-hud'])
@@ -193,12 +199,78 @@ test('motion style discovery is synchronous, searchable and isolated from projec
   await f.controller.dispose()
 })
 
+test('motion brief is discoverable while disabled or busy and contains safe detached user intent', async () => {
+  const f = fixture()
+  f.setBusy(true)
+  const disabled = await f.run('motion_brief_get')
+  assert.equal(disabled.enabled, false)
+  assert.equal(disabled.ready, false)
+  assert.equal(disabled.execution, 'synchronous')
+  assert.equal(disabled.final, true)
+  assert.equal(disabled.projectId, f.project.id)
+  assert.deepEqual((await f.run('project_get')).mcpMotionBrief.enabled, false)
+  await assert.rejects(f.run('motion_brief_get', { expectedProjectId: 'old-project' }), /当前工程已变化/)
+  await assert.rejects(f.run('motion_brief_get', { enabled: true }), /不支持/)
+  f.project.assets.push(video())
+  f.project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud', prompt: '突出操作重点，成片控制在 10 秒' }
+  const configured = await f.run('motion_brief_get')
+  assert.equal(configured.enabled, true)
+  assert.equal(configured.ready, true)
+  assert.equal(configured.styleId, 'tech-hud')
+  assert.equal(configured.prompt, f.project.mcpMotion.prompt)
+  assert.deepEqual(configured.assetIds, ['source-video'])
+  assert.equal(/\/private\/|blob:/.test(JSON.stringify(configured)), false)
+  configured.assetIds.push('injected')
+  assert.deepEqual(f.project.mcpMotion.assetIds, ['source-video'])
+  assert.equal(f.calls.length, 0)
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('motion generation requires local opt-in and rejects GUI calls or remote preference changes', async () => {
+  for (const mode of ['disabled', 'missing-assets', 'missing-style', 'other-style', 'unselected-source']) {
+    const project = createProject('用户任务')
+    project.assets.push(video(), video('other-video'))
+    project.mcpMotion = { enabled: mode !== 'disabled', assetIds: mode === 'missing-assets' ? [] : ['source-video'], styleId: mode === 'missing-style' ? '' : 'tech-hud' }
+    const f = fixture(project)
+    const args = { scenes: [{ assetId: mode === 'unselected-source' ? 'other-video' : 'source-video' }], dryRun: true, ...(mode === 'other-style' ? { styleId: 'flat-pop' } : {}) }
+    const done = await finished(f.controller, await f.run('motion_clip_generate', args))
+    assert.equal(done.state, 'failed', mode)
+    assert.equal(f.calls.length, 0, mode)
+    assert.equal(f.commits.length, 0, mode)
+    await f.controller.dispose()
+  }
+  const project = createProject('仅 MCP 执行')
+  project.assets.push(video())
+  project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
+  await assert.rejects(prepareEditorTool('open_media_motion_clip_generate', { scenes: [{ assetId: 'source-video' }], dryRun: true }, {
+    project, revision: 1, blobs: new Map(), source: 'gui', signal: new AbortController().signal, onProgress() {},
+  }), /外部 MCP Agent/)
+})
+
+test('MCP snapshot restore preserves current user-owned motion preferences', async () => {
+  const project = createProject('历史工程')
+  project.mcpMotion = { enabled: true, assetIds: [], styleId: 'tech-hud' }
+  const f = fixture(project)
+  const saved = await finished(f.controller, await f.run('project_snapshot', { action: 'create', name: '历史版本' }))
+  assert.equal(saved.state, 'completed', saved.error)
+  f.project.mcpMotion = { enabled: false, assetIds: [], styleId: 'flat-pop', prompt: '由用户关闭' }
+  f.externalChange()
+  const currentConfig = clone(f.project.mcpMotion)
+  const restored = await finished(f.controller, await f.run('project_snapshot', { action: 'restore', id: saved.result.id }))
+  assert.equal(restored.state, 'completed', restored.error)
+  assert.deepEqual(f.project.mcpMotion, currentConfig)
+  assert.equal(f.project.title, '历史工程')
+  await f.controller.dispose()
+})
+
 test('motion clip preflight uses the asynchronous shared tool without rendering media or editing the project', async () => {
   const project = createProject('风格预检', { width: 640, height: 360 })
   project.assets.push(video())
+  project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud', prompt: '展示素材重点' }
   project.tracks[1].clips.push(createClip(project.assets[0], project, { start: 3, trimOut: 2 }))
   const f = fixture(project), before = clone(project)
-  const args = { styleId: 'tech-hud', scenes: [{ assetId: 'source-video', heading: '测试场景', duration: 4 }], dryRun: true, expectedProjectId: project.id, expectedRevision: f.revision }
+  const args = { scenes: [{ assetId: 'source-video', heading: '测试场景', duration: 4 }], dryRun: true, expectedProjectId: project.id, expectedRevision: f.revision }
   const job = await f.run('motion_clip_generate', args)
   assert.equal(job.execution, 'asynchronous')
   assert.equal(job.responseType, 'job')
@@ -245,6 +317,7 @@ test('motion clip preflight uses the asynchronous shared tool without rendering 
 test('motion clip generation adopts only the encoded video and commits one undo step', async () => {
   const project = createProject('素材二创', { width: 640, height: 360 })
   project.assets.push(video())
+  project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
   project.tracks[1].clips.push(createClip(project.assets[0], project, { start: 3, trimOut: 2 }))
   const f = fixture(project), before = clone(project)
   let accepted = 0, discarded = 0
@@ -282,9 +355,10 @@ test('motion clip generation adopts only the encoded video and commits one undo 
 })
 
 test('motion clip jobs discard late encoded output after cancellation or a changed project session', async () => {
-  for (const action of ['cancel', 'revision', 'open', 'reopen', 'encode-failure']) {
+  for (const action of ['cancel', 'revision', 'configuration', 'open', 'reopen', 'encode-failure']) {
     const project = createProject('二创任务归属', { width: 640, height: 360 })
     project.assets.push(video())
+    project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
     const f = fixture(project), encoded = deferred()
     let accepted = 0, discarded = 0
     f.io.renderMotionClip = () => encoded.promise
@@ -292,6 +366,7 @@ test('motion clip jobs discard late encoded output after cancellation or a chang
     await until(() => f.calls.some(call => call.name === 'renderMotionClip'), 'motion encoder')
     if (action === 'cancel') await f.controller.cancel(job.id)
     if (action === 'revision') f.externalChange()
+    if (action === 'configuration') { f.project.mcpMotion.enabled = false; f.externalChange() }
     if (action === 'open') f.openOther()
     if (action === 'reopen') f.reopen()
     const expected = clone(f.project)

@@ -578,6 +578,58 @@ async function verifyCurrentProject(browser, url) {
   } finally { await page.close() }
 }
 
+async function verifyMotionPreferences(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } }), errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  try {
+    await installNativeBridge(page)
+    await page.goto(url)
+    await completion(page, 'startup-replay')
+    await page.getByTestId('create-project').click()
+    assert.equal((await tool(page, 'motion_brief_get')).enabled, false)
+    const imported = await tool(page, 'asset_import', { paths: ['/fixture/creative.png'] })
+    await page.waitForFunction(() => typeof window.mcpAppFixture.releaseImport === 'function')
+    await page.evaluate(() => {
+      const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 36
+      canvas.getContext('2d').fillRect(0, 0, 64, 36)
+      const url = canvas.toDataURL('image/png')
+      window.mcpAppFixture.releaseImport([{ id: 'creative-image', name: '创作素材.png', kind: 'image', url, mime: 'image/png', width: 64, height: 36, duration: 0, size: atob(url.split(',')[1]).length }])
+    })
+    await expect.poll(async () => (await tool(page, 'job_get', { id: imported.jobId })).state).toBe('completed')
+    await page.getByTestId('editor-mcp-open').click()
+    await page.getByTestId('mcp-motion-switch').click()
+    await page.locator('[data-motion-asset-id="creative-image"]').click()
+    await page.locator('[data-motion-style-id="neon-retro"]').click()
+    const prompt = page.getByRole('textbox', { name: '二创创作要求' })
+    await prompt.pressSequentially('A short introduction')
+    await expect(prompt).toHaveValue('A short introduction')
+    await page.getByRole('button', { name: '关闭MCP 服务', exact: true }).click()
+    const { revision: briefRevision, execution: briefExecution, final: briefFinal, responseType: briefType, ...brief } = await tool(page, 'motion_brief_get')
+    const readBrief = async () => { const { revision, execution, final, responseType, ...value } = await tool(page, 'motion_brief_get'); return value }
+    assert.equal(brief.ready, true); assert.equal(brief.styleId, 'neon-retro')
+    assert.deepEqual(brief.assetIds, ['creative-image']); assert.equal(brief.prompt, 'A short introduction')
+    const current = await tool(page, 'project_get')
+    assert.deepEqual(current.mcpMotionBrief, brief)
+    assert.equal(await page.evaluate(() => window.mcpAppFixture.calls.some(call => call.command === 'begin_motion_clip_render')), false, 'Configuring does not generate a video')
+    // Remote history may change edits but cannot revive or overwrite the user's preferences.
+    await tool(page, 'project_history', { direction: 'undo' })
+    assert.deepEqual(await readBrief(), brief)
+    await tool(page, 'project_history', { direction: 'redo' })
+    assert.deepEqual(await readBrief(), brief)
+    await page.getByTestId('editor-mcp-open').click()
+    await page.getByTestId('mcp-motion-switch').click()
+    await page.getByRole('button', { name: '关闭MCP 服务', exact: true }).click()
+    await tool(page, 'project_history', { direction: 'undo' })
+    assert.equal((await tool(page, 'motion_brief_get')).enabled, false, 'Remote undo cannot enable creation')
+    const rejected = await tool(page, 'motion_clip_generate', { scenes: [{ assetId: 'creative-image', duration: 2 }], dryRun: true })
+    await expect.poll(async () => (await tool(page, 'job_get', { id: rejected.jobId })).state).toBe('failed')
+    assert.match((await tool(page, 'job_get', { id: rejected.jobId })).error, /开启|就绪/)
+    assert.deepEqual(errors, [])
+    assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+    console.log('PASS 完整App素材二创：用户配置同步MCP、输入空格保留、配置不触发生成、远程撤销/重做不更改用户选择、关闭后禁止生成')
+  } finally { await page.close() }
+}
+
 async function main() {
   const { createServer } = await import('vite')
   const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
@@ -587,6 +639,10 @@ async function main() {
   page.setDefaultTimeout(15000)
   page.on('pageerror', error => errors.push(error.message))
   try {
+    if (process.argv.includes('--motion-only')) {
+      await verifyMotionPreferences(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+      return
+    }
     if (process.argv.includes('--banner-only')) {
       await verifyPersistentBanner(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
       return
@@ -1009,6 +1065,7 @@ async function main() {
 
     assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
     assert.deepEqual(errors, [])
+    await verifyMotionPreferences(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyCurrentProject(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyPersistentBanner(browser, `http://127.0.0.1:${server.httpServer.address().port}`)

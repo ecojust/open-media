@@ -74,6 +74,7 @@ async function main() {
       const sourceTrack=project.tracks.find(track=>track.kind==='video')
       sourceTrack.clips.push(createClip(video,project,{trimOut:2}));sourceTrack.locked=true
       project.markers=[{id:'existing-marker',time:1,label:'Existing edit',kind:'chapter',color:'#33aaff'}]
+      project.mcpMotion={enabled:true,assetIds:[still.id,video.id],styleId:'neon-retro',prompt:'将所选素材编排成两个清晰的创意展示镜头'}
       project=validateProject(project,{trusted:true})
       const before=JSON.stringify(project),progress=[]
       const prepared=await prepareEditorTool('open_media_motion_clip_generate',{
@@ -90,6 +91,7 @@ async function main() {
       await window.saveArtifact('motion-export.webm',await base64(output))
       const archive=await exportProjectFile(prepared.project,{blobs:new Map([...files,[generated.asset.id,output]])})
       const reopened=await importProjectFile(archive)
+      if(JSON.stringify(reopened.project.mcpMotion)!==JSON.stringify(project.mcpMotion))throw new Error('User creation brief did not survive save/reopen')
       const recovered=reopened.project.assets.find(asset=>asset.id===generated.asset.id)
       const decoded=await importMediaFile(new File([reopened.blobs.get(recovered.id)],recovered.name,{type:recovered.mime}))
       if(decoded.width!==640||decoded.height!==360||Math.abs(decoded.duration-4)>.3)throw new Error('Generated video did not survive save/reopen')

@@ -7,8 +7,10 @@ import { assertProjectRevision } from './project-operations.ts'
 import { cloneProject, createClip, createTrack, MAX_ASSETS, MAX_CLIPS, MAX_PROJECT_DURATION, MAX_TRACKS, validateProject } from './project.ts'
 import { clipEnd, projectDuration } from './timeline.ts'
 import { videoWorkingCopyResolver } from './video-working-copies.ts'
+import { assertMcpMotionRequest } from './mcp-motion.ts'
 
-export interface MotionClipGenerateOptions extends Omit<MotionComposeOptions, 'placement'> {
+export interface MotionClipGenerateOptions extends Omit<MotionComposeOptions, 'placement' | 'styleId'> {
+  styleId?: string
   destination?: 'assets' | 'timeline'
   insert?: { trackId?: string; start?: number }
 }
@@ -49,7 +51,7 @@ function freeAt(project: Project, trackId: string, start: number, duration: numb
 }
 
 function planInternal(project: Project, options: MotionClipGenerateOptions): { temporary: Project; options: MotionComposeOptions; plan: MotionClipGenerationPlan } {
-  const input = object(options, '效果短片参数')
+  const input = assertMcpMotionRequest(project,object(options, '效果短片参数'))
   if ('placement' in input) throw new Error('效果短片使用 destination 和 insert 选择生成位置，不支持 placement。')
   const { destination = 'assets', insert, ...compositionInput } = input
   if (destination !== 'assets' && destination !== 'timeline') throw new Error('效果短片目标需为素材库或时间线。')
@@ -73,6 +75,7 @@ function planInternal(project: Project, options: MotionClipGenerateOptions): { t
   }) : compositionInput.scenes
   include(compositionInput.musicAssetId); include(compositionInput.logoAssetId)
   const temporary = cloneProject({ ...current, assets: [...sourceAssets.values()], tracks: [], markers: [] })
+  delete temporary.mcpMotion
   const composeOptions = { ...compositionInput, scenes, placement: 'append' } as unknown as MotionComposeOptions
   const { placement: _placement, ...compositionPlan } = planMotionComposition(temporary, composeOptions)
   temporary.title = compositionPlan.title
@@ -100,7 +103,7 @@ function planInternal(project: Project, options: MotionClipGenerateOptions): { t
   return { temporary, options: composeOptions, plan: { ...compositionPlan, destination, ...(insertion ? { insert: insertion } : {}), sourceAssetIds: [...new Set([...compositionPlan.scenes.map(scene => scene.assetId), compositionPlan.musicAssetId, compositionPlan.logoAssetId].filter((id): id is string => Boolean(id)))], width: current.width, height: current.height } }
 }
 
-/** Shared GUI/MCP plan. Existing timeline length and locks do not affect asset generation. */
+/** Plan an authorized request without changing the current timeline. */
 export function planMotionClipGeneration(project: Project, options: MotionClipGenerateOptions): MotionClipGenerationPlan {
   return planInternal(project, options).plan
 }
@@ -112,6 +115,7 @@ export async function prepareMotionStyleTool(name: string, args: Record<string, 
   if (args.expectedProjectId !== undefined && args.expectedProjectId !== context.project.id) throw new Error('当前工程已经变化，请重新读取工程后操作。')
   if (name === 'open_media_motion_style_list') return { data: { items: structuredClone(MOTION_STYLES), total: MOTION_STYLES.length } }
   if (name !== 'open_media_motion_clip_generate') throw new Error('未知效果短片工具。')
+  if (context.source !== 'mcp') throw new Error('效果短片仅供 MCP 客户端调用，请在 MCP 设置中选择素材和风格后交由 AI 规划。')
   const { dryRun, expectedRevision: _revision, expectedProjectId: _projectId, ...input } = args
   if (dryRun !== undefined && typeof dryRun !== 'boolean') throw new Error('预检查选项必须为布尔值。')
   context.onProgress({ stage: '正在检查素材与短片安排', progress: 0 })

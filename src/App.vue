@@ -200,6 +200,8 @@ const draftSaves = createDraftSaveQueue(async ({ snapshot, snapshotBlobs, key, g
 function commit(next: Project, label = '已修改项目', historyGroup?: string, remote = false): boolean {
   if (destroyed || mcpBusy.value && !remote) return false
   try {
+    // Remote edits cannot change the user's per-project creation preferences.
+    if (remote) next = { ...next, mcpMotion: project.value.mcpMotion ? structuredClone(project.value.mcpMotion) : undefined }
     const checked = validateProject(stampNewAssets(next, project.value), { trusted: true })
     if (contentKey(checked) === contentKey(project.value)) return true
     checked.updatedAt = new Date().toISOString()
@@ -213,10 +215,11 @@ function commit(next: Project, label = '已修改项目', historyGroup?: string,
     return true
   } catch (cause) { fail(cause); return false }
 }
-function moveHistory(direction: 'undo' | 'redo') {
+function moveHistory(direction: 'undo' | 'redo', remote = false) {
   if (switching.value || booting.value || speechWorking.value || mcpBusy.value) return
   continuousEdit = undefined
-  history.value = direction === 'undo' ? undoHistory(history.value) : redoHistory(history.value)
+  const moved = direction === 'undo' ? undoHistory(history.value) : redoHistory(history.value)
+  history.value = remote ? { ...moved, present: { ...moved.present, mcpMotion: project.value.mcpMotion ? structuredClone(project.value.mcpMotion) : undefined } } : moved
   project.value = cloneProject(history.value.present); announce(direction === 'undo' ? '已撤销' : '已重做'); scheduleDraft()
 }
 function toggleAutosave() { if (switching.value || booting.value) return; autoSave.value = !autoSave.value; draftGeneration++; cancelDraftCountdown(); if (draftState.value === 'waiting') draftState.value = 'idle'; try { localStorage.setItem('open-media:autosave', String(autoSave.value)) } catch {} ; if (autoSave.value) void persist() }
@@ -777,7 +780,7 @@ const mcpAutomation = createMcpAutomation({
     await persist()
     if (current()) { lastSaveAt.value = savedAt; lastSaveKind.value = 'file'; if (warning) error.value = warning }
   },
-  history: direction => { videoEditor.value?.pause(); moveHistory(direction) },
+  history: direction => { videoEditor.value?.pause(); moveHistory(direction, true) },
   getPlayback: () => videoEditor.value?.getPlayback() ?? { time: 0, playing: false, selectedClipId: '' },
   setPlayback: async (patch: Partial<McpPlayback>) => {
     if (destroyed || allowClose) throw new Error('应用正在关闭。')
@@ -819,6 +822,12 @@ function openJobs(): void {
   void nextTick(async () => { await nextTick(); if (jobsOpen.value) document.querySelector<HTMLButtonElement>('.jobs-dialog button')?.focus() })
 }
 function openMcp(): void { jobsOpen.value = false; mcpOpen.value = true; if (mcpBridgeError) fail(mcpBridgeError) }
+function updateMcpMotion(config: NonNullable<Project['mcpMotion']>): void {
+  if (destroyed || allowClose || booting.value || switching.value || mcpBusy.value || busy.value || guiToolActive || browserExporting.value || speechWorking.value) return
+  const next = cloneProject(project.value)
+  next.mcpMotion = structuredClone(config)
+  commit(next, '已更新 MCP 素材二创配置', 'mcp-motion-settings')
+}
 function mcpJobState(job: McpPanelJob): string { return job.cancelling ? '正在取消' : ({ running: '正在处理', completed: '已完成', failed: '失败', cancelled: '已取消' }[job.state]) }
 function mcpJobPercent(job: McpPanelJob): number | undefined { return typeof job.progress === 'number' && Number.isFinite(job.progress) ? Math.round(Math.max(0, Math.min(1, job.progress)) * 100) : undefined }
 function mcpJobMetrics(job: McpPanelJob): string {
@@ -993,7 +1002,7 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
     <input ref="projectInput" class="sr-only" type="file" accept=".omedia" data-testid="project-input" @change="openProject(($event.target as HTMLInputElement).files?.[0]); ($event.target as HTMLInputElement).value=''"/>
     <ScreenshotPicker ref="screenshotPicker"/>
     <ExportPanel :open="exportOpen" :project="project" :native="native" @close="exportOpen=false" @status="announce" @busy="browserExporting=$event"/>
-    <McpPanel :open="mcpOpen" :native="native" @close="mcpOpen=false" @status="announce" @service-change="mcpServiceChanged"/>
+    <McpPanel :open="mcpOpen" :native="native" :project="project" :editing-busy="mcpBusy || !!busy || switching || browserExporting || speechWorking" @motion-change="updateMcpMotion" @close="mcpOpen=false" @status="announce" @service-change="mcpServiceChanged"/>
     <AppInfo :open="infoOpen" :native="native" :initial-provider="aiInitialProvider" @close="infoOpen=false" @status="announce"/>
     <EditorDialog :open="!!question" :title="question?.title || '确认操作'" icon="alert" class="app-confirm" @close="answer('cancel')"><div class="dialog-content"><p>{{ question?.text }}</p></div><template #footer><div class="confirmation-actions"><button v-for="choice in question?.choices" :key="choice.id" :class="{primary:choice.primary}" @click="answer(choice.id)">{{ choice.label }}</button></div></template></EditorDialog>
     <div v-if="jobsOpen" class="modal-shade" @click.self="jobsOpen=false">
