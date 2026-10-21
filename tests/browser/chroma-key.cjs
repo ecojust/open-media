@@ -89,9 +89,28 @@ async function main() {
       preview.dispose()
       const encoded = await exportTimelineWebM(project, { fps: 20, videoBitsPerSecond: 2_000_000 })
       const output = document.createElement('video'); output.muted = true; output.playsInline = true
+      output.width = 160; output.height = 128; document.body.append(output)
       const loaded = new Promise((resolve, reject) => { output.onloadeddata = resolve; output.onerror = reject })
       output.src = URL.createObjectURL(encoded); await loaded
-      const sought = new Promise(resolve => { output.onseeked = resolve }); output.currentTime = 0.6; await sought
+      // A completed seek can precede the compositor presenting its target frame.
+      // Wait for that timestamp before sampling pixels from the encoded output.
+      await new Promise((resolve, reject) => {
+        const target = 0.6
+        let seeked = false, presented = false, frameId
+        const cleanup = () => { clearTimeout(timeout); if (frameId !== undefined) output.cancelVideoFrameCallback(frameId); output.removeEventListener('seeked', onSeeked); output.removeEventListener('error', onError) }
+        const ready = () => { if (seeked && presented && output.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) { cleanup(); resolve() } }
+        const onSeeked = () => { seeked = true; ready() }
+        const onError = () => { cleanup(); reject(new Error(output.error?.message || 'Encoded output could not be decoded')) }
+        const onFrame = (_now, metadata) => {
+          if (Math.abs(metadata.mediaTime - target) <= 1 / project.fps) { presented = true; ready() }
+          else frameId = output.requestVideoFrameCallback(onFrame)
+        }
+        const timeout = setTimeout(() => { cleanup(); reject(new Error(`Encoded frame was not presented: time=${output.currentTime}, readyState=${output.readyState}`)) }, 10000)
+        output.addEventListener('seeked', onSeeked)
+        output.addEventListener('error', onError)
+        frameId = output.requestVideoFrameCallback(onFrame)
+        output.currentTime = target
+      })
       const decoded = document.createElement('canvas'); decoded.width = 160; decoded.height = 128
       const decodeContext = decoded.getContext('2d'); decodeContext.drawImage(output, 0, 0)
       const encodedPixels = [[40, 24], [80, 64], [4, 4]].map(([x, y]) => pixel(decodeContext, x, y))
@@ -99,6 +118,10 @@ async function main() {
       URL.revokeObjectURL(asset.url); URL.revokeObjectURL(output.src)
       return { gpuPixels, cpuPixels, keyedOnly, disabled, backend, recovered, recoveryBackend, spillCases, beforeStart, previewPixels, encodedPixels, encodedBytes: [...new Uint8Array(await encoded.arrayBuffer())] }
     })
+    const directory = process.env.BROWSER_ARTIFACTS || '/tmp/open-media-chroma-key'
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(`${directory}/keyed-timeline.webm`, Buffer.from(result.encodedBytes))
+    await page.screenshot({ path: `${directory}/keyed-preview.png` })
     assert.equal(result.backend, 'webgl')
     assert.equal(result.recoveryBackend, 'cpu')
     for (let index = 0; index < result.gpuPixels.length; index++) assert(Math.abs(result.gpuPixels[index] - result.cpuPixels[index]) <= 5, `GPU/CPU channel ${index}: ${result.gpuPixels[index]} vs ${result.cpuPixels[index]}`)
@@ -127,15 +150,11 @@ async function main() {
     }
     console.log('PASS 绿色/蓝色去溢色在 GPU 与 CPU 一致，实际修正边缘颜色且保留 alpha，其余通道与关闭后的颜色不变')
     assert.deepEqual(result.beforeStart, [0, 0, 255, 255])
-    for (const pixels of [result.previewPixels, result.encodedPixels]) {
+    for (const [stage, pixels] of [['实时预览', result.previewPixels], ['导出解码', result.encodedPixels]]) {
       for (const point of [pixels[0], pixels[2]]) assert(point[0] < 8 && point[1] < 8 && point[2] > 245, `绿幕应透出蓝色底板：${point}`)
-      assert(pixels[1][0] > 19 && pixels[1][0] < 34 && pixels[1][1] > 19 && pixels[1][1] < 34 && pixels[1][2] > 147 && pixels[1][2] < 164, `灰色前景半透明合成错误：${pixels[1]}`)
+      assert(pixels[1][0] > 19 && pixels[1][0] < 34 && pixels[1][1] > 19 && pixels[1][1] < 34 && pixels[1][2] > 147 && pixels[1][2] < 164, `${stage}灰色前景半透明合成错误：${pixels[1]}`)
     }
     assert(result.encodedBytes.length > 1000)
-    const directory = process.env.BROWSER_ARTIFACTS || '/tmp/open-media-chroma-key'
-    mkdirSync(directory, { recursive: true })
-    writeFileSync(`${directory}/keyed-timeline.webm`, Buffer.from(result.encodedBytes))
-    await page.screenshot({ path: `${directory}/keyed-preview.png` })
     assert.deepEqual(errors, [])
     console.log('PASS 真实绿幕视频预览与编码导出一致，正确保留开始刻度、缩放位置、滤镜与不透明度')
   } finally { await browser.close(); await server.close() }

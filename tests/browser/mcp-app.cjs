@@ -122,6 +122,14 @@ async function tool(page, name, args = {}) {
   return result.result
 }
 
+async function createReadyProject(page) {
+  await page.getByTestId('create-project').click()
+  await expect(page.getByTestId('video-editor')).toBeVisible()
+  // A click finishes before native project preparation, persistence and history refresh do.
+  // Wait for the real UI guard to release before sending the first remote mutation.
+  await expect(page.getByTestId('new-project')).toBeEnabled()
+}
+
 async function editorGeometry(page) {
   return page.evaluate(() => Object.fromEntries(['[data-testid="video-editor"]', '#editor-timeline'].map(selector => {
     const { x, y, width, height } = document.querySelector(selector).getBoundingClientRect()
@@ -168,7 +176,7 @@ async function verifyMcpFocus(browser, url) {
     await installNativeBridge(page)
     await page.goto(url)
     await completion(page, 'startup-replay')
-    await page.getByTestId('create-project').click()
+    await createReadyProject(page)
     await expect(page.getByTestId('editor-mcp-open')).toBeVisible()
     await page.waitForFunction(() => document.querySelector('#app').__vue_app__._instance.setupState.mcpServiceRunning)
     const now = await page.evaluate(() => Date.now())
@@ -409,7 +417,7 @@ async function verifyPersistentBanner(browser, url) {
     await installNativeBridge(page)
     await page.goto(url)
     await completion(page, 'startup-replay')
-    await page.getByTestId('create-project').click()
+    await createReadyProject(page)
     const banner = page.getByTestId('mcp-processing-banner'), glow = page.getByTestId('mcp-status-glow')
     await expect(banner).not.toBeVisible()
     const geometry = await editorGeometry(page), now = await page.evaluate(() => Date.now())
@@ -532,7 +540,7 @@ async function verifyCurrentProject(browser, url) {
     await installNativeBridge(page)
     await page.goto(url)
     await completion(page, 'startup-replay')
-    await page.getByTestId('create-project').click()
+    await createReadyProject(page)
     const original = await tool(page, 'project_get')
     for (const name of ['project_new', 'project_open']) {
       const result = await completion(page, await enqueue(page, name, name === 'project_open' ? { path: '/fixture/other.omedia' } : {}))
@@ -589,7 +597,7 @@ async function verifyMotionPreferences(browser, url) {
     await installNativeBridge(page)
     await page.goto(url)
     await completion(page, 'startup-replay')
-    await page.getByTestId('create-project').click()
+    await createReadyProject(page)
     assert.equal((await tool(page, 'motion_brief_get')).enabled, false)
     const imported = await tool(page, 'asset_import', { paths: ['/fixture/creative.png'] })
     await page.waitForFunction(() => typeof window.mcpAppFixture.releaseImport === 'function')
@@ -642,7 +650,7 @@ async function verifyProjectMediaIsolation(browser, url) {
     await installNativeBridge(page)
     await page.goto(url)
     await completion(page, 'startup-replay')
-    await page.getByTestId('create-project').click()
+    await createReadyProject(page)
     const importImage = async (id, hold = false) => {
       if (hold) await page.evaluate(() => { window.managedProjectFixture.holdNextPrepare = true })
       const job = await tool(page, 'asset_import', { paths: [`/fixture/public/${id}.png`] })
@@ -754,7 +762,7 @@ async function main() {
       console.log('PASS 主窗口原生主题及窗口/网页背景契约：初始主题、手动切换、系统跟随、有效颜色不变时释放/恢复主题覆盖')
       return
     }
-    await page.getByTestId('create-project').click()
+    await createReadyProject(page)
     await expect(page.getByTestId('save-project')).toBeEnabled()
     await expect(page.locator('.statusbar > *')).toHaveCount(2)
     await expect(page.locator('.statusbar > .status-main')).toBeVisible()
