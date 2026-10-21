@@ -114,9 +114,10 @@ async function reset(page) {
 }
 async function drag(page, x, y, options = {}) {
   const chosen = await clip(page, options.id || 'subtitle')
+  const project = await state(page)
   const box = await page.getByTestId('video-preview').boundingBox()
-  const scale = box.width / 640
-  assert(Math.abs(scale - box.height / 360) < 0.01, '预览实际显示比例必须一致')
+  const scale = box.width / project.width
+  assert(Math.abs(scale - box.height / project.height) < 0.01, '预览实际显示比例必须一致')
   const start = { x: box.x + (chosen.x + chosen.width / 2) * scale, y: box.y + (chosen.y + chosen.height / 2) * scale }
   await page.mouse.move(start.x, start.y); await page.mouse.down()
   if (options.alt) await page.keyboard.down('Alt')
@@ -127,6 +128,49 @@ async function drag(page, x, y, options = {}) {
   if (options.cancel === 'blur') await page.evaluate(() => window.dispatchEvent(new Event('blur')))
   await page.mouse.up()
   if (options.alt) await page.keyboard.up('Alt')
+}
+
+async function frameLayoutChecks(page) {
+  const original = await state(page)
+  for (const [width, height] of [[640, 360], [360, 640]]) {
+    for (const viewport of [{ width: 1440, height: 1200 }, { width: 900, height: 600 }, { width: 320, height: 640 }]) {
+      await page.setViewportSize(viewport)
+      await page.evaluate(async ({ original, width, height }) => {
+        window.positionFixture.reset({ ...original, width, height })
+        await window.positionFixture.nextTick()
+        window.positionFixture.editor.value.seek(1)
+      }, { original, width, height })
+      await select(page)
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      const boxes = await page.getByTestId('video-preview').evaluate(canvas => {
+        const stage = canvas.closest('.preview-stage'), css = getComputedStyle(stage)
+        const rect = element => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
+        const bounds = rect(stage), left = parseFloat(css.paddingLeft), right = parseFloat(css.paddingRight), top = parseFloat(css.paddingTop), bottom = parseFloat(css.paddingBottom)
+        return { stage: { x: bounds.x + left, y: bounds.y + top, width: bounds.width - left - right, height: bounds.height - top - bottom }, canvas: rect(canvas), frame: rect(canvas.parentElement), overlay: rect(canvas.parentElement.querySelector('[data-testid="preview-selection"]')) }
+      })
+      const expectedWidth = Math.min(boxes.stage.width, boxes.stage.height * width / height)
+      const expectedHeight = expectedWidth * height / width
+      assert(expectedWidth > 0 && expectedHeight > 0, '窄窗口也必须保留可见预览区域')
+      for (const kind of ['canvas', 'frame', 'overlay']) {
+        const actual = boxes[kind], context = `${width}×${height} 项目 / ${viewport.width}×${viewport.height} 窗口 / ${kind}`
+        coordinate(actual.width, expectedWidth, `${context} 宽度按可用空间等比适应`, 0.1)
+        coordinate(actual.height, expectedHeight, `${context} 高度按可用空间等比适应`, 0.1)
+        coordinate(actual.x + actual.width / 2, boxes.stage.x + boxes.stage.width / 2, `${context} 水平居中`, 0.1)
+        coordinate(actual.y + actual.height / 2, boxes.stage.y + boxes.stage.height / 2, `${context} 垂直居中`, 0.1)
+      }
+      if (viewport.width >= 900) {
+        await drag(page, 85, 70, { alt: true })
+        draggedCoordinate((await clip(page)).x, 85)
+        draggedCoordinate((await clip(page)).y, 70)
+      }
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.evaluate(async original => { window.positionFixture.reset(original); await window.positionFixture.nextTick(); window.positionFixture.editor.value.seek(1) }, original)
+  await select(page)
+  await expect.poll(() => subtitleBackgroundPixel(page, 60, 40)).toEqual([204, 34, 51, 255])
+  await page.evaluate(() => { window.positionFixture.canvasResets.splice(0) })
+  console.log('PASS 少轨道高窗口、矮窗口与320像素窄窗口下，横竖画幅、画布与选择层等比居中，拖动保持项目像素坐标')
 }
 
 async function liveAndHistoryChecks(page) {
@@ -413,6 +457,7 @@ async function main() {
   page.setDefaultTimeout(15000); page.on('pageerror', error => errors.push(error.message))
   try {
     await installEditor(page, `http://127.0.0.1:${port}`)
+    await frameLayoutChecks(page)
     await liveAndHistoryChecks(page)
     await snappingAndScaleChecks(page)
     await cancellationChecks(page)
