@@ -727,7 +727,9 @@ impl Worker {
             check_cancelled(cancelled)?;
             checked_file(&working, &output)?;
             let name = format!("{}-{}.mp4", safe_title(&shot.title), index + 1);
-            let asset = store.import(runtime, &output, Some(&name))?;
+            let asset = store
+                .workspace_store("videogen")?
+                .import(runtime, &output, Some(&name))?;
             if asset.kind != "video"
                 || asset.width != request.width
                 || asset.height != request.height
@@ -794,7 +796,9 @@ impl Worker {
             )?;
             check_cancelled(cancelled)?;
             checked_file(&working, &joined)?;
-            let asset = store.import(runtime, &joined, Some("生成分镜合辑.mp4"))?;
+            let asset = store
+                .workspace_store("videogen")?
+                .import(runtime, &joined, Some("生成分镜合辑.mp4"))?;
             let expected: f64 = outputs.iter().map(|a| a.duration).sum();
             if asset.kind != "video" || (asset.duration - expected).abs() > 1.0 {
                 let _ = fs::remove_file(&asset.native_path);

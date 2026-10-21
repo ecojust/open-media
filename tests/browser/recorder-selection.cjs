@@ -11,14 +11,16 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
     const vueImport = componentSource.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
     const { createApp, h } = await import(vueImport)
     const RecorderWorkspace = (await import('/src/components/RecorderWorkspace.vue')).default
-    const state = { calls: [], events: [], blobs: [], assets: [], status: { state: 'idle', elapsed: 0, segments: 0 } }
+    const state = { calls: [], events: [], blobs: [], assets: [], added: [], timeline: [], stored: [], status: { state: 'idle', elapsed: 0, segments: 0 } }
     window.recorderHarness = state
     if (native) {
+      state.stored = [{ id: 'previous-recording', name: '历史录屏.mp4', kind: 'video', url: '', nativePath: '/fixture/recording/saved.mp4', duration: 7, width: 1280, height: 720, size: 500, mime: 'video/mp4', addedAt: Date.now() }]
       const callbacks = new Map(), listeners = new Map()
       let callbackId = 0, listenerId = 0
       state.action = action => { for (const [id, listener] of listeners) if (listener.event === 'capture-controls-action') callbacks.get(listener.handler)?.({ event: listener.event, id, payload: { action } }) }
       window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_event, id) => listeners.delete(id) }
       window.__TAURI_INTERNALS__ = {
+        convertFileSrc: () => '/fixture-preview.mp4',
         transformCallback: callback => { const id = ++callbackId; callbacks.set(id, callback); return id },
         unregisterCallback: id => callbacks.delete(id),
         invoke: async (command, args) => {
@@ -27,7 +29,8 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
           if (command === 'plugin:event|unlisten') { listeners.delete(args.eventId); return null }
           if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
           if (command === 'show_main_window') return null
-          if (command === 'open_media_library_directory') {
+          if (command === 'list_workspace_assets') return { directories: { recording: '/fixture/recording' }, assets: state.stored, warnings: [] }
+          if (command === 'open_workspace_directory') {
             if (state.directoryFailure) { state.directoryFailure = false; throw new Error('目录暂不可用') }
             return null
           }
@@ -89,7 +92,7 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
       } })
       state.stopSource = () => { clearInterval(timer); stream.getTracks().forEach(track => track.stop()); state.microphoneTracks.forEach(track => track.stop()); void state.audioContext?.close() }
     }
-    const app = createApp({ render: () => h(RecorderWorkspace, { assets: [], native, onCaptured: (blob, name) => state.blobs.push({ blob, name }), onAsset: asset => state.assets.push(asset), onRecordingChange: active => state.events.push(active) }) })
+    const app = createApp({ render: () => h(RecorderWorkspace, { assets: [], native, onCaptured: (blob, name) => state.blobs.push({ blob, name }), onAsset: asset => state.assets.push(asset), onAddAsset: asset => state.added.push(asset), onAddToTimeline: asset => state.timeline.push(asset), onRecordingChange: active => state.events.push(active) }) })
     app.mount('#app')
     state.cleanup = () => { app.unmount(); state.stopSource?.(); delete window.__TAURI_INTERNALS__ }
   }, { native, surface })
@@ -109,7 +112,7 @@ async function main() {
     page.on('pageerror', error => errors.push(error.message))
     await mountRecorder(page, baseURL, true)
     await page.getByTestId('record-start').waitFor()
-    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => !['get_runtime_status', 'plugin:event|listen'].includes(call.command))), [], '打开录制页不能枚举来源或申请采集权限')
+    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => !['get_runtime_status', 'plugin:event|listen', 'list_workspace_assets'].includes(call.command))), [], '打开录制页不能枚举来源或申请采集权限')
     const directoryButton = page.getByRole('button', { name: '打开录屏保存目录', exact: true })
     const headingBounds = await page.getByRole('heading', { name: '屏幕录制', exact: true }).boundingBox()
     const directoryBounds = await directoryButton.boundingBox()
@@ -120,10 +123,16 @@ async function main() {
     await directoryButton.click()
     await expect(page.getByRole('alert')).toContainText('无法打开录屏保存目录：目录暂不可用')
     await directoryButton.click()
-    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'open_media_library_directory').length)).toBe(2)
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'open_workspace_directory').length)).toBe(2)
     await expect(page.getByRole('alert')).toHaveCount(0)
-    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => !['get_runtime_status', 'plugin:event|listen'].includes(call.command)).map(call => call.command)), ['open_media_library_directory', 'open_media_library_directory'], '打开目录不扫描视频列表或启动采集')
-    console.log('PASS 录屏目录入口紧邻主标题，按需打开、错误可重试且不扫描目录')
+    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.filter(call => !['get_runtime_status', 'plugin:event|listen', 'list_workspace_assets'].includes(call.command)).map(call => call.command)), ['open_workspace_directory', 'open_workspace_directory'], '打开目录不扫描视频列表或启动采集')
+    await expect(page.locator('.recent-grid [data-asset-id="previous-recording"]')).toBeVisible()
+    assert.equal(await page.evaluate(() => window.recorderHarness.added.length), 0, '浏览录屏目录不自动加入工程')
+    await page.locator('.recent-grid [data-asset-id="previous-recording"]').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '添加到工程素材', exact: true }).click()
+    assert.equal(await page.evaluate(() => window.recorderHarness.added[0].nativePath), '/fixture/recording/saved.mp4')
+    assert.deepEqual(await page.evaluate(() => window.recorderHarness.calls.find(call => call.command === 'list_workspace_assets').args), { categories: ['recording'] })
+    console.log('PASS 录屏目录入口紧邻主标题，按需打开与错误重试；独立目录列表仅在右键选择后加入工程')
     assert.equal(await page.getByTestId('capture-source').count(), 0)
     assert.equal(await page.getByTestId('capture-region-x').count(), 0)
     assert.equal(await page.getByTestId('capture-output').count(), 0)

@@ -99,7 +99,10 @@ async function main() {
         assert(sampledLabels.size >= 4, `${theme} image width ${width}: expected at least 4 distinct controls across contextual property tabs, got ${sampledLabels.size}`)
       }
       await page.setViewportSize({ width: 1440, height: 1000 })
+      await page.locator('.convert-source.active').click({ button: 'right' })
+      await page.getByRole('menuitem', { name: '添加到工程素材', exact: true }).click()
       await page.getByTestId('nav-edit').click()
+      await expect(page.locator('.project-summary')).toContainText('1 个素材')
       await page.locator('.asset-card').first().dblclick()
       await inspect(page, `${theme} editor image`, 2)
       await page.getByTitle('添加字幕', { exact: true }).click()

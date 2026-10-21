@@ -23,6 +23,9 @@ async function installNativeContract(page, voices = [{ id: 'english-first', name
         state.calls.push({ command, args })
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_media_jobs') return []
+        if (command === 'list_managed_projects') return []
+        if (command === 'save_managed_project') return { directory: '/fixture/projects', savedAt: new Date().toISOString() }
+        if (command === 'ensure_project_media') return { directory: `/fixture/projects/${args.projectId}`, assets: args.assets.map(asset => ({ assetId: asset.id, nativePath: asset.nativePath, size: asset.size })) }
         if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
         if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
         if (command === 'plugin:event|listen') return 1
@@ -53,10 +56,9 @@ async function expectDialogFocus(dialog) {
   await expect.poll(() => dialog.evaluate(element => element.contains(document.activeElement))).toBe(true)
 }
 
-async function showImportedAssets(page) {
-  const sources = page.getByLabel('素材来源', { exact: true })
-  await sources.getByRole('button', { name: '已导入', exact: true }).click()
-  await expect(sources.getByRole('button', { name: '已导入', exact: true })).toHaveAttribute('aria-pressed', 'true')
+async function showProjectAssets(page) {
+  await page.getByLabel('素材类型', { exact: true }).getByRole('button', { name: '全部', exact: true }).click()
+  await expect(page.getByLabel('素材来源', { exact: true })).toHaveCount(0)
 }
 
 async function selectVoice(page, name) {
@@ -77,7 +79,7 @@ async function verifyInspectorSpeechActions(browser, url) {
     await installNativeContract(page)
     await page.goto(url)
     await page.getByTestId('create-project').click()
-    await showImportedAssets(page)
+    await showProjectAssets(page)
     await page.evaluate(() => {
       window.speechDialogOpenCount = 0
       new MutationObserver(records => {
@@ -264,7 +266,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
     assert.equal(catalog.length, 1, '内置模型仅提供一种中英女声')
     assert.ok(catalog.every(voice => voices.some(original => original.id === voice.id)), '精简目录必须保留真实声音标识')
     await page.getByTestId('create-project').click()
-    await showImportedAssets(page)
+    await showProjectAssets(page)
     await page.locator('.editor-tools').getByRole('button', { name: '文字转语音', exact: true }).click()
     const picker = page.getByTestId('voice-picker')
     const previewAudio = page.getByLabel('声音试听音频')
@@ -368,7 +370,7 @@ async function verifyBundledVoiceCatalog(browser, url) {
     await page.setViewportSize({ width: 1440, height: 960 })
     await page.reload()
     await page.getByTestId('create-project').click()
-    await showImportedAssets(page)
+    await showProjectAssets(page)
     await page.locator('.editor-tools').getByRole('button', { name: '文字转语音', exact: true }).click()
     const restartVoice = catalog.find(voice => voice.category === 'zh-en-female')
     const brokenPattern = `**/${restartVoice.id}.mp3*`
@@ -404,7 +406,7 @@ async function main() {
     await installNativeContract(page)
     await page.goto(url)
     await page.getByTestId('create-project').click()
-    await showImportedAssets(page)
+    await showProjectAssets(page)
     await expect(page.getByTestId('video-editor')).toBeVisible()
     assert.equal(await page.evaluate(() => window.speechHarness.calls.some(call => call.command === 'get_speech_status')), false, '进入剪辑时不应加载未打开的配音组件')
     await page.getByRole('button', { name: '字幕', exact: true }).click()

@@ -42,8 +42,14 @@ async function createProject(page) {
 }
 
 async function openRecent(page, title) {
-  await page.locator('.brand').click()
-  await page.locator('.recent-item > button').filter({ hasText: title }).click()
+  if (await page.getByTestId('project-history-toggle').isVisible()) {
+    await page.getByTestId('project-history-toggle').click()
+    await page.getByRole('menuitem').filter({ hasText: title }).click()
+    await expect(page.getByRole('menu', { name: '历史工程' })).toHaveCount(0)
+  } else {
+    await page.locator('.brand').click()
+    await page.locator('.recent-item > button').filter({ hasText: title }).click()
+  }
   await expect(page.getByTestId('save-project')).toBeEnabled()
   await expect(page.locator('.project-title')).toHaveText(title)
 }
@@ -86,7 +92,7 @@ async function createPage(browser) {
 
 async function nativeChecks(browser, url) {
   const { page, context, errors } = await createPage(browser)
-  const state = { calls: [], mode: 'ready', nextName: 'native-a.omedia', openName: 'native-a.omedia', targets: new Map(), media: new Map(), uploads: new Map() }
+  const state = { calls: [], mode: 'ready', nextName: 'native-a.omedia', openName: 'native-a.omedia', targets: new Map(), media: new Map(), uploads: new Map(), managed: new Map() }
   const target = name => ({ name, path: path.join(artifacts, name), token: createHash('sha256').update(name).digest('hex') })
   try {
     await page.route('**/__native_project_media__?*', async route => {
@@ -100,6 +106,24 @@ async function nativeChecks(browser, url) {
       return { id: `asset-${Date.now()}`, name, kind: 'image', url: '', nativePath, mime: 'image/png', duration: 0, width: 48, height: 32, size: bytes.length }
     }
     await page.exposeBinding('projectNativeInvoke', async (_, command, args, options) => {
+      if (command === 'ensure_project_media') {
+        const directory = `/fixture/projects/${args.projectId}`
+        return { directory, assets: args.assets.map(asset => {
+          const bytes = state.media.get(asset.nativePath)
+          assert(bytes, `工程素材原件不存在 ${asset.nativePath}`)
+          const nativePath = `${directory}/assets/${createHash('sha256').update(bytes).digest('hex')}.png`
+          state.media.set(nativePath, Buffer.from(bytes))
+          return { assetId: asset.id, nativePath, size: bytes.length }
+        }) }
+      }
+      if (command === 'save_managed_project') {
+        const savedAt = new Date().toISOString()
+        state.managed.set(args.project.id, { project: structuredClone(args.project), duration: args.duration })
+        return { directory: `/fixture/projects/${args.project.id}`, savedAt }
+      }
+      if (command === 'list_managed_projects') return [...state.managed.values()].map(({ project, duration }) => ({ id: project.id, title: project.title, width: project.width, height: project.height, updatedAt: project.updatedAt, assetCount: project.assets.length, duration }))
+      if (command === 'load_managed_project') return structuredClone(state.managed.get(args.projectId).project)
+      if (command === 'remove_managed_project_draft') { state.managed.delete(args.projectId); return null }
       if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
       if (command === 'get_media_jobs') return []
       if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
@@ -283,12 +307,10 @@ async function nativeChecks(browser, url) {
         let snapshotBytes
         try { snapshotBytes = [...new Uint8Array(await imported.blobs.get(project.assets[0].id).arrayBuffer())] } finally { imported.revoke() }
         if (!await app.persist()) throw new Error('替换后的草稿保存失败')
-        const { loadProject, readStoredAssetBlob } = await import('/src/core/storage.ts')
-        const draft = await loadProject(project.id)
-        try {
-          const current = draft.project.assets[0]
-          return { snapshotBytes, draftBytes: [...new Uint8Array(await (await fetch(current.sourceUrl || current.url)).arrayBuffer())], blobCount: draft.blobs.size, storedBlob: !!await readStoredAssetBlob(project.id, current.id) }
-        } finally { draft.revoke() }
+        const { readStoredAssetBlob } = await import('/src/core/storage.ts')
+        const { loadManagedProject } = await import('/src/native-project-library.ts')
+        const draft = await loadManagedProject(project.id), current = draft.assets[0]
+        return { snapshotBytes, draftBytes: [...new Uint8Array(await (await fetch(current.sourceUrl || current.url)).arrayBuffer())], blobCount: app.blobs.size, storedBlob: !!await readStoredAssetBlob(project.id, current.id) }
       }, mode)
       assert.deepEqual(Buffer.from(result.snapshotBytes), replacement)
       assert.deepEqual(Buffer.from(result.draftBytes), replacement)

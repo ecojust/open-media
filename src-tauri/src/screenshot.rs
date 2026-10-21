@@ -46,7 +46,9 @@ pub fn capture(runtime: &Runtime, store: &MediaStore, selection: &PickerSelectio
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    store.import_png(&output, &format!("截屏-{stamp}.png"))
+    store
+        .workspace_store("screenshot")?
+        .import_png(&output, &format!("截屏-{stamp}.png"))
 }
 
 fn validate_selection(selection: &PickerSelection) -> Result<()> {

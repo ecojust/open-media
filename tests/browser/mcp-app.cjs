@@ -1,9 +1,11 @@
 const assert = require('node:assert/strict')
 const { chromium, expect } = require('@playwright/test')
+const { installManagedProjectBridge } = require('./managed-project-bridge.cjs')
 
 // Full application integration with the native event/IPC boundary simulated.
 // Real HTTP and protocol compatibility are tested separately by the native suite.
 async function installNativeBridge(page) {
+  await installManagedProjectBridge(page)
   await page.addInitScript(() => {
     localStorage.setItem('open-media:autosave', 'false')
     localStorage.setItem('open-media:theme', 'dark')
@@ -39,9 +41,11 @@ async function installNativeBridge(page) {
       metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
       transformCallback(callback) { const id = fixture.counter++; fixture.callbacks.set(id, callback); return id },
       unregisterCallback(id) { fixture.callbacks.delete(id) },
-      convertFileSrc: path => path,
-      invoke: async (command, args = {}) => {
+      convertFileSrc: path => window.managedProjectFileUrl(path),
+      invoke: async (command, args = {}, options = {}) => {
         fixture.calls.push({ command, args: structuredClone(args) })
+        const managed = await window.managedProjectCommand(command, args, options)
+        if (managed.handled) return managed.value
         if (command === 'get_desktop_platform') return 'macos'
         if (command === 'plugin:event|listen') {
           const id = fixture.counter++; fixture.listeners.set(id, { ...args, id }); return id
@@ -65,7 +69,7 @@ async function installNativeBridge(page) {
         if (command === 'cancel_media_job') { fixture.mediaJobs.find(job => job.id === args.id).state = 'cancelled'; return null }
         if (command === 'close_native_window') return null
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
-        if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
+        if (command === 'list_workspace_assets') return { directories: Object.fromEntries(args.categories.map(category => [category, `/fixture/${category}`])), assets: [], warnings: [] }
         if (command === 'mcp_import_media_paths') return new Promise(resolve => { fixture.releaseImport = assets => resolve(assets) })
         if (command === 'mcp_get_config') return { ...fixture.config }
         if (command === 'mcp_get_status') {
@@ -109,7 +113,7 @@ async function enqueue(page, tool, args = {}, options = {}) {
   return id
 }
 async function completion(page, id) {
-  await page.waitForFunction(id => window.mcpAppFixture.completions.some(result => result.id === id), id)
+  await page.waitForFunction(id => window.mcpAppFixture.completions.some(result => result.id === id), id, { timeout: id === 'startup-replay' ? 45000 : 15000 })
   return page.evaluate(id => window.mcpAppFixture.completions.find(result => result.id === id), id)
 }
 async function tool(page, name, args = {}) {
@@ -630,6 +634,70 @@ async function verifyMotionPreferences(browser, url) {
   } finally { await page.close() }
 }
 
+async function verifyProjectMediaIsolation(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } }), errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.setDefaultTimeout(15000)
+  try {
+    await installNativeBridge(page)
+    await page.goto(url)
+    await completion(page, 'startup-replay')
+    await page.getByTestId('create-project').click()
+    const importImage = async (id, hold = false) => {
+      if (hold) await page.evaluate(() => { window.managedProjectFixture.holdNextPrepare = true })
+      const job = await tool(page, 'asset_import', { paths: [`/fixture/public/${id}.png`] })
+      await page.waitForFunction(() => typeof window.mcpAppFixture.releaseImport === 'function')
+      await page.evaluate(id => {
+        const canvas = document.createElement('canvas'); canvas.width = 24; canvas.height = 24
+        canvas.getContext('2d').fillRect(0, 0, 24, 24)
+        const url = canvas.toDataURL('image/png'), fixture = window.mcpAppFixture
+        const release = fixture.releaseImport; fixture.releaseImport = undefined
+        release([{ id, name: `${id}.png`, kind: 'image', url, mime: 'image/png', width: 24, height: 24, duration: 0, size: atob(url.split(',')[1]).length }])
+      }, id)
+      return job
+    }
+    const imported = await importImage('project-only-image')
+    await expect.poll(async () => (await tool(page, 'job_get', { id: imported.jobId })).state).toBe('completed')
+    const first = await page.evaluate(() => {
+      const app = document.querySelector('#app').__vue_app__._instance.setupState
+      return { id: app.project.id, assets: structuredClone(app.project.assets), calls: window.managedProjectFixture.calls }
+    })
+    assert.equal(first.assets.length, 1)
+    assert.ok(first.assets[0].nativePath.startsWith(`/fixture/projects/${first.id}/assets/`))
+    assert.ok(first.calls.some(call => call.command === 'project_asset_write'), 'browser-backed input uses the chunked materialization bridge')
+    assert.ok(first.calls.some(call => call.command === 'ensure_project_media' && call.args.assets.some(asset => asset.id === 'project-only-image')))
+    assert.equal(await page.evaluate(async url => {
+      const image = new Image(); image.src = url; await image.decode(); return image.naturalWidth
+    }, first.assets[0].url), 24, 'copied project media remains readable for the actual preview')
+    await page.evaluate(async () => { await document.querySelector('#app').__vue_app__._instance.setupState.persist() })
+    assert.equal(await page.evaluate(id => window.managedProjectFixture.projects.get(id).project.assets[0].nativePath, first.id), first.assets[0].nativePath)
+    for (const action of ['cancel', 'reopen', 'openOther']) {
+      const current = await tool(page, 'project_get')
+      const pending = await importImage(`late-${action}`, true)
+      await page.waitForFunction(() => typeof window.managedProjectFixture.releasePrepare === 'function')
+      const copying = await tool(page, 'job_get', { id: pending.jobId })
+      assert.equal(copying.cancelable, true)
+      assert.match(copying.stage, /归档/)
+      await expect(page.getByTestId('new-project')).toBeDisabled()
+      if (action === 'cancel') await tool(page, 'job_cancel', { id: pending.jobId })
+      else await page.evaluate(async action => {
+        const app = document.querySelector('#app').__vue_app__._instance.setupState
+        const { cloneProject, createProject } = await import('/src/core/project.ts')
+        await app.adoptProject(action === 'reopen' ? cloneProject(app.project) : createProject('另一工程'))
+      }, action)
+      await page.evaluate(() => window.managedProjectFixture.releasePrepare())
+      await expect.poll(async () => (await tool(page, 'job_get', { id: pending.jobId })).state).toBe(action === 'cancel' ? 'cancelled' : 'failed')
+      const after = await tool(page, 'project_get')
+      assert.equal(after.assets.some(asset => asset.id === `late-${action}`), false)
+      assert.equal(after.projectId === current.projectId, action !== 'openOther')
+      await expect(page.getByTestId('new-project')).toBeEnabled()
+    }
+    assert.deepEqual(errors, [])
+    assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+    console.log('PASS 完整App工程素材隔离：分块归档后提交、预览可读、草稿持久化工程路径、复制期间可取消，重开和切换工程拒绝迟到结果')
+  } finally { await page.close() }
+}
+
 async function main() {
   const { createServer } = await import('vite')
   const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
@@ -639,6 +707,10 @@ async function main() {
   page.setDefaultTimeout(15000)
   page.on('pageerror', error => errors.push(error.message))
   try {
+    if (process.argv.includes('--storage-only')) {
+      await verifyProjectMediaIsolation(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+      return
+    }
     if (process.argv.includes('--motion-only')) {
       await verifyMotionPreferences(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
       return
@@ -1068,6 +1140,7 @@ async function main() {
     await verifyMotionPreferences(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyCurrentProject(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+    await verifyProjectMediaIsolation(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyPersistentBanner(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
   } finally { await browser.close(); await server.close() }
 }

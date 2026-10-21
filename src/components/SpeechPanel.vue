@@ -12,7 +12,7 @@ import { acceptSpeechJobs, beginSpeechJob, cancelSpeechJob, discardSpeechJob, ge
 import Icon from './Icon.vue'
 import VoicePicker from './VoicePicker.vue'
 
-const props = defineProps<{ project: Project; active: boolean; inDialog?: boolean }>()
+const props = defineProps<{ project: Project; active: boolean; inDialog?: boolean; commitProject?: (project: Project, label?: string) => Promise<void> }>()
 const emit = defineEmits<{ change: [project: Project, label: string]; status: [message: string]; busy: [value: boolean]; 'open-models': [provider: 'speech'] }>()
 const desktop = isDesktop()
 const status = ref<SpeechStatus>({ ready: false, voices: [] })
@@ -242,7 +242,8 @@ async function run(sources?: SpeechSource[], audition?: { voiceId: string; text:
       checkOperation(active)
       const result = applySpeechResults(props.project, results, { alignText: shouldAlign, alignment: getSpeechAlignment() })
       active.applying = true; finalizing.value = true
-      emit('change', result.project, `已为 ${sources.length} 段文字生成语音`)
+      if (props.commitProject) await props.commitProject(result.project, `已为 ${sources.length} 段文字生成语音`)
+      else emit('change', result.project, `已为 ${sources.length} 段文字生成语音`)
       await nextTick()
       if (!results.every(item => props.project.assets.some(asset => asset.id === item.asset.id)) || !result.audioClipIds.every(id => props.project.tracks.some(track => track.clips.some(clip => clip.id === id)))) throw new Error('语音没有写入项目，时间线保持原样，请重试。')
       const acceptedIds = [...active.jobs]

@@ -2,11 +2,92 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { chromium, expect } = require('@playwright/test')
+const { installManagedProjectBridge } = require('./managed-project-bridge.cjs')
 
 const read = page => page.evaluate(() => JSON.parse(JSON.stringify(window.editorTools.current.value)))
 const find = (project, id) => project.tracks.flatMap(track => track.clips).find(clip => clip.id === id)
 const clip = (page, id) => page.locator(`.timeline-clip[data-clip-id="${id}"]`)
 async function close(page, name) { await page.getByRole('button', { name: `关闭${name}`, exact: true }).click() }
+
+async function verifyNativeProjectPreparation(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } }), errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await installManagedProjectBridge(page)
+  await page.addInitScript(() => {
+    localStorage.setItem('open-media:autosave', 'false')
+    let counter = 0
+    const state = window.editorAppNative = { calls: [], unexpected: [], imported: 0 }
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
+      transformCallback: () => ++counter, unregisterCallback() {},
+      convertFileSrc: path => window.managedProjectFileUrl(path),
+      invoke: async (command, args = {}, options = {}) => {
+        state.calls.push(command)
+        const managed = await window.managedProjectCommand(command, args, options)
+        if (managed.handled) return managed.value
+        if (command === 'get_desktop_platform') return 'macos'
+        if (command === 'plugin:event|listen') return ++counter
+        if (command === 'plugin:event|unlisten' || command.startsWith('plugin:window|') || command.startsWith('plugin:webview|')) return null
+        if (command === 'configure_screenshot_shortcut') return args.shortcut
+        if (command === 'get_media_jobs' || command === 'mcp_pending') return []
+        if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
+        if (command === 'get_runtime_status') return { ready: true, version: 'fixture' }
+        if (command === 'mcp_get_config') return { host: '127.0.0.1', port: 39861, token: 'fixture' }
+        if (command === 'mcp_get_status') return { running: false, connectedClients: 0, pendingRequests: 0 }
+        if (command === 'mcp_asset_tool' && args.operation === 'asset_import_url') {
+          const canvas = document.createElement('canvas'); canvas.width = 24; canvas.height = 24
+          canvas.getContext('2d').fillRect(0, 0, 24, 24)
+          const url = canvas.toDataURL('image/png'), id = `gui-import-${++state.imported}`, nativePath = `/fixture/downloads/${id}.png`
+          const asset = { id, name: `${id}.png`, kind: 'image', url, nativePath, width: 24, height: 24, duration: 0, mime: 'image/png', size: atob(url.split(',')[1]).length }
+          window.managedProjectFixture.files.set(nativePath, { ...asset })
+          return { asset, source: { kind: 'url', url: args.args.url, sha256: 'a'.repeat(64), importedAt: Date.now() } }
+        }
+        state.unexpected.push(command)
+        throw Error(`Unexpected native editor command: ${command}`)
+      },
+    }
+  })
+  try {
+    await page.goto(url)
+    await expect(page.getByTestId('create-project')).toBeEnabled({ timeout: 45000 })
+    await page.getByTestId('create-project').click()
+    await page.getByTestId('asset-url-open').click()
+    const panel = page.getByTestId('asset-tools-panel')
+    await panel.getByLabel('素材网址').fill('https://example.com/source.png')
+    const inspect = () => page.evaluate(() => {
+      const app = document.querySelector('#app').__vue_app__._instance.setupState
+      return { id: app.project.id, revision: app.projectRevision, assets: JSON.parse(JSON.stringify(app.project.assets)) }
+    })
+    const before = await inspect()
+    for (const cancel of [true, false]) {
+      await page.evaluate(() => { window.managedProjectFixture.holdNextPrepare = true })
+      await panel.getByTestId('asset-tool-run').click()
+      await page.waitForFunction(() => typeof window.managedProjectFixture.releasePrepare === 'function')
+      await expect(panel).toContainText('正在保存工程素材')
+      await expect(panel.getByRole('button', { name: '取消处理', exact: true })).toBeEnabled()
+      await expect(page.getByTestId('new-project')).toBeDisabled()
+      assert.deepEqual((await inspect()).assets, before.assets, 'preparation must not publish a partial project')
+      if (cancel) await panel.getByRole('button', { name: '取消处理', exact: true }).click()
+      await page.evaluate(() => window.managedProjectFixture.releasePrepare())
+      await expect(panel.getByTestId('asset-tool-run')).toBeEnabled()
+      if (cancel) {
+        await expect(panel).toContainText('已取消')
+        assert.deepEqual(await inspect(), before, 'cancelling file preparation preserves the entire project revision')
+      } else await expect(panel).toContainText('素材已导入项目')
+    }
+    const after = await inspect()
+    assert.equal(after.assets.length, 1)
+    assert.equal(after.revision, before.revision + 1)
+    assert.equal(after.assets[0].id, 'gui-import-2')
+    assert.ok(after.assets[0].nativePath.startsWith(`/fixture/projects/${after.id}/assets/`))
+    await close(page, '从网址导入')
+    await page.getByRole('button', { name: '撤销', exact: true }).click()
+    assert.deepEqual((await inspect()).assets, before.assets)
+    assert.deepEqual(errors, [])
+    assert.deepEqual(await page.evaluate(() => window.editorAppNative.unexpected), [])
+    console.log('PASS native App shared runner archives GUI results before one commit; copying remains cancellable, no partial edits, canonical media paths and one-step undo')
+  } finally { await page.close() }
+}
 
 async function mount(page, url) {
   await page.route('**/__editor_tools__', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body,#app,.app-shell{height:100%;margin:0}*{box-sizing:border-box}</style></head><body><div id="app"></div></body></html>' }))
@@ -226,7 +307,6 @@ async function main() {
     console.log('PASS GUI 12种通用标注、动作、右侧线宽颜色类型与位置尺寸修改，隐藏空文本配音')
 
 
-    await page.getByRole('button', { name: '已导入', exact: true }).click()
     const assetCard = page.locator('.asset-card[data-source-asset-id="source"]')
     await assetCard.click({ button: 'right' })
     await page.getByRole('menuitem', { name: '分析素材信息', exact: true }).click()
@@ -329,6 +409,7 @@ async function main() {
     const real = await browser.newPage({ viewport: { width: 1440, height: 960 } })
     const realErrors = []; real.on('pageerror', error => realErrors.push(error.message))
     await real.goto(`http://127.0.0.1:${server.httpServer.address().port}`)
+    await expect(real.getByTestId('create-project')).toBeEnabled({ timeout: 45000 })
     await real.getByTestId('create-project').click()
     await real.getByTestId('theme-dark').click()
     await real.getByTestId('visual-elements-open').click()
@@ -383,6 +464,7 @@ async function main() {
     console.log('PASS timeline frame extreme aspect ratio stays within 1920px, real PNG artifact, cancellable stalled font preparation')
     assert.deepEqual(realErrors, []); await real.close()
     console.log('PASS real App shared runner commit and light/dark hover/select contrast, 32px native selects')
+    await verifyNativeProjectPreparation(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     console.log(`Screenshots: ${output}`)
   } finally { await browser.close(); await server.close() }
 }

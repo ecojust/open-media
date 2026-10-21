@@ -8,12 +8,12 @@ import VideoLibraryToolbar from './VideoLibraryToolbar.vue'
 import VideoLibraryActions from './VideoLibraryActions.vue'
 import type { MediaAsset } from '../core/types'
 import { videoDuration, videoImportedTime } from '../core/video-assets'
-import { useStoredVideos } from '../core/stored-videos'
+import { useWorkspaceMedia } from '../core/workspace-media'
 import { createVideoGif, gifFrameCount, validateGifSegments, type GifQuality, type GifSegment } from '../core/gif'
 import { beginMediaJob, cancelMediaJob, getMediaJobs } from '../native'
 
-const props = defineProps<{ assets: MediaAsset[]; native: boolean }>()
-const emit = defineEmits<{ import: []; imported: [file: File]; status: [message: string]; 'busy-change': [busy: boolean] }>()
+const props = defineProps<{ assets: MediaAsset[]; native: boolean; projectDisabled?: boolean }>()
+const emit = defineEmits<{ import: []; imported: [file: File]; status: [message: string]; 'busy-change': [busy: boolean]; 'add-project': [asset: MediaAsset] }>()
 const selectedId = ref('')
 const assetMenu = ref<InstanceType<typeof MediaAssetMenu>>()
 const video = ref<HTMLVideoElement | null>(null)
@@ -39,7 +39,7 @@ let abort: AbortController | undefined
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let polling = false
 let destroyed = false
-const { assets: videos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useStoredVideos(() => props.assets, () => props.native, true)
+const { assets: videos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useWorkspaceMedia(() => ['recording', 'videogen'], () => props.native, () => props.assets)
 const selected = computed(() => videos.value.find(asset => asset.id === selectedId.value))
 const duration = computed(() => selected.value?.duration ?? 0)
 const invalid = computed(() => validateGifSegments(segments.value, duration.value))
@@ -184,8 +184,8 @@ onBeforeUnmount(() => { destroyed = true; abort?.abort(); if (jobId.value) void 
     <template #actions><button class="import-button" :disabled="exporting" @click="requestImport"><Icon name="plus" :size="16" />导入视频</button><input ref="fileInput" type="file" accept="video/*,.mkv,.mov,.avi" hidden @change="importFile" /></template>
     <template #library>
       <aside class="gif-sources" aria-label="GIF 视频素材">
-        <header><h2>视频素材 <span>{{ videos.length }}</span></h2><VideoLibraryActions v-if="native" :directory="directory" :loading="libraryLoading" :disabled="exporting" @refresh="refreshVideos" @reveal="revealVideoDirectory" /></header>
-        <VideoLibraryToolbar v-if="native" :loading="libraryLoading" :preparing="previewPreparing" :error="libraryError" :warnings="libraryWarnings" />
+        <header><h2>视频素材 <span>{{ videos.length }}</span></h2><VideoLibraryActions v-if="native" :directory="directory" :loading="libraryLoading" :disabled="exporting" @refresh="refreshVideos" @reveal="revealVideoDirectory()" /></header>
+        <VideoLibraryToolbar v-if="native" loading-label="正在读取录屏与生成视频…" :loading="libraryLoading" :preparing="previewPreparing" :error="libraryError" :warnings="libraryWarnings" />
         <div class="gif-source-list" data-testid="gif-source-list">
           <button v-for="asset in videos" :key="asset.id" class="gif-source" :class="{ active: selectedId === asset.id }" :data-source-asset-id="asset.id" :aria-pressed="selectedId === asset.id" :disabled="exporting" @click="selectedId = asset.id" @contextmenu="assetMenu?.open($event, asset)" @keydown.shift.f10="assetMenu?.open($event, asset)" @keydown.context-menu="assetMenu?.open($event, asset)">
             <span class="gif-source-icon"><Icon name="video" :size="20" /></span><span class="gif-source-details"><strong :title="asset.name">{{ asset.name }}</strong><small>{{ videoDuration(asset.duration) }} · {{ asset.width }} × {{ asset.height }}</small><time :datetime="asset.addedAt" :title="`视频时间：${videoImportedTime(asset)}`">{{ videoImportedTime(asset) }}</time></span>
@@ -204,7 +204,7 @@ onBeforeUnmount(() => { destroyed = true; abort?.abort(); if (jobId.value) void 
     <template #settings>
       <aside class="gif-settings"><h2>输出设置</h2><RuntimeCheck v-if="native" :disabled="exporting" /><label class="field">输出宽度<select v-model.number="width" :disabled="exporting"><option :value="320">320 px · 轻量</option><option :value="480">480 px · 紧凑</option><option :value="640">640 px · 推荐</option><option :value="960">960 px · 清晰</option><option :value="1280">1280 px · 高清</option></select></label><label class="field">帧率<select v-model.number="fps" :disabled="exporting"><option :value="6">6 FPS · 小体积</option><option :value="10">10 FPS · 标准</option><option :value="12">12 FPS · 推荐</option><option :value="15">15 FPS · 流畅</option><option :value="24">24 FPS · 更流畅</option></select></label><label v-if="!native" class="field">色彩处理<select v-model="quality" :disabled="exporting"><option value="fast">快速 · 无抖动</option><option value="balanced">均衡 · 柔和抖动</option><option value="high">细腻 · 渐变抖动</option></select></label><label class="loop-control"><span><Icon name="repeat" :size="17" />循环播放</span><input v-model="loop" type="checkbox" role="switch" :disabled="exporting" /></label><div class="output-summary"><div><span>总时长</span><strong>{{ outputDuration.toFixed(2) }} 秒</strong></div><div><span>输出尺寸</span><strong>{{ selected ? `${Math.min(width,selected.width)} × ${outputHeight}` : '—' }}</strong></div><div><span>预计帧数</span><strong>{{ segments.reduce((sum,item) => sum + gifFrameCount(item,fps),0) }} 帧</strong></div><div><span>输出格式</span><strong>GIF</strong></div></div><div v-if="error" class="validation-error" role="alert">{{ error }}</div><div v-if="exporting" class="export-progress" role="status"><span>正在生成 {{ Math.round(progress*100) }}%</span><progress :value="progress" max="1" /><button @click="cancel">取消导出</button></div><button v-else class="export-button" :disabled="!selected || !!invalid" data-testid="export-gif" @click="exportGif"><Icon name="download" :size="17" />导出 GIF</button><p class="export-note">{{ native ? '逐片段截取并拼接，自动优化调色板，导出到选择的位置。' : '在本地浏览器中编码。较长片段建议降低尺寸和帧率，或在桌面端导出。' }}</p></aside>
     </template>
-    <template #overlays><MediaAssetMenu ref="assetMenu" :native="native" @error="error = $event" />
+    <template #overlays><MediaAssetMenu ref="assetMenu" :native="native" project-action :project-disabled="projectDisabled || exporting" @add-project="emit('add-project', $event)" @error="error = $event" />
     </template>
   </ToolWorkspace>
 </template>

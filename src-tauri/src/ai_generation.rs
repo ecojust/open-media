@@ -782,7 +782,9 @@ impl Worker {
         self.update(id, "检查生成文件", Some(0.99), None);
         models::checked_file(&job_dir, &output)?;
         let asset = if model.kind == "image" {
-            store.import_png(&output, &format!("生成图片-{}.png", models::now_ms()))?
+            store
+                .workspace_store("imagegen")?
+                .import_png(&output, &format!("生成图片-{}.png", models::now_ms()))?
         } else {
             let probed = store.probe(runtime, &output, "result.wav")?;
             if probed.kind != "audio"
@@ -792,7 +794,7 @@ impl Worker {
             {
                 return Err("生成结果不是有效的音频文件。".into());
             }
-            store.import(
+            store.workspace_store("musicgen")?.import(
                 runtime,
                 &output,
                 Some(&format!("生成音乐-{}.wav", models::now_ms())),

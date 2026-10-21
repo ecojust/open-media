@@ -16,39 +16,43 @@ async function mount(page, url, mode, native, source, options = {}) {
     const vueURL = source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1]
     const { createApp, h, ref, KeepAlive } = await import(vueURL)
     const Component = (await import(`/src/components/${filename}.vue`)).default
-    const asset = (id, addedAt, kind = 'video', local = true) => ({ id, addedAt, kind, name: `${id}.webm`, url: `/list-video/${id}`, duration: 8, width: 160, height: 90, size: 2048, mime: 'video/webm', ...(local ? { nativePath: `${id.startsWith('legacy') ? '/recordings' : '/import video'}/${id}.webm` } : {}) })
+    const asset = (id, addedAt, kind = 'video', local = true) => ({ id, addedAt, kind, name: `${id}.webm`, url: `/list-video/${id}`, duration: 8, width: 160, height: 90, size: 2048, mime: 'video/webm', ...(local ? { nativePath: `${id.startsWith('legacy') ? '/recording' : '/workspace-imports'}/${id}.webm` } : {}) })
     const assets = ref([asset('legacy-first'), asset('older', '2026-10-18T01:00:00Z'), asset('audio', '2030-01-01T00:00:00Z', 'audio'), asset('same-first', '2026-10-18T02:00:00Z'), asset('image', '2030-01-01T00:00:00Z', 'image'), asset('newest', '2026-10-18T03:00:00Z'), asset('same-last', '2026-10-18T02:00:00Z'), asset('legacy-last', undefined, 'video', false)])
-    if (native) assets.value.push(
-      { ...asset('generated', '2040-01-01T00:00:00Z'), nativePath: '/generated/output.webm' },
-      { ...asset('media-output', '2041-01-01T00:00:00Z'), nativePath: '/media/output.webm' },
+    const projectAssets = [
+      { ...asset('project-only', '2040-01-01T00:00:00Z'), nativePath: '/projects/example/source.webm' },
       { ...asset('builtin-watermark', '2042-01-01T00:00:00Z'), nativePath: '/media/watermark.webm', libraryRole: 'watermark' },
-    )
+    ]
     if (options.emptyProjectAssets) assets.value = []
     const visible = ref(true), theme = ref('light')
-    const state = window.listHarness = { assets, calls: [], failReveal: false, failScan: false, holdScan: false, stored: [], warnings: [], busy: false, importRequests: 0,
+    const state = window.listHarness = { assets, projectAssets, addedToProject: [], projectDisabled: ref(false), calls: [], failReveal: false, failScan: false, holdScan: false, stored: [], warnings: [], busy: false, importRequests: 0,
       append(id, addedAt) { const value = asset(id, addedAt); if (native) state.addStored(`scan-${id}`, addedAt, value.nativePath); assets.value.push(value) },
-      addStored(id, addedAt, nativePath = `/recordings/${id}.webm`) { state.stored.push({ ...asset(id), addedAt: Date.parse(addedAt), nativePath }) },
+      addStored(id, addedAt, nativePath = `/recording/${id}.webm`) { state.stored.push({ ...asset(id), addedAt: Date.parse(addedAt), nativePath }) },
       statuses: [], show(value) { visible.value = value }, theme(value) { theme.value = value } }
-    if (native) for (const value of assets.value) if (value.kind === 'video' && /^\/(?:recordings|import video)\//.test(value.nativePath ?? '')) state.addStored(`scan-${value.id}`, value.addedAt, value.nativePath)
+    if (native) for (const value of assets.value) if (value.kind === 'video' && /^\/(?:recording|workspace-imports)\//.test(value.nativePath ?? '')) state.addStored(`scan-${value.id}`, value.addedAt, value.nativePath)
     if (options.directoryOnly) { state.addStored('only-recording-new', '2035-01-01T00:00:00Z'); state.addStored('only-recording-old', '2034-01-01T00:00:00Z') }
-    const library = includeImported => ({ directory: '/Users/demo/Library/Application Support/Open Media/recordings', importDirectory: includeImported ? '/Users/demo/Library/Application Support/Open Media/import video' : null, assets: structuredClone(state.stored.filter(value => value.nativePath.startsWith('/recordings/') || includeImported && value.nativePath.startsWith('/import video/'))), warnings: [...state.warnings] })
+    const library = categories => ({ directories: Object.fromEntries(categories.map(category => [category, `/Users/demo/Library/Application Support/Open Media/${category}`])), assets: structuredClone(state.stored.filter(value => categories.some(category => ['screenshot', 'imagegen'].includes(category)) ? value.kind === 'image' && categories.some(category => value.nativePath?.startsWith(`/${category}/`)) : value.kind === 'video')), warnings: [...state.warnings] })
+    if (native && mode === 'image') state.stored.push(
+      { ...asset('screenshot-only', undefined, 'image'), nativePath: '/screenshot/capture.png', addedAt: Date.parse('2035-01-01T00:00:00Z') },
+      { ...asset('generated-image', undefined, 'image'), nativePath: '/imagegen/illustration.png', addedAt: Date.parse('2036-01-01T00:00:00Z') },
+      { ...asset('project-image', undefined, 'image'), nativePath: '/projects/example/assets/image.png', addedAt: Date.parse('2040-01-01T00:00:00Z') },
+    )
     window.__TAURI_INTERNALS__ = { convertFileSrc: nativePath => `/list-video/${nativePath.split('/').pop().replace(/\.[^.]+$/, '')}`, invoke: async (command, args) => {
       state.calls.push({ command, args })
       if (command === 'get_runtime_status') return { ready: true, source: 'fixture', version: 'fixture' }
-      if (command === 'list_stored_videos') {
+      if (command === 'list_workspace_assets') {
         if (state.failScan) throw new Error('录屏目录暂时不可读取，请重试')
-        const snapshot = library(args?.includeImported)
+        const snapshot = library(args?.categories)
         if (state.holdScan) return new Promise(resolve => { state.releaseScan = () => { state.holdScan = false; delete state.releaseScan; resolve(snapshot) } })
         return snapshot
       }
-      if (command === 'open_media_library_directory') return null
+      if (command === 'open_workspace_directory') return null
       if (command === 'reveal_media_asset') { if (state.failReveal) throw new Error('原始文件和素材副本均已移除'); return null }
       if (command === 'begin_media_job') return { id: 'gif-export', state: 'running', progress: 0 }
       if (command === 'get_media_jobs') return [{ id: 'gif-export', state: 'running', progress: 0 }]
       if (command === 'cancel_media_job') return null
       throw new Error(`Unexpected command: ${command}`)
     } }
-    const app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': theme.value }, h(KeepAlive, null, { default: () => visible.value ? h(Component, { assets: assets.value, native, ...(mode === 'gif' ? {} : { mode: mode === 'image' ? 'image' : 'video' }), onImport: () => { state.importRequests++; state.append('fresh-import.webm', '2027-01-01T00:00:00Z') }, onImported: file => state.append(file.name, '2027-01-01T00:00:00Z'), onStatus: value => state.statuses.push(value), onBusyChange: value => { state.busy = value } }) : h('div', { class: 'other-workspace' }) })) })
+    const app = createApp({ render: () => h('div', { class: 'app-shell', 'data-theme': theme.value }, h(KeepAlive, null, { default: () => visible.value ? h(Component, { assets: assets.value, native, projectDisabled: state.projectDisabled.value, 'onAdd-project': value => state.addedToProject.push(value), ...(mode === 'gif' ? {} : { mode: mode === 'image' ? 'image' : 'video' }), onImport: () => { state.importRequests++; state.append('fresh-import.webm', '2027-01-01T00:00:00Z') }, onImported: file => state.append(file.name, '2027-01-01T00:00:00Z'), onStatus: value => state.statuses.push(value), onBusyChange: value => { state.busy = value } }) : h('div', { class: 'other-workspace' }) })) })
     app.mount('#app')
     state.dispose = () => app.unmount()
   }, { mode, native, options })
@@ -59,8 +63,8 @@ async function assertLibraryHeader(page, mode) {
   await expect(actions).toBeVisible()
   await expect(actions.getByRole('button')).toHaveCount(2)
   await expect(page.getByTestId('video-library-directory')).toHaveCount(0)
-  await expect(page.locator('body')).not.toContainText('/Users/demo/Library/Application Support/Open Media/recordings')
-  await expect(page.locator('[title="/Users/demo/Library/Application Support/Open Media/recordings"]')).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText('/Users/demo/Library/Application Support/Open Media/recording')
+  await expect(page.locator('[title="/Users/demo/Library/Application Support/Open Media/recording"]')).toHaveCount(0)
   const geometry = await actions.evaluate((element, mode) => {
     const header = element.closest(mode === 'gif' ? '.gif-sources > header' : '.convert-section-title')
     const title = header?.querySelector('h2, strong')
@@ -97,13 +101,13 @@ async function main() {
       page.on('pageerror', error => errors.push(error.message))
       await mount(page, url, mode, native, source)
       const rows = page.locator('[data-source-asset-id]')
-      await expect(rows).toHaveCount(native ? 5 : 6)
-      assert.deepEqual(await rows.evaluateAll(items => items.map(item => item.dataset.sourceAssetId)), native ? ['newest', 'same-last', 'same-first', 'older', 'legacy-first'] : ['newest', 'same-last', 'same-first', 'older', 'legacy-last', 'legacy-first'])
+      await expect(rows).toHaveCount(6)
+      assert.deepEqual(await rows.evaluateAll(items => items.map(item => item.dataset.sourceAssetId)), ['newest', 'same-last', 'same-first', 'older', 'legacy-last', 'legacy-first'])
       await expect(rows.first().locator('time')).toHaveAttribute('datetime', native ? '2026-10-18T03:00:00.000Z' : '2026-10-18T03:00:00Z')
-      await expect(rows.filter({ hasText: '导入时间未记录' })).toHaveCount(native ? 1 : 2)
+      await expect(rows.filter({ hasText: '导入时间未记录' })).toHaveCount(2)
       if (native) {
-        assert.equal(await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').every(call => call.args?.includeImported === true)), true, '桌面列表必须请求录屏与导入视频两个目录')
-        for (const excluded of ['generated', 'media-output', 'builtin-watermark', 'legacy-last']) await expect(page.locator(`[data-source-asset-id="${excluded}"]`)).toHaveCount(0)
+        assert.equal(await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_workspace_assets').every(call => JSON.stringify(call.args?.categories) === JSON.stringify(['recording', 'videogen']))), true, '桌面列表必须仅请求录屏与生成视频分类')
+        for (const excluded of ['project-only', 'builtin-watermark']) await expect(page.locator(`[data-source-asset-id="${excluded}"]`)).toHaveCount(0)
       }
       const older = page.locator('[data-source-asset-id="older"]')
       await (mode === 'gif' ? older : older.locator('.source-details')).click()
@@ -112,7 +116,7 @@ async function main() {
       if (mode === 'gif') {
         await expect(page.getByLabel('GIF 视频来源')).toHaveValue('older')
         await page.getByLabel('开始时间', { exact: true }).fill('1')
-      } else await expect(page.locator('.convert-source input:checked')).toHaveCount(native ? 5 : 6)
+      } else await expect(page.locator('.convert-source input:checked')).toHaveCount(6)
       await page.evaluate(() => window.listHarness.append('later', '2026-10-18T04:00:00Z'))
       await expect(rows.first()).toHaveAttribute('data-source-asset-id', 'later')
       await expect(preview).toHaveAttribute('src', '/list-video/older')
@@ -126,6 +130,13 @@ async function main() {
       await expect(menu).toHaveCSS('background-color', 'rgb(29, 34, 48)')
       await expect(menu).toHaveCSS('color', 'rgb(227, 232, 242)')
       await page.evaluate(() => window.listHarness.theme('light'))
+      await menu.getByRole('menuitem', { name: '添加到工程素材' }).click()
+      assert.deepEqual(await page.evaluate(() => window.listHarness.addedToProject.map(asset => asset.id)), ['older'])
+      assert.equal(await page.evaluate(() => window.listHarness.projectAssets.length), 2, '列表只发出显式添加事件，不直接修改工程')
+      await older.click({ button: 'right' })
+      await page.evaluate(() => { window.listHarness.projectDisabled.value = true })
+      await expect(menu.getByRole('menuitem', { name: '添加到工程素材' })).toBeDisabled()
+      await page.evaluate(() => { window.listHarness.projectDisabled.value = false })
       const reveal = menu.getByRole('menuitem', { name: '打开所在文件夹' })
       if (native) {
         await expect(reveal).toBeEnabled(); await reveal.click()
@@ -133,7 +144,7 @@ async function main() {
         await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'reveal_media_asset').length)).toBe(1)
         const revealed = await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'reveal_media_asset'))
         assert.deepEqual(revealed.map(call => call.args.asset.id), ['older'])
-        await expect(page.locator('[data-source-asset-id="legacy-last"]')).toHaveCount(0)
+        await expect(page.locator('[data-source-asset-id="legacy-last"]')).toHaveCount(1)
       } else {
         await expect(reveal).toBeDisabled()
         await expect(menu).toContainText('仅桌面端可打开所在文件夹')
@@ -162,7 +173,13 @@ async function main() {
         }
       }
       await keyboardRow.focus(); await page.keyboard.press('Shift+F10')
-      await expect(menu).toBeVisible(); await page.keyboard.press('Escape')
+      await expect(menu).toBeVisible()
+      await expect(menu.getByRole('menuitem', { name: '添加到工程素材' })).toBeFocused()
+      await page.keyboard.press('ArrowDown')
+      await expect(menu.getByRole('menuitem', { name: native ? '打开所在文件夹' : '添加到工程素材' })).toBeFocused()
+      await page.keyboard.press('Home')
+      await expect(menu.getByRole('menuitem', { name: '添加到工程素材' })).toBeFocused()
+      await page.keyboard.press('Escape')
       await expect(keyboardRow).toBeFocused()
 
       // Escape during keyboard positioning must cancel the pending open as well.
@@ -220,22 +237,21 @@ async function main() {
       if (mode === 'gif') await expect(page.getByLabel('开始时间', { exact: true })).toHaveValue('1')
       if (native) {
         await page.evaluate(() => { window.listHarness.failReveal = true })
-        await older.click({ button: 'right' }); await menu.getByRole('menuitem').click()
+        await older.click({ button: 'right' }); await menu.getByRole('menuitem', { name: '打开所在文件夹' }).click()
         await expect(page.getByText('原始文件和素材副本均已移除', { exact: true })).toBeVisible()
       }
       if (mode === 'gif') {
         if (native) {
-          const scansBeforeImport = await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').length)
+          const scansBeforeImport = await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_workspace_assets').length)
           await page.evaluate(() => { window.listHarness.holdScan = true })
           await page.getByTestId('video-library-actions').getByRole('button', { name: '刷新本机视频列表' }).click()
           await page.waitForFunction(() => typeof window.listHarness.releaseScan === 'function')
           await page.getByRole('button', { name: '导入视频', exact: true }).click()
           assert.equal(await page.evaluate(() => window.listHarness.importRequests), 1, '桌面 GIF 使用原生导入事件')
-          await expect(page.locator('[data-source-asset-id="fresh-import.webm"]')).toHaveCount(0)
-          await expect(page.getByLabel('GIF 视频来源')).toHaveValue('older')
-          await expect(page.getByLabel('开始时间', { exact: true })).toHaveValue('1')
+          await expect(page.locator('[data-source-asset-id="fresh-import.webm"]')).toHaveCount(1)
+          await expect(page.getByLabel('GIF 视频来源')).toHaveValue('fresh-import.webm')
           await page.evaluate(() => window.listHarness.releaseScan())
-          await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').length)).toBe(scansBeforeImport + 2)
+          await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_workspace_assets').length)).toBe(scansBeforeImport + 2)
         } else {
           const chooser = page.waitForEvent('filechooser')
           await page.getByRole('button', { name: '导入视频', exact: true }).click()
@@ -272,13 +288,13 @@ async function main() {
         else await older.getByRole('checkbox').uncheck()
         await page.evaluate(() => {
           window.listHarness.addStored('recording-only', '2031-01-01T00:00:00Z')
-          window.listHarness.addStored('duplicate-older', '2032-01-01T00:00:00Z', '/import video/older.webm')
+          window.listHarness.addStored('duplicate-older', '2032-01-01T00:00:00Z', '/workspace-imports/older.webm')
           window.listHarness.warnings = ['损坏视频.webm：无法读取视频信息']
           window.listHarness.holdScan = true
         })
         await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
         await expect(toolbar).toBeVisible()
-        await expect(toolbar).toContainText('正在读取目录视频')
+        await expect(toolbar).toContainText('正在读取录屏与生成视频')
         await expect(toolbar).toHaveAttribute('aria-busy', 'true')
         await expect(actions.getByRole('button', { name: '刷新本机视频列表' })).toBeDisabled()
         await expect(rows).toHaveCount(beforeCount)
@@ -298,7 +314,7 @@ async function main() {
         await toolbar.getByText('部分文件已跳过（1）', { exact: true }).click()
         await expect(toolbar).toContainText('损坏视频.webm：无法读取视频信息')
         await actions.getByRole('button', { name: '打开录屏保存目录' }).click()
-        await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'open_media_library_directory').length)).toBe(1)
+        await expect.poll(() => page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'open_workspace_directory').length)).toBe(1)
         const recording = page.locator('[data-source-asset-id="recording-only"]')
         await (mode === 'gif' ? recording : recording.locator('.source-details')).click()
         await expect(preview).toHaveAttribute('src', '/list-video/recording-only')
@@ -310,9 +326,9 @@ async function main() {
         if (mode === 'gif') await page.getByLabel('开始时间', { exact: true }).fill('1.2')
         await page.evaluate(() => window.listHarness.show(false))
         await expect(page.locator('.other-workspace')).toHaveCount(1)
-        const scansWhileHidden = await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').length)
+        const scansWhileHidden = await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_workspace_assets').length)
         await page.evaluate(() => { window.listHarness.addStored('recording-on-return', '2033-01-01T00:00:00Z'); window.dispatchEvent(new Event('focus')) })
-        assert.equal(await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_stored_videos').length), scansWhileHidden)
+        assert.equal(await page.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_workspace_assets').length), scansWhileHidden)
         await page.evaluate(() => window.listHarness.show(true))
         await expect(page.locator('[data-source-asset-id="recording-on-return"]')).toHaveCount(1)
         await expect(preview).toHaveAttribute('src', '/list-video/recording-only')
@@ -324,16 +340,16 @@ async function main() {
         await expect(toolbar.getByRole('alert')).toContainText('录屏目录暂时不可读取')
         await expect(rows).toHaveCount(beforeFailure)
         await expect(preview).toHaveAttribute('src', '/list-video/recording-only')
-        await page.evaluate(() => { window.listHarness.failScan = false; window.listHarness.addStored('recording-on-focus', '2034-01-01T00:00:00Z'); window.dispatchEvent(new Event('focus')) })
+        await page.evaluate(() => { window.listHarness.failScan = false; window.listHarness.addStored('recording-on-focus', '2034-01-01T00:00:00Z', '/videogen/generated.webm'); window.dispatchEvent(new Event('focus')) })
         await expect(page.locator('[data-source-asset-id="recording-on-focus"]')).toHaveCount(1)
         await expect(toolbar.getByRole('alert')).toHaveCount(0)
         await expect(preview).toHaveAttribute('src', '/list-video/recording-only')
         assert.deepEqual(await page.evaluate(() => window.listHarness.assets.value.map(asset => asset.id)), projectAssetsBeforeScan, '目录浏览与预览不能把录屏批量加入当前工程')
-        console.log(`PASS ${mode} 本机目录模拟：录屏及导入目录、排除项目生成/media/内置视频、路径去重、延迟/失败保留选择与GIF片段、按需解码、激活和窗口聚焦刷新、打开目录与跳过提示`)
+        console.log(`PASS ${mode} 本机目录模拟：录屏及生成目录、工程素材隔离、路径去重、延迟/失败保留选择与GIF片段、按需解码、激活和窗口聚焦刷新、打开目录与跳过提示`)
       } else {
         await expect(page.getByTestId('video-library-toolbar')).toHaveCount(0)
         await expect(page.getByTestId('video-library-actions')).toHaveCount(0)
-        assert.equal(await page.evaluate(() => window.listHarness.calls.some(call => ['list_stored_videos', 'open_media_library_directory'].includes(call.command))), false, '网页不扫描本机目录')
+        assert.equal(await page.evaluate(() => window.listHarness.calls.some(call => ['list_workspace_assets', 'open_workspace_directory'].includes(call.command))), false, '网页不扫描本机目录')
       }
       const beforeMany = await rows.count()
       await page.evaluate(() => { for (let index = 0; index < 25; index++) window.listHarness.append(`extra-${index}`, '2028-01-01T00:00:00Z') })
@@ -389,11 +405,25 @@ async function main() {
     await mount(imagePage, url, 'image', true, source)
     await expect(imagePage.getByTestId('convert-workspace')).toBeVisible()
     await expect(imagePage.getByTestId('video-library-toolbar')).toHaveCount(0)
-    await expect(imagePage.getByTestId('video-library-actions')).toHaveCount(0)
-    assert.equal(await imagePage.evaluate(() => window.listHarness.calls.some(call => call.command === 'list_stored_videos')), false, '图片编辑不读取视频目录')
+    await expect(imagePage.getByTestId('video-library-actions')).toBeVisible()
+    await expect(imagePage.locator('[data-source-asset-id="screenshot-only"]')).toHaveCount(1)
+    await expect(imagePage.locator('[data-source-asset-id="generated-image"]')).toHaveCount(1)
+    await expect(imagePage.locator('[data-source-asset-id="project-image"]')).toHaveCount(0)
+    await expect(imagePage.locator('[data-source-asset-id="project-only"]')).toHaveCount(0)
+    assert.equal(await imagePage.evaluate(() => window.listHarness.calls.filter(call => call.command === 'list_workspace_assets').every(call => JSON.stringify(call.args.categories) === JSON.stringify(['screenshot', 'imagegen']))), true, '图片编辑同时读取截图和生成图片分类')
+    assert.deepEqual(await imagePage.locator('[data-source-asset-id]').evaluateAll(rows => rows.slice(0, 2).map(row => row.dataset.sourceAssetId)), ['generated-image', 'screenshot-only'], '两类图片按时间合并排列')
+    await imagePage.getByRole('button', { name: '刷新截图与生成图片列表' }).click()
+    await expect(imagePage.locator('[data-source-asset-id="generated-image"]')).toHaveCount(1)
+    await imagePage.locator('[data-source-asset-id="screenshot-only"]').click({ button: 'right' })
+    await imagePage.getByRole('menuitem', { name: '添加到工程素材' }).click()
+    await imagePage.locator('[data-source-asset-id="generated-image"]').click({ button: 'right' })
+    await imagePage.getByRole('menuitem', { name: '添加到工程素材' }).click()
+    assert.deepEqual(await imagePage.evaluate(() => window.listHarness.addedToProject.map(asset => [asset.id, asset.nativePath])), [['screenshot-only', '/screenshot/capture.png'], ['generated-image', '/imagegen/illustration.png']], '添加到工程前仍引用各自的原始分类目录')
+    await imagePage.getByRole('button', { name: '打开截图保存目录' }).click()
+    await expect.poll(() => imagePage.evaluate(() => window.listHarness.calls.filter(call => call.command === 'open_workspace_directory').map(call => call.args.category))).toEqual(['screenshot'])
     await imagePage.evaluate(() => window.listHarness.dispose())
     await imagePage.close()
-    console.log('PASS 图片编辑保留原项目素材列表，不显示或扫描视频目录')
+    console.log('PASS 图片编辑合并截图与生成图片、按时间排序、刷新去重、右键添加工程与打开截图目录')
   } finally { await browser.close(); await server.close() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -13,26 +13,13 @@ const assetCount = page => page.evaluate(() => window.recordingLibrary.current.v
 const clipsFor = (page, id) => page.evaluate(id => window.recordingLibrary.current.value.tracks.flatMap(track => track.clips).filter(clip => clip.assetId === id), id)
 
 async function assertLibraryHeader(page) {
-  const actions = page.getByTestId('video-library-actions')
-  await expect(actions).toBeVisible()
-  await expect(actions.getByRole('button')).toHaveCount(2)
-  await expect(page.getByTestId('video-library-directory')).toHaveCount(0)
+  await expect(page.getByTestId('video-library-actions')).toHaveCount(0)
+  await expect(page.getByTestId('video-library-toolbar')).toHaveCount(0)
+  await expect(page.getByLabel('素材来源', { exact: true })).toHaveCount(0)
+  await expect(page.locator('.asset-panel > header')).toContainText('项目素材')
+  await expect(page.locator('.asset-panel > header').getByTitle('导入素材')).toBeVisible()
+  assert.deepEqual(await page.getByLabel('素材类型', { exact: true }).getByRole('button').allTextContents(), ['全部', '视频', '图片', '音频'])
   await expect(page.locator('body')).not.toContainText(recordingDirectory)
-  await expect(page.locator(`[title="${recordingDirectory}"]`)).toHaveCount(0)
-  const geometry = await actions.evaluate(element => {
-    const header = element.closest('.asset-panel > header'), title = header?.querySelector('strong')
-    if (!header || !title) return null
-    const rect = element => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height } }
-    return { header: rect(header), title: rect(title), actions: rect(element), buttons: [...element.querySelectorAll('button')].map(rect), viewport: innerWidth }
-  })
-  assert(geometry, '录屏目录操作应位于项目素材主标题中')
-  assert(geometry.actions.x >= geometry.title.x + geometry.title.width - 1, '目录操作应放在项目素材标题右侧')
-  for (const button of geometry.buttons) {
-    assert(button.width >= 24 && button.height >= 24, '图标按钮保留足够的点击区域')
-    assert(button.x >= geometry.header.x && button.x + button.width <= Math.min(geometry.header.x + geometry.header.width, geometry.viewport) + 1, '目录按钮不能被标题或视口挤出')
-    assert(button.y >= geometry.header.y && button.y + button.height <= geometry.header.y + geometry.header.height + 1, '目录操作与主标题保持同一行')
-    assert(Math.abs(button.y + button.height / 2 - geometry.title.y - geometry.title.height / 2) <= 4, '图标与标题垂直居中')
-  }
 }
 
 async function mount(page, url, native, media) {
@@ -54,7 +41,7 @@ async function mount(page, url, native, media) {
     const context = canvas.getContext('2d'); context.fillStyle = '#17a7bb'; context.fillRect(0, 0, 80, 40)
     const imageURL = canvas.toDataURL('image/png'), imageSize = (await (await fetch(imageURL)).blob()).size
     const image = (id, name) => ({ id, name, kind: 'image', url: imageURL, duration: 0, width: 80, height: 40, mime: 'image/png', size: imageSize, addedAt: '2026-10-18T02:00:00.000Z' })
-    let project = createProject('录屏与项目素材分离验证', { width: 320, height: 180, fps: 15 })
+    let project = createProject('工程素材隔离验证', { width: 320, height: 180, fps: 15 })
     const main = video('project-video', '2026-10-18T01:00:00.000Z')
     const legacy = video('legacy-overlay', '2026-10-18T01:30:00.000Z'); legacy.name = '旧水印素材.webm'
     project.assets.push(main, audio('project-audio', '背景音乐-普通素材.wav'), image('project-image', '水印设计原稿.png'), legacy)
@@ -68,7 +55,9 @@ async function mount(page, url, native, media) {
     const fixture = window.recordingLibrary = {
       current: shallowRef(project), editor: ref(null), initial: JSON.parse(JSON.stringify(project)), mainTrackId,
       watermarkClipId: watermark.clipId, musicClipId: music.clipId, calls: [], changes: [], statuses: [], imports: 0, devices: 0,
-      failScan: false, holdScan: false, stored: [], warnings: [],
+      stored: [],
+      addImported() { this.current.value = { ...this.current.value, assets: [...this.current.value.assets, video('explicit-import', '2026-10-19T00:00:00.000Z', true)] } },
+      openEmptyProject() { this.current.value = createProject('独立空工程', { width: 320, height: 180, fps: 15 }) },
       addStored(id, time) { this.stored.push({ ...video(id, Date.parse(time), true) }) },
     }
     fixture.addStored('recording-a', '2031-01-01T01:00:00Z')
@@ -79,13 +68,7 @@ async function mount(page, url, native, media) {
       convertFileSrc: nativePath => `${location.origin}/editor-library-video/${nativePath.split('/').pop().replace(/\.[^.]+$/, '')}`,
       invoke: async (command, args) => {
         fixture.calls.push({ command, args })
-        if (command === 'list_stored_videos') {
-          if (fixture.failScan) throw new Error('录屏保存目录暂时不可读取')
-          const result = () => ({ directory, assets: structuredClone(fixture.stored), warnings: [...fixture.warnings] })
-          if (fixture.holdScan) return new Promise(resolve => { fixture.releaseScan = () => { fixture.holdScan = false; resolve(result()) } })
-          return result()
-        }
-        if (command === 'open_media_library_directory') return null
+        if (command === 'list_stored_videos') return { directory, assets: structuredClone(fixture.stored), warnings: [] }
         throw new Error(`Unexpected native command: ${command}`)
       },
     }
@@ -101,8 +84,6 @@ async function mount(page, url, native, media) {
 }
 
 async function ordinaryAssets(page) {
-  const imported = page.getByRole('button', { name: '已导入', exact: true })
-  if (await imported.count()) await imported.click()
   await page.getByRole('button', { name: '全部', exact: true }).first().click()
   await expect(page.locator('.asset-card')).toHaveCount(4)
   for (const id of ['project-video', 'project-audio', 'project-image', 'legacy-overlay']) await expect(card(page, id)).toBeVisible()
@@ -138,7 +119,7 @@ async function saveAndInspect(page, output, media) {
   assert.deepEqual(Buffer.from(entries['media/builtin-music']), media.audio, '隐藏的内置配乐仍必须完整打包')
   assert(entries['media/builtin-watermark'].byteLength > 30, '隐藏的水印图片仍必须完整打包')
   for (const asset of manifest.assets.filter(asset => asset.kind === 'video')) assert.deepEqual(Buffer.from(entries[`media/${asset.id}`]), media.video)
-  assert(!manifest.assets.some(asset => asset.id === 'recording-c' || asset.id === 'recording-d'), '未加入时间线的目录视频不能进入保存文件')
+  assert(!manifest.assets.some(asset => /^recording-/.test(asset.id)), '公共目录视频不能自动进入工程保存文件')
 }
 
 async function dragAsset(page, id, trackId, time) {
@@ -172,110 +153,56 @@ async function main() {
       page.on('request', request => { if (request.url().includes('/editor-library-video/')) requests.push(request.url()) })
       await mount(page, url, native, media)
       const initial = await page.evaluate(() => window.recordingLibrary.initial)
-      const toolbar = page.getByTestId('video-library-toolbar'), actions = page.getByTestId('video-library-actions')
-      if (native) {
-        await expect(page.locator('.asset-card')).toHaveCount(3)
-        await expect(toolbar).toHaveCount(0)
-        await assertLibraryHeader(page)
-        for (const width of [780, 540]) {
-          await page.setViewportSize({ width, height: 960 })
-          await actions.scrollIntoViewIfNeeded()
-          await assertLibraryHeader(page)
-          await page.screenshot({ path: path.join(directory, `editor-recordings-${width}.png`), animations: 'disabled' })
-        }
-        await page.setViewportSize({ width: 1440, height: 960 })
-        assert.deepEqual(await page.locator('.asset-card').evaluateAll(items => items.map(item => item.dataset.sourceAssetId)), ['recording-c', 'recording-b', 'recording-a'])
-        for (const id of ['project-video', 'project-audio', 'project-image', 'builtin-watermark', 'builtin-music']) await expect(card(page, id)).toHaveCount(0)
-        assert.deepEqual(await snapshot(page), initial, '浏览录屏目录不能改变工程或标记修改')
-        assert.equal(await page.evaluate(() => window.recordingLibrary.changes.length), 0)
-        assert(!requests.some(url => /\/recording-[abc]$/.test(url)), '读取列表不能逐个解码录屏')
-      } else {
-        await expect(toolbar).toHaveCount(0)
-        await expect(actions).toHaveCount(0)
-        await expect(page.getByRole('button', { name: '录屏', exact: true })).toHaveCount(0)
-        assert.equal(await page.evaluate(() => window.recordingLibrary.calls.length), 0)
-      }
+      await assertLibraryHeader(page)
       await ordinaryAssets(page)
-      assert.deepEqual(await snapshot(page), initial)
+      assert.deepEqual(await snapshot(page), initial, '显示工程素材和筛选不会修改工程')
+      assert.equal(await page.evaluate(() => window.recordingLibrary.changes.length), 0)
       for (const id of ['watermarkClipId', 'musicClipId']) {
         const clipId = await page.evaluate(id => window.recordingLibrary[id], id)
         await expect(page.locator(`.timeline-clip[data-clip-id="${clipId}"]`)).toHaveCount(1)
       }
-      console.log(`PASS ${native ? '桌面' : '网页'} 项目素材分栏：普通素材与显式用途素材分离，旧无用途标记素材保留，时间线未删改`)
-      if (native) {
-        await page.getByRole('button', { name: '录屏', exact: true }).click()
-        await expect(page.locator('.asset-card')).toHaveCount(3)
-        await card(page, 'recording-a').dblclick()
-        await expect.poll(() => assetCount(page)).toBe(initial.assets.length + 1)
-        await expect.poll(async () => (await clipsFor(page, 'recording-a')).length).toBe(1)
-        await card(page, 'recording-a').dblclick()
-        await expect.poll(async () => (await clipsFor(page, 'recording-a')).length).toBe(2)
-        assert.equal(await assetCount(page), initial.assets.length + 1, '同一个录屏再次使用不能重复注册资产')
-        const mainTrackId = await page.evaluate(() => window.recordingLibrary.mainTrackId)
-        await dragAsset(page, 'recording-b', mainTrackId, 8)
-        await expect.poll(async () => (await clipsFor(page, 'recording-b')).length).toBe(1)
-        await expect.poll(() => assetCount(page)).toBe(initial.assets.length + 2)
-        await dragAsset(page, 'recording-b', mainTrackId, 16)
-        await expect.poll(async () => (await clipsFor(page, 'recording-b')).length).toBe(2)
-        assert.equal(await assetCount(page), initial.assets.length + 2)
-        const initialClips = initial.tracks.reduce((sum, track) => sum + track.clips.length, 0)
-        const changes = await page.evaluate(() => window.recordingLibrary.changes)
-        assert.deepEqual(changes.map(change => change.assets), [1, 1, 2, 2].map(added => initial.assets.length + added))
-        assert.deepEqual(changes.map(change => change.clips), [1, 2, 3, 4].map(added => initialClips + added), '注册新素材和添加片段必须在同一次项目变更里完成')
-        assert.equal(await page.evaluate(() => window.recordingLibrary.imports), 0, '目录片段加入时间线不能触发再次选择导入文件')
-        assert.equal((await snapshot(page)).assets.filter(asset => asset.nativePath === `${recordingDirectory}/recording-b.webm`).length, 1)
-        await page.evaluate(() => window.recordingLibrary.editor.value.setPlayback({ time: 0.5, selectedClipId: '' }))
-        await expect.poll(() => page.locator('.preview-frame canvas').evaluate(canvas => {
-          const [r, g, b, a] = canvas.getContext('2d').getImageData(5, canvas.height - 5, 1, 1).data
-          return Math.abs(r - 98) <= 3 && Math.abs(g - 87) <= 3 && Math.abs(b - 219) <= 3 && a === 255
-        }), { message: '真实目录视频需要解码并进入预览画布' }).toBe(true)
-        await ordinaryAssets(page)
-        await page.getByRole('button', { name: '视频', exact: true }).first().click()
-        await page.getByRole('button', { name: '录屏', exact: true }).click()
-        await page.getByLabel('搜索素材', { exact: true }).fill('recording-b')
-        await expect(page.locator('.asset-card')).toHaveCount(1)
-        const beforeRefresh = await snapshot(page)
-        await page.evaluate(() => { window.recordingLibrary.addStored('recording-d', '2032-01-01T00:00:00Z'); window.recordingLibrary.holdScan = true })
-        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
-        await expect(toolbar).toBeVisible()
-        await expect(toolbar).toContainText('正在读取目录视频')
-        await expect(toolbar).toHaveAttribute('aria-busy', 'true')
-        await expect(actions.getByRole('button', { name: '刷新本机视频列表' })).toBeDisabled()
-        await expect(card(page, 'recording-b')).toBeVisible()
-        await page.waitForFunction(() => typeof window.recordingLibrary.releaseScan === 'function')
-        await page.evaluate(() => window.recordingLibrary.releaseScan())
-        await expect(toolbar).toHaveCount(0)
-        await expect(page.getByLabel('搜索素材', { exact: true })).toHaveValue('recording-b')
-        await expect(page.getByRole('button', { name: '录屏', exact: true })).toHaveAttribute('aria-pressed', 'true')
-        await expect(page.locator('.asset-card')).toHaveCount(1)
-        assert.deepEqual(await snapshot(page), beforeRefresh)
-        await page.evaluate(() => { window.recordingLibrary.failScan = true })
-        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
-        await expect(toolbar).toBeVisible()
-        await expect(toolbar.getByRole('alert')).toContainText('录屏保存目录暂时不可读取')
-        await expect(card(page, 'recording-b')).toBeVisible()
-        assert.deepEqual(await snapshot(page), beforeRefresh)
-        await page.getByLabel('搜索素材', { exact: true }).fill('')
-        await expect(page.locator('.asset-card')).toHaveCount(4)
-        await page.evaluate(() => { window.recordingLibrary.failScan = false })
-        await actions.getByRole('button', { name: '刷新本机视频列表' }).click()
-        await expect(toolbar.getByRole('alert')).toHaveCount(0)
-        await expect(toolbar).toHaveCount(0)
-        await actions.getByRole('button', { name: '打开录屏保存目录' }).click()
-        await expect.poll(() => page.evaluate(() => window.recordingLibrary.calls.filter(call => call.command === 'open_media_library_directory').length)).toBe(1)
-        await saveAndInspect(page, path.join(directory, 'recording-library.omedia'), media)
-        assert(!requests.some(url => /\/recording-[cd]$/.test(url)), '后续刷新和项目保存也不能读取未选中的目录文件')
-        await page.screenshot({ path: path.join(directory, 'editor-recordings-desktop.png'), animations: 'disabled' })
-        await page.getByRole('button', { name: '已导入', exact: true }).click()
-        await expect(page.getByRole('button', { name: '视频', exact: true }).first()).toHaveClass(/active/)
-        await ordinaryAssets(page)
-        await page.screenshot({ path: path.join(directory, 'editor-imported-desktop.png'), animations: 'disabled' })
-        console.log('PASS 录屏目录双击/拖拽原子注册与重复复用、真实视频解码、刷新保持筛选、失败保留数据、便携项目保存包含隐藏素材完整字节')
-      } else {
-        await saveAndInspect(page, path.join(directory, 'imported-library-browser.omedia'), media)
-        assert.equal(await page.evaluate(() => window.recordingLibrary.calls.length), 0, '网页模式不能发起原生目录查询')
-        console.log('PASS 网页仅显示已导入普通素材，无本机扫描；隐藏用途素材仍完整保存')
+      for (const id of ['recording-a', 'recording-b', 'recording-c']) await expect(card(page, id)).toHaveCount(0)
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+      assert.equal(await page.evaluate(() => window.recordingLibrary.calls.length), 0, '工程剪辑不扫描任何公共目录')
+      assert(!requests.some(url => /\/recording-[abc]$/.test(url)), '打开工程不能读取未添加的公共素材')
+      await card(page, 'project-video').dblclick()
+      await expect.poll(async () => (await clipsFor(page, 'project-video')).length).toBe(2)
+      const mainTrackId = await page.evaluate(() => window.recordingLibrary.mainTrackId)
+      await dragAsset(page, 'project-video', mainTrackId, 16)
+      await expect.poll(async () => (await clipsFor(page, 'project-video')).length).toBe(3)
+      assert.equal(await assetCount(page), initial.assets.length, '复用工程素材不能重复登记')
+      await page.evaluate(() => window.recordingLibrary.editor.value.setPlayback({ time: 0.5, selectedClipId: '' }))
+      await expect.poll(() => page.locator('.preview-frame canvas').evaluate(canvas => {
+        const [r, g, b, a] = canvas.getContext('2d').getImageData(5, canvas.height - 5, 1, 1).data
+        return Math.abs(r - 98) <= 3 && Math.abs(g - 87) <= 3 && Math.abs(b - 219) <= 3 && a === 255
+      }), { message: '工程视频应真实解码并进入预览画布' }).toBe(true)
+      await page.locator('.asset-panel > header').getByTitle('导入素材').click()
+      assert.equal(await page.evaluate(() => window.recordingLibrary.imports), 1)
+      assert.equal(await assetCount(page), initial.assets.length, '只有点击导入、尚未接受文件时不添加素材')
+      await page.evaluate(() => window.recordingLibrary.addImported())
+      await expect(card(page, 'explicit-import')).toBeVisible()
+      await expect(page.locator('.asset-card')).toHaveCount(5)
+      await saveAndInspect(page, path.join(directory, `project-library-${native ? 'desktop' : 'browser'}.omedia`), media)
+      const previous = await snapshot(page)
+      await page.getByRole('button', { name: '图片', exact: true }).first().click()
+      await page.getByLabel('搜索素材', { exact: true }).fill('水印')
+      await page.evaluate(() => window.recordingLibrary.openEmptyProject())
+      await expect(page.locator('.asset-card')).toHaveCount(0)
+      await expect(page.locator('.asset-empty')).toContainText('此工程暂无素材')
+      await expect(page.getByLabel('搜索素材', { exact: true })).toHaveValue('')
+      await expect(page.getByRole('button', { name: '全部', exact: true }).first()).toHaveClass(/active/)
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+      assert.equal(await page.evaluate(() => window.recordingLibrary.calls.length), 0)
+      assert.equal(await assetCount(page), 0, '新工程不能混入上一个工程或公共目录素材')
+      await page.evaluate(previous => { window.recordingLibrary.current.value = previous }, previous)
+      await expect(page.locator('.asset-card')).toHaveCount(5)
+      for (const width of [1440, 780]) {
+        await page.setViewportSize({ width, height: 960 })
+        await assertLibraryHeader(page)
+        await page.screenshot({ path: path.join(directory, `editor-project-library-${native ? 'desktop' : 'browser'}-${width}.png`), animations: 'disabled' })
       }
+      assert(!requests.some(url => /\/recording-[abc]$/.test(url)), '切换工程和保存均不能读取未添加的公共目录文件')
+      console.log(`PASS ${native ? '桌面' : '网页'} 工程素材隔离、显式导入、直接分类、工程切换、真实视频解码与便携工程媒体字节校验`)
       assert.equal(await page.evaluate(() => window.recordingLibrary.devices), 0)
       assert.deepEqual(errors, [])
       await page.evaluate(() => window.recordingLibrary.dispose())

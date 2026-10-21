@@ -34,6 +34,7 @@ async function main() {
         images.push(await importMediaFile(new File([blob], name, { type: 'image/png' })))
       }
       window.conversionHarness.assets.value = images
+      window.originalImageIds = Object.fromEntries(images.map(asset => [asset.name, asset.id]))
     })
     const options = await page.getByTestId('convert-format').locator('option').evaluateAll(items => items.map(item => item.value))
     for (const format of ['png', 'jpeg', 'webp', 'bmp', 'ico', 'gif', 'tiff']) assert.ok(options.includes(format), `${format} is available`)
@@ -94,9 +95,11 @@ async function main() {
     }
     console.log('PASS per-image crop confirmation/cancellation, retained selections, unconfirmed crop applied before export, actual batch crop/resize/rotation pixels and narrow inline editor')
 
-    await page.getByLabel('选择 第二张.png', { exact: true }).first().uncheck()
-    await page.getByLabel('选择 色块.png', { exact: true }).first().check()
-    await page.locator('.source-details').filter({ hasText: '色块.png' }).first().click()
+    // New generated files sort ahead of older sources and can share their names.
+    const originalIds = await page.evaluate(() => window.originalImageIds)
+    await page.locator(`[data-source-asset-id="${originalIds['第二张.png']}"]`).getByRole('checkbox').uncheck()
+    await page.locator(`[data-source-asset-id="${originalIds['色块.png']}"]`).getByRole('checkbox').check()
+    await page.locator(`[data-source-asset-id="${originalIds['色块.png']}"] .source-details`).click()
     await page.getByTestId('convert-format').selectOption('ico')
     for (const size of [16, 32, 48, 64, 128, 256]) await page.getByLabel(`图标 ${size} 像素`, { exact: true }).uncheck()
     assert.equal(await page.getByTestId('convert-start').isDisabled(), true, 'empty icon size choice cannot start an invalid conversion')

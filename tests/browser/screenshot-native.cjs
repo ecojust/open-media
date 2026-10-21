@@ -12,7 +12,8 @@ async function installNativeContract(page) {
   await page.addInitScript(() => {
     const callbacks = new Map(), listeners = new Map(), urls = new Map()
     let callbackId = 0, listenerId = 0
-    const state = { calls: [], shortcut: null, rejectShortcut: null, rejectClipboard: false, picker: null, capture: null, completed: [], unexpected: [] }
+    const state = { managed: JSON.parse(localStorage.getItem('screenshot-fixture:managed') || '{}'), calls: [], shortcut: null, rejectShortcut: null, rejectClipboard: false, picker: null, capture: null, completed: [], unexpected: [] }
+    for (const project of Object.values(state.managed)) for (const asset of project.assets) urls.set(asset.nativePath, asset.url)
     function asset(name, width, height, color) {
       const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
       const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, width, height)
@@ -54,7 +55,18 @@ async function installNativeContract(page) {
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_desktop_platform') return 'macos'
         if (command === 'get_media_jobs') return []
-        if (command === 'list_stored_videos') return { directory: '/screenshot-fixture/recordings', assets: [], warnings: [] }
+        if (command === 'list_stored_videos') return { directory: '/screenshot-fixture/recording', assets: [], warnings: [] }
+        if (command === 'list_workspace_assets') return { directories: Object.fromEntries(args.categories.map(category => [category, `/screenshot-fixture/${category}`])), assets: args.categories.includes('screenshot') ? state.completed : [], warnings: [] }
+        if (command === 'open_workspace_directory') return
+        if (command === 'list_managed_projects') return Object.values(state.managed).map(project => ({ id: project.id, title: project.title, width: project.width, height: project.height, updatedAt: project.updatedAt, duration: 0, assetCount: project.assets.length }))
+        if (command === 'ensure_project_media') return { directory: `/screenshot-fixture/projects/${args.projectId}`, assets: args.assets.map(item => {
+          const nativePath = `/screenshot-fixture/projects/${args.projectId}/assets/${item.id}.png`
+          urls.set(nativePath, urls.get(item.nativePath) || item.url)
+          return { assetId: item.id, nativePath, size: item.size }
+        }) }
+        if (command === 'save_managed_project') { state.managed[args.project.id] = structuredClone(args.project); localStorage.setItem('screenshot-fixture:managed', JSON.stringify(state.managed)); return { directory: `/screenshot-fixture/projects/${args.project.id}`, savedAt: new Date().toISOString() } }
+        if (command === 'load_managed_project') return structuredClone(state.managed[args.projectId])
+        if (command === 'remove_managed_project_draft') return
         if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
         if (command === 'mcp_pending') return []
         if (command === 'mcp_get_status') return { running: false, host: '127.0.0.1', port: 39861, url: null, pendingRequests: 0, connectedClients: 0 }
@@ -99,7 +111,7 @@ async function main() {
     page.on('pageerror', error => errors.push(error.message))
     await installNativeContract(page)
     await page.goto(url)
-    await expect(page.getByTestId('home-workspace')).toBeVisible()
+    await expect(page.getByTestId('home-workspace')).toBeVisible({ timeout: 30000 }).catch(async cause => { console.error(await page.locator('body').innerText(), errors, await page.evaluate(() => window.screenshotHarness?.unexpected)); throw cause })
 
     await check('桌面截屏先订阅事件再注册默认快捷键，不提前读取屏幕或打开录制', async () => {
       await expect.poll(async () => (await calls(page, 'configure_screenshot_shortcut')).length).toBe(1)
@@ -154,6 +166,10 @@ async function main() {
       await page.evaluate(() => { window.screenshotHarness.holdClipboard = false; window.screenshotHarness.finishClipboard() })
       await expect(page.locator('.status-main')).toContainText('已复制')
       assert.deepEqual((await calls(page, 'copy_image_to_clipboard'))[0].args, { width: 64, height: 40, byteLength: 8 + 64 * 40 * 4, firstPixel: [26, 120, 188, 255], lastPixel: [26, 120, 188, 255] })
+      await page.getByTestId('nav-edit').click()
+      await expect(page.locator('.project-summary')).toContainText('0 个素材')
+      await page.getByTestId('nav-image').click()
+      await expect(page.getByTestId('convert-image-preview')).toHaveAttribute('alt', '截屏-1.png')
     })
 
     await check('取消范围选择不创建素材并恢复主窗口，弹窗打开时忽略截屏事件', async () => {
@@ -199,7 +215,7 @@ async function main() {
       assert.equal(await page.evaluate(() => localStorage.getItem('open-media:screenshot-shortcut')), 'disabled')
       await expect(page.getByTestId('screenshot-start')).toBeEnabled()
       await page.reload()
-      await expect(page.getByTestId('home-workspace')).toBeVisible()
+      await expect(page.getByTestId('home-workspace')).toBeVisible({ timeout: 30000 }).catch(async cause => { console.error(await page.locator('body').innerText(), errors, await page.evaluate(() => window.screenshotHarness?.unexpected)); throw cause })
       await expect.poll(async () => (await calls(page, 'configure_screenshot_shortcut')).length).toBe(1)
       assert.deepEqual((await calls(page, 'configure_screenshot_shortcut'))[0].args, { shortcut: null })
       await page.getByTestId('nav-record').click()
@@ -242,12 +258,18 @@ async function main() {
       assert.deepEqual(copies[1].args, copies[0].args)
       await expect(page.locator('.convert-source')).toHaveCount(before)
       await expect(page.getByTestId('convert-result')).toHaveCount(0)
+      await page.locator('.convert-source.active').click({ button: 'right' })
+      await page.getByRole('menuitem', { name: '添加到工程素材', exact: true }).click()
+      await expect(page.locator('.status-main')).toContainText('素材已加入当前工程')
+      await page.getByTestId('nav-edit').click()
+      await expect(page.locator('.project-summary')).toContainText('1 个素材')
+      const accepted = (await calls(page, 'ensure_project_media')).find(call => call.args.assets.length === 1)
+      assert(accepted?.args.assets[0].nativePath.startsWith('/screenshot-fixture/native-screenshot-fixture-'), '显式加入工程时才提交原始截图到工程收录通道')
     })
 
-    await check('项目素材已满仍复制真实截屏像素，并明确区分复制成功与加入项目失败', async () => {
+    await check('项目素材已满仍能截屏、复制并载入独立图片工作区，不改变工程素材', async () => {
       const fullProject = await page.evaluate(async () => {
         const { createProject, MAX_ASSETS } = await import('/src/core/project.ts')
-        const { saveProject } = await import('/src/core/storage.ts')
         const project = createProject('素材已满的截屏项目')
         const canvas = document.createElement('canvas'); canvas.width = 2; canvas.height = 2
         const url = canvas.toDataURL('image/png')
@@ -256,12 +278,12 @@ async function main() {
           url, nativePath: `/screenshot-fixture/capacity-image-${index}.png`,
           width: 2, height: 2, duration: 0, size: 100, mime: 'image/png',
         }))
-        await saveProject(project)
+        await window.__TAURI_INTERNALS__.invoke('save_managed_project', { project })
         localStorage.setItem('open-media:last-project', project.id)
         return { id: project.id, count: MAX_ASSETS, assetIds: project.assets.map(asset => asset.id) }
       })
       await page.reload()
-      await expect(page.getByTestId('home-workspace')).toBeVisible()
+      await expect(page.getByTestId('home-workspace')).toBeVisible({ timeout: 30000 }).catch(async cause => { console.error(await page.locator('body').innerText(), errors, await page.evaluate(() => window.screenshotHarness?.unexpected)); throw cause })
       await expect.poll(async () => (await calls(page, 'configure_screenshot_shortcut')).length).toBe(1)
       await page.getByTestId('nav-edit').click()
       await expect(page.locator('.project-summary')).toContainText(`${fullProject.count} 个素材`)
@@ -276,21 +298,19 @@ async function main() {
         width: 64, height: 40, byteLength: 8 + 64 * 40 * 4,
         firstPixel: [26, 120, 188, 255], lastPixel: [26, 120, 188, 255],
       }, '达到项目容量不能阻断截屏的二进制剪贴板写入')
-      await expect(page.locator('.status-main')).toContainText('截屏已复制到剪贴板，但加入图片编辑失败')
-      await expect(page.locator('.app-error')).toContainText('素材列表无效或数量过多')
-      await expect(page.locator('.status-main')).not.toContainText('并载入图片编辑')
-      await expect(page.locator('.status-main')).not.toContainText('已载入图片编辑')
-      await expect(page.getByTestId('recorder-workspace')).toBeVisible()
-      await expect(page.getByTestId('convert-workspace')).toHaveCount(0)
+      await expect(page.locator('.status-main')).toContainText('截屏已复制到剪贴板，并载入图片编辑')
+      await expect(page.locator('.app-error')).toHaveCount(0)
+      await expect(page.getByTestId('convert-workspace')).toBeVisible()
+      await expect(page.getByTestId('convert-image-preview')).toHaveAttribute('alt', '截屏-1.png')
+      await expect(page.locator('.convert-source')).toHaveCount(1)
       await expect.poll(async () => (await calls(page, 'show_main_window')).length).toBe(1)
       await page.getByTestId('nav-edit').click()
       await expect(page.locator('.project-summary')).toContainText(`${fullProject.count} 个素材`)
       const retainedAssetIds = await page.evaluate(async id => {
-        const { loadProject } = await import('/src/core/storage.ts')
-        const saved = await loadProject(id)
-        try { return saved.project.assets.map(asset => asset.id) } finally { saved.revoke() }
+        const saved = await window.__TAURI_INTERNALS__.invoke('load_managed_project', { projectId: id })
+        return saved.assets.map(asset => asset.id)
       }, fullProject.id)
-      assert.deepEqual(retainedAssetIds, fullProject.assetIds, '满额截屏不能删除、替换或追加原项目素材')
+      assert.deepEqual(retainedAssetIds, fullProject.assetIds, '截图工作区不能删除、替换或追加原项目素材')
     })
 
     assert.deepEqual(errors, [])

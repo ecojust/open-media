@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { IDBFactory } from 'fake-indexeddb'
-import { createClip, createProject, createSubtitleClip, cloneProject } from '../src/core/project.ts'
-import { addClip, commitHistory, createHistory, findClip, redoHistory, undoHistory } from '../src/core/timeline.ts'
+import { createClip, createProject, createSubtitleClip, createTextClip, cloneProject } from '../src/core/project.ts'
+import { addAssets, addClip, commitHistory, createHistory, findClip, redoHistory, undoHistory } from '../src/core/timeline.ts'
 import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../src/core/speech-settings.ts'
 import { storeToolArtifact } from '../src/core/tool-artifacts.ts'
 import { addTransition } from '../src/core/transitions.ts'
@@ -50,6 +50,7 @@ async function finished(controller, job) {
   return controller.status(job.id)
 }
 const video = (id = 'source-video') => ({ id, name: 'video.mp4', kind: 'video', url: 'blob:video', nativePath: '/private/video.mp4', duration: 10, width: 1280, height: 720, size: 10, mime: 'video/mp4' })
+const localizeProject = project => ({ ...clone(project), assets: project.assets.map(asset => ({ ...clone(asset), nativePath: `/projects/${project.id}/assets/${asset.id}`, url: `asset://localhost/projects/${project.id}/assets/${asset.id}`, sourceUrl: `asset://localhost/projects/${project.id}/assets/${asset.id}` })) })
 const voice = { id: 'matcha_zh_en_female', name: 'Matcha 中英', language: 'zh-CN', status: 'bundled' }
 
 function fixture(initialProject = createProject('当前工程', { width: 640, height: 360 })) {
@@ -430,6 +431,131 @@ test('import runs once as an atomic undo step and adopts source size for a fresh
   assert.equal(f.busy, false)
   await f.run('project_history', { direction: 'undo' })
   assert.equal(f.project.assets.length, 0)
+  await f.controller.dispose()
+})
+
+test('material-producing jobs commit and register only assets owned by the current project', async () => {
+  for (const kind of ['import', 'upload', 'url', 'video', 'image', 'music', 'speech']) {
+    const source = createProject('工程素材隔离')
+    if (kind === 'speech') source.tracks[0].clips.push(createTextClip(source, { text: '工程内的配音素材。', trimOut: 5 }))
+    const f = fixture(source), preparations = []
+    f.host.prepareProject = async (candidate, options) => {
+      options.assertCurrent()
+      assert.equal(options.signal.aborted, false)
+      assert.ok(options.blobs instanceof Map)
+      assert.equal(f.commits.length, 0)
+      preparations.push(clone(candidate))
+      return localizeProject(candidate)
+    }
+    let job
+    if (kind === 'import') job = await f.run('asset_import', { paths: ['/global/recording/source.mp4'] })
+    if (kind === 'upload') {
+      const upload = await f.run('asset_upload', { action: 'begin', name: 'sample.mp4', size: 4, sha256: 'a'.repeat(64) })
+      assert.equal(preparations.length, 0)
+      job = await f.run('asset_upload', { action: 'commit', uploadId: upload.uploadId })
+    }
+    if (kind === 'url') {
+      f.io.runAssetTool = async () => ({ asset: video('url-video'), source: { kind: 'url', url: 'https://example.com/source.mp4', sha256: 'a'.repeat(64), importedAt: 1 } })
+      job = await f.run('asset_import_url', { url: 'https://example.com/source.mp4' })
+    }
+    if (kind === 'video') job = await f.run('video_generation_start', generation())
+    if (kind === 'image') job = await f.run('image_generate', aiImage({ destination: 'timeline' }))
+    if (kind === 'music') job = await f.run('music_generate', { modelId: 'ace-step-1.5-turbo', prompt: '轻快纯音乐', instrumental: true, destination: 'timeline' })
+    if (kind === 'speech') job = await f.run('speech_generate')
+    const done = await finished(f.controller, job)
+    assert.equal(done.state, 'completed', `${kind}: ${done.error}`)
+    assert.equal(preparations.length, 1, kind)
+    assert.equal(f.commits.length, 1, kind)
+    assert.ok(f.assets.length > 0, kind)
+    for (const asset of f.assets) {
+      assert.equal(asset.nativePath, `/projects/${f.project.id}/assets/${asset.id}`, kind)
+      assert.deepEqual(asset, f.project.assets.find(item => item.id === asset.id), kind)
+      assert.notEqual(preparations[0].assets.find(item => item.id === asset.id).nativePath, asset.nativePath, kind)
+    }
+    assert.equal(source.assets.length, 0, 'detached preparation does not mutate the source project')
+    await f.controller.dispose()
+  }
+})
+
+test('in-memory built-in material bytes are included when preparing project ownership', async () => {
+  const f = fixture(), existingBlob = new Blob(['prior']), materialBlob = new Blob(['material'], { type: 'audio/wav' })
+  f.host.getBlobs().set('prior', existingBlob)
+  const material = { ...video('builtin'), kind: 'audio', url: 'blob:builtin', nativePath: undefined }
+  f.io.prepareMcpMaterial = async project => ({ project: addAssets(project, [material]), assets: [{ asset: material, blob: materialBlob }], label: '添加内置配乐' })
+  f.host.prepareProject = async (candidate, options) => {
+    assert.equal(options.blobs.get('prior'), existingBlob)
+    assert.equal(options.blobs.get(material.id), materialBlob)
+    assert.equal(f.host.getBlobs().has(material.id), false, 'not owned before commit')
+    return localizeProject(candidate)
+  }
+  const done = await finished(f.controller, await f.run('material_add', { kind: 'music', id: 'sample' }))
+  assert.equal(done.state, 'completed', done.error)
+  assert.equal(f.assets[0].nativePath, `/projects/${f.project.id}/assets/builtin`)
+  assert.equal(f.host.getBlobs().get(material.id), materialBlob)
+  await f.controller.dispose()
+})
+
+test('project preparation remains cancellable and rejects late results from another revision or session', async () => {
+  for (const action of ['cancel', 'externalChange', 'reopen', 'openOther']) {
+    const f = fixture(), pending = deferred()
+    let options, candidate
+    f.host.prepareProject = async (project, context) => { candidate = project; options = context; return pending.promise }
+    const job = await f.run('asset_import', { paths: ['/global/recording/source.mp4'] })
+    await until(() => !!candidate)
+    assert.equal(f.busy, true)
+    assert.equal(f.controller.status(job.id).cancelable, true)
+    assert.match(f.controller.status(job.id).stage, /归档/)
+    await assert.rejects(f.run('project_update', { patch: { title: '不能同时写入' } }), cause => cause.blockingJob?.jobId === job.id)
+    if (action === 'cancel') await f.run('job_cancel', { id: job.id })
+    else f[action]()
+    assert.throws(options.assertCurrent)
+    pending.resolve(localizeProject(candidate))
+    const done = await finished(f.controller, job)
+    assert.equal(done.state, action === 'cancel' ? 'cancelled' : 'failed', action)
+    assert.equal(f.commits.length, 0, action)
+    assert.equal(f.assets.length, 0, action)
+    assert.equal(f.project.assets.length, 0, action)
+    assert.equal(f.busy, false)
+    await f.controller.dispose()
+  }
+})
+
+test('motion output acceptance and cancellation retain temporary-resource ownership after localization', async () => {
+  for (const action of ['accept', 'cancel', 'reopen', 'copy-failed']) {
+    const source = createProject('素材二创归档')
+    source.assets.push(video())
+    source.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
+    const f = fixture(source), pending = deferred()
+    let candidate, accepted = 0, discarded = 0
+    f.io.renderMotionClip = async project => ({ asset: { ...video('motion-output'), width: project.width, height: project.height, duration: 4 }, accept: async () => { accepted++ }, discard: async () => { discarded++ } })
+    f.host.prepareProject = async project => { candidate = project; return pending.promise }
+    const job = await f.run('motion_clip_generate', { scenes: [{ assetId: 'source-video', duration: 4 }] })
+    await until(() => !!candidate)
+    if (action === 'cancel') await f.run('job_cancel', { id: job.id })
+    if (action === 'reopen') f.reopen()
+    if (action === 'copy-failed') pending.reject(new Error('磁盘空间不足'))
+    else pending.resolve(localizeProject(candidate))
+    const done = await finished(f.controller, job)
+    assert.equal(done.state, action === 'accept' ? 'completed' : action === 'cancel' ? 'cancelled' : 'failed', done.error)
+    assert.equal(accepted, action === 'accept' ? 1 : 0)
+    assert.equal(discarded, action === 'accept' ? 0 : 1)
+    assert.equal(f.commits.length, action === 'accept' ? 1 : 0)
+    if (action === 'accept') assert.equal(f.assets[0].nativePath, `/projects/${f.project.id}/assets/motion-output`)
+    await f.controller.dispose()
+  }
+})
+
+test('read-only project queries, previews and global generation do not copy media into a project', async () => {
+  const f = fixture()
+  f.host.prepareProject = async () => { throw new Error('unexpected project media preparation') }
+  f.io.preparePreviewTool = async () => ({ data: { width: 320, height: 180, time: 0 } })
+  for (const name of ['project_get', 'asset_list', 'motion_style_list', 'ai_status']) await f.run(name)
+  const frame = await finished(f.controller, await f.run('timeline_get_frame', { time: 0, width: 320 }))
+  assert.equal(frame.state, 'completed', frame.error)
+  const generated = await finished(f.controller, await f.run('image_generate', aiImage({ destination: 'generated' })))
+  assert.equal(generated.state, 'completed', generated.error)
+  assert.equal(f.commits.length, 0)
+  assert.equal(f.assets.length, 0)
   await f.controller.dispose()
 })
 

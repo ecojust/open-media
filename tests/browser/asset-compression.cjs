@@ -20,10 +20,10 @@ async function mount(page, url, desktop = true) {
     const media = await (await fetch(VIDEO_SEGMENTS[0].url)).blob()
     const loaded = await importMediaFile(new File([media], '源视频.webm', { type: 'video/webm' }))
     // Native sizes and compression jobs are controlled GUI fixtures; media decoding is real.
-    const recording = { ...loaded, id: 'recording', name: '录屏素材.webm', nativePath: '/recordings/recording.webm', size: 1536 * 1024 ** 2, addedAt: Date.now() }
+    const recording = { ...loaded, id: 'recording', name: '录屏素材.webm', nativePath: '/recordings/recording.webm', size: 1536 * 1024 ** 2, addedAt: new Date().toISOString() }
     const imported = { ...loaded, id: 'imported', name: '已导入素材.webm', nativePath: '/media/imported.webm', size: 256 * 1024 ** 2 }
     const audio = { ...loaded, kind: 'audio', id: 'sound', name: '声音.webm', width: 0, height: 0 }
-    const project = createProject('剪辑前素材压缩', { width: loaded.width, height: loaded.height, fps: 24 }); project.assets.push(imported, audio)
+    const project = createProject('剪辑前素材压缩', { width: loaded.width, height: loaded.height, fps: 24 }); project.assets.push(recording, imported, audio)
     const f = window.assetCompression = { current: shallowRef(project), theme: ref('dark'), calls: [], tools: [], messages: [], commits: 0, hold: false, fail: false, jobs: new Map(), sequence: 0, revision: 0, cancelled: [], discarded: [] }
     const commit = (next, label) => { f.current.value = next; f.commits++; f.revision++; f.messages.push(label) }
     const state = job => ({ ...job, state: f.fail ? 'failed' : f.hold ? 'running' : 'completed', stage: f.hold ? '正在压缩所选视频' : '完成', progress: f.hold ? .25 : 1, current: 1, total: 1, elapsedSeconds: 2, ...(f.fail ? { error: '测试编码失败' } : {}) })
@@ -70,8 +70,8 @@ async function main() {
     await expect(card(page, 'recording')).toBeVisible(); await expect(card(page, 'recording').getByTestId('asset-file-size')).toHaveText('1.5 GB')
     await card(page, 'recording').click({ button: 'right' }); await page.getByTestId('asset-compression-open').click()
     const dialog = page.getByRole('dialog', { name: '压缩视频', exact: true }), panel = dialog.getByTestId('project-video-compression'), start = panel.getByTestId('project-compression-start'), restore = panel.getByTestId('project-compression-restore')
-    await expect(dialog).toContainText('录屏素材.webm'); await expect(dialog).toContainText('开始压缩时会将此视频加入本工程素材')
-    assert.equal((await read(page)).assets.length, 2)
+    await expect(dialog).toContainText('录屏素材.webm'); await expect(dialog).not.toContainText('开始压缩时会将此视频加入本工程素材')
+    assert.equal((await read(page)).assets.length, 3)
     await page.evaluate(() => { window.assetCompression.hold = true }); await start.click()
     await expect(dialog.getByRole('progressbar')).toBeVisible(); await expect(dialog).toContainText('正在压缩所选视频'); await expect(dialog.getByRole('button', { name: '关闭压缩视频' })).toBeDisabled()
     await dialog.getByRole('button', { name: '取消处理' }).click(); await expect(dialog).toContainText('已取消')
@@ -85,11 +85,11 @@ async function main() {
     await dialog.getByRole('button', { name: '关闭压缩视频' }).click(); await expect(card(page, work.id)).toBeVisible(); await expect(card(page, 'recording')).toHaveCount(0)
     await expect(card(page, work.id).getByTestId('asset-file-size')).toContainText('1.5 GB → 614.4 MB'); await expect(card(page, work.id)).toContainText('工作副本')
     await page.screenshot({ path: path.join(output, 'recording-working-copy.png') })
-    await page.getByRole('button', { name: '已导入', exact: true }).click(); await expect(card(page, work.id)).toHaveCount(0); await expect(card(page, 'imported').getByTestId('asset-file-size')).toHaveText('256.0 MB')
+    await expect(card(page, work.id)).toBeVisible(); await expect(card(page, 'imported').getByTestId('asset-file-size')).toHaveText('256.0 MB')
     await card(page, 'sound').click({ button: 'right' }); await expect(page.getByTestId('asset-compression-open')).toHaveCount(0); await page.keyboard.press('Escape')
-    console.log('PASS 视频右键单素材压缩，开始时登记录屏；取消/失败保留原件，大小与工作副本实时显示，录屏和导入归类不重复')
+    console.log('PASS 工程视频右键独立压缩；取消/失败保留原件，大小与工作副本实时显示，不扫描公共目录')
 
-    await page.getByRole('button', { name: '录屏', exact: true }).click(); await card(page, work.id).dblclick()
+    await card(page, work.id).dblclick()
     p = await read(page); assert.equal(p.tracks.flatMap(t => t.clips)[0].assetId, work.id)
     await card(page, work.id).click({ button: 'right' }); await page.getByTestId('asset-compression-open').click(); await restore.click(); await expect(restore).toHaveCount(0)
     p = await read(page); assert.equal(p.tracks.flatMap(t => t.clips)[0].assetId, 'recording'); assert(p.assets.filter(a => a.compression).every(a => a.compression.active === false))
@@ -100,12 +100,12 @@ async function main() {
     assert.equal(await page.evaluate(() => window.assetCompression.calls.filter(c => c.command === 'create_media_preview').length), 1)
     console.log('PASS 后续添加立即使用工作副本；恢复后原件加入时间线时按需生成可播放预览并保存URL，不重复使用失效原URL')
 
-    await page.getByRole('button', { name: '已导入', exact: true }).click(); await card(page, 'imported').click({ button: 'right' }); await page.getByTestId('asset-compression-open').click()
+    await card(page, 'imported').click({ button: 'right' }); await page.getByTestId('asset-compression-open').click()
     await page.setViewportSize({ width: 400, height: 850 }); await page.evaluate(() => { window.assetCompression.theme.value = 'light' })
     assert(await dialog.evaluate(e => e.scrollWidth <= e.clientWidth + 1)); await page.screenshot({ path: path.join(output, 'single-video-compression-light.png') })
     await start.click(); await expect(restore).toBeVisible(); assert.deepEqual(await page.evaluate(() => window.assetCompression.tools.at(-1).args.assetIds), ['imported'])
     await dialog.getByRole('button', { name: '关闭压缩视频' }).click(); p = await read(page); const importedWork = p.assets.find(a => a.compression?.active && a.compression.originalAssetId === 'imported'); await expect(card(page, importedWork.id)).toBeVisible()
-    assert.deepEqual(errors, []); console.log('PASS 未使用的导入视频可在剪辑前独立压缩，400px弹窗无溢出；未捕获异常为0')
+    assert.equal(await page.evaluate(() => window.assetCompression.calls.filter(c => c.command === 'list_stored_videos').length), 0); assert.deepEqual(errors, []); console.log('PASS 未使用的导入视频可在剪辑前独立压缩，400px弹窗无溢出；未捕获异常为0')
     const web = await browser.newPage({ viewport: { width: 1200, height: 900 } }); await mount(web, url, false)
     await card(web, 'imported').click({ button: 'right' }); await web.getByTestId('asset-compression-open').click()
     const webDialog = web.getByRole('dialog', { name: '压缩视频', exact: true })

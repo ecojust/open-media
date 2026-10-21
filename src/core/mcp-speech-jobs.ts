@@ -50,6 +50,7 @@ export interface McpSpeechJobsOptions {
   getProjectSession?(): number
   isBusy(): boolean
   onBusy(value: boolean): void
+  prepareProject?(project: Project, options: { signal: AbortSignal; assertCurrent: () => void }): Promise<Project>
   /** Must synchronously reject a stale revision or commit the whole project as one undo step. */
   commit(project: Project, label: string, expected: { projectId: string; revision: number; projectSession?: number }): boolean | void
   onAssets?(assets: MediaAsset[]): void
@@ -147,15 +148,20 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
       }
       check(operation)
       const edit = applySpeechResults(operation.project, results, { alignText: operation.job.alignText, alignment: getSpeechAlignment() })
+      operation.job.stage = '正在归档工程配音素材'
+      publish(operation)
+      const project = options.prepareProject ? await options.prepareProject(edit.project, { signal: operation.controller.signal, assertCurrent: () => check(operation) }) : edit.project
+      check(operation)
+      if (project.id !== operation.job.projectId) throw new Error('工程配音归档返回了其他工程，本次语音未写入时间线。')
       operation.job.cancelable = false
       operation.job.stage = '正在加入时间线'
       publish(operation)
       check(operation)
-      const accepted = options.commit(edit.project, `MCP 已为 ${results.length} 段文字生成语音`, { projectId: operation.job.projectId, revision: operation.job.revision, projectSession: operation.projectSession })
+      const accepted = options.commit(project, `MCP 已为 ${results.length} 段文字生成语音`, { projectId: operation.job.projectId, revision: operation.job.revision, projectSession: operation.projectSession })
       if (accepted === false || options.getProject().id !== operation.job.projectId || !results.every(item => options.getProject().assets.some(asset => asset.id === item.asset.id)) || !edit.audioClipIds.every(id => options.getProject().tracks.some(track => track.clips.some(clip => clip.id === id)))) throw new Error('语音没有写入项目，请重试。')
       operation.committed = true
       operation.job.result = { assetIds: results.map(item => item.asset.id), audioClipIds: edit.audioClipIds, overlaps: edit.overlaps }
-      try { options.onAssets?.(results.map(item => item.asset)) } catch { operation.job.warning = '语音已加入项目，素材列表刷新失败。' }
+      try { options.onAssets?.(results.map(item => project.assets.find(asset => asset.id === item.asset.id)!)) } catch { operation.job.warning = '语音已加入项目，素材列表刷新失败。' }
       const ids = [...operation.nativeJobs]
       operation.nativeJobs.clear()
       try { await options.native.acceptSpeechJobs(ids) }

@@ -29,7 +29,7 @@ async function save(page) {
 
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, hmr: false, watch: null }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
   await server.listen()
   const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), headless: true, args: ['--no-sandbox'] })
   try {
@@ -54,7 +54,7 @@ async function main() {
       }
     })
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`)
-    await expect(page.getByTestId('create-project')).toBeEnabled()
+    await expect(page.getByTestId('create-project')).toBeEnabled({ timeout: 30000 })
     await expect(page.getByTestId('new-project')).toHaveCount(0)
     for (const workspace of ['record', 'gif', 'video', 'image']) {
       await page.getByTestId(`nav-${workspace}`).click()

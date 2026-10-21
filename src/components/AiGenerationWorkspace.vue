@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import ToolWorkspace from './ToolWorkspace.vue'
+import MediaAssetMenu from './MediaAssetMenu.vue'
+import { useWorkspaceMedia } from '../core/workspace-media'
 import type { MediaAsset } from '../core/types.ts'
 import type { AiGenerationRequest, AiProvider } from '../core/ai.ts'
 import { aiState, aiServiceError, observeAi, generateAi, stopAiJob, aiDuration, aiModelStateNames } from '../core/ai-service.ts'
@@ -18,9 +20,12 @@ const image = computed(() => props.provider === 'image'), heading = computed(() 
 const models = computed(() => aiState.value.models.filter(model => model.provider === props.provider))
 const model = computed(() => models.value.find(item => item.id === modelId.value))
 const jobs = computed(() => aiState.value.jobs.filter(job => job.provider === props.provider && job.kind === 'generation').slice().sort((a,b) => b.startedAt-a.startedAt))
+const selectedLibraryAssetId = ref(''), mediaMenu = ref<InstanceType<typeof MediaAssetMenu>>()
+const generatedAssets = computed(() => jobs.value.flatMap(item => item.assets))
+const { assets: libraryAssets, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, refresh: refreshLibrary, reveal: revealLibrary } = useWorkspaceMedia(() => [image.value ? 'imagegen' : 'musicgen'], () => props.native, () => generatedAssets.value)
 const working = computed(() => starting.value || jobs.value.some(job=>job.state==='running'))
 const job = computed(() => jobs.value.find(item => item.id === selectedJob.value) ?? jobs.value[0])
-const result = computed(() => job.value?.assets.find(asset => asset.id === selectedAsset.value) ?? job.value?.assets[0])
+const result = computed(() => libraryAssets.value.find(asset => asset.id === selectedLibraryAssetId.value) ?? job.value?.assets.find(asset => asset.id === selectedAsset.value) ?? job.value?.assets[0] ?? libraryAssets.value[0])
 const supportsNegative = computed(() => modelId.value === 'qwen-image')
 const unavailable = computed(() => !props.native ? '本地生成需要桌面端。' : !model.value ? '请前往 Info 下载所需模型。' : model.value.state !== 'ready' ? `${model.value.name}：${aiModelStateNames[model.value.state]}，请前往 Info 下载模型。` : model.value.runtime.state === 'unsupported' ? model.value.runtime.reason || '当前设备不支持这个模型。' : '')
 const invalid = computed(() => !prompt.value.trim() ? '请描述你想生成的内容。' : prompt.value.length > (image.value ? 6000 : 4096) ? '内容描述超过模型支持的长度。' : lyrics.value.length > 6000 ? '歌词不能超过 6000 字。' : !Number.isInteger(steps.value) || steps.value < 1 || steps.value > 100 ? '生成步数应为 1–100 的整数。' : !Number.isInteger(seed.value) || seed.value < 0 || seed.value > 4294967295 ? '随机种子无效。' : !image.value && (!Number.isFinite(seconds.value) || seconds.value < 10 || seconds.value > 180) ? '歌曲时长应为 10–180 秒。' : image.value && imageMode.value === 'image' && !inputAsset.value ? '请选择作为起点的图片。' : !image.value && !instrumental.value && !lyrics.value.trim() ? '请输入歌词，或切换为纯音乐。' : '')
@@ -28,7 +33,9 @@ const canGenerate = computed(() => !props.disabled && !working.value && !unavail
 const draftKey = computed(() => `open-media:ai-${props.provider}-draft:v1`)
 watch(models, values => { if (!modelId.value && values[0]) { modelId.value = (values.find(item=>item.state==='ready') ?? values.find(item=>item.id==='z-image-turbo') ?? values[0]).id; chooseModel() } })
 function chooseModel(): void { steps.value = image.value ? modelId.value === 'qwen-image' ? 30 : 9 : modelId.value.includes('sft') ? 50 : 8 }
-watch(() => props.active, active => { if (!active) document.querySelectorAll<HTMLMediaElement>(`[data-ai-provider="${props.provider}"] audio`).forEach(element=>element.pause()) })
+watch(() => props.active, active => { if (active) void refreshLibrary(); else document.querySelectorAll<HTMLMediaElement>(`[data-ai-provider="${props.provider}"] audio`).forEach(element=>element.pause()) })
+function selectJob(id: string): void { selectedLibraryAssetId.value = ''; selectedJob.value = id }
+function assetDate(asset: MediaAsset): string { return asset.addedAt ? new Date(asset.addedAt).toLocaleString('zh-CN', { hour12: false }) : '' }
 function persist(): void {
   try { localStorage.setItem(draftKey.value, JSON.stringify({ modelId:modelId.value,prompt:prompt.value,negativePrompt:negativePrompt.value,lyrics:lyrics.value,instrumental:instrumental.value,imageMode:imageMode.value,size:size.value,strength:strength.value,steps:steps.value,guidance:guidance.value,seed:seed.value,seconds:seconds.value,bpm:bpm.value,language:language.value,keyScale:keyScale.value,lowMemory:lowMemory.value })) }
   catch { error.value = '生成参数草稿暂时无法保存到本机，请保留提示词。' }
@@ -62,22 +69,28 @@ async function generate(): Promise<void> {
   const [width,height]=size.value.split('x').map(Number)
   const request:AiGenerationRequest={requestId:crypto.randomUUID(),modelId:modelId.value,prompt:prompt.value.trim(),steps:steps.value,seed:seed.value,lowMemory:lowMemory.value,
     ...(image.value?{width,height,negativePrompt:supportsNegative.value?negativePrompt.value:undefined,guidance:supportsNegative.value?guidance.value:0,inputAsset:imageMode.value==='image'?inputAsset.value:undefined,strength:imageMode.value==='image'?strength.value:undefined}:{lyrics:instrumental.value?'':lyrics.value.trim(),instrumental:instrumental.value,seconds:seconds.value,bpm:bpm.value||undefined,language:language.value,keyScale:keyScale.value.trim()||undefined})}
-  try{const next=await generateAi({provider:props.provider,request});selectedJob.value=next.id;emit('status',`${heading.value}任务已提交，可在 Info 的模型任务中查看或取消`)}catch(cause){error.value=cause instanceof Error?cause.message:String(cause)}finally{starting.value=false}
+  try{const next=await generateAi({provider:props.provider,request});selectJob(next.id);emit('status',`${heading.value}任务已提交，可在 Info 的模型任务中查看或取消`)}catch(cause){error.value=cause instanceof Error?cause.message:String(cause)}finally{starting.value=false}
 }
 async function cancel(id:string):Promise<void>{cancelling.value=id;try{await stopAiJob(id)}catch(cause){error.value=String(cause)}finally{cancelling.value=''}}
 async function reveal(asset:MediaAsset):Promise<void>{try{await revealMediaAsset(asset)}catch(cause){error.value=String(cause)}}
 </script>
 
 <template>
-  <ToolWorkspace class="ai-generation-workspace" :data-ai-provider="provider" :data-testid="`${provider}-generation-workspace`" :title="heading" :icon="image ? 'image' : 'audio'" :description="image ? '描述画面，或从一张图片开始创作。' : '描述风格、乐器与氛围，创作歌曲或纯音乐。'" library-label="生成任务" settings-label="生成设置">
+  <ToolWorkspace class="ai-generation-workspace" :data-ai-provider="provider" :data-testid="`${provider}-generation-workspace`" :title="heading" :icon="image ? 'image' : 'audio'" :description="image ? '描述画面，或从一张图片开始创作。' : '描述风格、乐器与氛围，创作歌曲或纯音乐。'" :library-label="image ? '生成图片' : '生成音乐'" settings-label="生成设置">
+    <template #title-actions><button v-if="native" :title="image ? '打开图像生成目录' : '打开歌曲生成目录'" :aria-label="image ? '打开图像生成目录' : '打开歌曲生成目录'" @click="revealLibrary()"><Icon name="folder" :size="17" /></button></template>
     <template #library>
+      <div class="ai-generation-library-heading"><h2>{{ image ? '生成图片' : '生成音乐' }} <small>{{ libraryAssets.length }}</small></h2><button :disabled="libraryLoading || !native" title="刷新生成素材" aria-label="刷新生成素材" @click="refreshLibrary"><Icon name="refresh" :size="15" /></button></div>
+      <p v-if="libraryError" class="ai-generation-error" role="alert">{{ libraryError }}</p>
+      <p v-for="warning in libraryWarnings" :key="warning" class="ai-generation-muted">{{ warning }}</p>
+      <div class="ai-generation-file-list" :aria-label="image ? '生成图片列表' : '生成音乐列表'"><button v-for="asset in libraryAssets" :key="asset.id" :data-asset-id="asset.id" :aria-pressed="result?.id === asset.id" :title="asset.name" @click="selectedLibraryAssetId = asset.id" @contextmenu="mediaMenu?.open($event, asset)" @keydown.shift.f10="mediaMenu?.open($event, asset)" @keydown.contextmenu="mediaMenu?.open($event, asset)"><img v-if="asset.kind === 'image'" :src="asset.url" alt="" loading="lazy" /><Icon v-else name="audio" :size="24" /><span><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : aiDuration(asset.duration) }}</small><time>{{ assetDate(asset) }}</time></span></button></div>
+      <p v-if="!libraryAssets.length" class="ai-generation-library-empty">{{ libraryLoading ? '正在读取生成素材…' : '生成的素材会保留在这里，可右键添加到工程素材。' }}</p>
       <div class="ai-generation-library-heading"><h2>生成任务</h2><small>{{ jobs.length }} 个任务</small></div>
-      <div v-if="jobs.length" class="ai-generation-job-list"><article v-for="item in jobs" :key="item.id" :class="{selected:job?.id===item.id}"><button class="ai-generation-job-heading" @click="selectedJob=item.id"><strong>{{ models.find(entry=>entry.id===item.modelId)?.name || heading }}</strong><span>{{ ({running:'生成中',completed:'已完成',failed:'失败',cancelled:'已取消'})[item.state] }}</span></button><p>{{ item.stage }} · {{ aiDuration(item.elapsedSeconds) }}</p><progress v-if="item.state==='running'" :value="item.progress" max="1" aria-label="生成任务进度"/><p v-if="item.error" class="ai-generation-error">{{ item.error }}</p><p v-if="item.warning" class="ai-generation-muted">{{ item.warning }}</p><button v-if="item.state==='running' && item.cancelable" :disabled="cancelling===item.id" @click="cancel(item.id)">{{ cancelling===item.id?'正在取消…':'取消生成' }}</button></article></div>
+      <div v-if="jobs.length" class="ai-generation-job-list"><article v-for="item in jobs" :key="item.id" :class="{selected:!selectedLibraryAssetId && job?.id===item.id}"><button class="ai-generation-job-heading" @click="selectJob(item.id)"><strong>{{ models.find(entry=>entry.id===item.modelId)?.name || heading }}</strong><span>{{ ({running:'生成中',completed:'已完成',failed:'失败',cancelled:'已取消'})[item.state] }}</span></button><p>{{ item.stage }} · {{ aiDuration(item.elapsedSeconds) }}</p><progress v-if="item.state==='running'" :value="item.progress" max="1" aria-label="生成任务进度"/><p v-if="item.error" class="ai-generation-error">{{ item.error }}</p><p v-if="item.warning" class="ai-generation-muted">{{ item.warning }}</p><button v-if="item.state==='running' && item.cancelable" :disabled="cancelling===item.id" @click="cancel(item.id)">{{ cancelling===item.id?'正在取消…':'取消生成' }}</button></article></div>
       <p v-else class="ai-generation-library-empty">暂无生成任务。填写{{ image ? '画面' : '音乐' }}描述后，点击开始生成。</p>
     </template>
     <div class="ai-generation-content">
       <section class="ai-generation-preview-card" aria-label="生成结果预览"><h2>生成预览</h2>
-        <div v-if="result" class="ai-generation-result"><img v-if="result.kind==='image'" :src="result.url" :alt="result.name"/><template v-else><div class="ai-generation-audio-stage"><Icon name="audio" :size="60"/><strong>{{ result.name }}</strong></div><audio :key="result.id" :src="result.url" controls preload="metadata"/></template><label v-if="job && job.assets.length>1">选择结果<select v-model="selectedAsset"><option v-for="asset in job.assets" :key="asset.id" :value="asset.id">{{ asset.name }}</option></select></label><strong>{{ result.name }}</strong><small>{{ image ? `${result.width} × ${result.height}` : aiDuration(result.duration) }}</small><div class="ai-generation-result-actions"><button :disabled="disabled" @click="emit('add-asset',result)"><Icon name="import" :size="14"/>加入素材</button><button :disabled="disabled" @click="emit('add-timeline',result)"><Icon name="plus" :size="14"/>加入时间线</button><button v-if="image" :disabled="disabled" @click="emit('edit-image',result)"><Icon name="image" :size="14"/>编辑图片</button><button title="打开文件夹" aria-label="打开生成结果文件夹" @click="reveal(result)"><Icon name="folder" :size="15"/></button></div><p class="ai-generation-muted">当前项目：{{ projectTitle }}</p></div>
+        <div v-if="result" class="ai-generation-result" @contextmenu="mediaMenu?.open($event, result)"><img v-if="result.kind==='image'" :src="result.url" :alt="result.name"/><template v-else><div class="ai-generation-audio-stage"><Icon name="audio" :size="60"/><strong>{{ result.name }}</strong></div><audio :key="result.id" :src="result.url" controls preload="metadata"/></template><label v-if="!selectedLibraryAssetId && job && job.assets.length>1">选择结果<select v-model="selectedAsset"><option v-for="asset in job.assets" :key="asset.id" :value="asset.id">{{ asset.name }}</option></select></label><strong>{{ result.name }}</strong><small>{{ image ? `${result.width} × ${result.height}` : aiDuration(result.duration) }}</small><div class="ai-generation-result-actions"><button :disabled="disabled" @click="emit('add-asset',result)"><Icon name="import" :size="14"/>加入素材</button><button :disabled="disabled" @click="emit('add-timeline',result)"><Icon name="plus" :size="14"/>加入时间线</button><button v-if="image" :disabled="disabled" @click="emit('edit-image',result)"><Icon name="image" :size="14"/>编辑图片</button><button title="打开文件夹" aria-label="打开生成结果文件夹" @click="reveal(result)"><Icon name="folder" :size="15"/></button></div><p class="ai-generation-muted">当前项目：{{ projectTitle }}</p></div>
         <div v-else class="ai-generation-empty"><Icon :name="image ? 'image' : 'audio'" :size="42"/><strong>{{ image ? '让画面从描述中诞生' : '为作品写一段旋律' }}</strong><p>生成结果保存在本机，可预览并加入当前剪辑项目。</p></div>
       </section>
       <section class="ai-generation-card"><div class="ai-generation-modes" role="group" :aria-label="`${heading}方式`"><template v-if="image"><button :disabled="working" :aria-pressed="imageMode==='text'" @click="imageMode='text'">文生图</button><button :disabled="working || (!!model && !model.capabilities.includes('image-to-image'))" :aria-pressed="imageMode==='image'" @click="imageMode='image'">图生图</button></template><template v-else><button :disabled="working" :aria-pressed="!instrumental" @click="instrumental=false">歌曲</button><button :disabled="working" :aria-pressed="instrumental" @click="instrumental=true">纯音乐</button></template></div>
@@ -95,10 +108,21 @@ async function reveal(asset:MediaAsset):Promise<void>{try{await revealMediaAsset
         <p v-if="error || aiServiceError" class="ai-generation-error" role="alert">{{ error || aiServiceError }}</p><div class="ai-generation-submit"><p>{{ unavailable || invalid || '优先使用可用 GPU，无法运行时报告原因并尝试 CPU。' }}</p><button class="primary" :disabled="!canGenerate" data-testid="ai-generation-start" @click="generate"><span v-if="starting" class="spinner small"/><Icon v-else name="sparkles" :size="16"/>{{ starting ? '正在提交…' : '开始生成' }}</button></div>
       </div>
     </template>
+    <template #overlays><MediaAssetMenu ref="mediaMenu" :native="native" project-action :project-disabled="disabled" @add-project="emit('add-asset', $event)" @error="error = $event" /></template>
   </ToolWorkspace>
 </template>
 
 <style scoped>
+.ai-generation-file-list{display:flex;flex-direction:column;gap:8px;margin-bottom:22px}
+.ai-generation-file-list>button{display:flex;align-items:center;flex-shrink:0;gap:10px;padding:10px;text-align:left;width:100%;min-width:0;border:1px solid var(--ui-line);border-radius:8px;background:var(--ui-surface)}
+.ai-generation-file-list>button[aria-pressed=true]{border-color:var(--ui-accent);background:var(--ui-accent-soft)}
+.ai-generation-file-list>button>svg{flex-shrink:0;color:var(--ui-accent)}
+.ai-generation-file-list>button>img{width:44px;height:44px;object-fit:cover;border-radius:5px;flex-shrink:0}
+.ai-generation-file-list>button>span{display:grid;gap:5px;min-width:0}
+.ai-generation-file-list strong{font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ai-generation-file-list small,.ai-generation-file-list time{font-size:10px;color:var(--ui-muted)}
+.ai-generation-library-heading>button{padding:5px;flex-shrink:0}
+
 .ai-generation-card{min-width:0}
 .ai-generation-card h2{font-size:13px;margin:0 0 14px}
 .ai-model-select{display:grid;gap:8px;font-size:11px}

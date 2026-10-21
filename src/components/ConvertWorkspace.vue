@@ -12,7 +12,7 @@ import ImageAnnotationEditor from './ImageAnnotationEditor.vue'
 import ImageCanvasViewport from './ImageCanvasViewport.vue'
 import type { MediaAsset } from '../core/types'
 import { videoImportedTime } from '../core/video-assets'
-import { useStoredVideos } from '../core/stored-videos'
+import { useWorkspaceMedia } from '../core/workspace-media'
 import { convertImage, convertedImageName, getSupportedImageFormats, imageDefaults, imageDimensions, imageFormatOptions, standardIconSizes, type ImageConvertOptions } from '../core/image-convert'
 import { validateImageCrop, type ImageCrop } from '../core/image-crop'
 import { cloneImageAnnotations, validateImageAnnotations, type ImageAnnotation } from '../core/image-annotations'
@@ -20,17 +20,17 @@ import { copyImageToClipboard, imageClipboardError } from '../core/image-clipboa
 import { downloadBlob } from '../core/media-import'
 import { createClip, createProject, createTrack, newId } from '../core/project'
 import { browserVideoExportSupported, exportTimelineWebM } from '../core/browser-export'
-import { beginMediaJob, cancelMediaJob, getMediaJobs, getRuntimeStatus, saveBytes, type MediaJob } from '../native'
+import { beginMediaJob, cancelMediaJob, getMediaJobs, getRuntimeStatus, revealMediaJobOutput, saveBytes, type MediaJob } from '../native'
 
-const props = defineProps<{ assets: MediaAsset[]; mode: 'image' | 'video'; native: boolean; focusAssetId?: string }>()
-const emit = defineEmits<{ import: [files?: File[]]; status: [message: string]; result: [asset: MediaAsset]; 'busy-change': [busy: boolean, mode: 'image' | 'video'] }>()
+const props = defineProps<{ assets: MediaAsset[]; mode: 'image' | 'video'; native: boolean; focusAssetId?: string; projectDisabled?: boolean }>()
+const emit = defineEmits<{ import: [files?: File[]]; status: [message: string]; result: [asset: MediaAsset]; 'busy-change': [busy: boolean, mode: 'image' | 'video']; 'add-project': [asset: MediaAsset] }>()
 interface Result {
   id: string; sourceId: string; mode: 'image' | 'video'; name: string
   state: 'waiting' | 'running' | 'done' | 'error' | 'cancelled'
   progress: number; blob?: Blob; url?: string; path?: string; message?: string; width?: number; height?: number
+  asset?: MediaAsset; jobId?: string; pngProjectCopy?: boolean
 }
-const { assets: storedVideos, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useStoredVideos(() => props.assets, () => props.native && props.mode === 'video', true)
-const available = computed(() => props.mode === 'image' ? props.assets.filter(asset => asset.kind === 'image') : storedVideos.value)
+const { assets: available, directory, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, preparing: previewPreparing, refresh: refreshVideos, reveal: revealVideoDirectory, preparePreview } = useWorkspaceMedia(() => props.mode === 'image' ? ['screenshot', 'imagegen'] : ['recording', 'videogen'], () => props.native, () => props.assets)
 const assetMenu = ref<InstanceType<typeof MediaAssetMenu>>()
 const selectedIds = ref<string[]>([])
 const selected = computed(() => available.value.filter(asset => selectedIds.value.includes(asset.id)))
@@ -310,6 +310,10 @@ async function copyCurrentImage() {
 function fileSize(size: number) { return size >= 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(size / 1024))} KB` }
 function duration(seconds: number) { return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` }
 function resultState(item: Result) { return { waiting: '等待转换', running: `转换中 ${Math.round(item.progress * 100)}%`, done: '已完成', error: '转换失败', cancelled: '已取消' }[item.state] }
+function openResultMenu(event: MouseEvent | KeyboardEvent, item: Result): void {
+  if (item.state !== 'done' || !item.asset) return
+  void assetMenu.value?.open(event, item.asset, { ...(item.jobId ? { reveal: () => revealMediaJobOutput(item.jobId!) } : {}), ...(item.pngProjectCopy ? { projectLabel: '以 PNG 副本加入工程' } : {}) })
+}
 function drop(event: DragEvent) {
   dragging.value = false
   if (!busy.value && event.dataTransfer?.files.length) emit('import', [...event.dataTransfer.files])
@@ -321,16 +325,21 @@ function publishResult(item: Result, blob: Blob, source: MediaAsset, dimensions:
   item.sourceId = source.id
   const downloadOnly = blob.type === 'image/tiff' || blob.type === 'image/x-icon'
   if (!downloadOnly) {
-    const asset: MediaAsset = { id: newId('asset'), name: item.name, kind: item.mode === 'image' ? 'image' : 'video', url: URL.createObjectURL(blob), mime: blob.type, size: blob.size, width: dimensions.width, height: dimensions.height, duration: dimensions.duration ?? 0 }
+    const asset: MediaAsset = { id: newId('asset'), name: item.name, kind: item.mode === 'image' ? 'image' : 'video', url: URL.createObjectURL(blob), mime: blob.type, size: blob.size, width: dimensions.width, height: dimensions.height, duration: dimensions.duration ?? 0, addedAt: new Date().toISOString() }
     outputAssetIds.add(asset.id)
     item.url = asset.url
+    item.asset = asset
     emit('result', asset)
   }
   if (dimensions.previewBlob) {
     item.url = URL.createObjectURL(dimensions.previewBlob)
     resultPreviewUrls.add(item.url)
+    if (downloadOnly) {
+      item.pngProjectCopy = true
+      item.asset = { id: newId('asset'), name: item.name.replace(/\.[^.]+$/, '') + '.png', kind: 'image', url: item.url, mime: 'image/png', size: dimensions.previewBlob.size, width: dimensions.width, height: dimensions.height, duration: 0, addedAt: new Date().toISOString() }
+    }
   }
-  if (downloadOnly) item.message = '已生成，可下载或打包保存；此格式保留在转换队列中。'
+  if (downloadOnly) item.message = item.pngProjectCopy ? '原格式文件可下载或打包保存；右键可将 PNG 副本加入工程。' : '原格式文件可下载或打包保存。'
   if (source.id === active.value?.id) { previewOriginal.value = false; previewConverted.value = false }
 }
 function videoDimensions(asset: MediaAsset) {
@@ -364,6 +373,7 @@ async function convertVideo(asset: MediaAsset, item: Result, signal: AbortSignal
   const range = videoRange(asset)
   const dimensions = videoDimensions(asset)
   if (props.native) {
+    const format = video.format, kind = audioOnly.value ? 'audio' : 'video'
     const job = await beginMediaJob({ kind: 'convert', asset, format: video.format, ...(!audioOnly.value ? dimensions : {}), fps: Number(video.fps), quality: video.quality, audioOnly: audioOnly.value, sampleRate: Number(video.sampleRate), videoBitrate: Number(video.bitrate), audioBitrate: Number(video.audioBitrate), trimStart: range.start, trimEnd: range.end })
     if (!job) { item.state = 'cancelled'; item.message = '已取消选择保存位置'; return }
     nativeJobId = job.id
@@ -373,6 +383,13 @@ async function convertVideo(asset: MediaAsset, item: Result, signal: AbortSignal
     if (final.state === 'cancelled') { item.state = 'cancelled'; return }
     if (final.state !== 'completed') throw new Error(final.error || '媒体编码失败。')
     item.path = final.outputPath
+    item.jobId = final.id
+    if (final.outputPath) {
+      const { convertFileSrc } = await import('@tauri-apps/api/core')
+      const mime = ({ mp4: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac', flac: 'audio/flac' } as Record<string, string>)[format] ?? 'application/octet-stream'
+      // Native project ingestion stats the completed file and replaces this unknown size.
+      item.asset = { id: newId('asset'), name: item.name, kind, nativePath: final.outputPath, url: convertFileSrc(final.outputPath), mime, size: 0, width: kind === 'audio' ? 0 : dimensions.width, height: kind === 'audio' ? 0 : dimensions.height, duration: range.end - range.start, addedAt: new Date().toISOString() }
+    }
     item.state = 'done'
     item.progress = 1
     return
@@ -474,13 +491,13 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
     <template #actions><button class="convert-button" :disabled="busy" @click="emit('import')"><Icon name="upload" />导入{{ mode === 'image' ? '图片' : '视频' }}</button></template>
     <template #library>
       <aside class="convert-sources" aria-label="待转换素材">
-        <div class="convert-section-title"><h2>{{ mode === 'image' ? '素材' : '视频' }} <span>{{ available.length }}</span></h2><div class="convert-source-actions"><button :disabled="busy || !available.length" @click="selectAll">{{ selected.length === available.length && available.length ? '取消全选' : '全选' }}</button><VideoLibraryActions v-if="native && mode === 'video'" :directory="directory" :loading="libraryLoading" :disabled="busy" @refresh="refreshVideos" @reveal="revealVideoDirectory" /></div></div>
-        <VideoLibraryToolbar v-if="native && mode === 'video'" :loading="libraryLoading" :preparing="previewPreparing" :error="libraryError" :warnings="libraryWarnings" />
+        <div class="convert-section-title"><h2>{{ mode === 'image' ? '素材' : '视频' }} <span>{{ available.length }}</span></h2><div class="convert-source-actions"><button :disabled="busy || !available.length" @click="selectAll">{{ selected.length === available.length && available.length ? '取消全选' : '全选' }}</button><VideoLibraryActions v-if="native" :directory="directory" :refresh-label="mode === 'image' ? '刷新截图与生成图片列表' : '刷新本机视频列表'" :folder-label="mode === 'image' ? '打开截图保存目录' : '打开录屏保存目录'" :loading="libraryLoading" :disabled="busy" @refresh="refreshVideos" @reveal="revealVideoDirectory()" /></div></div>
+        <VideoLibraryToolbar v-if="native" :loading-label="mode === 'image' ? '正在读取截图与生成图片…' : '正在读取录屏与生成视频…'" :loading="libraryLoading" :preparing="previewPreparing" :error="libraryError" :warnings="libraryWarnings" />
         <div v-if="!available.length" class="convert-empty"><Icon :name="mode === 'image' ? 'image' : 'video'" :size="36" /><p>拖入文件开始转换</p><button class="convert-button" @click="emit('import')">选择文件</button></div>
-        <div v-for="asset in available" :key="asset.id" class="convert-source" :class="{ active: active?.id === asset.id }" :data-source-asset-id="asset.id" @click="selectSource(asset.id)" @contextmenu="mode === 'video' && assetMenu?.open($event, asset)">
+        <div v-for="asset in available" :key="asset.id" class="convert-source" :class="{ active: active?.id === asset.id }" :data-source-asset-id="asset.id" @click="selectSource(asset.id)" @contextmenu="assetMenu?.open($event, asset)">
           <input type="checkbox" :checked="selectedIds.includes(asset.id)" :aria-label="`选择 ${asset.name}`" :disabled="busy" @click.stop @change="toggle(asset.id)">
           <img v-if="asset.kind === 'image'" :src="asset.url" alt="" loading="lazy"><span v-else class="source-icon"><Icon :name="asset.kind === 'audio' ? 'audio' : 'video'" /></span>
-          <button class="source-details" :title="asset.name" :disabled="busy" @click="selectSource(asset.id)" @keydown.shift.f10="mode === 'video' && assetMenu?.open($event, asset)" @keydown.context-menu="mode === 'video' && assetMenu?.open($event, asset)"><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : duration(asset.duration) }} · {{ fileSize(asset.size) }}</small><time v-if="mode === 'video'" class="source-imported-time" :datetime="asset.addedAt" :title="`视频时间：${videoImportedTime(asset)}`">{{ videoImportedTime(asset) }}</time><small v-if="imageCrops[asset.id]" class="source-cropped">已框选 {{ imageCrops[asset.id]!.width }} × {{ imageCrops[asset.id]!.height }}</small></button>
+          <button class="source-details" :title="asset.name" :disabled="busy" @click="selectSource(asset.id)" @keydown.shift.f10="assetMenu?.open($event, asset)" @keydown.context-menu="assetMenu?.open($event, asset)"><strong>{{ asset.name }}</strong><small>{{ asset.kind === 'image' ? `${asset.width} × ${asset.height}` : duration(asset.duration) }} · {{ fileSize(asset.size) }}</small><time v-if="mode === 'video' || asset.addedAt" class="source-imported-time" :datetime="asset.addedAt" :title="`素材时间：${videoImportedTime(asset)}`">{{ videoImportedTime(asset) }}</time><small v-if="imageCrops[asset.id]" class="source-cropped">已框选 {{ imageCrops[asset.id]!.width }} × {{ imageCrops[asset.id]!.height }}</small></button>
         </div>
         <p v-if="available.length" class="source-selection">已选 {{ selected.length }} 项</p>
         <div v-if="mode === 'image'" ref="imageResultsTarget" class="image-library-results" />
@@ -516,7 +533,7 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
         <section class="convert-results" aria-label="转换结果">
           <div class="convert-section-title"><h2>{{ mode === 'image' ? '导出结果' : '转换队列' }} <span>{{ visibleResults.length }}</span></h2><button v-if="completed.length" data-testid="convert-download-all" @click="downloadAll"><Icon name="download" />打包下载</button></div>
           <div v-if="!visibleResults.length" class="results-empty">{{ mode === 'image' ? '编辑完成后，点击「导出图片」' : '选择格式后，点击「开始转换」' }}</div>
-          <article v-for="item in visibleResults" :key="item.id" class="convert-result" :class="item.state" data-testid="convert-result">
+          <article v-for="item in visibleResults" :key="item.id" class="convert-result" :class="item.state" :tabindex="item.state === 'done' && item.asset ? 0 : undefined" :aria-label="item.state === 'done' && item.asset ? `${item.name}，${item.pngProjectCopy ? '以 PNG 副本加入工程' : '右键添加到工程素材'}` : undefined" data-testid="convert-result" @contextmenu="openResultMenu($event, item)" @keydown.shift.f10="openResultMenu($event, item)" @keydown.context-menu="openResultMenu($event, item)">
             <Icon :name="item.state === 'done' ? 'check' : item.state === 'error' ? 'alert' : mode === 'image' ? 'image' : 'video'" />
             <div class="result-description"><strong>{{ item.name }}</strong><span>{{ resultState(item) }}<template v-if="item.blob"> · {{ fileSize(item.blob.size) }}</template></span><small v-if="item.message">{{ item.message }}</small><small v-if="item.path" :title="item.path">已保存：{{ item.path }}</small><progress v-if="item.state === 'running'" :value="item.progress" max="1" :aria-label="`${item.name} 转换进度`" /></div>
             <button v-if="item.blob" class="result-download" :aria-label="`下载 ${item.name}`" @click="saveOutput(item.blob!, item.name)"><Icon name="download" /></button>
@@ -587,7 +604,7 @@ onBeforeUnmount(() => { destroyed = true; cancelImageCopy(); stopPreview(); clea
         </div>
       </aside>
     </template>
-    <template #overlays><MediaAssetMenu ref="assetMenu" :native="native" @error="message = $event" />
+    <template #overlays><MediaAssetMenu ref="assetMenu" :native="native" project-action :project-disabled="projectDisabled || busy" @add-project="emit('add-project', $event)" @error="message = $event" />
     </template>
   </ConvertWorkspaceFrame>
 </template>

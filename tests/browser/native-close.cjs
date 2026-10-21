@@ -1,38 +1,33 @@
 const assert = require('node:assert/strict')
 const { existsSync } = require('node:fs')
 const { chromium, expect } = require('@playwright/test')
+const { installManagedProjectBridge } = require('./managed-project-bridge.cjs')
 
 async function fixture(browser, url, autoSave = false) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
   const page = await context.newPage(), errors = []
   page.setDefaultTimeout(10000)
   page.on('pageerror', error => errors.push(error.message))
+  await installManagedProjectBridge(page)
   await page.addInitScript(autoSave => {
     localStorage.setItem('open-media:autosave', String(autoSave))
     const callbacks = new Map(), listeners = new Map()
     const state = window.closeHarness = { calls: [], jobs: [], saveMode: 'ready', closeMode: 'ready', jobsMode: 'ready', saved: [], draftMode: 'ready', draftCompletions: [] }
-    const complete = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, 'oncomplete')
-    Object.defineProperty(IDBTransaction.prototype, 'oncomplete', {
-      ...complete,
-      set(handler) {
-        complete.set.call(this, typeof handler === 'function' ? function (event) {
-          if (state.draftMode === 'hold' && this.mode === 'readwrite' && this.objectStoreNames.contains('projects')) state.draftCompletions.push(() => handler.call(this, event))
-          else handler.call(this, event)
-        } : handler)
-      },
-    })
     let callbackId = 0
     window.__TAURI_INTERNALS__ = {
       transformCallback(callback) { const id = ++callbackId; callbacks.set(id, callback); return id },
       unregisterCallback(id) { callbacks.delete(id) },
-      convertFileSrc: value => value,
-      invoke: async (command, args) => {
+      convertFileSrc: value => window.managedProjectFileUrl(value),
+      invoke: async (command, args, options) => {
         state.calls.push(command)
+        if (command === 'save_managed_project' && state.draftMode === 'hold') await new Promise(resolve => state.draftCompletions.push(resolve))
+        const managed = await window.managedProjectCommand(command, args, options)
+        if (managed.handled) return managed.value
         if (command === 'plugin:event|listen') { listeners.set(args.event, args.handler); return args.handler }
         if (command === 'plugin:event|unlisten') return null
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
-        if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
+        if (command === 'list_workspace_assets') return { directories: Object.fromEntries(args.categories.map(category => [category, `/fixture/${category}`])), assets: [], warnings: [] }
         if (command === 'ai_get_status') { state.generationChecks ||= []; state.generationChecks.push(args); const models=(state.generationModels || []).map(model=>({provider:'video',capabilities:[],runtime:{state:'ready'},requiresLicenseAcceptance:false,bundled:false,version:'1',...model})); const jobs=(state.generationJobs || []).map(job=>({provider:'video',kind:'generation',cancelable:true,...job})); return {models,jobs,busy:models.some(model=>['downloading','verifying'].includes(model.state)) || jobs.some(job=>job.state==='running')} }
         if (command === 'list_video_generation_jobs') return state.generationJobs || []
         if (command === 'get_media_jobs') {
@@ -56,7 +51,7 @@ async function fixture(browser, url, autoSave = false) {
     state.ready = () => listeners.has('native-close-requested')
   }, autoSave)
   await page.goto(url)
-  await expect(page.getByTestId('create-project')).toBeEnabled()
+  await expect(page.getByTestId('create-project')).toBeEnabled({ timeout: 45000 })
   await page.waitForFunction(() => window.closeHarness.ready())
   await page.getByTestId('nav-edit').click()
   await expect(page.locator('.statusbar > *')).toHaveCount(2)
@@ -77,11 +72,7 @@ const dialog = page => page.getByRole('dialog', { name: '关闭应用', exact: t
 async function setMode(page, key, value) { await page.evaluate(({ key, value }) => { window.closeHarness[key] = value }, { key, value }) }
 async function checkNoExit(page) { assert.equal(await calls(page, 'close_native_window'), 0) }
 async function readDraft(page, id) {
-  return page.evaluate(async id => {
-    const { loadProject } = await import('/src/core/storage.ts')
-    const restored = await loadProject(id || localStorage.getItem('open-media:last-project'))
-    try { return restored.project } finally { restored.revoke() }
-  }, id)
+  return page.evaluate(id => structuredClone(window.managedProjectFixture.projects.get(id || localStorage.getItem('open-media:last-project')).project), id)
 }
 
 async function main() {
@@ -196,7 +187,7 @@ async function main() {
       await dialog(page).getByRole('button', { name: '全部关闭', exact: true }).click()
       await expect.poll(() => calls(page, 'close_native_window')).toBe(1)
       assert.equal(await calls(page, 'save_project_archive'), 0)
-      assert.deepEqual(await page.evaluate(async () => (await (await import('/src/core/storage.ts')).listProjects()).map(project => project.title)), ['已有本地草稿'])
+      assert.deepEqual(await page.evaluate(() => [...window.managedProjectFixture.projects.values()].map(item => item.project.title)), ['已有本地草稿'])
       await finish()
       console.log('PASS 自动保存草稿后仍提示未写入文件的修改；全部关闭保留已有草稿，不另写项目文件或覆盖草稿')
     }

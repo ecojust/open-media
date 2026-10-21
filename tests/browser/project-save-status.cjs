@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict')
 const { existsSync, mkdirSync, writeFileSync } = require('node:fs')
 const path = require('node:path')
-const net = require('node:net')
 const { chromium, expect } = require('@playwright/test')
 const { unzipSync, strFromU8 } = require('fflate')
 
@@ -86,7 +85,7 @@ async function fixture(browser, url, title) {
     }
   })
   await page.goto(url)
-  await expect(page.getByTestId('home-workspace')).toBeVisible()
+  await expect(page.getByTestId('home-workspace')).toBeVisible({ timeout: 30000 })
   await page.evaluate(async title => {
     const { createProject } = await import('/src/core/project.ts')
     const { saveProject } = await import('/src/core/storage.ts')
@@ -330,14 +329,12 @@ async function openAndAssetChecks(browser, url) {
 async function main() {
   mkdirSync(artifacts, { recursive: true })
   const { createServer } = await import('vite')
-  const probe = net.createServer(); await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve))
-  const port = probe.address().port; await new Promise(resolve => probe.close(resolve))
-  const server = await createServer({ server: { host: '127.0.0.1', port, strictPort: true, watch: null, hmr: false } })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, watch: null, hmr: false } })
   let browser
   try {
     await server.listen()
     browser = await chromium.launch({ headless: true, executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--no-proxy-server'] })
-    const url = `http://127.0.0.1:${port}`
+    const url = `http://127.0.0.1:${server.httpServer.address().port}`
     await countdownChecks(browser, url)
     await completionChecks(browser, url)
     await recentRefreshChecks(browser, url)

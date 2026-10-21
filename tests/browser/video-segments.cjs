@@ -40,6 +40,7 @@ async function main() {
       const current = shallowRef(original)
       const fixture = window.segmentFixture = { current, changes: [], prepared: [], nextTick }
       fixture.app = createApp({ render: () => h(Editor, { project: current.value,
+        commitProject: async next => { await new Promise(resolve => setTimeout(resolve, 120)); fixture.changes.push(next); current.value = next },
         onChange: next => { fixture.changes.push(next); current.value = next },
         onPreparedAsset: (asset, blob) => fixture.prepared.push({ id: asset.id, size: blob.size }),
       }) })
@@ -105,7 +106,7 @@ async function main() {
     assert.equal(project.tracks.flatMap(track => track.clips).find(clip => clip.text === '定制开场').textAlign, 'left')
     assert(await page.evaluate(() => window.segmentPreview.paused && !window.segmentPreview.getAttribute('src')), '关闭库后释放预览')
     assert.equal(await page.evaluate(() => window.segmentFixture.changes.length), 1)
-    console.log('PASS 默认通用八款片头、真实变速预览、可编辑标题，自定义6秒前插并同步后移')
+    console.log('PASS 默认通用八款片头、真实变速预览、可编辑标题，等待异步工程归档后同步前插和后移')
 
     await outroOpener.click()
     await expect(page.getByRole('dialog', { name: '片尾', exact: true })).toBeVisible()

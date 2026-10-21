@@ -171,7 +171,10 @@ impl MediaStore {
         let root = self.checked_root()?;
         if !matches!(
             root.file_name().and_then(|value| value.to_str()),
-            Some("media" | "recordings" | "import video")
+            Some(
+                "media" | "recording" | "screenshot" | "videogen" | "imagegen"
+                | "musicgen" | "import video"
+            )
         ) {
             return Err("媒体保存目录无效。".into());
         }
@@ -209,10 +212,18 @@ impl MediaStore {
     }
     /// Recording storage is a fixed sibling of the application's media directory.
     pub fn recording_root(&self) -> Result<PathBuf> {
-        self.sibling_root("recordings")
+        self.sibling_root("recording")
     }
     pub fn recording_store(&self) -> Result<Self> {
-        self.sibling_store("recordings")
+        self.sibling_store("recording")
+    }
+    pub fn workspace_store(&self, category: &str) -> Result<Self> {
+        match category {
+            "recording" | "screenshot" | "videogen" | "imagegen" | "musicgen" => {
+                self.sibling_store(category)
+            }
+            _ => Err("素材分类无效。".into()),
+        }
     }
     pub fn import_video_root(&self) -> Result<PathBuf> {
         self.sibling_root("import video")
@@ -224,8 +235,12 @@ impl MediaStore {
     pub fn is_internal_path(&self, path: &Path) -> bool {
         self.checked_root().is_ok()
             && (path.starts_with(&self.root)
-                || self.recording_root().is_ok_and(|root| path.starts_with(root))
-                || self.import_video_root().is_ok_and(|root| path.starts_with(root)))
+                || [
+                    "media", "recording", "recordings", "screenshot", "videogen", "imagegen",
+                    "musicgen", "import video", "projects",
+                ]
+                .iter()
+                .any(|name| self.sibling_root(name).is_ok_and(|root| path.starts_with(root))))
     }
     pub fn import(&self, runtime: &Runtime, input: &Path, name: Option<&str>) -> Result<Asset> {
         self.import_file(runtime, input, name, false)

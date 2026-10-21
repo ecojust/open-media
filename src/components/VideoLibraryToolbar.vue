@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import Icon from './Icon.vue'
 
-withDefaults(defineProps<{ loading: boolean; preparing?: boolean; error?: string; warnings?: string[] }>(), { preparing: false, error: '', warnings: () => [] })
+withDefaults(defineProps<{ loading: boolean; preparing?: boolean; error?: string; warnings?: string[]; loadingLabel?: string }>(), { preparing: false, error: '', warnings: () => [], loadingLabel: '正在读取目录视频…' })
 </script>
 
 <template>
   <div v-if="loading || preparing || error || warnings.length" class="video-library-toolbar" data-testid="video-library-toolbar" :aria-busy="loading || preparing">
-    <span v-if="loading || preparing" class="video-library-status" role="status">{{ loading ? '正在读取目录视频…' : '正在准备当前视频预览…' }}</span>
+    <span v-if="loading || preparing" class="video-library-status" role="status">{{ loading ? loadingLabel : '正在准备当前视频预览…' }}</span>
     <p v-if="error" class="video-library-error" role="alert"><Icon name="alert" :size="12" /><span>{{ error }}</span></p>
     <details v-if="warnings.length" class="video-library-warnings"><summary>部分文件已跳过（{{ warnings.length }}）</summary><ul><li v-for="(warning, index) in warnings" :key="index">{{ warning }}</li></ul></details>
   </div>

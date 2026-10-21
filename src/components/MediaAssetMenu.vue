@@ -4,9 +4,10 @@ import Icon from './Icon.vue'
 import type { MediaAsset } from '../core/types'
 import { revealMediaAsset } from '../native'
 
-const props = defineProps<{ native: boolean }>()
-const emit = defineEmits<{ error: [message: string] }>()
+const props = defineProps<{ native: boolean; projectAction?: boolean; projectDisabled?: boolean }>()
+const emit = defineEmits<{ error: [message: string]; 'add-project': [asset: MediaAsset] }>()
 const selected = ref<MediaAsset>()
+const projectLabel = ref('添加到工程素材')
 const menu = ref<HTMLElement>()
 const portal = shallowRef<HTMLElement | string>('body')
 const position = ref({ x: 0, y: 0 })
@@ -14,10 +15,12 @@ const enabled = computed(() => props.native && Boolean(selected.value?.nativePat
 const unavailable = computed(() => props.native ? '此素材没有可用的本地位置' : '仅桌面端可打开所在文件夹')
 let anchor: HTMLElement | undefined
 let menuGeneration = 0
+let revealSelected: (() => Promise<void>) | undefined
 
 function close(restoreFocus = false): void {
   ++menuGeneration
   selected.value = undefined
+  revealSelected = undefined
   document.removeEventListener('pointerdown', outside, true)
   document.removeEventListener('keydown', keyboard, true)
   window.removeEventListener('resize', dismissForViewportChange)
@@ -32,8 +35,17 @@ function outside(event: PointerEvent): void { if (!menu.value?.contains(event.ta
 function keyboard(event: KeyboardEvent): void {
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(true) }
   else if (event.key === 'Tab') close()
+  else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && menu.value?.contains(document.activeElement)) {
+    const choices = [...menu.value.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+    if (!choices.length) return
+    event.preventDefault()
+    event.stopPropagation()
+    const current = choices.indexOf(document.activeElement as HTMLButtonElement)
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length
+    choices[index]?.focus({ preventScroll: true })
+  }
 }
-async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset): Promise<void> {
+async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset, options?: { reveal?: () => Promise<void>; projectLabel?: string }): Promise<void> {
   event.preventDefault()
   event.stopPropagation()
   close()
@@ -51,6 +63,8 @@ async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset): Promi
   const rect = anchor.getBoundingClientRect()
   position.value = { x: mouse ? event.clientX : rect.left, y: mouse ? event.clientY : rect.bottom }
   selected.value = asset
+  projectLabel.value = options?.projectLabel ?? '添加到工程素材'
+  revealSelected = options?.reveal
   window.addEventListener('scroll', dismissForViewportChange, true)
   await nextTick()
   if (generation !== menuGeneration || !selected.value || !menu.value?.isConnected) return
@@ -62,9 +76,16 @@ async function open(event: MouseEvent | KeyboardEvent, asset: MediaAsset): Promi
 async function reveal(): Promise<void> {
   const asset = selected.value
   if (!asset || !enabled.value) return
+  const reveal = revealSelected
   close(true)
-  try { await revealMediaAsset(asset) }
+  try { if (reveal) await reveal(); else await revealMediaAsset(asset) }
   catch (cause) { emit('error', cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '无法打开素材所在文件夹') }
+}
+function addProject(): void {
+  const asset = selected.value
+  if (!asset || !props.projectAction || props.projectDisabled) return
+  close(true)
+  emit('add-project', asset)
 }
 onDeactivated(dismiss)
 onBeforeUnmount(dismiss)
@@ -73,8 +94,9 @@ defineExpose({ open, close })
 
 <template>
   <Teleport :to="portal">
-    <div v-if="selected" ref="menu" class="media-asset-menu" role="menu" aria-label="视频素材操作" tabindex="-1" :style="{ left: `${position.x}px`, top: `${position.y}px` }" @contextmenu.prevent>
+    <div v-if="selected" ref="menu" class="media-asset-menu" role="menu" :aria-label="selected.kind === 'video' ? '视频素材操作' : selected.kind === 'image' ? '图片素材操作' : '音频素材操作'" tabindex="-1" :style="{ left: `${position.x}px`, top: `${position.y}px` }" @contextmenu.prevent>
       <span class="media-asset-menu-name" :title="selected.name">{{ selected.name }}</span>
+      <button v-if="projectAction" role="menuitem" :disabled="projectDisabled" @click="addProject"><Icon name="import" :size="16"/>{{ projectLabel }}</button>
       <button role="menuitem" :disabled="!enabled" :title="enabled ? '打开素材所在文件夹' : unavailable" @click="reveal"><Icon name="folder" :size="16"/>打开所在文件夹</button>
       <small v-if="!enabled">{{ unavailable }}</small>
     </div>

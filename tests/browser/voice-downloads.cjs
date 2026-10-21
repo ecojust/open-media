@@ -1,9 +1,11 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const { chromium, expect } = require('@playwright/test')
+const { installManagedProjectBridge } = require('./managed-project-bridge.cjs')
 
 // IPC fixtures verify UI routing and shared states; no model download or synthesis is performed.
 async function installNativeContract(page) {
+  await installManagedProjectBridge(page)
   await page.addInitScript(() => {
     const packs = [
       { id: 'zipvoice_zh_female', modelId: 'zipvoice-distill-fp32', name: 'ZipVoice Distill FP32', modelSize: 531957872, language: 'zh-CN', gender: 'female', license: 'CC-BY-NC' },
@@ -25,8 +27,10 @@ async function installNativeContract(page) {
     }) })
     window.__TAURI_INTERNALS__ = {
       transformCallback: () => 1, unregisterCallback() {},
-      invoke: async (command, args) => {
+      invoke: async (command, args, options) => {
         state.calls.push({ command, args })
+        const managed = await window.managedProjectCommand(command, args, options)
+        if (managed.handled) return managed.value
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_media_jobs' || command === 'mcp_pending') return []
         if (command === 'mcp_get_status') return { running: false, connectedClients: 0, pendingRequests: 0 }

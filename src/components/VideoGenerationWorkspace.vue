@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import ToolWorkspace from './ToolWorkspace.vue'
+import MediaAssetMenu from './MediaAssetMenu.vue'
+import { useWorkspaceMedia } from '../core/workspace-media'
 import type { MediaAsset } from '../core/types.ts'
 import { VIDEO_GENERATION_MAX_SHOTS, videoGenerationActualSeconds, videoGenerationRequestError, type VideoGenerationJob, type VideoGenerationMode, type VideoGenerationModel, type VideoGenerationRequest, type VideoGenerationShot, type VideoGenerationStatus } from '../core/video-generation.ts'
 import { beginVideoGeneration, cancelVideoGeneration, getVideoGenerationStatus, listVideoGenerationJobs } from '../native-video-generation.ts'
@@ -20,6 +22,9 @@ const mode = ref<VideoGenerationMode>('prompt'), modelId = ref(''), shots = ref<
 const size = ref('512x512'), steps = ref(20), seed = ref(42), lowMemory = ref(true), joinShots = ref(true)
 const catalog = ref<VideoGenerationStatus>(), checking = ref(false), error = ref(''), pollError = ref(''), draftError = ref('')
 const jobs = ref<VideoGenerationJob[]>([]), selectedJobId = ref(''), selectedAssetId = ref(''), cancelling = ref('')
+const selectedLibraryAssetId = ref(''), mediaMenu = ref<InstanceType<typeof MediaAssetMenu>>()
+const generatedAssets = computed(() => jobs.value.flatMap(job => [...(job.combinedAsset ? [job.combinedAsset] : []), ...job.assets]))
+const { assets: libraryAssets, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, refresh: refreshLibrary, reveal: revealLibrary, preparePreview } = useWorkspaceMedia(() => ['videogen'], () => props.native, () => generatedAssets.value)
 const starting = ref(false), elapsedNow = ref(Date.now()), jobRequests = ref<Record<string, VideoGenerationRequest>>({})
 let pollTimer: ReturnType<typeof setTimeout> | undefined, clockTimer: ReturnType<typeof setInterval> | undefined, draftTimer: ReturnType<typeof setTimeout> | undefined
 let destroyed = false, refreshing = false
@@ -31,14 +36,17 @@ const busy = computed(() => working.value)
 const shownShots = computed(() => mode.value === 'storyboard' ? shots.value : shots.value.slice(0, 1))
 const selectedJob = computed(() => jobs.value.find(job => job.id === selectedJobId.value) ?? jobs.value[0])
 const results = computed(() => selectedJob.value ? [...(selectedJob.value.combinedAsset ? [selectedJob.value.combinedAsset] : []), ...selectedJob.value.assets] : [])
-const previewAsset = computed(() => results.value.find(asset => asset.id === selectedAssetId.value) ?? results.value[0])
+const previewAsset = computed(() => libraryAssets.value.find(asset => asset.id === selectedLibraryAssetId.value) ?? results.value.find(asset => asset.id === selectedAssetId.value) ?? results.value[0] ?? libraryAssets.value[0])
 const invalid = computed(() => videoGenerationRequestError(makeRequest('validation')))
 const unavailable = computed(() => !props.native ? '视频生成需要 Apple 芯片 Mac 桌面端。' : catalog.value && !catalog.value.supported ? catalog.value.reason || '当前设备不支持本地视频生成。' : !selectedModel.value ? '请等待模型检查完成。' : !modeAvailable(mode.value) ? '当前模型不支持此生成方式，请切换模型。' : selectedModel.value.state !== 'ready' ? '请前往 Info 下载所选模型。' : !catalog.value?.runtimeReady ? '视频生成组件尚未就绪，请前往 Info 检查模型。' : '')
 const canGenerate = computed(() => !props.disabled && !working.value && !unavailable.value && !invalid.value)
 watch(busy, value => emit('busy-change', value), { immediate: true })
 watch(results, values => { if (!values.some(asset => asset.id === selectedAssetId.value)) selectedAssetId.value = values[0]?.id || '' })
-watch(() => props.active, active => { if (active) void refresh(); else document.querySelector<HTMLVideoElement>('[data-testid="generation-preview"]')?.pause() })
+watch(() => props.active, active => { if (active) { void refresh(); void refreshLibrary() } else document.querySelector<HTMLVideoElement>('[data-testid="generation-preview"]')?.pause() })
 
+function selectLibraryAsset(asset: MediaAsset): void { selectedLibraryAssetId.value = asset.id; void preparePreview(asset) }
+function selectJob(id: string): void { selectedLibraryAssetId.value = ''; selectedJobId.value = id }
+function assetDate(asset: MediaAsset): string { return asset.addedAt ? new Date(asset.addedAt).toLocaleString('zh-CN', { hour12: false }) : '' }
 function newShot(): VideoGenerationShot { return { id: crypto.randomUUID(), title: '', prompt: '', seconds: 1 } }
 function message(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause) }
 function percent(value?: number): number { return Math.round(Math.max(0, Math.min(1, value ?? 0)) * 100) }
@@ -114,7 +122,7 @@ async function generate(retry?: VideoGenerationRequest): Promise<void> {
   const readiness = !catalog.value?.supported || !catalog.value.runtimeReady || model?.state !== 'ready' ? '请前往 Info 完成模型准备并检查当前设备。' : !model.modes.includes(request.mode) ? '所选模型不支持此生成方式。' : ''
   if (validation || readiness) { error.value = validation || readiness; return }
   starting.value = true; error.value = ''; persistDraft()
-  try { const job = await beginVideoGeneration(request); jobRequests.value[job.id] = JSON.parse(JSON.stringify(request)); jobs.value = [job, ...jobs.value.filter(item => item.id !== job.id)]; selectedJobId.value = job.id; emit('status', '视频生成已开始，可在任务区查看进度。') }
+  try { const job = await beginVideoGeneration(request); jobRequests.value[job.id] = JSON.parse(JSON.stringify(request)); jobs.value = [job, ...jobs.value.filter(item => item.id !== job.id)]; selectJob(job.id); emit('status', '视频生成已开始，可在任务区查看进度。') }
   catch (cause) { error.value = message(cause) }
   finally { starting.value = false; void refresh() }
 }
@@ -130,18 +138,24 @@ onBeforeUnmount(() => { destroyed = true; clearTimeout(pollTimer); clearTimeout(
 </script>
 
 <template>
-  <ToolWorkspace class="generation-workspace" data-testid="video-generation-workspace" title="视频生成" icon="sparkles" description="从一句描述到一组镜头，让灵感成为可剪辑的素材。" library-label="生成任务" settings-label="生成设置">
+  <ToolWorkspace class="generation-workspace" data-testid="video-generation-workspace" title="视频生成" icon="sparkles" description="从一句描述到一组镜头，让灵感成为可剪辑的素材。" library-label="生成视频" settings-label="生成设置">
+    <template #title-actions><button v-if="native" title="打开视频生成目录" aria-label="打开视频生成目录" @click="revealLibrary()"><Icon name="folder" :size="17" /></button></template>
     <template #actions><button :disabled="!native" title="配置 MCP 服务" aria-label="配置视频生成 MCP 服务" @click="emit('open-mcp')"><Icon name="mcp" /><span>MCP</span></button></template>
     <template #library>
+      <div class="generation-library-heading"><h2>生成视频 <small>{{ libraryAssets.length }}</small></h2><button :disabled="libraryLoading || !native" title="刷新生成视频" aria-label="刷新生成视频" @click="refreshLibrary"><Icon name="refresh" :size="15" /></button></div>
+      <p v-if="libraryError" class="generation-error" role="alert">{{ libraryError }}</p>
+      <p v-for="warning in libraryWarnings" :key="warning" class="generation-muted">{{ warning }}</p>
+      <div class="generation-file-list" aria-label="生成视频列表"><button v-for="asset in libraryAssets" :key="asset.id" :data-asset-id="asset.id" :aria-pressed="previewAsset?.id === asset.id" :title="asset.name" @click="selectLibraryAsset(asset)" @contextmenu="mediaMenu?.open($event, asset)" @keydown.shift.f10="mediaMenu?.open($event, asset)" @keydown.contextmenu="mediaMenu?.open($event, asset)"><Icon name="video" :size="24" /><span><strong>{{ asset.name }}</strong><small>{{ asset.width }} × {{ asset.height }} · {{ asset.duration.toFixed(1) }} 秒</small><time>{{ assetDate(asset) }}</time></span></button></div>
+      <p v-if="!libraryAssets.length" class="generation-library-empty">{{ libraryLoading ? '正在读取生成视频…' : '生成的视频会保留在这里，可右键添加到工程素材。' }}</p>
       <div class="generation-library-heading"><h2>生成任务</h2><small>{{ jobs.length }} 个任务</small></div>
-      <div v-if="jobs.length" class="generation-job-list"><article v-for="job in jobs" :key="job.id" class="generation-job" :class="{ selected: selectedJob?.id === job.id }" :data-job-id="job.id"><button class="generation-job-select" :aria-pressed="selectedJob?.id === job.id" @click="selectedJobId = job.id"><span><Icon :name="job.state === 'running' ? 'clock' : job.state === 'completed' ? 'check' : 'alert'" :size="15" /><strong>{{ jobState(job) }}</strong></span><time>{{ new Date(job.startedAt).toLocaleTimeString('zh-CN', { hour12: false }) }}</time></button><p>{{ job.stage }}<template v-if="job.shotCount > 1"> · 镜头 {{ Math.min(job.shotCount, job.shotIndex + 1) }}/{{ job.shotCount }}</template></p><progress v-if="job.state === 'running'" :value="job.progress === undefined ? undefined : percent(job.progress)" max="100" aria-label="视频生成进度" /><div class="generation-job-metrics"><small>用时 {{ elapsed(job) }}<template v-if="job.progress !== undefined"> · {{ percent(job.progress) }}%</template></small><button v-if="job.state === 'running'" :disabled="cancelling === job.id" @click="cancelJob(job)">{{ cancelling === job.id ? '正在取消…' : '取消生成' }}</button><button v-else-if="(job.state === 'failed' || job.state === 'cancelled') && jobRequests[job.id]" :disabled="working || disabled || !catalog?.supported || !catalog.runtimeReady" @click="generate(jobRequests[job.id])">重新生成</button></div><p v-if="job.error" class="generation-error">{{ job.error }}</p><p v-if="job.warning" class="generation-muted">{{ job.warning }}</p></article></div>
+      <div v-if="jobs.length" class="generation-job-list"><article v-for="job in jobs" :key="job.id" class="generation-job" :class="{ selected: !selectedLibraryAssetId && selectedJob?.id === job.id }" :data-job-id="job.id"><button class="generation-job-select" :aria-pressed="!selectedLibraryAssetId && selectedJob?.id === job.id" @click="selectJob(job.id)"><span><Icon :name="job.state === 'running' ? 'clock' : job.state === 'completed' ? 'check' : 'alert'" :size="15" /><strong>{{ jobState(job) }}</strong></span><time>{{ new Date(job.startedAt).toLocaleTimeString('zh-CN', { hour12: false }) }}</time></button><p>{{ job.stage }}<template v-if="job.shotCount > 1"> · 镜头 {{ Math.min(job.shotCount, job.shotIndex + 1) }}/{{ job.shotCount }}</template></p><progress v-if="job.state === 'running'" :value="job.progress === undefined ? undefined : percent(job.progress)" max="100" aria-label="视频生成进度" /><div class="generation-job-metrics"><small>用时 {{ elapsed(job) }}<template v-if="job.progress !== undefined"> · {{ percent(job.progress) }}%</template></small><button v-if="job.state === 'running'" :disabled="cancelling === job.id" @click="cancelJob(job)">{{ cancelling === job.id ? '正在取消…' : '取消生成' }}</button><button v-else-if="(job.state === 'failed' || job.state === 'cancelled') && jobRequests[job.id]" :disabled="working || disabled || !catalog?.supported || !catalog.runtimeReady" @click="generate(jobRequests[job.id])">重新生成</button></div><p v-if="job.error" class="generation-error">{{ job.error }}</p><p v-if="job.warning" class="generation-muted">{{ job.warning }}</p></article></div>
       <p v-else class="generation-library-empty">暂无生成任务。填写提示词后，点击开始生成。</p>
     </template>
     <div class="generation-content">
       <p v-if="!native || catalog && !catalog.supported" class="generation-notice" role="status"><Icon name="info" :size="17" />{{ catalog?.reason || '视频生成需要 Apple 芯片 Mac 桌面端；其他平台可查看设置。' }}</p>
     <p v-if="pollError || error || draftError" class="generation-error" role="alert">{{ error || pollError || draftError }} <button v-if="pollError" @click="refresh">重新检查</button></p>
       <section class="generation-preview-card" aria-label="生成结果预览"><h2>生成预览</h2>
-        <div v-if="previewAsset" class="generation-preview"><video :key="previewAsset.id" :src="previewAsset.url" controls playsinline preload="metadata" data-testid="generation-preview" /><label v-if="results.length > 1">查看结果<select v-model="selectedAssetId" aria-label="查看生成结果"><option v-for="asset in results" :key="asset.id" :value="asset.id">{{ asset.id === selectedJob?.combinedAsset?.id ? '完整视频 · ' : '' }}{{ asset.name }}</option></select></label><strong>{{ previewAsset.name }}</strong><small>{{ previewAsset.width }} × {{ previewAsset.height }} · {{ previewAsset.duration.toFixed(2) }} 秒</small><div class="generation-result-actions"><button :disabled="disabled" @click="emit('add-asset', previewAsset)"><Icon name="import" :size="14" />加入素材</button><button :disabled="disabled" @click="emit('add-timeline', previewAsset)"><Icon name="plus" :size="14" />加入时间线</button><button :disabled="!previewAsset.nativePath" title="打开文件夹" aria-label="打开生成视频文件夹" @click="reveal(previewAsset)"><Icon name="folder" :size="15" /></button></div><p class="generation-muted">添加至当前项目：{{ projectTitle }}</p></div>
+        <div v-if="previewAsset" class="generation-preview" @contextmenu="mediaMenu?.open($event, previewAsset)"><video :key="previewAsset.id" :src="previewAsset.url" controls playsinline preload="metadata" data-testid="generation-preview" /><label v-if="!selectedLibraryAssetId && results.length > 1">查看结果<select v-model="selectedAssetId" aria-label="查看生成结果"><option v-for="asset in results" :key="asset.id" :value="asset.id">{{ asset.id === selectedJob?.combinedAsset?.id ? '完整视频 · ' : '' }}{{ asset.name }}</option></select></label><strong>{{ previewAsset.name }}</strong><small>{{ previewAsset.width }} × {{ previewAsset.height }} · {{ previewAsset.duration.toFixed(2) }} 秒</small><div class="generation-result-actions"><button :disabled="disabled" @click="emit('add-asset', previewAsset)"><Icon name="import" :size="14" />加入素材</button><button :disabled="disabled" @click="emit('add-timeline', previewAsset)"><Icon name="plus" :size="14" />加入时间线</button><button :disabled="!previewAsset.nativePath" title="打开文件夹" aria-label="打开生成视频文件夹" @click="reveal(previewAsset)"><Icon name="folder" :size="15" /></button></div><p class="generation-muted">添加至当前项目：{{ projectTitle }}</p></div>
         <div v-else class="generation-empty"><Icon name="film" :size="36" /><strong>从这里开启一段新画面</strong><p>生成过程中可切换工作区。完成后预览视频，再加入当前项目。</p></div>
       </section>
       <section class="generation-input"><div class="generation-modes" role="group" aria-label="生成方式"><button v-for="item in modes" :key="item.id" :aria-pressed="mode === item.id" :disabled="working || !modeAvailable(item.id)" :title="!modeAvailable(item.id) ? '请先切换支持此方式的模型' : item.detail" @click="mode = item.id"><Icon :name="item.icon" :size="15" />{{ item.title }}</button></div>
@@ -174,10 +188,20 @@ onBeforeUnmount(() => { destroyed = true; clearTimeout(pollTimer); clearTimeout(
           <div class="generation-submit"><p class="generation-muted">{{ unavailable || invalid || '生成在本机进行，首次加载大型模型可能较慢。' }}</p><button class="primary" :disabled="!canGenerate" data-testid="generation-start" @click="generate()"><span v-if="starting" class="spinner small" /><Icon v-else name="sparkles" :size="16" />{{ starting ? '正在启动…' : '开始生成' }}</button></div>
       </div>
     </template>
+    <template #overlays><MediaAssetMenu ref="mediaMenu" :native="native" project-action :project-disabled="disabled" @add-project="emit('add-asset', $event)" @error="error = $event" /></template>
   </ToolWorkspace>
 </template>
 
 <style scoped>
+.generation-file-list{display:flex;flex-direction:column;gap:8px;margin-bottom:22px}
+.generation-file-list>button{display:flex;align-items:center;flex-shrink:0;gap:10px;padding:10px;text-align:left;width:100%;min-width:0;border:1px solid var(--ui-line);border-radius:8px;background:var(--ui-surface)}
+.generation-file-list>button[aria-pressed=true]{border-color:var(--ui-accent);background:var(--ui-accent-soft)}
+.generation-file-list>button>svg{flex-shrink:0;color:var(--ui-accent)}
+.generation-file-list>button>span{display:grid;gap:5px;min-width:0}
+.generation-file-list strong{font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.generation-file-list small,.generation-file-list time{font-size:10px;color:var(--ui-muted)}
+.generation-library-heading>button{padding:5px;flex-shrink:0}
+
 .generation-models,.generation-input,.generation-output{min-width:0}
 .generation-models>header,.generation-output>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .generation-model-list{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}

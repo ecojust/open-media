@@ -28,6 +28,7 @@ export interface McpAutomationHost {
   getBlockingOperation?(): McpBlockingOperation | undefined
   getBlobs(): Map<string, Blob>
   getSaveTarget(): ProjectFileTarget | undefined
+  prepareProject?(project: Project, options: { blobs: Map<string, Blob>; signal: AbortSignal; assertCurrent: () => void }): Promise<Project>
   commit(project: Project, label: string, expected: { projectId: string; revision: number; projectSession?: number }): boolean
   hydrate(imported: ImportedProject): Promise<Project>
   didSave(project: Project, target: ProjectFileTarget, expected: { projectId: string; projectSession?: number }): Promise<void>
@@ -81,6 +82,7 @@ export function createMcpAutomation(host: McpAutomationHost) {
   const speech = createMcpSpeechJobs({
     getProject: host.getProject, getRevision: host.getRevision, getProjectSession: host.getProjectSession, isBusy: () => !!active || host.isBusy(),
     onBusy: host.onBusy, commit: host.commit, onAssets: assets => assets.forEach(asset => host.ownAsset(asset)),
+    prepareProject: (project, options) => host.prepareProject ? host.prepareProject(project, { ...options, blobs: host.getBlobs() }) : Promise.resolve(project),
     onChange: () => host.onJobsChanged(),
     native: { getSpeechStatus, beginSpeechJob, getSpeechJob, cancelSpeechJob, discardSpeechJob, acceptSpeechJobs },
   })
@@ -151,10 +153,22 @@ export function createMcpAutomation(host: McpAutomationHost) {
     })
     return snapshot(operation)
   }
-  function commit(operation: Operation, project: Project, label: string): void {
+  async function commit(operation: Operation, project: Project, label: string, assets: { asset: MediaAsset; blob?: Blob }[] = []): Promise<Project> {
     check(operation)
+    if (host.prepareProject) {
+      changed(operation, '正在归档工程素材')
+      const blobs = new Map(host.getBlobs())
+      for (const { asset, blob } of assets) if (blob) blobs.set(asset.id, blob)
+      project = await host.prepareProject(project, { blobs, signal: operation.controller.signal, assertCurrent: () => check(operation) })
+    }
+    check(operation)
+    if (project.id !== operation.job.projectId) throw new Error('工程素材归档返回了其他工程，本次操作未写入项目。')
     if (!host.commit(project, `MCP：${label}`, { projectId: operation.job.projectId, revision: operation.job.revision, projectSession: operation.projectSession })) throw new Error('项目拒绝了本次修改，请重新读取项目。')
     operation.irrevocable = true; operation.job.cancelable = false
+    return project
+  }
+  function ownAssets(project: Project | undefined, assets: { asset: MediaAsset; blob?: Blob }[] = []): void {
+    for (const { asset, blob } of assets) host.ownAsset(project?.assets.find(item => item.id === asset.id) ?? asset, blob)
   }
   function wait(operation: Operation, milliseconds = 400): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -215,9 +229,9 @@ export function createMcpAutomation(host: McpAutomationHost) {
         if (prepared.irreversible) { operation.irrevocable = true; operation.job.cancelable = false }
         try {
           if (!prepared.irreversible) check(operation)
-          if (prepared.project) commit(operation, prepared.project, prepared.label || '编辑项目')
+          const project = prepared.project ? await commit(operation, prepared.project, prepared.label || '编辑项目', prepared.assets) : undefined
           if (prepared.accept) { operation.irrevocable = true; operation.job.cancelable = false; changed(operation, '正在保存处理结果', 1) }
-          try { prepared.assets?.forEach(({ asset, blob }) => host.ownAsset(asset, blob)) }
+          try { ownAssets(project, prepared.assets) }
           finally { await prepared.accept?.() }
           operation.irrevocable = true; operation.job.cancelable = false
           if (prepared.selection?.clipId) void host.setPlayback({ selectedClipId: prepared.selection.clipId }).catch(() => {})
@@ -249,7 +263,8 @@ export function createMcpAutomation(host: McpAutomationHost) {
           const assets = await importMcpMediaPaths(args.paths as string[])
           check(operation)
           const next = adoptFirstVideoSize(addAssets(operation.source, assets), assets)
-          commit(operation, next, '导入素材'); assets.forEach(asset => host.ownAsset(asset))
+          const project = await commit(operation, next, '导入素材')
+          ownAssets(project, assets.map(asset => ({ asset })))
           return { assetIds: assets.map(asset => asset.id), revision: host.getRevision() }
         })
       case 'open_media_playback_get': return host.getPlayback()
@@ -343,8 +358,8 @@ export function createMcpAutomation(host: McpAutomationHost) {
             if (nativeJob.state === 'completed') {
               const result = applyMcpAiGeneration(operation.source, nativeJob, prepared)
               if (result.project) {
-                commit(operation, result.project, provider === 'image' ? '添加生成图片' : '添加生成歌曲')
-                result.assets.forEach(asset => host.ownAsset(asset))
+                const project = await commit(operation, result.project, provider === 'image' ? '添加生成图片' : '添加生成歌曲')
+                ownAssets(project, result.assets.map(asset => ({ asset })))
                 if (result.result.clipIds[0]) void host.setPlayback({ selectedClipId: result.result.clipIds[0] }).catch(() => {})
               }
               return { ...result.result, projectId: host.getProject().id, revision: host.getRevision() }
@@ -397,8 +412,8 @@ export function createMcpAutomation(host: McpAutomationHost) {
             if (nativeJob.warning) operation.job.warning = nativeJob.warning
             if (nativeJob.state === 'completed') {
               const result = applyMcpVideoGeneration(operation.source, nativeJob, prepared.request, prepared.insert)
-              commit(operation, result.project, '添加生成视频')
-              result.assets.forEach(asset => host.ownAsset(asset))
+              const project = await commit(operation, result.project, '添加生成视频')
+              ownAssets(project, result.assets.map(asset => ({ asset })))
               if (result.result.clipIds[0]) void host.setPlayback({ selectedClipId: result.result.clipIds[0] }).catch(() => {})
               return { ...result.result, projectId: host.getProject().id, revision: host.getRevision() }
             }
@@ -428,12 +443,13 @@ export function createMcpAutomation(host: McpAutomationHost) {
             ? { time: args.time ?? playback.time, ...(args.transitionClipId === undefined && args.time === undefined && findClip(operation.source, playback.selectedClipId)?.clip.transition ? { transitionClipId: playback.selectedClipId } : {}) }
             : args.kind !== 'video_segment' ? { start: args.start ?? playback.time } : {}
           const result = await prepareMcpMaterial(operation.source, { ...args, ...timing } as Parameters<typeof prepareMcpMaterial>[1], { signal: operation.controller.signal })
-          try { check(operation); commit(operation, result.project, result.label) }
+          let project: Project
+          try { check(operation); project = await commit(operation, result.project, result.label, result.assets) }
           catch (cause) {
             for (const { asset } of result.assets ?? []) for (const url of new Set([asset.url, asset.sourceUrl])) if (url?.startsWith('blob:')) URL.revokeObjectURL(url)
             throw cause
           }
-          result.assets?.forEach(({ asset, blob }) => host.ownAsset(asset, blob))
+          ownAssets(project, result.assets)
           if (result.selection?.clipId) void host.setPlayback({ selectedClipId: result.selection.clipId }).catch(() => {})
           return { ...result.selection, revision: host.getRevision() }
         })

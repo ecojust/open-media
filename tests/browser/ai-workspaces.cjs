@@ -21,13 +21,15 @@ async function mount(page, base) {
       {...common,id:'ace-step-1.5-turbo',name:'ACE-Step 1.5 Turbo',provider:'music',capabilities:['text-to-music','lyrics-to-song'],state:'ready'},
       {...common,id:'voice-fixture',name:'已下载配音',provider:'speech',capabilities:['text-to-speech'],state:'ready'},
       {...common,id:'video-fixture',name:'已下载视频',provider:'video',capabilities:['text-to-video'],state:'ready'},
-    ],jobs:[],provider:ref('image'),open:ref(false),filter:ref(),added:[],timeline:[],edited:[]}
+    ],jobs:[],stored:{imagegen:[],musicgen:[]},provider:ref('image'),open:ref(false),filter:ref(),added:[],timeline:[],edited:[]}
     const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;const ctx=canvas.getContext('2d');ctx.fillStyle='#5588aa';ctx.fillRect(0,0,64,64)
     state.asset={id:'result-image',name:'测试生成图片.png',kind:'image',url:canvas.toDataURL(),duration:5,width:64,height:64,size:300,mime:'image/png',nativePath:'/fixture/image.png'}
     const status=()=>JSON.parse(JSON.stringify({models:state.models,jobs:state.jobs,busy:state.jobs.some(job=>job.state==='running')||state.models.some(model=>['downloading','verifying'].includes(model.state))}))
     window.__TAURI_INTERNALS__={convertFileSrc:()=>state.asset.url,invoke:async(command,args={})=>{
       state.calls.push({command,args:JSON.parse(JSON.stringify(args))})
       if(command==='ai_get_status')return status()
+      if(command==='list_workspace_assets')return {directories:{imagegen:'/fixture/imagegen',musicgen:'/fixture/musicgen'},assets:args.categories.flatMap(category=>state.stored[category]||[]),warnings:[]}
+      if(command==='open_workspace_directory')return
       if(command==='ai_model_download'||command==='ai_model_repair'){if(!args.acceptedLicense)throw Error('许可未确认');const model=state.models.find(model=>model.id===args.modelId);model.state='downloading';model.runtime={state:'downloading',reason:'正在下载运行环境：50 MB / 100 MB'};Object.assign(model,{downloadTransferredBytes:50000000,downloadTotalBytes:1100000000,downloadPhase:'runtime',downloadSpeedBytesPerSecond:5000000,remainingSeconds:210,activeSource:'hf-mirror.com'});return status()}
       if(command==='ai_model_cancel'){const model=state.models.find(model=>model.id===args.modelId);model.state='not-downloaded';model.runtime={state:'ready'};return status()}
       if(command==='ai_generate'){const request=args.request;const job={id:`${request.provider}:${request.request.requestId}`,provider:request.provider,modelId:request.request.modelId,kind:'generation',state:'running',stage:'排队等待推理',startedAt:Date.now(),elapsedSeconds:0,assets:[],cancelable:true};state.jobs.unshift(job);return structuredClone(job)}
@@ -118,6 +120,23 @@ async function main(){
     await expect(page.locator('.ai-generation-result>img')).toBeVisible()
     await page.getByRole('button',{name:'加入素材',exact:true}).click();await page.getByRole('button',{name:'加入时间线',exact:true}).click();await page.getByRole('button',{name:'编辑图片',exact:true}).click()
     assert.deepEqual(await page.evaluate(()=>[window.aiHarness.added.length,window.aiHarness.timeline.length,window.aiHarness.edited.length]),[1,1,1])
+    await page.evaluate(async()=>{const state=window.aiHarness;state.stored.imagegen=[{...state.asset,id:'stored-image',name:'历史生成图片.png',addedAt:Date.now()}];state.stored.musicgen=[{...state.asset,id:'stored-music',name:'历史生成音乐.wav',kind:'audio',mime:'audio/wav',nativePath:'/fixture/musicgen/saved.wav',duration:30,addedAt:Date.now()}];state.jobs=[];await state.refresh()})
+    await page.getByRole('button',{name:'刷新生成素材',exact:true}).click()
+    await expect(page.locator('.ai-generation-file-list [data-asset-id="stored-image"]')).toBeVisible()
+    assert.equal(await page.evaluate(()=>window.aiHarness.added.length),1,'历史素材不自动加入当前工程')
+    await page.locator('.ai-generation-file-list [data-asset-id="stored-image"]').click({button:'right'})
+    await page.getByRole('menuitem',{name:'添加到工程素材',exact:true}).click()
+    assert.equal(await page.evaluate(()=>window.aiHarness.added.at(-1).id),'stored-image')
+    await page.getByRole('button',{name:'打开图像生成目录',exact:true}).click()
+    await page.getByRole('button',{name:'切换工作区',exact:true}).click()
+    await expect(page.locator('.ai-generation-file-list [data-asset-id="stored-music"]')).toBeVisible()
+    await page.locator('.ai-generation-file-list [data-asset-id="stored-music"]').focus()
+    await page.keyboard.press('Shift+F10')
+    await page.getByRole('menuitem',{name:'添加到工程素材',exact:true}).click()
+    assert.equal(await page.evaluate(()=>window.aiHarness.added.at(-1).id),'stored-music')
+    await page.getByRole('button',{name:'打开歌曲生成目录',exact:true}).click()
+    assert.deepEqual(await page.evaluate(()=>window.aiHarness.calls.filter(call=>call.command==='open_workspace_directory').map(call=>call.args.category)),['imagegen','musicgen'])
+    await page.getByRole('button',{name:'切换工作区',exact:true}).click()
     await page.setViewportSize({width:520,height:900})
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
     await page.getByRole('button',{name:'关于 Open Media',exact:true}).click()

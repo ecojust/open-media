@@ -2,6 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onDeactivated, onMounted, ref, shallowRef, watch } from 'vue'
 import Icon from './Icon.vue'
 import ToolWorkspace from './ToolWorkspace.vue'
+import MediaAssetMenu from './MediaAssetMenu.vue'
+import { useWorkspaceMedia } from '../core/workspace-media'
+import { openWorkspaceDirectory } from '../native-media-library'
 import RecordingToolbar from './RecordingToolbar.vue'
 import CaptureSelectionOverlay from './CaptureSelectionOverlay.vue'
 import ScreenshotControls from './ScreenshotControls.vue'
@@ -12,10 +15,10 @@ import type { MediaAsset } from '../core/types'
 import { readMicrophonePreference, writeMicrophonePreference } from '../core/microphone-devices'
 import { recordingClock, type CaptureControlAction, type CaptureControlsSnapshot } from '../core/capture-controls'
 import { browserCaptureAvailable, captureErrorMessage, startBrowserCapture, type BrowserCapture, type BrowserCaptureSelectionRequest } from '../core/capture'
-import { cancelCapturePicker, cancelCaptureStart, getCaptureStatus, onCaptureControlsAction, openMediaLibraryDirectory, pauseCapture, pickCaptureSource, resumeCapture, setCaptureMicrophone, showMainWindow, startCapture, stopCapture, type CaptureSelection, type CapturePickerPreferences, type CaptureStatus } from '../native'
+import { cancelCapturePicker, cancelCaptureStart, getCaptureStatus, onCaptureControlsAction, pauseCapture, pickCaptureSource, resumeCapture, setCaptureMicrophone, showMainWindow, startCapture, stopCapture, type CaptureSelection, type CapturePickerPreferences, type CaptureStatus } from '../native'
 
-const props = withDefaults(defineProps<{ assets: MediaAsset[]; native: boolean; screenshotShortcut?: string | null; screenshotBusy?: boolean; screenshotDisabled?: boolean; screenshotError?: string; screenshotConfiguring?: boolean }>(), { screenshotShortcut: null, screenshotBusy: false, screenshotDisabled: false, screenshotError: '', screenshotConfiguring: false })
-const emit = defineEmits<{ captured: [blob: Blob, name: string]; asset: [asset: MediaAsset]; status: [message: string]; 'add-to-timeline': [assetId: string]; 'recording-change': [active: boolean]; screenshot: []; 'screenshot-shortcut-change': [shortcut: string | null] }>()
+const props = withDefaults(defineProps<{ assets: MediaAsset[]; native: boolean; projectDisabled?: boolean; screenshotShortcut?: string | null; screenshotBusy?: boolean; screenshotDisabled?: boolean; screenshotError?: string; screenshotConfiguring?: boolean }>(), { screenshotShortcut: null, screenshotBusy: false, screenshotDisabled: false, screenshotError: '', screenshotConfiguring: false })
+const emit = defineEmits<{ captured: [blob: Blob, name: string]; asset: [asset: MediaAsset]; status: [message: string]; 'add-to-timeline': [asset: MediaAsset]; 'add-asset': [asset: MediaAsset]; 'recording-change': [active: boolean]; screenshot: []; 'screenshot-shortcut-change': [shortcut: string | null] }>()
 const phase = ref<'idle' | 'selecting' | 'starting' | 'recording' | 'paused' | 'stopping'>('idle')
 const elapsed = ref(0)
 const muted = ref(false)
@@ -57,7 +60,10 @@ const liveBorder = computed(() => !props.native && (phase.value === 'recording' 
 const clockLabel = computed(() => recordingClock(elapsed.value))
 const controlsSnapshot = computed<CaptureControlsSnapshot>(() => ({ phase: phase.value === 'selecting' ? 'starting' : phase.value, elapsed: elapsed.value, muted: muted.value, audioAvailable: audioAvailable.value, microphoneEnabled: microphoneEnabled.value, microphonePending: microphonePending.value, busy: controlBusy.value, error: error.value }))
 const phaseLabel = computed(() => ({ idle: '准备录制', selecting: '正在选择录制范围', starting: remaining.value ? `${remaining.value} 秒后开始` : '正在准备', recording: '正在录制', paused: '已暂停', stopping: '正在保存录制' })[phase.value])
-const recentVideos = computed(() => props.assets.filter(item => item.kind === 'video').slice(-4).reverse())
+const capturedAssets = shallowRef<MediaAsset[]>([])
+const mediaMenu = ref<InstanceType<typeof MediaAssetMenu>>()
+const selectedRecording = shallowRef<MediaAsset>()
+const { assets: recentVideos, loading: libraryLoading, error: libraryError, warnings: libraryWarnings, refresh: refreshLibrary, preparePreview } = useWorkspaceMedia(() => ['recording'], () => props.native, () => [...props.assets, ...capturedAssets.value])
 const screenshotSettingsOpen = ref(false)
 const screenshotSettingsButton = ref<HTMLButtonElement>()
 const directoryOpening = ref(false)
@@ -67,12 +73,25 @@ async function openRecordingDirectory(): Promise<void> {
   if (!props.native || destroyed || directoryOpening.value) return
   directoryOpening.value = true
   directoryError.value = ''
-  try { await openMediaLibraryDirectory() }
+  try { await openWorkspaceDirectory('recording') }
   catch (cause) {
     if (!destroyed) directoryError.value = `无法打开录屏保存目录：${cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '请重试。'}`
   } finally { if (!destroyed) directoryOpening.value = false }
 }
 
+function recordedAsset(asset: MediaAsset): void { capturedAssets.value = [...capturedAssets.value.filter(item => item.id !== asset.id), asset]; selectedRecording.value = asset; emit('asset', asset) }
+async function previewRecording(asset: MediaAsset): Promise<void> {
+  if (active.value) return
+  clearPreview(); latestName.value = asset.name; selectedRecording.value = asset
+  await preparePreview(asset)
+  if (active.value || selectedRecording.value?.id !== asset.id || destroyed) return
+  const source = recentVideos.value.find(item => item.id === asset.id) ?? asset
+  selectedRecording.value = source
+  await nextTick()
+  if (preview.value && !active.value && selectedRecording.value?.id === asset.id) { preview.value.src = source.url; preview.value.muted = false }
+}
+function assetDate(asset: MediaAsset): string { return asset.addedAt ? new Date(asset.addedAt).toLocaleString('zh-CN', { hour12: false }) : '' }
+watch(() => props.assets, assets => { if (!selectedRecording.value && latestName.value) selectedRecording.value = assets.find(asset => asset.name === latestName.value) })
 async function takeScreenshot(): Promise<void> {
   screenshotSettingsOpen.value = false
   await nextTick()
@@ -85,11 +104,12 @@ function screenshotSettingsKeydown(event: KeyboardEvent): void {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
 }
-onDeactivated(() => { screenshotSettingsOpen.value = false })
+onDeactivated(() => { screenshotSettingsOpen.value = false; if (!active.value) preview.value?.pause() })
 
 function clearPreview(): void {
   if (finishedUrl.value) URL.revokeObjectURL(finishedUrl.value)
   finishedUrl.value = ''
+  selectedRecording.value = undefined
   if (preview.value) { preview.value.pause(); preview.value.srcObject = null; preview.value.removeAttribute('src'); preview.value.load() }
 }
 async function restoreAfterCapture(): Promise<void> {
@@ -207,7 +227,7 @@ async function begin(): Promise<void> {
       } finally { abort.signal.removeEventListener('abort', cancelPendingStart) }
       nativeStarted = true
       updateNativeSource(result)
-      if (destroyed || abort.signal.aborted) { const asset = await stopCapture(); if (asset) emit('asset', asset); phase.value = 'idle'; return }
+      if (destroyed || abort.signal.aborted) { const asset = await stopCapture(); if (asset) recordedAsset(asset); phase.value = 'idle'; return }
       phase.value = result.state === 'paused' ? 'paused' : 'recording'
       elapsed.value = result.elapsed
     } else {
@@ -329,7 +349,7 @@ async function stop(): Promise<void> {
     if (props.native) {
       const asset = await stopCapture()
       if (asset) {
-        emit('asset', asset)
+        recordedAsset(asset)
         latestName.value = asset.name
         capturedCount.value++
         await nextTick()
@@ -379,14 +399,14 @@ onBeforeUnmount(() => {
   clearInterval(clock)
   window.removeEventListener('beforeunload', beforeUnload)
   if (controller) void controller.stop().catch(() => {})
-  if (props.native && ['recording', 'paused'].includes(phase.value)) void stopCapture().then(asset => { if (asset) emit('asset', asset) }).catch(() => {})
+  if (props.native && ['recording', 'paused'].includes(phase.value)) void stopCapture().then(asset => { if (asset) recordedAsset(asset) }).catch(() => {})
   clearPreview()
 })
 defineExpose({ isRecording: () => active.value, stop })
 </script>
 
 <template>
-  <ToolWorkspace class="recorder-workspace" data-testid="recorder-workspace" title="屏幕录制" icon="monitor" description="记录屏幕、窗口或演示，录制完成后直接开始剪辑。" library-label="最近的视频素材" settings-label="录制设置">
+  <ToolWorkspace class="recorder-workspace" data-testid="recorder-workspace" title="屏幕录制" icon="monitor" description="记录屏幕、窗口或演示，录制完成后可添加到工程继续剪辑。" library-label="录屏视频" settings-label="录制设置">
     <template #title-actions>
       <button v-if="native" class="recording-directory-button" type="button" :disabled="directoryOpening" aria-label="打开录屏保存目录" title="打开录屏保存目录" @click="openRecordingDirectory"><Icon name="folder" :size="18" /></button>
     </template>
@@ -394,14 +414,17 @@ defineExpose({ isRecording: () => active.value, stop })
       <button ref="screenshotSettingsButton" class="screenshot-settings-button" type="button" data-testid="screenshot-settings-open" aria-haspopup="dialog" :aria-expanded="screenshotSettingsOpen" @click="screenshotSettingsOpen = true"><Icon name="camera" :size="16" />截屏设置</button>
     </template>
     <template #library>
-      <div class="recent-captures"><div class="section-title"><h2>最近的视频素材</h2><span>{{ recentVideos.length }}</span></div><div class="recent-grid"><button v-for="asset in recentVideos" :key="asset.id" :title="`将 ${asset.name} 添加到时间线`" @click="emit('add-to-timeline', asset.id)"><span class="recent-thumb"><Icon name="video" :size="24" /></span><span class="recent-info"><strong>{{ asset.name }}</strong><small>{{ asset.width }} × {{ asset.height }} · {{ Math.round(asset.duration) }} 秒</small></span><Icon name="plus" :size="17" /></button></div><p v-if="!recentVideos.length" class="recent-empty">录制完成后，视频会显示在这里。</p></div>
+      <div class="recent-captures"><div class="section-title"><h2>录屏视频 <span>{{ recentVideos.length }}</span></h2><button :disabled="libraryLoading || !native" title="刷新录屏视频" aria-label="刷新录屏视频" @click="refreshLibrary"><Icon name="refresh" :size="15" /></button></div>
+        <p v-if="libraryError" class="capture-error" role="alert">{{ libraryError }}</p><p v-for="warning in libraryWarnings" :key="warning" class="settings-hint">{{ warning }}</p>
+        <div class="recent-grid"><button v-for="asset in recentVideos" :key="asset.id" :data-asset-id="asset.id" :title="`预览 ${asset.name}`" :aria-pressed="selectedRecording?.id === asset.id" :disabled="active" @click="previewRecording(asset)" @contextmenu="mediaMenu?.open($event, asset)" @keydown.shift.f10="mediaMenu?.open($event, asset)" @keydown.contextmenu="mediaMenu?.open($event, asset)"><span class="recent-thumb"><Icon name="video" :size="24" /></span><span class="recent-info"><strong>{{ asset.name }}</strong><small>{{ asset.width }} × {{ asset.height }} · {{ Math.round(asset.duration) }} 秒</small><time>{{ assetDate(asset) }}</time></span></button></div><p v-if="!recentVideos.length" class="recent-empty">{{ libraryLoading ? '正在读取录屏视频…' : '录制完成后，视频会显示在这里。右键可添加到工程素材。' }}</p>
+      </div>
     </template>
     <template #default>
       <p v-if="directoryError" class="capture-error screenshot-page-error" role="alert">{{ directoryError }}</p>
       <p v-if="screenshotError && !screenshotSettingsOpen" class="capture-error screenshot-page-error" role="alert">{{ screenshotError }}</p>
       <div class="capture-stage">
         <div class="stage-toolbar"><span><i :class="{ live: phase === 'recording', paused: phase === 'paused' }" />{{ phaseLabel }}</span><strong>{{ clockLabel }}</strong><span>{{ fps }} FPS</span></div>
-        <div class="capture-video-wrap" :class="{ 'recording-border': liveBorder }" data-testid="recording-preview">
+        <div class="capture-video-wrap" :class="{ 'recording-border': liveBorder }" data-testid="recording-preview" @contextmenu="selectedRecording && !active && mediaMenu?.open($event, selectedRecording)">
           <video ref="preview" playsinline :controls="!active" :class="{ visible: active && !native || !!latestName }" aria-label="录制画面预览" />
           <div v-if="(!active && !latestName) || (native && active)" class="capture-placeholder"><div class="capture-symbol"><Icon :name="sourceType === 'region' ? 'crop' : sourceType === 'window' ? 'panel' : 'monitor'" :size="46" /></div><h2>{{ native && active ? (phase === 'selecting' ? '选择要录制的范围' : phase === 'starting' ? '正在准备录制' : '正在录制所选画面') : '让想法被看见' }}</h2><p>{{ native && active ? (phase === 'selecting' ? '拖动框选区域，或点击窗口；确认后才会开始录制。' : '红色边框标示当前录制范围，可随时返回这里暂停或停止。') : '点击开始录制，直接选择想要记录的画面。' }}</p><span v-if="!active">{{ native ? '屏幕 / 窗口 / 区域 · 分段暂停 · 麦克风' : '屏幕 / 窗口 / 区域 · 分段暂停 · 音频' }}</span></div>
           <div v-if="remaining" class="capture-countdown" aria-live="assertive">{{ remaining }}</div>
@@ -409,7 +432,8 @@ defineExpose({ isRecording: () => active.value, stop })
           <RecordingToolbar v-if="liveBorder" class="preview-recording-toolbar" :snapshot="controlsSnapshot" @action="controlAction" />
         </div>
         <div v-if="active && actualSource" class="actual-source" data-testid="recording-source"><Icon :name="sourceType === 'region' ? 'crop' : 'monitor'" :size="15" /><div><strong>{{ actualSource.label }}</strong><span v-if="actualSource.width && actualSource.height">来源 {{ actualSource.width }} × {{ actualSource.height }}<template v-if="sourceType === 'region'"> · 区域 {{ selection?.region?.width }} × {{ selection?.region?.height }}</template><template v-if="actualSource.outputWidth && actualSource.outputHeight"> · 输出 {{ actualSource.outputWidth }} × {{ actualSource.outputHeight }}</template></span></div><span class="recording-tag">{{ phase === 'paused' ? '已暂停' : '录制范围' }}</span></div>
-        <div class="capture-bottom"><span><Icon name="shield" :size="16" />仅在你点击开始后采集</span><span v-if="capturedCount">本次已录制 {{ capturedCount }} 段</span><span v-else>停止后自动加入素材库</span></div>
+        <div class="capture-bottom"><span><Icon name="shield" :size="16" />仅在你点击开始后采集</span><span v-if="capturedCount">本次已录制 {{ capturedCount }} 段</span><span v-else>停止后保存在录屏目录</span></div>
+        <div v-if="selectedRecording && !active" class="recording-result-actions"><strong>{{ selectedRecording.name }}</strong><button :disabled="projectDisabled" @click="emit('add-asset', selectedRecording)"><Icon name="import" :size="14" />加入素材</button><button :disabled="projectDisabled" @click="emit('add-to-timeline', selectedRecording)"><Icon name="plus" :size="14" />加入时间线</button></div>
       </div>
     </template>
     <template #settings>
@@ -427,6 +451,7 @@ defineExpose({ isRecording: () => active.value, stop })
       </aside>
     </template>
     <template #overlays>
+    <MediaAssetMenu ref="mediaMenu" :native="native" project-action :project-disabled="projectDisabled || active" @add-project="emit('add-asset', $event)" @error="error = $event" />
     <EditorDialog class="screenshot-settings-dialog" :open="screenshotSettingsOpen" title="截屏设置" icon="camera" :return-focus="screenshotSettingsButton" @close="screenshotSettingsOpen = false" @keydown="screenshotSettingsKeydown">
       <ScreenshotControls v-if="screenshotSettingsOpen" :native="native" :shortcut="screenshotShortcut" :busy="screenshotBusy" :disabled="active || screenshotDisabled" :error="screenshotError" :configuring="screenshotConfiguring" @capture="takeScreenshot" @shortcut-change="emit('screenshot-shortcut-change', $event)" />
     </EditorDialog>
@@ -442,6 +467,13 @@ defineExpose({ isRecording: () => active.value, stop })
 </template>
 
 <style scoped>
+.section-title>button{padding:5px}.section-title h2>span{color:var(--ui-muted);font-weight:400;margin-left:5px}
+.recent-grid button[aria-pressed=true]{border-color:var(--ui-accent);background:var(--ui-accent-soft)}
+.recent-info time{font-size:9px;color:var(--ui-muted)}
+.recording-result-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 18px;border-top:1px solid var(--ui-line)}
+.recording-result-actions>strong{font-size:11px;margin-right:auto;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recording-result-actions>button{font-size:11px;padding:6px 9px}
+
 .recording-directory-button{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;padding:0;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--ui-muted,#7c8492);cursor:pointer}.recording-directory-button:hover{background:var(--ui-surface-2,#f7f8fc);color:var(--ui-accent,#6257db);border-color:var(--ui-border,#e5e8f0)}.recording-directory-button:focus-visible{outline:2px solid var(--ui-accent,#6257db);outline-offset:2px}.recording-directory-button:disabled{opacity:.45;cursor:wait}
 .preview-recording-toolbar{position:absolute;top:8px;right:8px;z-index:6;max-width:calc(100% - 16px)}
 .record-actions button{white-space:nowrap;padding-inline:8px;gap:5px}.record-actions button[aria-pressed]{flex:0 0 34px;width:34px;padding-inline:0}

@@ -17,6 +17,19 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mov", "mkv", "webm", "avi", "m4v", "mpeg", "mpg", "ts", "mts", "m2ts", "flv", "wmv",
     "3gp", "3g2", "ogv", "mxf", "vob", "f4v",
 ];
+const IMAGE_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff", "avif", "heic", "heif", "ico",
+];
+const AUDIO_EXTENSIONS: &[&str] = &[
+    "wav", "mp3", "flac", "ogg", "oga", "opus", "m4a", "aac", "aiff", "aif", "wma",
+];
+const WORKSPACE_CATEGORIES: &[(&str, &str)] = &[
+    ("recording", "video"),
+    ("screenshot", "image"),
+    ("videogen", "video"),
+    ("imagegen", "image"),
+    ("musicgen", "audio"),
+];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +49,19 @@ pub struct StoredVideos {
     pub import_directory: Option<String>,
     pub assets: Vec<StoredVideo>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredWorkspaceAssets {
+    pub directories: HashMap<String, String>,
+    pub assets: Vec<StoredVideo>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct WorkspaceLibrary {
+    libraries: HashMap<String, VideoLibrary>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -93,6 +119,9 @@ pub struct VideoLibrary {
 }
 
 pub(crate) fn video_name(name: &str) -> bool {
+    media_name(name, "video")
+}
+fn media_name(name: &str, kind: &str) -> bool {
     if name.starts_with('.')
         || name.len() > 1024
         || Path::new(name).file_name().and_then(|name| name.to_str()) != Some(name)
@@ -104,7 +133,18 @@ pub(crate) fn video_name(name: &str) -> bool {
         .and_then(|value| value.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    VIDEO_EXTENSIONS.contains(&extension.as_str())
+    match kind {
+        "video" => VIDEO_EXTENSIONS.contains(&extension.as_str()),
+        "image" => IMAGE_EXTENSIONS.contains(&extension.as_str()),
+        "audio" => AUDIO_EXTENSIONS.contains(&extension.as_str()),
+        _ => false,
+    }
+}
+fn usable_asset(asset: &Asset, kind: &str) -> bool {
+    asset.kind == kind
+        && asset.duration.is_finite()
+        && asset.duration > 0.0
+        && (kind == "audio" || (asset.width > 0 && asset.height > 0))
 }
 fn stable_id(root: &Path, name: &str) -> String {
     let mut hash = Sha256::new();
@@ -130,15 +170,14 @@ fn runtime_key(runtime: &Runtime) -> String {
     )
 }
 fn usable_entry(name: &str, entry: &Entry) -> bool {
-    video_name(name)
+    ["video", "image", "audio"]
+        .iter()
+        .any(|kind| media_name(name, kind))
         && entry.fingerprint.modified_nanos < 1_000_000_000
         && entry.error.as_ref().is_none_or(|error| error.len() <= 4096)
         && entry.asset.as_ref().is_none_or(|asset| {
-            asset.kind == "video"
-                && asset.duration.is_finite()
-                && asset.duration > 0.0
-                && asset.width > 0
-                && asset.height > 0
+            usable_asset(asset, &asset.kind)
+                && media_name(name, &asset.kind)
                 && asset.size == entry.fingerprint.size
         })
 }
@@ -221,17 +260,21 @@ impl VideoLibrary {
             result.import_directory = Some(imported.directory);
             result.assets.extend(imported.assets);
             result.warnings.extend(imported.warnings);
-            result.assets.sort_by(|left, right| {
-                right
-                    .modified_at
-                    .cmp(&left.modified_at)
-                    .then_with(|| left.asset.native_path.cmp(&right.asset.native_path))
-            });
         }
+        result.assets.sort_by(|left, right| {
+            right
+                .modified_at
+                .cmp(&left.modified_at)
+                .then_with(|| left.asset.native_path.cmp(&right.asset.native_path))
+        });
         Ok(result)
     }
 
     pub fn list(&self, store: &MediaStore, runtime: &Runtime) -> Result<StoredVideos> {
+        self.list_kind(store, runtime, "video")
+    }
+
+    fn list_kind(&self, store: &MediaStore, runtime: &Runtime, kind: &str) -> Result<StoredVideos> {
         let metadata = fs::symlink_metadata(&store.root)
             .map_err(|error| format!("媒体保存目录不可用：{error}"))?;
         if !metadata.is_dir()
@@ -254,7 +297,7 @@ impl VideoLibrary {
             }
         };
         let runtime = (
-            format!("{:?}|{}", store.root, runtime_key(runtime)),
+            format!("{:?}|{}|{kind}", store.root, runtime_key(runtime)),
             runtime,
         );
         if !cache.loaded {
@@ -288,7 +331,7 @@ impl VideoLibrary {
             let Some(name) = item.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if !video_name(&name) {
+            if !media_name(&name, kind) {
                 continue;
             }
             let path = item.path();
@@ -342,15 +385,7 @@ impl VideoLibrary {
                 .is_none_or(|entry| entry.fingerprint != *fingerprint)
             {
                 let (asset, error) = match store.probe(runtime.1, path, name) {
-                    Ok(asset)
-                        if asset.kind == "video"
-                            && asset.duration.is_finite()
-                            && asset.duration > 0.0
-                            && asset.width > 0
-                            && asset.height > 0 =>
-                    {
-                        (Some(asset), None)
-                    }
+                    Ok(asset) if usable_asset(&asset, kind) => (Some(asset), None),
                     Ok(_) => (None, None),
                     Err(error) => (None, Some(error)),
                 };
@@ -382,6 +417,9 @@ impl VideoLibrary {
                 warn(format!("已跳过 {name}：{error}"));
             }
             if let Some(mut asset) = entry.asset.clone() {
+                if !usable_asset(&asset, kind) {
+                    continue;
+                }
                 asset.id = stable_id(&store.root, name);
                 asset.name = crate::media_metadata::original_name(store, path)
                     .unwrap_or_else(|| name.clone());
@@ -423,6 +461,71 @@ impl VideoLibrary {
             assets,
             warnings,
         })
+    }
+}
+
+impl WorkspaceLibrary {
+    pub fn new(app_data: &Path) -> Self {
+        let libraries = WORKSPACE_CATEGORIES
+            .iter()
+            .map(|(category, _)| *category)
+            .map(|category| {
+                (
+                    category.to_owned(),
+                    VideoLibrary::new(app_data.join(format!("workspace-{category}-index.json"))),
+                )
+            })
+            .collect();
+        Self { libraries }
+    }
+
+    pub fn list(
+        &self,
+        store: &MediaStore,
+        runtime: &Runtime,
+        categories: &[String],
+    ) -> Result<StoredWorkspaceAssets> {
+        if categories.is_empty()
+            || categories.len() > WORKSPACE_CATEGORIES.len()
+            || categories.iter().any(|category| {
+                !WORKSPACE_CATEGORIES
+                    .iter()
+                    .any(|(name, _)| category == name)
+            })
+        {
+            return Err("请选择有效的素材分类。".into());
+        }
+        let mut result = StoredWorkspaceAssets {
+            directories: HashMap::new(),
+            assets: Vec::new(),
+            warnings: Vec::new(),
+        };
+        for category in categories {
+            if result.directories.contains_key(category) {
+                continue;
+            }
+            let category_store = store.workspace_store(category)?;
+            let kind = WORKSPACE_CATEGORIES
+                .iter()
+                .find(|(name, _)| category == name)
+                .unwrap()
+                .1;
+            result.directories.insert(
+                category.clone(),
+                category_store.root.to_string_lossy().into(),
+            );
+            let listed = self.libraries[category].list_kind(&category_store, runtime, kind)?;
+            result.assets.extend(listed.assets);
+            result.warnings.extend(listed.warnings);
+        }
+        result.assets.sort_by(|left, right| {
+            right
+                .modified_at
+                .cmp(&left.modified_at)
+                .then_with(|| left.asset.native_path.cmp(&right.asset.native_path))
+        });
+        result.warnings.truncate(MAX_WARNINGS);
+        Ok(result)
     }
 }
 
@@ -468,6 +571,161 @@ mod tests {
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_secs(seconds)))
             .unwrap();
+    }
+
+    #[test]
+    fn workspace_lists_only_new_categories_without_moving_or_copying_old_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = runtime();
+        let source = video(directory.path(), &runtime);
+        let picture = directory.path().join("picture.png");
+        let extracted = process(&runtime.encoder)
+            .args(["-v", "error", "-i"])
+            .arg(&source)
+            .args(["-frames:v", "1"])
+            .arg(&picture)
+            .output()
+            .unwrap();
+        assert!(
+            extracted.status.success(),
+            "{}",
+            String::from_utf8_lossy(&extracted.stderr)
+        );
+        let music = directory.path().join("music.wav");
+        let generated = process(&runtime.encoder)
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=660:duration=0.2",
+            ])
+            .arg(&music)
+            .output()
+            .unwrap();
+        assert!(generated.status.success());
+        let store = MediaStore::new(directory.path()).unwrap();
+        let mut expected = HashSet::new();
+        for (index, (category, kind)) in WORKSPACE_CATEGORIES.iter().enumerate() {
+            let target = store.workspace_store(category).unwrap();
+            let (input, label) = match *kind {
+                "image" => (&picture, "图片.png"),
+                "audio" => (&music, "歌曲.wav"),
+                _ => (&source, "视频.mp4"),
+            };
+            let asset = target.import(&runtime, input, Some(label)).unwrap();
+            modified(Path::new(&asset.native_path), 1_700_000_000 + index as u64);
+            expected.insert(asset.native_path);
+            // Wrong types and nested files are never loaded into a category's list.
+            let other = if *kind == "video" { &picture } else { &source };
+            fs::copy(other, target.root.join(other.file_name().unwrap())).unwrap();
+            fs::create_dir(target.root.join("nested")).unwrap();
+            fs::copy(
+                input,
+                target.root.join("nested").join(input.file_name().unwrap()),
+            )
+            .unwrap();
+        }
+        let legacy_root = directory.path().join("recordings");
+        fs::create_dir(&legacy_root).unwrap();
+        let legacy = legacy_root.join("旧录屏.mp4");
+        fs::copy(&source, &legacy).unwrap();
+        modified(&legacy, 1_700_000_100);
+        let ignored = store
+            .import(&runtime, &source, Some("旧通用素材.mp4"))
+            .unwrap();
+        let imported = store
+            .import_video_store()
+            .unwrap()
+            .import(&runtime, &source, Some("导入视频.mp4"))
+            .unwrap();
+        let library = WorkspaceLibrary::new(directory.path());
+        let categories: Vec<_> = WORKSPACE_CATEGORIES
+            .iter()
+            .map(|(name, _)| name.to_string())
+            .collect();
+        let listed = library.list(&store, &runtime, &categories).unwrap();
+        assert!(listed.warnings.is_empty(), "{:?}", listed.warnings);
+        assert_eq!(listed.assets.len(), 5);
+        assert_eq!(listed.assets[0].asset.kind, "audio");
+        assert_eq!(listed.assets[0].added_at, 1_700_000_004_000);
+        assert!(!listed.assets.iter().any(|item| item.asset.native_path == legacy.to_string_lossy()));
+        assert_eq!(
+            listed.directories["recording"],
+            directory.path().join("recording").to_string_lossy()
+        );
+        assert_eq!(
+            listed.directories["imagegen"],
+            directory.path().join("imagegen").to_string_lossy()
+        );
+        assert_eq!(
+            listed
+                .assets
+                .iter()
+                .map(|asset| asset.asset.native_path.clone())
+                .collect::<HashSet<_>>(),
+            expected
+        );
+        assert!(!expected.contains(&ignored.native_path));
+        assert!(!expected.contains(&imported.native_path));
+        for asset in &listed.assets {
+            assert!(Path::new(&asset.asset.native_path).is_file());
+            assert!(store
+                .authorized_path(&serde_json::to_value(&asset.asset).unwrap())
+                .is_ok());
+        }
+        let videos = library
+            .list(&store, &runtime, &["recording".into(), "videogen".into()])
+            .unwrap();
+        assert_eq!(videos.assets.len(), 2);
+        assert!(videos
+            .assets
+            .iter()
+            .all(|asset| asset.asset.kind == "video"));
+        let screenshots = library
+            .list(&store, &runtime, &["screenshot".into()])
+            .unwrap();
+        assert_eq!(screenshots.assets.len(), 1);
+        assert_eq!(screenshots.assets[0].asset.kind, "image");
+        let reopened = WorkspaceLibrary::new(directory.path())
+            .list(&store, &runtime, &categories)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&listed).unwrap(),
+            serde_json::to_value(&reopened).unwrap()
+        );
+        assert_eq!(fs::read(&legacy).unwrap(), fs::read(&source).unwrap());
+        assert!(library
+            .list(&store, &runtime, &["../media".into()])
+            .is_err());
+        assert!(library.list(&store, &runtime, &[]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_library_ignores_external_links_and_unrelated_legacy_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = runtime();
+        let source = video(directory.path(), &runtime);
+        let store = MediaStore::new(directory.path()).unwrap();
+        let current = store
+            .recording_store()
+            .unwrap()
+            .import(&runtime, &source, Some("当前录屏.mp4"))
+            .unwrap();
+        std::os::unix::fs::symlink(directory.path(), directory.path().join("recordings")).unwrap();
+        std::os::unix::fs::symlink(
+            &source,
+            store.recording_store().unwrap().root.join("link.mp4"),
+        )
+        .unwrap();
+        let listed = WorkspaceLibrary::new(directory.path())
+            .list(&store, &runtime, &["recording".into()])
+            .unwrap();
+        assert_eq!(listed.assets.len(), 1);
+        assert_eq!(listed.assets[0].asset.native_path, current.native_path);
+        assert!(listed.warnings.is_empty());
     }
 
     #[test]
@@ -640,22 +898,26 @@ mod tests {
                 .write(true)
                 .open(path)
                 .unwrap()
-                .set_times(fs::FileTimes::new().set_modified(
-                    UNIX_EPOCH + Duration::new(1_700_000_000, nanos),
-                ))
+                .set_times(
+                    fs::FileTimes::new()
+                        .set_modified(UNIX_EPOCH + Duration::new(1_700_000_000, nanos)),
+                )
                 .unwrap();
         }
         let combined = library
             .list_stored(&import_library, &media, &runtime, true)
             .unwrap();
         assert_eq!(combined.directory, recordings.root.to_string_lossy());
-        assert_eq!(
-            combined.import_directory.as_deref(),
-            imports.root.to_str()
-        );
+        assert_eq!(combined.import_directory.as_deref(), imports.root.to_str());
         assert_eq!(combined.assets.len(), 2);
-        assert_eq!(combined.assets[0].asset.native_path, imported.to_string_lossy());
-        assert_eq!(combined.assets[1].asset.native_path, recording.to_string_lossy());
+        assert_eq!(
+            combined.assets[0].asset.native_path,
+            imported.to_string_lossy()
+        );
+        assert_eq!(
+            combined.assets[1].asset.native_path,
+            recording.to_string_lossy()
+        );
         assert_eq!(combined.assets[0].added_at, combined.assets[1].added_at);
         assert_ne!(combined.assets[0].asset.id, combined.assets[1].asset.id);
         assert_eq!(combined.assets[1].asset.id, default.assets[0].asset.id);
@@ -665,7 +927,10 @@ mod tests {
             assert!(index.entries.contains_key("shared.mp4"));
         }
         let serialized = serde_json::to_value(&combined).unwrap();
-        assert_eq!(serialized["importDirectory"], imports.root.to_string_lossy().as_ref());
+        assert_eq!(
+            serialized["importDirectory"],
+            imports.root.to_string_lossy().as_ref()
+        );
         assert!(serialized["assets"][0].get("modifiedAt").is_none());
         let restarted = VideoLibrary::new(recording_index)
             .list_stored(&VideoLibrary::new(import_index), &media, &runtime, true)

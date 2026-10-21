@@ -18,6 +18,11 @@ async function checks(browser, url, native) {
       if (native) window.__TAURI_INTERNALS__ = {
         transformCallback: () => 1, unregisterCallback() {}, convertFileSrc: path => path,
         invoke: async (command, args) => {
+          const managed = JSON.parse(localStorage.getItem('fixture:managed-projects') || '{}')
+          if (command === 'ensure_project_media') { if(args.assets.length) throw new Error('名称测试仅使用空工程'); return { directory: `/projects/${args.projectId}`, assets: [] } }
+          if (command === 'save_managed_project') { managed[args.project.id] = { project: structuredClone(args.project), duration: args.duration }; localStorage.setItem('fixture:managed-projects',JSON.stringify(managed)); return { directory:`/projects/${args.project.id}`, savedAt:new Date().toISOString() } }
+          if (command === 'list_managed_projects') return Object.values(managed).map(({project,duration}) => ({id:project.id,title:project.title,width:project.width,height:project.height,updatedAt:project.updatedAt,assetCount:project.assets.length,duration}))
+          if (command === 'load_managed_project') return managed[args.projectId].project
           if (command === 'get_desktop_platform') return 'macos'
           if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
           if (command === 'get_media_jobs' || command === 'mcp_pending') return []
@@ -82,11 +87,12 @@ async function checks(browser, url, native) {
     await expect(page.getByTestId('open-project')).toBeEnabled()
     await page.locator('.timeline-footer').click()
     await expect(title(page)).toHaveText('工程乙')
-    const oldDraftTitle = await page.evaluate(async id => {
+    const oldDraftTitle = await page.evaluate(async ({id,native}) => {
+      if(native) return (await (await import('/src/native-project-library.ts')).loadManagedProject(id)).title
       const { loadProject } = await import('/src/core/storage.ts')
       const draft = await loadProject(id)
       try { return draft.project.title } finally { draft.revoke() }
-    }, projects[0].id)
+    }, {id:projects[0].id,native})
     assert.equal(oldDraftTitle, '工程甲仍在输入的名称', '切换前的名称输入属于原工程并应保留在其草稿中')
     console.log(`PASS ${native ? '桌面' : '网页'} Ctrl+O 提交当前工程名称，打开后标题同步且旧输入失焦不会改写新工程`)
 
@@ -160,7 +166,7 @@ async function checks(browser, url, native) {
       const project = createProject(), fileName = '历史草稿的文件名称.omedia'
       const target = native ? { kind: 'native', target: { name: fileName, path: `/projects/${fileName}`, token: 'fixture-draft-target' } }
         : { kind: 'browser', handle: await (await navigator.storage.getDirectory()).getFileHandle(fileName, { create: true }) }
-      await saveProject(project)
+      if(native) { const {prepareProjectMedia,saveManagedProject} = await import('/src/native-project-library.ts'); await saveManagedProject(await prepareProjectMedia(project)) } else await saveProject(project)
       await storeProjectSaveTarget(project.id, target)
       await app.refreshRecent()
       app.view = 'home'
@@ -182,7 +188,7 @@ async function checks(browser, url, native) {
 
 async function main() {
   const { createServer } = await import('vite')
-  const server = await createServer({ server: { host: '127.0.0.1', port: 0, hmr: false, watch: null }, logLevel: 'error' })
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false, hmr: false, watch: null }, logLevel: 'error' })
   await server.listen()
   const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), headless: true, args: ['--no-sandbox'] })
   try {

@@ -39,6 +39,7 @@ async function mount(page, url) {
       replace(next) { current.value = validateProject(next, { trusted: true }); history = createHistory(current.value) },
     }
     fixture.app = createApp({ render: () => h(Editor, { ref: editor, project: current.value,
+      commitProject: async next => { await new Promise(resolve => setTimeout(resolve, 120)); history = commitHistory(history, next); current.value = next; fixture.changes.push(next) },
       onChange: next => { history = commitHistory(history, next); current.value = next; fixture.changes.push(next) },
       onPreparedAsset: (asset, blob) => fixture.prepared.set(asset.id, blob), onBusy: busy => { fixture.busy = busy },
     }) })
@@ -90,7 +91,7 @@ async function galleryAndInsertion(page) {
   assert.deepEqual(await read(page), before)
   await page.evaluate(() => window.soundFixture.redo())
   assert.deepEqual(await read(page), next)
-  console.log('PASS 10音效GUI、真实试听与资源释放、选中转场优先对齐、真实音轨、素材库隔离和单步撤销重做')
+  console.log('PASS 10音效GUI、真实试听与资源释放、异步工程归档完成后入轨、选中转场优先对齐、素材库隔离及撤销重做')
   return next
 }
 

@@ -26,7 +26,7 @@ fn recording_directory_is_a_fixed_sibling_of_the_regular_media_store() {
     );
     assert_eq!(
         recordings.root,
-        app_data.path().join("recordings").canonicalize().unwrap()
+        app_data.path().join("recording").canonicalize().unwrap()
     );
     assert_eq!(store.recording_root().unwrap(), recordings.root);
     assert_ne!(store.root, recordings.root);
@@ -47,7 +47,12 @@ fn main_store_accepts_all_fixed_media_roots_but_not_unrelated_siblings() {
         assert_eq!(store.authorized_path(&asset_path(&path)).unwrap(), path);
         assert!(store.is_internal_path(&path));
     }
-    for name in ["other", "media-other", "recordings-other", "import video-other"] {
+    for name in [
+        "other",
+        "media-other",
+        "recordings-other",
+        "import video-other",
+    ] {
         let directory = app_data.path().join(name);
         fs::create_dir(&directory).unwrap();
         let path = directory.join("video.mp4");
@@ -80,6 +85,68 @@ fn imported_video_directory_is_a_fixed_sibling_and_preserves_existing_media() {
     assert_eq!(store.import_video_store().unwrap().root, imported.root);
     assert_eq!(fs::read(old_file).unwrap(), b"existing media");
     assert_eq!(fs::read_dir(&imported.root).unwrap().count(), 0);
+}
+
+#[test]
+fn workspace_and_project_paths_are_authorized_and_internal_roots_cannot_be_overwritten() {
+    let app_data = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(app_data.path()).unwrap();
+    for category in [
+        "recording",
+        "screenshot",
+        "videogen",
+        "imagegen",
+        "musicgen",
+    ] {
+        let workspace = store.workspace_store(category).unwrap();
+        assert_eq!(
+            workspace.root,
+            app_data.path().join(category).canonicalize().unwrap()
+        );
+        let path = workspace.root.join("asset.dat");
+        fs::write(&path, b"retained asset").unwrap();
+        assert_eq!(store.authorized_path(&asset_path(&path)).unwrap(), path);
+        assert!(store.is_internal_path(&workspace.root));
+    }
+    for invalid in ["", "../outside", "projects", "imaggen", "media"] {
+        assert!(store.workspace_store(invalid).is_err());
+    }
+    for name in ["recordings", "projects/project-a/assets"] {
+        let root = app_data.path().join(name);
+        fs::create_dir_all(&root).unwrap();
+        let old = root.join("old.mp4");
+        fs::write(&old, b"existing project reference").unwrap();
+        assert_eq!(store.authorized_path(&asset_path(&old)).unwrap(), old);
+        assert!(store.is_internal_path(&old));
+        assert_eq!(fs::read(&old).unwrap(), b"existing project reference");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_and_project_root_links_cannot_authorize_external_files() {
+    use std::os::unix::fs::symlink;
+    let app_data = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let store = MediaStore::new(app_data.path()).unwrap();
+    let file = outside.path().join("asset.mp4");
+    fs::write(&file, b"external asset").unwrap();
+    for name in [
+        "recording",
+        "recordings",
+        "screenshot",
+        "videogen",
+        "imagegen",
+        "musicgen",
+        "projects",
+    ] {
+        symlink(outside.path(), app_data.path().join(name)).unwrap();
+        assert!(store
+            .authorized_path(&asset_path(&app_data.path().join(name).join("asset.mp4")))
+            .is_err());
+        assert!(!store.is_internal_path(&file));
+        assert!(store.workspace_store(name).is_err());
+    }
 }
 
 #[test]
@@ -159,7 +226,7 @@ fn a_link_inside_imported_videos_does_not_authorize_an_external_media_file() {
 fn a_regular_file_cannot_be_used_as_the_recordings_directory() {
     let app_data = tempfile::tempdir().unwrap();
     let store = MediaStore::new(app_data.path()).unwrap();
-    let path = app_data.path().join("recordings");
+    let path = app_data.path().join("recording");
     fs::write(&path, b"keep this file").unwrap();
     assert!(store.recording_root().is_err());
     assert!(store.recording_store().is_err());
@@ -176,11 +243,11 @@ fn recordings_directory_cannot_be_redirected_outside_the_application_store() {
     let store = MediaStore::new(app_data.path()).unwrap();
     let file = outside.path().join("video.mp4");
     fs::write(&file, b"outside fixture").unwrap();
-    symlink(outside.path(), app_data.path().join("recordings")).unwrap();
+    symlink(outside.path(), app_data.path().join("recording")).unwrap();
     assert!(store.recording_root().is_err());
     assert!(store.recording_store().is_err());
     assert!(store
-        .authorized_path(&asset_path(&app_data.path().join("recordings/video.mp4")))
+        .authorized_path(&asset_path(&app_data.path().join("recording/video.mp4")))
         .is_err());
     assert!(store.authorized_path(&asset_path(&file)).is_err());
     let regular_media = store.root.join("ordinary.mp4");
@@ -324,7 +391,9 @@ fn library_video_imports_and_blobs_keep_sources_and_work_in_conversion_and_gif_e
     let source = app_data.path().join("source.mp4");
     make_video(&runtime, &source);
     let bytes = fs::read(&source).unwrap();
-    let ordinary = store.import(&runtime, &source, Some("普通素材.mp4")).unwrap();
+    let ordinary = store
+        .import(&runtime, &source, Some("普通素材.mp4"))
+        .unwrap();
     let imported = store
         .import_for_library(&runtime, &source, Some("手动导入视频.mp4"))
         .unwrap();
@@ -344,7 +413,9 @@ fn library_video_imports_and_blobs_keep_sources_and_work_in_conversion_and_gif_e
         );
         assert_eq!(fs::read(&asset.native_path).unwrap(), bytes);
         assert_eq!(
-            store.authorized_path(&serde_json::to_value(asset).unwrap()).unwrap(),
+            store
+                .authorized_path(&serde_json::to_value(asset).unwrap())
+                .unwrap(),
             Path::new(&asset.native_path)
         );
         assert_eq!(
@@ -404,14 +475,27 @@ fn library_imports_keep_audio_and_images_in_media_even_with_video_extensions() {
     let audio_path = app_data.path().join("audio.mp4");
     let output = process(&runtime.encoder)
         .args([
-            "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=0.2",
-            "-c:a", "pcm_s16le", "-f", "wav",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=0.2",
+            "-c:a",
+            "pcm_s16le",
+            "-f",
+            "wav",
         ])
         .arg(&audio_path)
         .output()
         .unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let image_path = app_data.path().join("image.mp4");
     {
         let output = fs::File::create(&image_path).unwrap();
@@ -466,14 +550,21 @@ fn library_import_probes_each_file_once() {
     )
     .unwrap();
     fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o700)).unwrap();
-    let counted_runtime = Runtime { probe: wrapper_path, ..runtime };
+    let counted_runtime = Runtime {
+        probe: wrapper_path,
+        ..runtime
+    };
     let imported = store
         .import_for_library(&counted_runtime, &source, Some("单次读取.mp4"))
         .unwrap();
     assert_eq!(imported.kind, "video");
     assert_eq!(fs::read(&count_path).unwrap(), b"x");
     let blob = store
-        .import_bytes_for_library(&counted_runtime, &fs::read(&source).unwrap(), "单次读取拖入.mp4")
+        .import_bytes_for_library(
+            &counted_runtime,
+            &fs::read(&source).unwrap(),
+            "单次读取拖入.mp4",
+        )
         .unwrap();
     assert_eq!(blob.kind, "video");
     assert_eq!(fs::read(count_path).unwrap(), b"xx");

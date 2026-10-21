@@ -37,6 +37,7 @@ function fixture(overrides = {}) {
     isBusy: () => busy,
     onBusy: value => { busy = value },
     onAssets: assets => calls.assets.push(...assets),
+    prepareProject: overrides.prepareProject,
     onChange: job => calls.events.push(job),
     commit: (next, label, expected) => {
       if (expected.projectId !== project.id || expected.revision !== revision || expected.projectSession !== projectSession || overrides.rejectCommit) return false
@@ -118,6 +119,57 @@ test('第二段失败会丢弃所有临时结果，保留完整原项目', async
   assert.equal(f.calls.accept.length, 0)
   assert.deepEqual(f.project, f.original)
   assert.equal(f.busy, false)
+})
+
+test('整批配音先归档到当前工程，注册归档后的素材并保留生成元数据', async () => {
+  let prepared
+  const f = fixture({ prepareProject: async (project, options) => {
+    options.assertCurrent()
+    assert.equal(options.signal.aborted, false)
+    assert.equal(f.calls.commits.length, 0)
+    assert.equal(f.calls.accept.length, 0)
+    prepared = structuredClone(project)
+    return { ...project, assets: project.assets.map(asset => ({ ...asset, nativePath: `/projects/${project.id}/assets/${asset.id}.wav`, url: `asset://localhost/projects/${project.id}/assets/${asset.id}.wav` })) }
+  } })
+  const done = await finish(f.service, f.service.startSpeech().id)
+  assert.equal(done.state, 'completed', done.error)
+  assert.equal(f.calls.commits.length, 1)
+  for (const asset of f.calls.assets) {
+    assert.equal(asset.nativePath, `/projects/${f.project.id}/assets/${asset.id}.wav`)
+    assert.deepEqual(asset, f.project.assets.find(item => item.id === asset.id))
+    assert.equal(asset.duration, prepared.assets.find(item => item.id === asset.id).duration)
+    assert.ok(prepared.assets.find(item => item.id === asset.id).nativePath.startsWith('/tmp/'))
+  }
+  assert.equal(f.calls.accept.length, 1)
+  assert.equal(f.calls.discard.length, 0)
+  await f.service.dispose()
+})
+
+test('配音归档期间取消或重新打开同一工程不会写回过期结果，仅清理临时原件', async () => {
+  for (const action of ['cancel', 'edit', 'reopen', 'copy-failed']) {
+    const pending = deferred()
+    let prepared, options
+    const f = fixture({ prepareProject: (project, context) => { prepared = project; options = context; return pending.promise } })
+    const job = f.service.startSpeech()
+    for (let index = 0; !prepared && index < 100; index++) await new Promise(resolve => setTimeout(resolve, 1))
+    assert.ok(prepared)
+    assert.equal(f.service.status(job.id).cancelable, true)
+    assert.equal(f.calls.begin.length, 2)
+    if (action === 'cancel') await f.service.cancel(job.id)
+    else if (action !== 'copy-failed') f[action]()
+    if (action !== 'copy-failed') assert.throws(options.assertCurrent)
+    // A failed native copy can leave a reusable, unreferenced project copy;
+    // discardSpeechJob still receives only the original generation job IDs.
+    pending.resolve(action === 'copy-failed' ? { ...prepared, id: 'other-project' } : prepared)
+    const done = await finish(f.service, job.id)
+    assert.equal(done.state, action === 'cancel' ? 'cancelled' : 'failed')
+    assert.equal(f.calls.commits.length, 0)
+    assert.equal(f.calls.assets.length, 0)
+    assert.equal(f.calls.accept.length, 0)
+    assert.deepEqual(f.calls.discard.sort(), f.calls.begin.map(request => request.requestId).sort())
+    assert.equal(f.busy, false)
+    await f.service.dispose()
+  }
 })
 
 test('生成期间项目被修改时，不覆盖最新项目且清理尚未提交音频', async () => {

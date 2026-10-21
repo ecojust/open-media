@@ -12,6 +12,7 @@ pub mod chroma_key;
 pub mod preview;
 pub mod project_files;
 pub mod project_archive;
+pub mod project_library;
 pub mod project_compression;
 pub mod project_asset_uploads;
 mod media_metadata;
@@ -61,7 +62,7 @@ mod desktop {
         preview::{self, PreviewResult},
         project_files::{self, ProjectFile, ProjectFiles, ProjectTarget},
         mcp::{McpConfig, McpManager, McpRequest, McpStatus},
-        video_library::{StoredVideos, VideoLibrary},
+        video_library::{StoredVideos, VideoLibrary, StoredWorkspaceAssets, WorkspaceLibrary},
         image_clipboard::{self, ImageClipboard},
         recording_controls::{ControlsAction, ControlsManager, ControlsSnapshot},
         speech::{SpeechJob, SpeechRequest, SpeechStatus},
@@ -88,6 +89,7 @@ mod desktop {
         jobs: JobManager,
         video_library: VideoLibrary,
         imported_video_library: VideoLibrary,
+        workspace_library: WorkspaceLibrary,
         asset_tools: crate::asset_tools::AssetTools,
         audio_tools: crate::audio_tools::AudioToolsManager,
         project_compression: crate::project_compression::CompressionManager,
@@ -380,6 +382,77 @@ mod desktop {
                 include_imported.unwrap_or(false),
             )
         }).await
+    }
+    #[tauri::command]
+    pub async fn ensure_project_media(
+        project_id: String,
+        assets: Vec<Asset>,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<crate::project_library::PreparedProjectMedia> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || crate::project_library::ensure_project_media(&store, &project_id, &assets)).await
+    }
+    #[tauri::command]
+    pub async fn save_managed_project(
+        project: Value,
+        duration: f64,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<crate::project_library::SavedManagedProject> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || crate::project_library::save_managed_project(&store, &project, duration)).await
+    }
+    #[tauri::command]
+    pub async fn list_managed_projects(
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<Vec<crate::project_library::ManagedProjectSummary>> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || crate::project_library::list_managed_projects(&store)).await
+    }
+    #[tauri::command]
+    pub async fn load_managed_project(
+        project_id: String,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<Value> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || crate::project_library::load_managed_project(&store, &project_id)).await
+    }
+    #[tauri::command]
+    pub async fn remove_managed_project_draft(
+        project_id: String,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || crate::project_library::remove_managed_project_draft(&store, &project_id)).await
+    }
+    #[tauri::command]
+    pub async fn list_workspace_assets(
+        categories: Vec<String>,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<StoredWorkspaceAssets> {
+        project_files::require_main_window(window.label())?;
+        let state = state.inner().clone();
+        blocking(move || state.workspace_library.list(&state.store, &state.runtime()?, &categories)).await
+    }
+    #[tauri::command]
+    pub async fn open_workspace_directory(
+        category: String,
+        window: tauri::WebviewWindow,
+        state: State<'_, MediaState>,
+    ) -> engine::Result<()> {
+        project_files::require_main_window(window.label())?;
+        let store = state.store.clone();
+        blocking(move || crate::export_files::open_media_library_directory(&store.workspace_store(&category)?)).await
     }
     #[tauri::command]
     pub async fn open_media_library_directory(
@@ -1216,6 +1289,7 @@ mod desktop {
                     jobs: JobManager::default(),
                     video_library: VideoLibrary::new(data.join("stored-recording-index.json")),
                     imported_video_library: VideoLibrary::new(data.join("stored-import-video-index.json")),
+                    workspace_library: WorkspaceLibrary::new(&data),
                     asset_tools: crate::asset_tools::AssetTools::new(&data).map_err(std::io::Error::other)?,
                     audio_tools: crate::audio_tools::AudioToolsManager::default(),
                     project_compression: crate::project_compression::CompressionManager::default(),
@@ -1289,7 +1363,14 @@ mod desktop {
                 audio_tool_accept,
                 audio_tool_discard,
                 get_runtime_status,
+                ensure_project_media,
+                save_managed_project,
+                list_managed_projects,
+                load_managed_project,
+                remove_managed_project_draft,
                 list_stored_videos,
+                list_workspace_assets,
+                open_workspace_directory,
                 open_media_library_directory,
                 select_runtime,
                 pick_media_assets,

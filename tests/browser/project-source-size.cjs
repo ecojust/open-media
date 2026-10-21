@@ -19,9 +19,9 @@ async function fixture(browser, url, native = false) {
     localStorage.setItem('open-media:autosave', 'false')
     if (!native) return
     let callback = 0
-    window.sizeHarness = { assets: [], calls: [] }
+    window.sizeHarness = { assets: [], calls: [], nativeUrls: {} }
     window.__TAURI_INTERNALS__ = {
-      transformCallback: () => ++callback, unregisterCallback: () => {}, convertFileSrc: value => value,
+      transformCallback: () => ++callback, unregisterCallback: () => {}, convertFileSrc: value => window.sizeHarness.nativeUrls[value] || value,
       invoke: async (command, args) => {
         window.sizeHarness.calls.push(command)
         if (command === 'plugin:event|listen') return ++callback
@@ -32,7 +32,11 @@ async function fixture(browser, url, native = false) {
         if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
         if (command === 'get_runtime_status') return { ready: true, version: 'fixture', source: 'bundled' }
         if (command === 'get_capture_status') return { state: 'idle', elapsed: 0, segments: 0 }
-        if (command === 'pick_media_assets') return window.sizeHarness.assets.splice(0)
+        if (command === 'list_managed_projects') return []
+        if (command === 'save_managed_project') return { directory: '/fixture/projects', savedAt: new Date().toISOString() }
+        if (command === 'ensure_project_media') return { directory: `/fixture/projects/${args.projectId}`, assets: args.assets.map(asset => ({ assetId: asset.id, nativePath: asset.nativePath, size: asset.size })) }
+        if (command === 'list_workspace_media') return { directory: '/fixture/recording', directories: ['/fixture/recording'], assets: [], warnings: [] }
+        if (command === 'pick_media_assets') return window.sizeHarness.assets.splice(0).map(asset => { const nativePath = `/fixture/${asset.id}.webm`; window.sizeHarness.nativeUrls[nativePath] = asset.url; return { ...asset, nativePath } })
         throw new Error(`未预期的原生命令：${command}`)
       },
     }
@@ -40,7 +44,6 @@ async function fixture(browser, url, native = false) {
   await page.goto(url)
   await expect(page.getByTestId('create-project')).toBeEnabled({ timeout: 15000 }).catch(error => { if (errors.length) error.message += `\n启动错误：${errors.join('\n')}`; throw error })
   await page.getByTestId('nav-edit').click()
-  if (native) await page.getByLabel('素材来源', { exact: true }).getByRole('button', { name: '已导入', exact: true }).click()
   return { page, close: async () => { assert.deepEqual(errors, []); await context.close() } }
 }
 
@@ -242,16 +245,21 @@ async function main() {
         let component = document.querySelector('.recorder-workspace').__vueParentComponent
         while (component && component.type.__name !== 'RecorderWorkspace') component = component.parent
         if (!component) throw new Error('录屏组件未挂载。')
-        component.emit('asset', { id: 'recorded-source', name: 'recorded.webm', kind: 'video', width: 180, height: 320, duration: .8, size, mime: 'video/webm', url: `data:video/webm;base64,${bytes}` })
+        window.sizeHarness.nativeUrls['/fixture/recorded.webm'] = `data:video/webm;base64,${bytes}`
+        component.emit('asset', { nativePath: '/fixture/recorded.webm', id: 'recorded-source', name: 'recorded.webm', kind: 'video', width: 180, height: 320, duration: .8, size, mime: 'video/webm', url: `data:video/webm;base64,${bytes}` })
       }, { bytes: fs.readFileSync(portrait).toString('base64'), size: fs.statSync(portrait).size })
+      assert.deepEqual(await dimensions(page), [1920, 1080, true], '录屏完成不会自动导入或修改工程')
+      await page.locator('[data-asset-id="recorded-source"]').click({ button: 'right' })
+      await page.getByRole('menuitem', { name: '添加到工程素材', exact: true }).click()
       await expect.poll(() => dimensions(page)).toEqual([180, 320, false])
-      await page.getByTitle('将 recorded.webm 添加到时间线', { exact: true }).click()
+      await page.getByTestId('nav-edit').click()
+      await page.locator('.asset-card[data-source-asset-id="recorded-source"]').dblclick()
       await expect(page.getByTestId('video-editor')).toBeVisible()
       await expect(page.locator('.preview-heading')).toContainText('180 × 320')
       await expect(page.locator('.timeline-clip')).toHaveCount(1)
       assert.deepEqual(await dimensions(page), [180, 320, false])
       await close()
-      console.log('PASS 录屏组件完成事件及加入剪辑事件保留录制源尺寸；未申请真实采集权限')
+      console.log('PASS 录屏完成保持工程不变；用户显式加入工程素材后匹配源尺寸并可入轨，未申请真实采集权限')
     }
   } finally { await browser.close(); await server.close(); fs.rmSync(directory, { recursive: true, force: true }) }
 }

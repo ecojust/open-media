@@ -293,7 +293,7 @@ async function main() {
     await page.getByRole('button', { name: '关闭导出', exact: true }).click()
   })
 
-  await check('录制跨工作区持续运行，保存忙碌时停止也不会丢弃录制', async () => {
+  await check('录制跨工作区持续运行，保存忙碌时停止保留录制，显式加入后才改变工程', async () => {
     await page.evaluate(() => {
       const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180
       const context = canvas.getContext('2d'); let frame = 0
@@ -338,7 +338,13 @@ async function main() {
     await page.evaluate(() => window.releaseBufferReads())
     await download
     await page.getByTestId('nav-edit').click()
-    await expect(page.locator('.project-summary')).toContainText('3 个素材', { timeout: 20000 })
+    await expect(page.locator('.project-summary')).toContainText('2 个素材', { timeout: 20000 })
+    await expect(page.locator('.asset-card')).toHaveCount(2)
+    await page.getByTestId('nav-record').click()
+    await page.locator('.recent-grid > button').first().click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '添加到工程素材', exact: true }).click()
+    await page.getByTestId('nav-edit').click()
+    await expect(page.locator('.project-summary')).toContainText('3 个素材')
     assert.equal(await page.evaluate(() => window.captureStream.getTracks().every(track => track.readyState === 'ended')), true)
     assert.equal(await page.evaluate(() => window.captureMicrophoneStream.getTracks().every(track => track.readyState === 'ended')), true)
     await page.evaluate(async () => { clearInterval(window.capturePaintTimer); await window.captureAudioContext.close() })

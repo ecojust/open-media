@@ -3,6 +3,7 @@ const { existsSync, mkdirSync } = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { chromium, expect } = require('@playwright/test')
+const { installManagedProjectBridge } = require('./managed-project-bridge.cjs')
 const root = path.resolve(__dirname, '../..')
 const artifacts = path.join(os.tmpdir(), 'open-media-native-platform')
 
@@ -35,6 +36,7 @@ async function main() {
       const context = await browser.newContext({ viewport: { width: 1440, height: 960 } })
       const page = await context.newPage(), errors = []
       page.on('pageerror', error => errors.push(error.message))
+      await installManagedProjectBridge(page)
       await page.addInitScript(platform => {
         localStorage.setItem('open-media:autosave', 'false')
         if (platform === 'web') return
@@ -43,8 +45,10 @@ async function main() {
           metadata: { currentWindow: { label: 'main' }, currentWebview: { label: 'main' } },
           transformCallback: () => ++nextId,
           unregisterCallback() {},
-          convertFileSrc: value => value,
-          invoke: async (command, args) => {
+          convertFileSrc: value => window.managedProjectFileUrl(value),
+          invoke: async (command, args, options) => {
+            const managed = await window.managedProjectCommand(command, args, options)
+            if (managed.handled) return managed.value
             if (command === 'get_desktop_platform') {
               window.headerPlatformRequested = true
               if (platform === 'failed') throw new Error('Host unavailable')
@@ -61,7 +65,7 @@ async function main() {
         }
       }, platform)
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}`)
-      await expect(page.getByTestId('home-workspace')).toBeVisible()
+      await expect(page.getByTestId('home-workspace')).toBeVisible({ timeout: 45000 })
       if (platform !== 'web') await page.waitForFunction(() => window.headerPlatformRequested)
       await expect(page.locator('.topbar .brand')).toHaveCount(sidebarControls ? 0 : 1)
       await expect(page.getByTestId('theme-dark')).toBeVisible()

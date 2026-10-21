@@ -14,7 +14,7 @@ async function mount(page, base, native = true) {
     const { default: Workspace } = await import('/src/components/VideoGenerationWorkspace.vue')
     const image = { id: 'image-1', name: '湖畔首帧.png', kind: 'image', url: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect fill="%23447788" width="64" height="64"/></svg>', duration: 5, width: 64, height: 64, size: 100, mime: 'image/png', nativePath: '/fixture/image.png' }
     const asset = { id: 'video-result', name: '生成镜头.mp4', kind: 'video', url: '', duration: 3.04, width: 512, height: 288, size: 200, mime: 'video/mp4', nativePath: '/fixture/generation/result.mp4' }
-    const state = window.generationHarness = { calls: [], jobs: [], selections: [image], added: [], timeline: [], busy: false, mcp: false, modelProviders: [], active: ref(true), enabled: ref(true), supported: true,
+    const state = window.generationHarness = { calls: [], jobs: [], stored: [], selections: [image], added: [], timeline: [], busy: false, mcp: false, modelProviders: [], active: ref(true), enabled: ref(true), supported: true,
       models: [
         { id: 'h3-base-fl2va', name: 'MiniMax H3 FL2VA', version: '1', modes: ['prompt', 'image', 'storyboard'], size: 144000000000, downloadedBytes: 0, state: 'not-downloaded', hardware: 'Apple 芯片，建议低内存模式', licenseUrl: 'https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE' },
         { id: 'h3-base-ref2va', name: 'MiniMax H3 Ref2VA', version: '1', modes: ['reference'], size: 150000000000, downloadedBytes: 0, state: 'not-downloaded', hardware: 'Apple 芯片，建议 64 GB 以上内存', licenseUrl: 'https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE' },
@@ -24,6 +24,8 @@ async function mount(page, base, native = true) {
       state.calls.push({ command, args })
       if (command === 'get_video_generation_status') return status()
       if (command === 'list_video_generation_jobs') return JSON.parse(JSON.stringify(state.jobs))
+      if (command === 'list_workspace_assets') return { directories: { videogen: '/fixture/videogen' }, assets: structuredClone(state.stored), warnings: [] }
+      if (command === 'open_workspace_directory') return
       if (command === 'begin_video_model_download') { if (!args.acceptedLicense) throw new Error('未确认许可'); state.models.find(model => model.id === args.modelId).state = 'downloading'; return status() }
       if (command === 'cancel_video_model_download') { Object.assign(state.models.find(model => model.id === args.modelId), { state: 'not-downloaded', downloadedBytes: 10000000 }); return status() }
       if (command === 'pick_media_assets') return state.selections
@@ -113,10 +115,20 @@ async function main() {
     await workspace.locator('[data-job-id="job-4"]').getByRole('button', { name: '取消生成', exact: true }).click()
     await page.getByRole('button', { name: '配置视频生成 MCP 服务', exact: true }).click()
     assert.equal(await page.evaluate(() => window.generationHarness.mcp), true)
-    await page.evaluate(() => { window.generationHarness.enabled.value = false })
+    await page.evaluate(() => { const state = window.generationHarness; state.stored = [{ ...state.asset, id: 'persisted-video', name: '历史生成视频.mp4', addedAt: Date.now() }]; state.jobs = []; state.enabled.value = false })
     await expect(workspace).not.toBeVisible()
     await page.evaluate(() => { window.generationHarness.enabled.value = true })
     await expect(page.getByLabel('视频提示词', { exact: true })).toHaveValue('沿用参考图片的主体和色彩，镜头缓缓拉近。')
+    const saved = page.locator('.generation-file-list [data-asset-id="persisted-video"]')
+    await expect(saved).toBeVisible()
+    await expect(page.locator('.generation-preview')).toContainText('历史生成视频.mp4')
+    assert.equal(await page.evaluate(() => window.generationHarness.added.length), 1, '读取历史生成目录不能自动导入当前工程')
+    await saved.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '添加到工程素材', exact: true }).click()
+    assert.equal(await page.evaluate(() => window.generationHarness.added.at(-1).id), 'persisted-video')
+    await page.getByRole('button', { name: '打开视频生成目录', exact: true }).click()
+    assert.deepEqual(await page.evaluate(() => window.generationHarness.calls.filter(call => call.command === 'open_workspace_directory').at(-1).args), { category: 'videogen' })
+    assert.deepEqual(await page.evaluate(() => [...new Set(window.generationHarness.calls.filter(call => call.command === 'list_workspace_assets').flatMap(call => call.args.categories))]), ['videogen'])
     await page.evaluate(() => { window.generationHarness.supported = false; window.generationHarness.models.forEach(model => { model.state = 'unsupported' }) })
     await page.getByRole('button', { name: '重新检查模型', exact: true }).click()
     await expect(page.getByTestId('generation-start')).toBeDisabled()
@@ -135,11 +147,17 @@ async function main() {
         if (command === 'get_video_generation_status') return { supported: true, runtimeReady: true, models: [{ id: 'h3-base-fl2va', name: 'MiniMax H3 FL2VA', modes: ['prompt', 'image', 'storyboard'], state: 'ready', size: 144000000000, downloadedBytes: 144000000000, version: '1', licenseUrl: 'https://example.com/license', hardware: 'Apple 芯片' }] }
         if (command === 'list_video_generation_jobs') return [{ id: 'app-job', state: 'completed', stage: '生成完成', progress: 1, shotIndex: 0, shotCount: 1, startedAt: Date.now(), elapsedSeconds: 10, assets: [result] }]
         if (command === 'get_runtime_status') return { ready: true }
+        if (command === 'ensure_project_media') return { directory: `/fixture/projects/${args.projectId}`, assets: args.assets.map(asset => ({ assetId: asset.id, nativePath: `/fixture/projects/${args.projectId}/assets/${asset.id}.mp4`, size: asset.size })) }
+        if (command === 'save_managed_project') return { directory: `/fixture/projects/${args.project.id}`, savedAt: new Date().toISOString() }
+        if (command === 'list_managed_projects') return []
+        if (command === 'load_managed_project') return null
+        if (command === 'remove_managed_project_draft') return
         if (command === 'get_media_jobs' || command === 'mcp_pending') return []
         if (command === 'mcp_get_status') return { running: false, connectedClients: 0, pendingRequests: 0 }
         if (command === 'get_desktop_platform') return 'macos'
         if (command === 'get_speech_status') return { ready: false, voices: [] }
-        if (command === 'list_stored_videos') return { directory: '/fixture/recordings', assets: [], warnings: [] }
+        if (command === 'list_stored_videos') return { directory: '/fixture/recording', assets: [], warnings: [] }
+        if (command === 'list_workspace_assets') return { directories: { videogen: '/fixture/videogen', recording: '/fixture/recording' }, assets: [], warnings: [] }
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'plugin:event|listen') return 1
         return null
