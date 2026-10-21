@@ -34,6 +34,7 @@ async function installNativeContract(page, voices = [{ id: 'english-first', name
         const finish = job => ({ ...job, state: 'completed', stage: '语音已生成', asset: { id: `speech-${job.id}`, name: '生成语音.wav', kind: 'audio', url: fixture.url, nativePath: `/fixture/speech/${job.id}.wav`, mime: 'audio/wav', duration: 2.5, width: 0, height: 0, size: fixture.size } })
         if (command === 'begin_speech_job') {
           const request = args.request
+          if (!fixture.voices.some(voice => voice.id === request.voiceId)) throw new Error('所选音色不可用，请在配音面板选择可用声音。')
           const job = { id: request.requestId, state: 'running', stage: '正在合成语音' }
           state.jobs[job.id] = job
           if (state.mode === 'failed') return { ...job, state: 'failed', error: '语音生成失败，请重试。' }
@@ -77,6 +78,8 @@ async function verifyInspectorSpeechActions(browser, url) {
     page.setDefaultTimeout(15000)
     page.on('pageerror', error => errors.push(error.message))
     await installNativeContract(page)
+    // This scenario starts with a previously chosen voice, without opening settings.
+    await page.addInitScript(() => localStorage.setItem('open-media:speech-settings', JSON.stringify({ voiceId: 'voice-1', rate: 1, alignText: true })))
     await page.goto(url)
     await page.getByTestId('create-project').click()
     await showProjectAssets(page)
@@ -172,7 +175,7 @@ async function verifyInspectorSpeechActions(browser, url) {
     await expect(align).toBeEnabled()
     await expect(dialog).not.toBeVisible()
     const defaultRequest = (await speechRequests(page)).at(-1)
-    assert.deepEqual({ text: defaultRequest.text, voiceId: defaultRequest.voiceId, speed: defaultRequest.speed }, { text: '第一段独立配音', voiceId: 'voice-1', speed: 1 }, '首次直接生成必须自行初始化默认中文声音和正常语速')
+    assert.deepEqual({ text: defaultRequest.text, voiceId: defaultRequest.voiceId, speed: defaultRequest.speed }, { text: '第一段独立配音', voiceId: 'voice-1', speed: 1 }, '首次直接生成必须沿用用户已保存的音色和语速，不自行选择其他声音')
     await expect(inspector.getByLabel('片段开始时间', { exact: true })).toHaveValue('1')
     await expect(inspector.getByLabel('片段时长', { exact: true })).toHaveValue('2.5')
     console.log('PASS 属性栏单条配音显示真实进度、GPU/CPU阶段与耗时，未知和最终入轨阶段不定进度；取消失败清理，重试不残留旧进度')
@@ -428,7 +431,12 @@ async function main() {
     await expect(speechDialog.getByTestId('speech-align-selected')).toHaveCount(0)
     await expect(speechDialog.getByRole('button', { name: '全部文字对齐已有语音', exact: true })).toBeVisible()
     await expect(page.locator('.property-panel').getByTestId('speech-panel')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: '选择 清朗', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(speechDialog.locator('.voice-card [aria-pressed="true"]')).toHaveCount(0)
+    await expect(speechDialog.getByTestId('speech-generate-all')).toBeDisabled()
+    assert.equal(await page.evaluate(async () => (await import('/src/core/speech-settings.ts')).getSpeechSettings().voiceId), 'matcha_zh_en_female', '目录不含当前音色时不得自动回退到首个可用音色')
+    assert.equal((await speechRequests(page)).length, 0, '加载声音目录不得启动未选音色的生成任务')
+    await selectVoice(page, '清朗')
+    await expect(speechDialog.getByTestId('speech-generate-all')).toBeEnabled()
     await expect(speechDialog.getByRole('tab')).toHaveCount(0)
     await expect(speechDialog.locator('.voice-card')).toHaveCount(3)
     await expect(speechDialog.locator('select[aria-label="配音声音"]')).toHaveCount(0)
