@@ -2,158 +2,144 @@
   <img src="public/brand-mark.png" alt="Open Media 图标" width="64" height="64" align="absmiddle" />&nbsp; Open Media
 </h1>
 
-本地录屏、分段 GIF、视频剪辑、视频生成、图像生成、歌曲生成、视频转换与图片编辑工作台。八个工作区共享素材，AI 模型由主应用统一管理，在同一项目中完成采集、创作与导出；支持浅色、深色和跟随系统主题。
+本地媒体创作工作台，包含录屏、片段转 GIF、视频生成、图像生成、歌曲生成、视频转换、图片编辑和视频剪辑。AI 模型由主应用统一管理，各工作区衔接采集、生成、编辑与导出，支持浅色、深色和跟随系统主题。
 
-[下载最新版本](https://github.com/ecojust/open-media/releases/latest) · [使用指南](docs/USAGE.md) · [常见授权问题](docs/USAGE.md#macos-授权与启动提示)
+[下载最新版本](https://github.com/ecojust/open-media/releases/latest) · [使用指南](docs/USAGE.md) · [MCP 接口](docs/MCP.md) · [常见授权问题](docs/USAGE.md#macos-授权与启动提示)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/editor-dark.png">
-  <img src="docs/screenshots/editor-light.png" alt="旅行短片剪辑：8 条轨道、28 个片段，包含标题字幕、画中画、动态水印、中文旁白、配乐和滤镜" width="1600">
+  <img src="docs/screenshots/editor-light.png" alt="Open Media 科普短片剪辑：章节标题、知识标签、字幕、画中画、转场、音效与背景音乐" width="1600">
 </picture>
 
-*40 秒旅行短片：10 个素材、8 条轨道、28 个片段。下面展示各工作区的完整创作场景，截图随页面主题切换。*
+*封面为 40 秒科普短片：10 个素材、8 条轨道、45 个片段。以下截图基于 v0.3.3，随页面主题切换；示例内容与拍摄说明见[截图说明](docs/screenshots/README.md)。*
 
-## 功能示例
+## 功能模块
 
 | 工作区 | 主要能力 |
 | --- | --- |
-| [屏幕录制](#屏幕录制) | 窗口、整屏与区域选择，录制尺寸、暂停继续、麦克风来源、快捷键截屏与自动复制 |
-| [片段转 GIF](#片段转-gif) | 多区间截取、片段重排、尺寸与帧率、循环设置、动图预览与下载 |
-| [视频剪辑](#视频剪辑) | 多轨编排、吸附与裁切、画中画、字幕、滤镜、转场、片头片尾、水印、背景音乐、离线配音与麦克风录音 |
-| [视频生成](#视频生成) | 模型按需下载、提示词、首尾帧、参考素材与分镜生成，后台进度、取消、预览及剪辑入库 |
-| [图像生成](#图像生成) | 按需下载图像模型、文生图与图生图、画幅与重绘强度、结果进入图片编辑或时间线 |
-| [歌曲生成](#歌曲生成) | 歌词歌曲与纯音乐、风格描述、时长、节拍与调性，生成音频可直接加入剪辑 |
-| [视频转换](#视频转换) | 批量处理、格式转换、分辨率、帧率与码率、片段截取、音频提取 |
-| [图片编辑](#图片编辑) | 文字与笔触、刻度裁剪、旋转翻转、批量导出、多尺寸 ICO 与剪贴板复制 |
+| [屏幕录制](#屏幕录制) | 窗口、整屏与区域录制，尺寸选择、暂停继续、麦克风来源、快捷键截屏与自动复制 |
+| [片段转 GIF](#片段转-gif) | 多区间截取与重排，尺寸、帧率、画质和循环设置，动图预览与导出 |
+| [视频生成](#视频生成) | 提示词、首尾帧、参考素材与分镜，低内存模式、任务进度及剪辑入库 |
+| [图像生成](#图像生成) | 文生图与图生图，画幅、步数、种子和重绘强度，结果衔接图片编辑 |
+| [歌曲生成](#歌曲生成) | 歌词歌曲与纯音乐，风格、时长、节拍、调性与语言，音频试听及剪辑入库 |
+| [视频转换](#视频转换) | 批量转码、片段截取、分辨率与码率设置、音频提取 |
+| [图片编辑](#图片编辑) | 画布缩放、文字与笔触、刻度裁剪、旋转翻转、多格式导出和剪贴板复制 |
+| [视频剪辑](#视频剪辑) | 多轨编辑、字幕与配音、滤镜、转场与音效、水印、片头片尾、音乐和工程保存 |
 
 ### 屏幕录制
 
-交互选择窗口、整屏或区域并设置输出尺寸；录制范围以红框标示，悬浮操作栏提供计时、暂停／继续、麦克风开关和停止。截屏可选择范围，完成后自动复制并进入图片编辑。
+选择窗口、整屏或区域并设置输出尺寸，支持麦克风来源选择。录制范围以红框标示，悬浮操作栏提供计时、暂停／继续、麦克风开关和停止；开始采集时自动收起应用。快捷键截屏完成后自动复制到剪贴板，并进入图片编辑。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/record-dark.png">
-  <img src="docs/screenshots/record-light.png" alt="录屏实际工作区：录制旅行拍摄计划演示页，显示红框、时长、暂停、停止和录制设置" width="1600">
+  <img src="docs/screenshots/record-light.png" alt="屏幕录制工作区：录制入口、截屏设置、视频列表与画面预览" width="1600">
 </picture>
-
-*网页录屏示例：采集「山野影像」演示页，输出 1280 × 720 画面，素材列表同时呈现四段旅行镜头。*
-
-<details>
-<summary>查看录制来源与输出尺寸选择</summary>
-
-<img src="docs/screenshots/record-picker.png" alt="录制范围选择：画面预览、来源尺寸、输出尺寸、麦克风控制和确认按钮" width="1600">
-
-</details>
 
 ### 片段转 GIF
 
-从同一个视频截取多个时间区间，调整片段顺序、输出尺寸、帧率、画质和循环方式；预览选段与生成后的动图，并直接下载结果。
+从视频截取多个区间并调整顺序，设置尺寸、帧率、画质和循环方式，预览后导出动图。桌面端左侧统一显示录屏目录与手动导入目录中的视频，按时间排序，方便连续处理。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/gif-dark.png">
-  <img src="docs/screenshots/gif-light.png" alt="四段旅行画面截取为 GIF：区间列表、起止时间、输出尺寸、帧率和已生成动图" width="1600">
+  <img src="docs/screenshots/gif-light.png" alt="片段转 GIF：视频列表、多区间截取、画面预览与输出参数" width="1600">
 </picture>
-
-*示例：将山谷、雪山、云雾和松林四个片段组合为 6 秒循环动图，输出宽度 640 像素、12 FPS。*
-
-### 视频剪辑
-
-多轨时间线支持拖动排序、分割裁剪、删除接拢和吸附定位。字幕、水印和画中画可在预览中直接拖动对齐；视频片段支持 12 种滤镜与参数调色。内置 10 种风格的纯音乐，支持试听、本地上传和独立背景音乐轨道。配音内置中英混合女声，另有按需下载的离线音色，支持本地试听、批量文字转语音、文字时长对齐及麦克风录音。
-
-画面尺寸可在预览上方实时调整，字幕背景随每行文字宽度绘制。内置 **35 种转场**，包含碎片爆散、旋涡碎片、碎片聚拢、像素消散、错峰切片、棋盘翻片、数字故障、环绕重组、拉链开幕和阶梯折屏，以及缩放淡化、圆形聚焦、柔光闪切和失焦过渡，在独立轨道中围绕视频切点前后各应用一半时长；“片头”和“片尾”分别提供 **19 款动态模板**，标题可编辑，也支持导入本地视频。片头插入项目开头并同步后移原有轨道，保持字幕、声音与画面对齐；片尾追加到项目结尾。
-
-桌面端内置 [MCP 服务](docs/MCP.md)，外部 AI 可通过 97 个工具操作当前打开工程的轨道、字幕、滤镜、转场、素材、配音、图像／视频／歌曲生成及导出，修改同步到当前剪辑界面；打开和切换工程由用户在界面中完成。
-
-工程视频压缩支持无损和按质量两种模式，导入后即可预处理，也可从单个视频右键压缩；素材卡显示文件大小和压缩前后大小。工作副本即时用于剪辑播放与特效合成预览，同源分割片段共享副本，原视频保留并可一键恢复。静止画面检测可按持续时间自动分割片段，以黄色 `repeat` 类型标记，保留内容并支持撤销。
-
-素材右键菜单提供媒体信息、取帧、联系表、场景检测和离线文字识别。片段属性支持关键帧、裁剪聚焦、定格、变速与音频处理；字幕和配音面板提供字幕文件、发音词典、时长预估与对齐策略。可生成局部视频或音频预览，添加章节标记，保存命名版本，并检查导出问题。离线语音识别模型按需下载，支持中英文及带时间戳的识别结果。
-
-**剪辑优化**集中提供节奏检查、声画对齐、旁白与音乐平衡、跨轨字幕样式统一和预览框选聚焦。等待区间先标记供检查，配音按实际时长对齐，音乐随人声自动降低；批量调整可整体撤销。
-
-封面示例同时编排标题、字幕、画中画、主视频、动态水印、旁白和配乐。内置水印库含 **五类共 548 个素材**，其中 132 个文字模板可直接编辑文案与样式。
-
-**通用样式**提供 24 款可编辑文字布局、8 种入退场动画和 16 款片头片尾。文案、配色、位置与时长可定制；12 种原生标注支持线宽与颜色调整，35 种转场按淡化、方向、几何、缩放、碎片和切片分类，并提供缓动与作用范围设置。标题、步骤、身份条、来源署名、比较标签可自由组合，适用于不同视频内容。
-
-素材设计、研究记录与验证范围见[通用素材说明](docs/GENERAL_MATERIALS.md)和[碎片与切片转场](docs/TRANSITION_STUDY.md)。
-
-<img src="docs/screenshots/general-materials.png" alt="通用文字模板定制：修改文案、文字颜色、背景、时长、位置与入退场动画，并显示实际渲染预览" width="1600">
-
-**科普精选**提供 16 款动态标注、8 款可编辑知识标签、6 款片头和 6 款片尾，覆盖测量、聚焦、引线、对比、流程、波形、天文、生命科学与工程等主题。动效采用分阶段入场与稳定停留，片头片尾的文字保留为独立可编辑片段；所有素材离线可用，也可通过 MCP 搜索“科普”并添加。
-
-<img src="docs/screenshots/science-materials.png" alt="科普精选素材库：测量刻度、聚焦括角、目标引线、波形窗口、对比分隔与步骤进度，支持预览和添加到时间线" width="1600">
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/watermarks-dark.png">
-  <img src="docs/screenshots/watermarks-light.png" alt="复杂多轨剪辑中打开水印库：500 个素材、五类各 100 个、分类搜索及实际素材卡片" width="1600">
-</picture>
-
-<details>
-<summary>查看可编辑文字水印模板</summary>
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/text-watermarks-dark.png">
-  <img src="docs/screenshots/text-watermarks-light.png" alt="可编辑文字水印：100 个不同题材模板，保留原生文字、字体、颜色和背景编辑能力" width="1600">
-</picture>
-
-</details>
 
 ### 视频生成
 
-独立工作区提供提示词、图片首尾帧、参考素材和分镜生成。分镜可调整顺序、镜头描述与时长，分别保留或合并输出；任务显示阶段、进度和耗时，支持取消，生成结果可预览并加入项目素材或时间线。MCP 使用同一套生成与任务接口。
+支持提示词、图片首尾帧、多素材参考和分镜生成；分镜可调整顺序与时长，分别保留或合并输出。提供画幅、步数、种子与低内存模式，后台任务显示阶段、进度和耗时，支持取消；完成的结果可预览并加入剪辑。
 
-本地生成引擎面向 Apple 芯片 Mac，模型按需下载，提供断点续传、文件校验及版本检测。基础模型约 144 GB，参考模式另需扩展权重；生成速度和内存需求取决于设备、分辨率、时长及质量设置。模型许可、硬件范围与验证状态见[视频生成说明](docs/VIDEO_GENERATION.md)。
+当前本地视频后端支持 macOS 15 及以上的 Apple 芯片 Mac，模型按需下载。硬件、磁盘需求与实际验证范围见[视频生成说明](docs/VIDEO_GENERATION.md)。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/video-generation-dark.png">
+  <img src="docs/screenshots/video-generation-light.png" alt="视频生成工作区：生成方式、分镜描述、画幅与低内存参数" width="1600">
+</picture>
 
 ### 图像生成
 
-提供 Qwen-Image 与 Z-Image-Turbo，支持文字生成图片和基于原图重绘。可调整画幅、步数、种子与重绘强度，生成图片可加入剪辑、时间线或图片编辑。基础图生图不等同于按局部指令编辑图片。
+提供 Qwen-Image 和 Z-Image-Turbo，支持文字生成图片及基于原图重绘。可设置画幅、步数、随机种子和重绘强度，结果可加入素材、时间线或图片编辑，继续添加文字与标注。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/image-generation-dark.png">
+  <img src="docs/screenshots/image-generation-light.png" alt="图像生成工作区：文生图提示词、排除内容、模型选择与生成参数" width="1600">
+</picture>
 
 ### 歌曲生成
 
-提供快速与标准两种歌曲模型，支持自备歌词、纯音乐、风格描述，以及时长、节拍、调性和演唱语言设置。生成的音频可试听并加入当前剪辑项目。
+支持自备歌词生成歌曲，也可生成纯音乐；提供风格描述、时长、节拍、调性和演唱语言设置。快速与标准模型按需下载，生成音频可试听并加入剪辑工程。
 
-**Info** 统一管理模型，配音、图像、视频、歌曲和语音识别按类别折叠显示，支持备用下载来源自动切换、剩余时间估算与共享任务状态；旧版已下载的配音与视频模型继续使用原缓存。新增模型及运行环境全部按需下载，不进入主应用安装包。设备范围、准确下载体积和验证边界见[共享 AI 模型说明](docs/AI_MODELS.md)。
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/music-generation-dark.png">
+  <img src="docs/screenshots/music-generation-light.png" alt="歌曲生成工作区：歌词、风格描述、纯音乐模式及节拍调性设置" width="1600">
+</picture>
 
 ### 视频转换
 
-批量转换视频，设置输出分辨率、帧率、视频与音频码率、采样率和截取区间。每项任务独立显示进度与结果，支持取消、预览和下载；桌面端支持 MP4、MOV、MKV、WebM 及常见音频格式。
+批量转换视频或提取音频，设置输出格式、分辨率、帧率、码率、采样率与截取区间。任务独立显示进度和结果，支持取消、预览及导出。桌面端素材列表读取 `recordings` 与 `import video`，手动导入保留原文件，内置素材与生成结果分别存储。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/video-convert-dark.png">
-  <img src="docs/screenshots/video-convert-light.png" alt="四段旅行视频批量转换：素材列表、已完成结果、720p 分辨率、24 FPS、码率和片段截取设置" width="1600">
+  <img src="docs/screenshots/video-convert-light.png" alt="视频转换：视频素材列表、批量任务、片段预览、格式与编码参数" width="1600">
 </picture>
-
-*示例：四个视频截取 1.5–7.5 秒区间，设置为 720p、24 FPS、4500 kbps 并批量生成 WebM；图中的完成项均为实际转换结果。*
 
 ### 图片编辑
 
-插入多段文字并调整字体、字号、颜色和位置；使用画笔、荧光笔及虚线笔触自由标注，支持撤销与重做。裁剪确认后即时更新主预览，复制和导出均包含当前编辑效果。
+在当前预览画布中完成文字、画笔、荧光笔、虚线笔触和刻度裁剪，支持缩放、平移、旋转翻转及撤销重做。裁剪与标注即时反映到预览，手动复制和导出保留编辑效果；每张图片独立保存编辑状态。
 
-支持旋转、翻转、尺寸与背景设置，以及 PNG、JPEG、WebP、BMP、ICO、静态 GIF、TIFF 等格式。每张图片保留独立裁剪与标注，多尺寸 ICO 可同时包含多种图标规格。
+支持 PNG、JPEG、WebP、BMP、ICO、静态 GIF、TIFF 等格式及批量输出，多尺寸 ICO 可包含多种图标规格。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/image-edit-dark.png">
-  <img src="docs/screenshots/image-edit-light.png" alt="旅行海报图片编辑：多图片素材、层次化标题与文案、自定义笔触、编辑后预览和导出结果" width="1600">
+  <img src="docs/screenshots/image-edit-light.png" alt="图片编辑：四张山野海报、七层文字、两条笔触与内联图层属性" width="1600">
 </picture>
 
-<details>
-<summary>查看文字与笔触编辑、刻度裁剪</summary>
+### 视频剪辑
+
+- **多轨编排**：轨道拖拽排序，片段分割、裁切、吸附与删除接拢，Ctrl + 滚轮缩放时间线；字幕、水印和画中画支持在预览中拖动定位。
+- **画面与动效**：实时调整工程尺寸，滤镜调色、关键帧、裁剪聚焦、定格与变速；淡化、缩放、几何、碎片和切片转场，搭配可编辑水印、标注、片头与片尾。
+- **字幕与声音**：字幕文件导入导出、样式复用、空文本检测，离线文字转语音、批量进度、配音时长对齐和麦克风录音；背景音乐、音频循环、响度处理及人声避让。
+- **效率与预览**：视频压缩工作副本、静止画面检测与黄色 `repeat` 标记，节奏检查、声画对齐、局部视频／音频预览、章节标记和导出检查，保留原始素材。
+- **工程管理**：新建、打开、保存与另存为，本地草稿自动保存、命名版本、撤销重做，项目文件可携带素材继续编辑。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/image-tools-dark.png">
-  <img src="docs/screenshots/image-tools-light.png" alt="旅行海报文字与笔触编辑：多层标注、颜色、字号、透明度、画笔与撤销操作" width="1600">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/editor-dark.png">
+  <img src="docs/screenshots/editor-light.png" alt="视频剪辑工作区：多轨时间线、预览合成、素材列表和片段属性" width="1600">
 </picture>
+
+**转场音效**内置 10 款原创短音效，可离线试听，将重音对齐视频切点后加入独立音频轨道。音效支持位置、音量、时长及淡入淡出调整，参与预览和导出，也可通过 MCP 添加。
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/image-crop-dark.png">
-  <img src="docs/screenshots/image-crop-light.png" alt="图片精细框选：像素标尺、细分网格、吸附步长、选区坐标及尺寸" width="1600">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/transition-sounds-dark.png">
+  <img src="docs/screenshots/transition-sounds-light.png" alt="转场音效素材库：风掠、低频冲击、晶粒闪烁、数字跳切，支持试听并对齐视频切点" width="1600">
 </picture>
 
-</details>
+## 共享模型中心
+
+Info 集中管理配音、图像、视频、歌曲和语音识别模型，按类别折叠显示下载状态、大小与硬件要求。支持备用下载来源自动切换、断点续传、文件校验、粗略剩余时间估算及已下载模型检查修复；下载和任务状态跨工作区共享。
+
+主应用内置基础离线配音，额外模型按需下载，所需运行组件由模型中心统一管理。生成能力、设备支持、模型占用及完整推理验证范围见[共享 AI 模型说明](docs/AI_MODELS.md)。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/model-center-dark.png">
+  <img src="docs/screenshots/model-center-light.png" alt="共享模型中心：分类模型列表、下载状态、大小和硬件要求" width="1600">
+</picture>
+
+## MCP 自动化
+
+桌面端提供 MCP 服务和可复制的连接配置，外部 AI 可操作**当前打开的工程**，覆盖素材导入、轨道与片段、字幕、滤镜、转场及音效、配音、模型管理、媒体生成、预览检查与导出。界面显示连接状态、正在调用的工具和任务进度；批量编辑支持版本校验与整体撤销。
+
+工程的新建、打开和切换由用户完成。完整能力、调用示例和异步任务说明见 [MCP 文档](docs/MCP.md)。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mcp-dark.png">
+  <img src="docs/screenshots/mcp-light.png" alt="MCP 服务配置：监听地址、访问 Token 与可复制的客户端配置" width="1600">
+</picture>
 
 ## 本地创作与保存
 
-素材保留原件，导出生成新文件。`.omedia` 项目可携带素材和时间线继续编辑；自动保存保留本地草稿，手动保存与另存为用于项目文件。
+素材保留原件，导出生成新文件。`.omedia` 项目可携带素材和时间线继续编辑；自动保存保留本地草稿，手动保存覆盖当前项目文件，另存为选择新位置。
 
-桌面安装包内置媒体处理和离线语音组件。网页端支持浏览器屏幕采集、剪辑、动图与常用图片处理，视频导出采用 WebM；可用格式以当前环境界面为准。屏幕和麦克风仅在主动操作并完成授权后采集。
+桌面安装包内置媒体处理和基础离线语音组件。网页端支持浏览器屏幕采集、剪辑、动图与常用图片处理，视频导出采用 WebM；可用格式以当前环境界面为准。屏幕和麦克风仅在主动操作并完成授权后采集。
 
 详细操作、快捷键、格式说明和 macOS 权限恢复见[使用指南](docs/USAGE.md)。
 
