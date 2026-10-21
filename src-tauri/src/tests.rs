@@ -8,6 +8,8 @@ use std::{
 };
 #[path = "media_performance_tests.rs"]
 mod media_performance_tests;
+#[path = "motion_style_export_tests.rs"]
+mod motion_style_export_tests;
 fn runtime() -> Runtime {
     Runtime::discover(None, None).expect("Media runtime required for integration checks")
 }

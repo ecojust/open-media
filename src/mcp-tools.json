@@ -7104,5 +7104,204 @@
         "final": true
       }
     }
+  },
+  {
+    "name": "open_media_motion_style_list",
+    "description": "查询风格成片的 15 类可编辑二维包装风格，返回 items、total、count、配色、标签和能力说明。search 可按名称、说明、标签或风格 ID 过滤。使用当前工程素材组合背景、装饰、文字、关键帧和入退场动画，不生成真实三维模型、流体模拟或素材轮廓变形。\n执行方式：同步返回最终结果，只读查询。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "search": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result",
+        "final": true
+      }
+    }
+  },
+  {
+    "name": "open_media_motion_compose",
+    "description": "使用当前工程已导入的图片或视频，按指定风格编排可编辑的多轨成片：背景、装饰、素材、标题说明、关键帧、入退场动画及可选配乐与 Logo。按 scenes 顺序排列，尺寸沿用当前工程；默认 append 追加，prepend 前插并顺延原时间线和标记，不新建或替换工程。每场默认 4 秒，可设置 2–12 秒；视频可从 trimIn 开始，剩余不足时缩短场景并返回 warnings，不自动循环补足。dryRun=true 只预检并返回编排计划，不导入装饰或修改工程；正式成功只产生一次撤销记录，返回 clipIds、trackIds、sceneCount、start、duration、warnings。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可通过 open_media_job_cancel({id:jobId}) 取消；失败或取消不会写入部分时间线。",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "styleId",
+        "scenes"
+      ],
+      "properties": {
+        "styleId": {
+          "type": "string",
+          "enum": [
+            "paper-ink",
+            "iso-cards",
+            "flat-pop",
+            "line-focus",
+            "studio-depth",
+            "shape-rhythm",
+            "sticker-notes",
+            "tech-hud",
+            "editorial-collage",
+            "aurora-glass",
+            "geometric-grid",
+            "neon-retro",
+            "pixel-arcade",
+            "liquid-color",
+            "expressive-type"
+          ]
+        },
+        "scenes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "assetId"
+            ],
+            "properties": {
+              "assetId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160,
+                "description": "当前工程中的图片或视频素材 ID。"
+              },
+              "heading": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "caption": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "duration": {
+                "type": "number",
+                "minimum": 2,
+                "maximum": 12,
+                "default": 4
+              },
+              "trimIn": {
+                "type": "number",
+                "minimum": 0,
+                "description": "视频源起点，单位秒；图片不使用此参数。"
+              }
+            }
+          }
+        },
+        "placement": {
+          "type": "string",
+          "enum": [
+            "append",
+            "prepend"
+          ],
+          "default": "append"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "accent": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "textColor": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}$"
+        },
+        "musicAssetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "当前工程中的音频素材 ID，添加到配乐轨道。"
+        },
+        "musicVolume": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "sourceAudio": {
+          "type": "boolean"
+        },
+        "tempo": {
+          "type": "string",
+          "enum": [
+            "calm",
+            "balanced",
+            "energetic"
+          ]
+        },
+        "logoAssetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "description": "当前工程中的图片素材 ID。"
+        },
+        "dryRun": {
+          "type": "boolean",
+          "default": false
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "asynchronous",
+        "responseType": "job",
+        "jobIdField": "jobId",
+        "statusField": "state",
+        "pollingTool": "open_media_job_get",
+        "cancelTool": "open_media_job_cancel",
+        "resultField": "result",
+        "errorField": "errorDetails",
+        "terminalStates": [
+          "completed",
+          "failed",
+          "cancelled"
+        ]
+      }
+    }
   }
 ]

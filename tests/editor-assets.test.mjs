@@ -24,6 +24,22 @@ test('项目素材只排除显式内置用途，普通录屏、配音、录音�
   assert.deepEqual(project, before)
 })
 
+test('风格背景与装饰保存后仍归类隐藏，用户同名图片继续作为可选素材', () => {
+  const project = createProject()
+  const image = (id, patch = {}) => video(id, { name: '风格成片-背景.png', kind: 'image', duration: 0, mime: 'image/png', ...patch })
+  project.assets.push(image('user-photo'), image('style-background', { libraryRole: 'motion-style' }), image('style-decoration', { libraryRole: 'motion-style' }))
+  project.tracks[1].clips.push(createClip(project.assets[1], project), createClip(project.assets[2], project))
+  const json = JSON.stringify(project)
+  for (const trusted of [true, false]) {
+    const reopened = validateProject(JSON.parse(json), { trusted })
+    assert.deepEqual(projectSourceAssets(reopened).map(asset => asset.id), ['user-photo'])
+    assert.deepEqual(reopened.assets.map(asset => asset.libraryRole), [undefined, 'motion-style', 'motion-style'])
+    assert.deepEqual(reopened.tracks[1].clips.map(clip => clip.assetId), ['style-background', 'style-decoration'])
+  }
+  const invalid = JSON.parse(json); invalid.assets[1].libraryRole = 'unrecognized-role'
+  assert.throws(() => validateProject(invalid, { trusted: true }), /素材库用途/)
+})
+
 test('选中目录中的一项才原子登记到工程、添加片段并匹配首视频尺寸，撤销一步恢复全部', () => {
   const library = [video('first'), video('selected'), video('third')]
   const project = createProject(), before = structuredClone({ project, library })

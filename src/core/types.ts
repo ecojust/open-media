@@ -44,7 +44,7 @@ export interface MediaAsset {
   addedAt?: string
   /** Built-in library material role; ordinary imported files have no role. */
   provenance?: { kind: 'upload' | 'url'; name?: string; url?: string; finalUrl?: string; mimeType?: string; sha256: string; size?: number; importedAt: number }
-  libraryRole?: 'watermark' | 'background-music' | 'video-segment' | 'transition-sound'
+  libraryRole?: 'watermark' | 'background-music' | 'video-segment' | 'transition-sound' | 'motion-style'
   /** Generated working copy; the original remains an ordinary project asset. */
   compression?: {
     originalAssetId: string

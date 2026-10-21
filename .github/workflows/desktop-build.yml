@@ -126,6 +126,12 @@ jobs:
           node tests/browser/preview-blur.cjs --native 2>&1 | tee -a test-results/browser/browser.log
         env:
           BROWSER_ARTIFACTS: test-results/browser
+      - name: Verify generated motion composition through native export
+        env:
+          OPEN_MEDIA_MOTION_FIXTURE: ${{ github.workspace }}/test-results/browser/motion-style-render/native-project.json
+        run: |
+          set -o pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --locked --lib browser_composed_motion_style_exports_real_frames_and_audio -- --ignored --nocapture 2>&1 | tee test-results/browser/motion-style-render/native-export.log
       - name: Summarize browser failures
         if: failure() && steps.browser.outcome == 'failure'
         run: node scripts/report-build-failure.mjs test-results/browser/browser.log

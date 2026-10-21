@@ -5,6 +5,7 @@ import { createClip, createProject, createSubtitleClip, validateProject } from '
 import { addAsset, addClip, findClip, setTrack, projectDuration } from '../src/core/timeline.ts'
 import { addTransition, TRANSITION_PRESETS } from '../src/core/transitions.ts'
 import { applySpeechResults, planSpeech } from '../src/core/speech.ts'
+import { MOTION_STYLES } from '../src/core/motion-style-catalog.ts'
 import aiTools from '../src/mcp-ai-tools.json' with { type: 'json' }
 
 function fixture() {
@@ -28,7 +29,7 @@ function assertUnchangedAfterFailure(project, tool, args, regex) {
 }
 
 test('MCP catalog is unique, restrictive and contains the declared runtime and editing operations', () => {
-  assert.equal(MCP_TOOLS.length, 97)
+  assert.equal(MCP_TOOLS.length, 99)
   assert.equal(new Set(MCP_TOOLS.map(tool => tool.name)).size, MCP_TOOLS.length)
   assert.equal(MCP_TOOLS.filter(tool => isProjectTool(tool.name)).length, 39)
   for (const tool of MCP_TOOLS) {
@@ -53,6 +54,35 @@ test('shared AI tool contracts are identical to the published aggregate catalog'
     assert.equal(tool._meta['openmedia/execution'].pollingTool, 'open_media_job_get')
     assert.equal(tool._meta['openmedia/execution'].cancelTool, 'open_media_job_cancel')
   }
+})
+
+test('motion composition advertises bounded asset-driven inputs and distinct execution contracts', () => {
+  const list = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_style_list')
+  const compose = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_compose')
+  assert.equal(list.annotations.readOnlyHint, true)
+  assert.equal(list._meta['openmedia/execution'].mode, 'synchronous')
+  assert.equal(compose.annotations.readOnlyHint, false)
+  assert.equal(compose.annotations.idempotentHint, false)
+  assert.equal(compose._meta['openmedia/execution'].mode, 'asynchronous')
+  assert.equal(compose._meta['openmedia/execution'].pollingTool, 'open_media_job_get')
+  assert.equal(compose._meta['openmedia/execution'].cancelTool, 'open_media_job_cancel')
+  assert.deepEqual(compose.inputSchema.properties.styleId.enum, MOTION_STYLES.map(style => style.id))
+  const validate = args => validateMcpToolArguments(compose.name, args)
+  const scene = { assetId: 'existing-video', heading: '标题', caption: '素材说明', duration: 4, trimIn: 1 }
+  const base = { styleId: 'tech-hud', scenes: [scene] }
+  assert.doesNotThrow(() => validate({ ...base, placement: 'prepend', title: '说明片', accent: '#abcdef', background: '#010203', textColor: '#FFFFFF', musicAssetId: 'existing-audio', musicVolume: 0.25, sourceAudio: true, tempo: 'energetic', logoAssetId: 'existing-image', dryRun: true, expectedRevision: 7, expectedProjectId: 'current-project' }))
+  assert.doesNotThrow(() => validate({ ...base, scenes: Array.from({ length: 16 }, () => ({ ...scene, heading: '字'.repeat(120), caption: '字'.repeat(240), duration: 12 })) }))
+  for (const patch of [
+    { styleId: 'unknown-style' }, { scenes: [] }, { scenes: Array(17).fill(scene) },
+    { scenes: [{ ...scene, duration: 1.99 }] }, { scenes: [{ ...scene, duration: 12.01 }] },
+    { scenes: [{ ...scene, trimIn: -1 }] }, { scenes: [{ ...scene, duration: NaN }] },
+    { scenes: [{ ...scene, heading: '字'.repeat(121) }] }, { scenes: [{ ...scene, caption: '字'.repeat(241) }] },
+    { scenes: [{ assetId: '  ' }] }, { scenes: [{ ...scene, url: 'https://example.test/source.mp4' }] },
+    { title: '字'.repeat(121) }, { accent: 'red' }, { textColor: '#fff' }, { background: 'url(file:///private/source)' },
+    { musicVolume: -0.01 }, { musicVolume: 1.01 }, { placement: 'replace' }, { tempo: 'random' },
+    { width: 1920 }, { sourceAudio: 'yes' }, { dryRun: 'yes' },
+  ]) assert.throws(() => validate({ ...base, ...patch }), undefined, JSON.stringify(patch))
+  assert.throws(() => validateMcpToolArguments(list.name, { search: '字'.repeat(201) }), /长度/)
 })
 
 test('project inspection returns IDs and timing while omitting private asset capabilities', () => {

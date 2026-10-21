@@ -16,6 +16,7 @@ import { beginVideoGeneration, beginVideoModelDownload, cancelVideoGeneration, c
 import { applyMcpVideoGeneration, prepareMcpVideoGeneration } from './mcp-video-generation.ts'
 import { beginAiGeneration, cancelAiJob, cancelAiModelDownload, downloadAiModel, getAiJob, getAiStatus, repairAiModel } from '../native-ai.ts'
 import { applyMcpAiGeneration, prepareMcpAiGeneration, publicAiJob, publicAiStatus } from './mcp-ai-generation.ts'
+import { MOTION_STYLES } from './motion-style-catalog.ts'
 
 export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
 export interface McpAutomationHost {
@@ -169,6 +170,19 @@ export function createMcpAutomation(host: McpAutomationHost) {
     if (expectedProjectId !== undefined && expectedProjectId !== host.getProject().id) throw new Error(`当前工程已变化：当前 projectId=${host.getProject().id}，请先重新读取当前工程。`)
     const startTool = (kind: string, label: string, action: (operation: Operation) => Promise<unknown>) => start(kind, label, action, name)
     if (args.expectedRevision !== undefined && args.expectedRevision !== host.getRevision()) throw new Error(`项目版本已变化：当前 revision=${host.getRevision()}，请先重新读取项目。`)
+    if (name === 'open_media_motion_style_list') {
+      const search = typeof args.search === 'string' ? args.search.trim().toLocaleLowerCase() : ''
+      const items = MOTION_STYLES.filter(style => !search || [style.id, style.name, style.description, ...style.tags].join(' ').toLocaleLowerCase().includes(search))
+      return {
+        items: structuredClone(items), total: MOTION_STYLES.length, count: items.length,
+        capabilities: {
+          editable: true, rendering: '2d',
+          description: '利用当前工程素材编排背景、装饰、文字、关键帧和入退场动画，生成可继续编辑的多轨时间线。',
+          limitations: ['不生成真实三维模型或物理模拟。', '不执行流体模拟、逐帧折射或用户素材轮廓变形。'],
+        },
+        projectId: host.getProject().id, revision: host.getRevision(),
+      }
+    }
     if (isProjectTool(name)) {
       const revision = host.getRevision(), projectSession = host.getProjectSession?.(), source = host.getProject(), result = executeProjectTool(source, name, args)
       if (result.project) {

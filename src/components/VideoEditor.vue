@@ -41,6 +41,7 @@ import ProjectToolsPanel from './editor-tools/ProjectToolsPanel.vue'
 import VisualElementsPanel from './editor-tools/VisualElementsPanel.vue'
 import PreviewToolsPanel from './editor-tools/PreviewToolsPanel.vue'
 import EditingAssistPanel from './editor-tools/EditingAssistPanel.vue'
+import MotionStyleComposer from './MotionStyleComposer.vue'
 import type { AssetToolAction, EditorToolRunner } from './editor-tools/types'
 import OverlayProperties from './editor-tools/OverlayProperties.vue'
 import MotionPresetControls from './editor-tools/MotionPresetControls.vue'
@@ -87,7 +88,7 @@ const assetFilter = ref('all')
 const native = isDesktop()
 const assetSource = ref<'recordings' | 'imported'>(native ? 'recordings' : 'imported')
 const search = ref('')
-const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | 'asset-tools' | 'subtitle-tools' | 'project-tools' | 'visual-elements' | 'preview-tools' | 'editing-assist' | 'idle-split' | 'asset-compression' | null>(null)
+const editorDialog = ref<'speech' | 'project' | 'watermark' | 'music' | 'segment' | 'transition' | 'asset-tools' | 'subtitle-tools' | 'project-tools' | 'visual-elements' | 'preview-tools' | 'editing-assist' | 'motion-style' | 'idle-split' | 'asset-compression' | null>(null)
 const assistOpened = ref(false), focusPicking = ref(false)
 const focusRegion = shallowRef<NormalizedRect>()
 const modalOpen = computed(() => editorDialog.value !== null)
@@ -1547,6 +1548,7 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
         <button class="editor-primary" title="导入素材" aria-label="导入素材" @click="importEditorAssets()"><Icon name="import" :size="16" /><span>导入素材</span></button>
         <button title="文字转语音" aria-label="文字转语音" :class="{ 'editor-primary': editorDialog === 'speech' }" @click="openSpeech"><Icon name="audio" :size="16" /><span>配音</span></button>
         <button title="检查节奏、对齐讲解与平衡声音" aria-label="剪辑优化" aria-haspopup="dialog" data-testid="editing-assist-open" :disabled="!!exportDisabled" @click="openEditorDialog('editing-assist')"><Icon name="sliders" :size="16" /><span>剪辑优化</span></button>
+        <button v-if="runTool" title="用素材、文字与动画编排风格成片" aria-label="风格成片" aria-haspopup="dialog" data-testid="motion-style-open" :disabled="!!exportDisabled" @click="openEditorDialog('motion-style')"><Icon name="sparkles" :size="16" /><span>风格成片</span></button>
       </div>
       <div class="editor-output-actions">
         <button class="mcp-service-button" :class="{ connected: mcpConnected }" :title="mcpConnected ? 'MCP 服务 · 客户端已连接' : 'MCP 服务 · 暂无客户端连接'" :aria-label="mcpConnected ? 'MCP 服务，客户端已连接' : 'MCP 服务，暂无客户端连接'" aria-haspopup="dialog" data-testid="editor-mcp-open" @click="emit('openMcp')"><Icon name="mcp" :size="18" /></button>
@@ -1724,6 +1726,9 @@ defineExpose({ getCanvas: () => canvas.value, pause, seek, getPlayback, setPlayb
     <EditorDialog :open="editorDialog === 'editing-assist'" title="剪辑优化" icon="sliders" wide :busy="toolBusy" busy-message="正在处理，请等待完成或取消任务。" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
       <EditingAssistPanel v-if="assistOpened" :key="project.id" :native="native" :project="project" :selected-clip-id="selectedId || undefined" :run-tool="runTool" :disabled="editingBusy || !!exportDisabled" @busy="setToolBusy" @change="applyAssistChange" @seek="locateAssistResult" @status="emit('status', $event)" @focus="startFocusPick" @chapters="openProjectTools('markers')" @titles="openEditorDialog('visual-elements')" />
     </EditorDialog>
+    <EditorDialog class="motion-style-dialog" :open="editorDialog === 'motion-style'" title="风格成片" icon="sparkles" wide :busy="toolBusy" busy-message="正在准备动画图层，可取消后继续编辑。" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
+      <MotionStyleComposer v-if="runTool && editorDialog === 'motion-style'" :key="project.id" :project="project" :run="runTool" @busy="setToolBusy" @status="emit('status', $event)" @complete="locateAssistResult" @import="closeEditorDialog(); importEditorAssets()" />
+    </EditorDialog>
     <EditorDialog :open="editorDialog === 'project'" title="项目设置" icon="settings" :busy="toolBusy" busy-message="请先完成或取消工程视频处理，再关闭设置。" :return-focus="dialogReturnFocus" @close="closeEditorDialog">
         <div class="property-content project-settings-content">
           <fieldset :disabled="editingBusy || !!exportDisabled"><h3>画面</h3>
@@ -1859,5 +1864,6 @@ button,input,textarea{font:inherit}button{display:inline-flex;align-items:center
 </style>
 
 <style scoped>
+.motion-style-dialog.wide{width:min(1000px,calc(100vw - 24px))}
 .timeline-marker{position:absolute;bottom:0;z-index:2;transform:translateX(-50%);width:16px;height:15px;min-height:0;padding:0;border:0;border-radius:3px;background:var(--ed-panel);cursor:pointer}.timeline-marker:hover:not(:disabled){background:var(--ed-accent-soft)}
 </style>

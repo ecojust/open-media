@@ -40,4 +40,15 @@ node scripts/screenshots-editor.cjs
 
 需要本地浏览器；视频列表脚本还需要媒体编码命令。各脚本启动临时开发服务，结束时释放浏览器与服务。
 
-目录中其余图片为历史文档配图，当前 README 只使用上表中的 11 组截图。
+## 风格成片截图
+
+新增 `motion-style-light.png` 与 `motion-style-dark.png` 对应 v0.3.4 的风格成片界面，尺寸为 1440 × 1100。`motion-style-gallery.png` 展示同一组素材在实际时间线中生成的 15 种横屏画面。
+
+```sh
+node tests/browser/motion-style-ui.cjs
+node tests/browser/motion-style-render.cjs
+```
+
+两项使用本地示例图片、视频和配乐，分别验证界面操作与实际合成，不调用录屏或麦克风。脚本在临时目录写出截图、可解码的视频和原生导出测试工程；设置 `BROWSER_ARTIFACTS` 可指定报告位置。
+
+目录中其余图片为历史文档配图，当前 README 使用上表 11 组工作区截图及新增风格成片截图。
