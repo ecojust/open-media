@@ -127,7 +127,7 @@ async function main() {
     await page.getByRole('menuitem', { name: '添加到工程素材', exact: true }).click()
     assert.equal(await page.evaluate(() => window.generationHarness.added.at(-1).id), 'persisted-video')
     await page.getByRole('button', { name: '打开视频生成目录', exact: true }).click()
-    assert.deepEqual(await page.evaluate(() => window.generationHarness.calls.filter(call => call.command === 'open_workspace_directory').at(-1).args), { category: 'videogen' })
+    await expect.poll(() => page.evaluate(() => window.generationHarness.calls.filter(call => call.command === 'open_workspace_directory').map(call => call.args))).toEqual([{ category: 'videogen' }])
     assert.deepEqual(await page.evaluate(() => [...new Set(window.generationHarness.calls.filter(call => call.command === 'list_workspace_assets').flatMap(call => call.args.categories))]), ['videogen'])
     await page.evaluate(() => { window.generationHarness.supported = false; window.generationHarness.models.forEach(model => { model.state = 'unsupported' }) })
     await page.getByRole('button', { name: '重新检查模型', exact: true }).click()

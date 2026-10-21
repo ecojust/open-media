@@ -631,6 +631,7 @@ mod tests {
         fs::create_dir(&legacy_root).unwrap();
         let legacy = legacy_root.join("旧录屏.mp4");
         fs::copy(&source, &legacy).unwrap();
+        let legacy = legacy.canonicalize().unwrap();
         modified(&legacy, 1_700_000_100);
         let ignored = store
             .import(&runtime, &source, Some("旧通用素材.mp4"))
@@ -653,11 +654,11 @@ mod tests {
         assert!(!listed.assets.iter().any(|item| item.asset.native_path == legacy.to_string_lossy()));
         assert_eq!(
             listed.directories["recording"],
-            directory.path().join("recording").to_string_lossy()
+            directory.path().join("recording").canonicalize().unwrap().to_string_lossy()
         );
         assert_eq!(
             listed.directories["imagegen"],
-            directory.path().join("imagegen").to_string_lossy()
+            directory.path().join("imagegen").canonicalize().unwrap().to_string_lossy()
         );
         assert_eq!(
             listed

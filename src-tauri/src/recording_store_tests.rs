@@ -116,8 +116,9 @@ fn workspace_and_project_paths_are_authorized_and_internal_roots_cannot_be_overw
         fs::create_dir_all(&root).unwrap();
         let old = root.join("old.mp4");
         fs::write(&old, b"existing project reference").unwrap();
-        assert_eq!(store.authorized_path(&asset_path(&old)).unwrap(), old);
-        assert!(store.is_internal_path(&old));
+        let canonical = old.canonicalize().unwrap();
+        assert_eq!(store.authorized_path(&asset_path(&old)).unwrap(), canonical);
+        assert!(store.is_internal_path(&canonical));
         assert_eq!(fs::read(&old).unwrap(), b"existing project reference");
     }
 }

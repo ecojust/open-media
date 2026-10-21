@@ -135,7 +135,7 @@ async function main(){
     await page.getByRole('menuitem',{name:'添加到工程素材',exact:true}).click()
     assert.equal(await page.evaluate(()=>window.aiHarness.added.at(-1).id),'stored-music')
     await page.getByRole('button',{name:'打开歌曲生成目录',exact:true}).click()
-    assert.deepEqual(await page.evaluate(()=>window.aiHarness.calls.filter(call=>call.command==='open_workspace_directory').map(call=>call.args.category)),['imagegen','musicgen'])
+    await expect.poll(()=>page.evaluate(()=>window.aiHarness.calls.filter(call=>call.command==='open_workspace_directory').map(call=>call.args.category))).toEqual(['imagegen','musicgen'])
     await page.getByRole('button',{name:'切换工作区',exact:true}).click()
     await page.setViewportSize({width:520,height:900})
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
