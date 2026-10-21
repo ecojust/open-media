@@ -13,7 +13,7 @@ async function main() {
     await page.route('**/motion-native-fixture', route => route.fulfill({ contentType: 'text/html', body: '<main>效果片段生命周期</main>' }))
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/motion-native-fixture`)
     const result = await page.evaluate(async () => {
-      const { createProject, createClip, createTextClip } = await import('/src/core/project.ts')
+      const { createProject, createClip, createTextClip, createTrack } = await import('/src/core/project.ts')
       const { renderMotionClip } = await import('/src/native-motion-clip.ts')
       const project = createProject('临时效果片段', { width: 1440, height: 810, fps: 48 })
       const source = { id: 'video', kind: 'video', name: '原素材.mp4', url: 'asset://localhost/source.mp4', nativePath: '/safe/media/source.mp4', width: 160, height: 90, duration: 2, size: 100, mime: 'video/mp4' }
@@ -21,15 +21,19 @@ async function main() {
       canvas.getContext('2d').fillRect(0, 0, 32, 32)
       const png = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
       const art = { id: 'art', kind: 'image', name: '背景.png', url: URL.createObjectURL(png), width: 32, height: 32, duration: 5, size: png.size, mime: 'image/png' }
-      project.assets = [source, art]
+      const unusedArt = { ...art, id: 'unused-art', name: '未使用.png' }
+      project.assets = [source, art, unusedArt]
       project.tracks.find(track => track.kind === 'video').clips = [createClip(source, project)]
       project.tracks.find(track => track.kind === 'text').clips = [createTextClip(project, { text: '原生效果片段', trimOut: 2 })]
+      const background = createTrack('video', '背景图层')
+      background.clips = [createClip(art, project, { trimOut: 2 })]
+      project.tracks.push(background)
       const original = JSON.stringify(project)
       let mode = 'success', calls = [], release, progress = [], spec
       const wait = async name => { if (mode === name) await new Promise(resolve => { release = resolve }) }
       const ready = { ...source, id: 'result', name: '效果片段.mp4', nativePath: '/safe/media/motion-clip-scope/result.mp4', width: 1440, height: 810 }
       window.__TAURI_INTERNALS__ = { convertFileSrc: path => `asset://localhost${path}`, invoke: async (command, args) => {
-        calls.push({ command, id: args?.id, scopeId: args?.scopeId })
+        calls.push({ command, id: args?.id, scopeId: args?.scopeId, name: args?.name })
         if (command === 'create_motion_clip_scope') { await wait('late-scope'); return 'scope' }
         if (command === 'import_motion_clip_asset') {
           await wait('late-import')
@@ -87,7 +91,11 @@ async function main() {
     assert.equal(result.output.kind, 'video'); assert.match(result.output.url, /^asset:/)
     assert.equal(result.acceptCalls, 1); assert.equal(result.acceptDiscards, 0)
     assert.equal(result.imports.length, 2); assert(result.imports.every(call => call.scopeId === 'scope'))
+    assert(result.imports.some(call => call.name === '背景.png'))
+    assert(!result.imports.some(call => call.name === '未使用.png'), '未使用的图片不能占用临时 PNG 导入与编码准备')
+    assert.equal(result.spec.project.assets.find(asset => asset.id === 'unused-art').nativePath, undefined)
     assert(result.spec.project.assets.find(asset => asset.id === 'art').nativePath.includes('/inputs/'))
+    assert(result.spec.project.tracks.some(track => track.clips.some(clip => clip.assetId === 'art')))
     assert.equal(result.spec.project.assets.find(asset => asset.id === 'video').nativePath, '/safe/media/source.mp4')
     assert.equal(Object.keys(result.spec.textAssets).length, 1)
     assert(result.progress.some(update => update.encodedFrames === 7 && update.outputTime === .15))
@@ -107,7 +115,7 @@ async function main() {
     assert.match(result.staleError, /当前工程已变化/)
     assert(result.staleCleanup.some(call => call.command === 'cancel_media_job'))
     assert(result.staleCleanup.some(call => call.command === 'discard_motion_clip'))
-    console.log('PASS native effect clip bridge: scoped PNGs, 1440×810/48fps, progress, source immutability, accept/discard ownership, failed output, delayed scope/import/launch cancellation, stale project cleanup')
+    console.log('PASS native effect clip bridge: used artwork and text scoped PNGs, unused image skipped, 1440×810/48fps, progress, source immutability, accept/discard ownership, failed output, delayed scope/import/launch cancellation, stale project cleanup')
   } finally { await browser?.close(); await server.close() }
 }
 
