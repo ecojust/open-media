@@ -149,7 +149,10 @@ async function mount(page, url) {
         if (command === 'audio_tool_begin') return { id: 'audio-tool-1', state: 'completed', progress: 1, stage: '处理完成', result: args.spec.action === 'analyze' ? { integratedLufs: -18.5, truePeakDbtp: -2, loudnessRange: 3, measured: true, peakDbfs: -.05, possibleClipping: true, silenceIntervals: [{ start: 1, end: 1.5, duration: .5 }] } : { asset: { ...audioAsset, id: `processed-${fixture.calls.length}` }, before: { integratedLufs: -18.5 }, after: { integratedLufs: -16, truePeakDbtp: -1 } } }
         if (command === 'audio_tool_accept') return null
         if (command === 'get_speech_status') return { ready: true, voices: [{ id: 'fixture-voice', name: '测试音色', language: 'zh-CN', gender: 'female', status: 'bundled' }] }
-        if (command === 'begin_speech_job') return { id: 'speech-preview-1', state: 'completed', progress: 1, stage: '试听就绪', asset: { ...audioAsset, id: 'preview-audio', name: '配音试听.wav' } }
+        if (command === 'begin_speech_job') {
+          if (args.request.voiceId !== 'fixture-voice') throw new Error('所选音色不可用，请选择测试音色。')
+          return { id: 'speech-preview-1', state: 'completed', progress: 1, stage: '试听就绪', asset: { ...audioAsset, id: 'preview-audio', name: '配音试听.wav' } }
+        }
         if (command === 'discard_speech_job' || command === 'accept_speech_jobs') return null
         throw new Error(`Unexpected native command: ${command}`)
       },
@@ -379,6 +382,10 @@ async function main() {
 
     await page.getByRole('button', { name: '文字转语音', exact: true }).first().click()
     const speechDialog = page.getByRole('dialog', { name: '文字转语音', exact: true })
+    const testVoice = speechDialog.getByRole('button', { name: '选择 测试音色', exact: true })
+    await expect(testVoice).toHaveAttribute('aria-pressed', 'false')
+    await testVoice.click()
+    await expect(testVoice).toHaveAttribute('aria-pressed', 'true')
     const speech = page.getByTestId('speech-tools-panel')
     await speech.getByText('读法、时长与对齐设置', { exact: true }).click()
     await speech.getByText('读法词典', { exact: true }).click()
@@ -400,6 +407,8 @@ async function main() {
     await expect(speech.getByLabel('自定义配音试听', { exact: true })).toBeVisible()
     await expect.poll(() => speech.getByLabel('自定义配音试听', { exact: true }).evaluate(el => el.duration)).toBe(5)
     await expect(speech.getByRole('button', { name: '保存试听音频' })).toBeVisible()
+    const speechRequest = await page.evaluate(() => window.editorTools.calls.filter(call => call.command === 'begin_speech_job').at(-1).args.request)
+    assert.equal(speechRequest.voiceId, 'fixture-voice', '自定义试听必须使用用户明确选择的音色')
     assert.equal((await read(page)).assets.length, assetsBeforePreview)
     assert(await page.evaluate(() => window.editorTools.calls.some(call => call.command === 'discard_speech_job' && call.args.id === 'speech-preview-1')))
     await close(page, '文字转语音')
