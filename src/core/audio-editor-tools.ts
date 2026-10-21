@@ -5,7 +5,7 @@ import type { EditorToolContext, PreparedEditorTool } from './editor-tool-servic
 import type { Clip, MediaAsset, Project } from './types.ts'
 import { cloneProject, validateProject } from './project.ts'
 import { clipDuration, clipEnd, findClip } from './timeline.ts'
-import { getSpeechSettings, validateSpeechSettings } from './speech-settings.ts'
+import { assertMcpSpeechVoice, getSpeechSettings, resolveMcpSpeechVoice, validateSpeechSettings } from './speech-settings.ts'
 import { applySpeechPronunciation, getSpeechPronunciation, setSpeechPronunciation, validateSpeechPronunciation } from './speech-pronunciation.ts'
 import { getSpeechAlignment, setSpeechAlignment, speechTimingPlan, validateSpeechAlignment } from './speech-timing.ts'
 import { exportSubtitles, importSubtitles, importSubtitleCues, type SubtitleFormat, type SubtitleFileOptions } from './subtitle-files.ts'
@@ -66,10 +66,12 @@ async function localAsset(asset: MediaAsset, context: EditorToolContext, depende
 async function previewSpeech(args: Record<string, unknown>, context: EditorToolContext, deps: AudioEditorDependencies): Promise<PreparedEditorTool> {
   const text = textArg(args, 'text').trim()
   if ([...text].length > 4000) throw new Error('单段配音最多支持 4000 字。')
-  const status = await deps.native.getSpeechStatus(); check(context)
   const saved = getSpeechSettings()
-  const settings = validateSpeechSettings({ voiceId: args.voiceId ?? saved.voiceId, rate: args.rate ?? saved.rate, alignText: true })
-  const voice = settings.voiceId ? status.voices.find(voice => voice.id === settings.voiceId) : status.voices.find(voiceReady)
+  const settings = validateSpeechSettings({ voiceId: resolveMcpSpeechVoice(args.voiceId), rate: args.rate ?? saved.rate, alignText: true })
+  const status = await deps.native.getSpeechStatus(); check(context)
+  assertMcpSpeechVoice(settings.voiceId)
+  if (!status.ready) throw new Error(status.error || '语音组件暂不可用。')
+  const voice = status.voices.find(voice => voice.id === settings.voiceId)
   if (!voiceReady(voice)) throw new Error('所选配音模型尚未就绪，请先下载模型及运行组件。')
   let id: string = crypto.randomUUID()
   const abort = () => { void deps.native.cancelSpeechJob(id).catch(() => {}) }
@@ -79,11 +81,12 @@ async function previewSpeech(args: Record<string, unknown>, context: EditorToolC
     id = job.id
     for (;;) {
       check(context)
+      assertMcpSpeechVoice(settings.voiceId)
       context.onProgress({ stage: job.stage || '正在合成试听', progress: job.progress })
       if (job.state === 'failed' || job.state === 'cancelled') throw new Error(job.error || '试听生成已取消。')
       if (job.state === 'completed') {
         if (!job.asset || job.asset.kind !== 'audio' || !job.asset.nativePath || !Number.isFinite(job.asset.duration) || job.asset.duration <= 0) throw new Error('配音结果没有有效音频。')
-        return { data: { asset: job.asset, text, voiceId: voice!.id, rate: settings.rate, addedToTimeline: false }, accept: () => deps.native.acceptSpeechJobs([id]), discard: () => deps.native.discardSpeechJob(id) }
+        return { data: { asset: job.asset, text, voiceId: voice!.id, rate: settings.rate, addedToTimeline: false }, accept: () => { assertMcpSpeechVoice(settings.voiceId); return deps.native.acceptSpeechJobs([id]) }, discard: () => deps.native.discardSpeechJob(id) }
       }
       await wait(context.signal, deps.pollMs ?? 300)
       job = await deps.native.getSpeechJob(id)

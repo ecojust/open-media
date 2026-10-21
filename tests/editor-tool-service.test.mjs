@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { IDBFactory } from 'fake-indexeddb'
 import { createClip, createProject, createSubtitleClip, cloneProject } from '../src/core/project.ts'
+import { updateSpeechSettings } from '../src/core/speech-settings.ts'
 import { getSpeechPronunciation, setSpeechPronunciation } from '../src/core/speech-pronunciation.ts'
 
 // Keep the shared service, schemas, project operations and artifact cache real.
@@ -32,6 +33,7 @@ async function until(check){
 }
 async function finished(controller,job){await until(()=>controller.status(job.id).state!=='running');await new Promise(resolve=>setImmediate(resolve));return controller.status(job.id)}
 function fixture(){
+ updateSpeechSettings({ voiceId: 'voice', rate: 1, alignText: true })
  globalThis.indexedDB=new IDBFactory()
  const bytes=new Uint8Array([82,73,70,70,1,2,3,4]),blob=new Blob([bytes],{type:'audio/wav'}),url=URL.createObjectURL(blob)
  const asset={id:'audio',name:'真实读取的音频.wav',kind:'audio',url,nativePath:'/private/media/audio.wav',duration:2,width:0,height:0,size:8,mime:'audio/wav'}
@@ -49,6 +51,53 @@ function fixture(){
 function controllerFixture(){const f=fixture();let project=f.project,revision=4,busy=false;const commits=[],owned=[],announcements=[];const host={getProject:()=>project,getRevision:()=>revision,isBusy:()=>busy,isDirty:()=>false,getBlobs:()=>f.context.blobs,getSaveTarget:()=>undefined,commit(next,label,expected){if(expected.revision!==revision||expected.projectId!==project.id)return false;project=next;revision++;commits.push(label);return true},async adopt(next){project=next;revision++},async hydrate(value){return value.project},async didSave(){},async didOpen(){},history(){},getPlayback:()=>({time:0,playing:false,selectedClipId:''}),async setPlayback(patch){return patch},ownAsset(asset){owned.push(asset)},onBusy(value){busy=value},onJobsChanged(){},announce(message){announcements.push(message)}};return{...f,host,commits,owned,announcements,controller:createMcpAutomation(host),get current(){return project},get revision(){return revision},externalChange(){revision++;project=cloneProject(project);project.title='本地新修改'}}}
 
 test('shared schemas reject unknown fields and stale revision before native work',async()=>{const f=fixture();try{await assert.rejects(prepareEditorTool('open_media_audio_normalize',{clipId:'audio-clip',unexpected:true},f.context),/不支持/);await assert.rejects(prepareEditorTool('open_media_audio_normalize',{clipId:'audio-clip',expectedRevision:3},f.context),/版本/);assert.equal(f.calls.length,0)}finally{f.close()}})
+
+test('source reads are synchronous bounded current-project operations with explicit resume versions', async () => {
+  const f = controllerFixture()
+  const version = 'a'.repeat(64)
+  try {
+    f.io.runAssetTool = async (operation, args) => {
+      assert.equal(operation, 'asset_read')
+      assert.equal(args.asset.id, f.asset.id)
+      assert.equal(args.asset.nativePath, f.asset.nativePath)
+      const offset = args.offset ?? 0, end = Math.min(f.bytes.length, offset + (args.length ?? 262144))
+      return { assetId: f.asset.id, totalBytes: f.bytes.length, offset, nextOffset: end, done: end === f.bytes.length, sourceVersion: version, data: Buffer.from(f.bytes.slice(offset, end)).toString('base64') }
+    }
+    const first = await f.controller.execute('open_media_asset_read', { assetId: f.asset.id, length: 3, expectedProjectId: f.project.id, expectedRevision: 4 })
+    assert.equal(first.execution, 'synchronous'); assert.equal(first.final, true); assert.equal(first.sourceVersion, version)
+    assert.equal(first.responseType, 'result'); assert.equal(first.projectId, f.project.id); assert.equal(first.revision, 4)
+    assert.equal(first.jobId, undefined); assert.equal(f.controller.list().length, 0)
+    const second = await f.controller.execute('open_media_asset_read', { assetId: f.asset.id, offset: first.nextOffset, sourceVersion: first.sourceVersion, expectedRevision: 4 })
+    assert.deepEqual(Buffer.concat([Buffer.from(first.data, 'base64'), Buffer.from(second.data, 'base64')]), Buffer.from(f.bytes))
+    assert.equal(second.done, true)
+    assert.equal(f.controller.list().length, 0); assert.equal(f.commits.length, 0)
+    assert.equal(JSON.stringify([first, second]).includes('/private'), false)
+    const calls = f.calls.length
+    for (const args of [{ assetId: 'other-project-source' }, { assetId: f.asset.id, offset: 1 }, { assetId: f.asset.id, length: 262145 }, { assetId: f.asset.id, nativePath: '/private/secret' }, { assetId: f.asset.id, expectedProjectId: 'closed-project' }, { assetId: f.asset.id, expectedRevision: 3 }]) {
+      await assert.rejects(f.controller.execute('open_media_asset_read', args))
+    }
+    assert.equal(f.calls.length, calls)
+  } finally { await f.controller.dispose(); f.close() }
+})
+
+test('source block completion is discarded if project identity, revision or session changes while reading', async () => {
+  for (const change of ['project', 'revision', 'session']) {
+    const f = controllerFixture(), gate = deferred()
+    let session = 1
+    f.host.getProjectSession = () => session
+    try {
+      f.io.runAssetTool = () => gate.promise
+      const reading = f.controller.execute('open_media_asset_read', { assetId: f.asset.id })
+      await until(() => f.calls.some(call => call.name === 'runAssetTool'))
+      if (change === 'project') f.host.getProject = () => ({ ...f.project, id: 'other-open-project' })
+      else if (change === 'revision') f.externalChange()
+      else session++
+      gate.resolve({ data: 'cHJpdmF0ZQ==' })
+      await assert.rejects(reading, /工程或版本已变化/)
+      assert.equal(f.commits.length, 0)
+    } finally { gate.resolve({}); await f.controller.dispose(); f.close() }
+  }
+})
 test('MCP speech preview returns readable hashed artifact without exposing local asset paths',async()=>{const f=fixture();try{const result=await prepareEditorTool('open_media_speech_generate_preview',{text:'介绍 Open Media'},f.context);assert.ok(result.data.artifactId);assert.match(result.data.sha256,/^[a-f\d]{64}$/);assert.equal(result.data.asset.url,undefined);assert.equal(result.data.asset.nativePath,undefined);assert.equal(result.project,undefined);assert.equal(f.project.assets.length,1);const bytes=await readToolArtifact(result.data.artifactId);assert.deepEqual(Buffer.from(bytes.data,'base64'),Buffer.from(f.bytes));assert.equal(f.calls.filter(c=>c.name==='acceptSpeechJobs').length,0);await result.accept();assert.equal(f.calls.filter(c=>c.name==='acceptSpeechJobs').length,0);assert.equal(f.calls.filter(c=>c.name==='discardSpeechJob').length,1)}finally{f.close()}})
 test('GUI preview uses persisted playable artifact without retaining the temporary native WAV',async()=>{const f=fixture();try{const result=await prepareEditorTool('open_media_speech_generate_preview',{text:'试听'}, {...f.context,source:'gui'});assert.equal(result.data.asset.url,undefined);assert.equal(result.data.asset.nativePath,undefined);assert.ok(result.data.artifactId);const read=await readToolArtifact(result.data.artifactId);assert.deepEqual(Buffer.from(read.data,'base64'),Buffer.from(f.bytes));await result.accept();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.calls.filter(c=>c.name==='discardSpeechJob').length,1)}finally{f.close()}})
 test('unreadable audition output is discarded before return or acceptance',async()=>{const f=fixture();try{f.io.beginSpeechJob=async request=>({id:request.requestId,state:'completed',stage:'完成',asset:{...f.asset,id:'bad',url:'blob:missing'}});await assert.rejects(prepareEditorTool('open_media_speech_generate_preview',{text:'试听'},f.context));assert.equal(f.calls.filter(c=>c.name==='discardSpeechJob').length,1);assert.equal(f.calls.filter(c=>c.name==='acceptSpeechJobs').length,0)}finally{f.close()}})

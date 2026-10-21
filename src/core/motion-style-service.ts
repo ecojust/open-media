@@ -2,7 +2,7 @@ import type { EditorToolContext, EditorToolProgress, PreparedEditorTool } from '
 import type { MediaAsset, Project } from './types.ts'
 import type { BrowserVideoExportOptions } from './browser-export.ts'
 import { MOTION_STYLES, getMotionStyle, type MotionStyle } from './motion-style-catalog.ts'
-import { composeMotionProject, planMotionComposition, type MotionComposeOptions, type MotionCompositionPlan } from './motion-style-composer.ts'
+import { composeMotionProject, getMotionPresetStyle, planMotionComposition, type MotionComposeOptions, type MotionCompositionPlan } from './motion-style-composer.ts'
 import { assertProjectRevision } from './project-operations.ts'
 import { cloneProject, createClip, createTrack, MAX_ASSETS, MAX_CLIPS, MAX_PROJECT_DURATION, MAX_TRACKS, validateProject } from './project.ts'
 import { clipEnd, projectDuration } from './timeline.ts'
@@ -52,6 +52,7 @@ function freeAt(project: Project, trackId: string, start: number, duration: numb
 
 function planInternal(project: Project, options: MotionClipGenerateOptions): { temporary: Project; options: MotionComposeOptions; plan: MotionClipGenerationPlan } {
   const input = assertMcpMotionRequest(project,object(options, '效果短片参数'))
+  getMotionPresetStyle(input.styleId as string)
   if ('placement' in input) throw new Error('效果短片使用 destination 和 insert 选择生成位置，不支持 placement。')
   const { destination = 'assets', insert, ...compositionInput } = input
   if (destination !== 'assets' && destination !== 'timeline') throw new Error('效果短片目标需为素材库或时间线。')

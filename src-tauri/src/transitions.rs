@@ -105,8 +105,11 @@ impl Transitions {
         let assets = project["assets"].as_array().ok_or("素材列表无效。")?;
         let fps = number(project, "fps", 30.0, 1.0, 240.0)?;
         let mut sources = HashMap::new();
+        let hidden_sources: HashSet<_> = tracks.iter().filter(|track| track["kind"] == "video" && track["hidden"] == true)
+            .filter_map(|track| track["clips"].as_array())
+            .flatten().filter_map(|clip| clip["id"].as_str()).collect();
         for (track_index, track) in tracks.iter().enumerate() {
-            if track["kind"] != "video" {
+            if track["hidden"] == true || track["kind"] != "video" {
                 continue;
             }
             let mut clips: Vec<_> = track["clips"]
@@ -137,8 +140,12 @@ impl Transitions {
         let mut result = Self::default();
         let mut pairs = HashSet::new();
         let mut count = 0;
-        for track in tracks.iter().filter(|track| track["kind"] == "transition") {
+        for track in tracks.iter().filter(|track| track["kind"] == "transition" && track["hidden"] != true) {
             for clip in track["clips"].as_array().ok_or("转场轨道片段无效。")? {
+                if ["fromClipId", "toClipId"].iter().any(|key|
+                    clip["transition"][*key].as_str().is_some_and(|id| hidden_sources.contains(id))) {
+                    continue;
+                }
                 count += 1;
                 if count > 500 {
                     return Err("转场片段数量超出支持范围。".into());

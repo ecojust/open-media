@@ -5,7 +5,8 @@ export interface SpeechSettings {
 }
 
 const STORAGE_KEY = 'open-media:speech-settings'
-const defaults: Readonly<SpeechSettings> = Object.freeze({ voiceId: '', rate: 1, alignText: true })
+export const DEFAULT_SPEECH_VOICE = 'matcha_zh_en_female'
+const defaults: Readonly<SpeechSettings> = Object.freeze({ voiceId: DEFAULT_SPEECH_VOICE, rate: 1, alignText: true })
 const listeners = new Set<(settings: SpeechSettings) => void>()
 
 export function validateSpeechSettings(value: unknown, base: Readonly<SpeechSettings> = defaults): SpeechSettings {
@@ -20,13 +21,34 @@ export function validateSpeechSettings(value: unknown, base: Readonly<SpeechSett
 }
 
 function readSettings(): SpeechSettings {
-  try { return validateSpeechSettings(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')) }
+  try {
+    const saved = validateSpeechSettings(JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'))
+    return { ...saved, voiceId: saved.voiceId || DEFAULT_SPEECH_VOICE }
+  }
   catch { return { ...defaults } }
 }
 
 let settings = readSettings()
 
 export function getSpeechSettings(): SpeechSettings { return { ...settings } }
+
+/** Remote callers may confirm the user's choice, but cannot select another voice. */
+export function resolveMcpSpeechVoice(requested?: unknown): string {
+  const selected = getSpeechSettings().voiceId
+  if (!selected) throw new Error('请先在配音面板选择声音，MCP 只能使用用户当前选中的音色。')
+  if (requested !== undefined && requested !== selected) throw new Error(`MCP 只能使用用户当前选中的音色 ${selected}，请在配音面板修改选择。`)
+  return selected
+}
+
+export function assertMcpSpeechVoice(voiceId: string): void {
+  if (getSpeechSettings().voiceId !== voiceId) throw new Error('用户选择的配音音色已经变化，请使用当前音色重新生成。')
+}
+
+export function validateMcpSpeechSettings(value: unknown): SpeechSettings {
+  const next = validateSpeechSettings(value, getSpeechSettings())
+  next.voiceId = resolveMcpSpeechVoice(next.voiceId)
+  return next
+}
 
 /** The panel and remote operations use the same preferences, including while the editor is closed. */
 export function updateSpeechSettings(patch: Partial<SpeechSettings>): SpeechSettings {

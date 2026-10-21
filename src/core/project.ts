@@ -269,7 +269,7 @@ export function validateProject(value: unknown, options: ValidateProjectOptions 
       }
       return clip
     })
-    return { id: trackId, name: text(t.name, '轨道名称', 300), kind, muted: boolean(t.muted), locked: boolean(t.locked), clips }
+    return { id: trackId, name: text(t.name, '轨道名称', 300), kind, muted: boolean(t.muted), ...(t.hidden !== undefined ? { hidden: boolean(t.hidden) } : {}), locked: boolean(t.locked), clips }
   })
   const textIds = new Set(tracks.filter((track) => track.kind === 'text').flatMap((track) => track.clips.map((clip) => clip.id)))
   const fps = number(root.fps, '帧率', 1, 240)

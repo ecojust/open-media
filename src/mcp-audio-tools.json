@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_speech_generate_preview",
-    "description": "合成一句可试听的配音，不加入时间线。返回异步任务；文本应用读法词典。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "合成一句可试听的配音，不加入时间线；文本应用读法词典。只使用用户当前所选音色，省略 voiceId 自动沿用该选择，显式提供其他音色会被拒绝。所选声音未就绪时报告原因，不自动换用其他声音。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -12,7 +12,9 @@
         },
         "voiceId": {
           "type": "string",
-          "maxLength": 200
+          "maxLength": 200,
+          "description": "可省略；仅允许用户当前所选音色（speech_settings_get.voiceId / speech_voices.selectedVoiceId），不能通过 MCP 更换音色。",
+          "minLength": 1
         },
         "rate": {
           "type": "number",

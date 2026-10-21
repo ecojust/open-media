@@ -1,5 +1,5 @@
 import { cloneProject, validateProject } from './project.ts'
-import { clipEnd, projectDuration } from './timeline.ts'
+import { clipEnd, renderDuration } from './timeline.ts'
 import { trackSubtitleIssues } from './subtitle-validation.ts'
 import type { MediaAsset, Project } from './types.ts'
 import type { EditorToolContext, PreparedEditorTool } from './editor-tool-service.ts'
@@ -12,19 +12,20 @@ export function inspectExportStructure(project: Project): ExportIssue[] {
   try { validateProject(project, { trusted: true }) } catch (cause) { issues.push({ severity: 'error', code: 'invalid_project', message: cause instanceof Error ? cause.message : String(cause) }) }
   const assets = new Set(project.assets.map(asset => asset.id))
   for (const track of project.tracks) {
+    if (track.hidden) continue
     for (const issue of trackSubtitleIssues(track)) issues.push({ severity: 'warning', code: `subtitle_${issue.reason}`, message: issue.message, clipId: issue.clipId, trackId: track.id })
     for (const clip of track.clips) {
       if (clip.assetId && !assets.has(clip.assetId)) issues.push({ severity: 'error', code: 'missing_media', message: `“${clip.name}”缺少源素材。`, clipId: clip.id, trackId: track.id, time: clip.start })
       if (track.kind === 'text' && clip.text && (clip.x < 0 || clip.y < 0 || clip.x + clip.width > project.width + .5 || clip.y + clip.height > project.height + .5)) issues.push({ severity: 'warning', code: 'subtitle_bounds', message: `“${clip.name}”文字区域超出项目画面，请检查是否有意移出画面。`, clipId: clip.id, trackId: track.id, time: clip.start })
     }
   }
-  const voices = project.tracks.filter(track => !track.muted && track.kind === 'audio').flatMap(track => track.clips.filter(clip => clip.speech && clip.volume > 0).map(clip => ({ clip, trackId: track.id }))).sort((a, b) => a.clip.start - b.clip.start)
+  const voices = project.tracks.filter(track => !track.hidden && !track.muted && track.kind === 'audio').flatMap(track => track.clips.filter(clip => clip.speech && clip.volume > 0).map(clip => ({ clip, trackId: track.id }))).sort((a, b) => a.clip.start - b.clip.start)
   for (let index = 0; index < voices.length; index++) for (let next = index + 1; next < voices.length; next++) {
     const a = voices[index]!, b = voices[next]!
     if (b.clip.start >= clipEnd(a.clip) - .005) break
     if (Math.min(clipEnd(a.clip), clipEnd(b.clip)) > b.clip.start + .005) issues.push({ severity: 'warning', code: 'speech_overlap', message: `“${a.clip.name}”与“${b.clip.name}”的配音重叠。`, clipId: b.clip.id, trackId: b.trackId, time: b.clip.start })
   }
-  if (!projectDuration(project)) issues.push({ severity: 'error', code: 'empty_timeline', message: '时间线没有可导出的内容。' })
+  if (!renderDuration(project)) issues.push({ severity: 'error', code: 'empty_timeline', message: '时间线没有可导出的内容。' })
   return issues
 }
 export function audioPreviewProject(source: Project, args: Record<string, unknown>): Project {
@@ -32,8 +33,8 @@ export function audioPreviewProject(source: Project, args: Record<string, unknow
   const clipIds = args.clipIds as string[] | undefined, trackIds = args.trackIds as string[] | undefined
   if (mode === 'solo' && !clipIds?.length && !trackIds?.length) throw new Error('独听需要指定片段或轨道。')
   if (mode === 'mix' && (clipIds || trackIds)) throw new Error('指定片段或轨道时请选择独听模式。')
-  for (const id of clipIds ?? []) if (!project.tracks.some(track => ['audio', 'video'].includes(track.kind) && track.clips.some(clip => clip.id === id))) throw new Error('独听片段不存在或不含音频。')
-  for (const id of trackIds ?? []) if (!project.tracks.some(track => track.id === id && ['audio', 'video'].includes(track.kind))) throw new Error('独听轨道不存在或不含音频。')
+  for (const id of clipIds ?? []) if (!project.tracks.some(track => !track.hidden && ['audio', 'video'].includes(track.kind) && track.clips.some(clip => clip.id === id))) throw new Error('独听片段不存在或不含音频。')
+  for (const id of trackIds ?? []) if (!project.tracks.some(track => !track.hidden && track.id === id && ['audio', 'video'].includes(track.kind))) throw new Error('独听轨道不存在或不含音频。')
   // Keep the original duration, including silent tails and visual-only sections.
   project.tracks = project.tracks.map(track => ({ ...track,
     muted: mode === 'solo' && ['audio', 'video'].includes(track.kind) ? false : track.muted,
@@ -43,11 +44,11 @@ export function audioPreviewProject(source: Project, args: Record<string, unknow
       return clip
     }),
   }))
-  if (!project.tracks.some(track => ['audio', 'video'].includes(track.kind) && !track.muted && track.clips.some(clip => (clip.volume > 0 || clip.keyframes?.volume?.some(frame => frame.value > 0)) && project.assets.some(asset => asset.id === clip.assetId && asset.kind !== 'image')))) throw new Error('所选范围没有可听的音频片段。')
+  if (!project.tracks.some(track => !track.hidden && ['audio', 'video'].includes(track.kind) && !track.muted && track.clips.some(clip => (clip.volume > 0 || clip.keyframes?.volume?.some(frame => frame.value > 0)) && project.assets.some(asset => asset.id === clip.assetId && asset.kind !== 'image')))) throw new Error('所选范围没有可听的音频片段。')
   return project
 }
 export function previewRange(project: Project, args: Record<string, unknown>): { start: number; end: number } {
-  const duration = projectDuration(project), start = Number(args.start ?? 0), end = Number(args.end ?? Math.min(duration, start + 10))
+  const duration = renderDuration(project), start = Number(args.start ?? 0), end = Number(args.end ?? Math.min(duration, start + 10))
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || end > duration + .001 || end - start > 60 + .001) throw new Error('预览范围必须位于时间线内，且时长不能超过 60 秒。')
   return { start, end }
 }
@@ -72,10 +73,10 @@ async function frameFonts(signal: AbortSignal): Promise<void> {
   })
 }
 export async function timelineFrame(context: EditorToolContext, time: number, width = Math.min(1280, context.project.width)) {
-  if (!Number.isFinite(time) || time < 0 || time >= projectDuration(context.project)) throw new Error('取帧时间必须位于时间线内。')
+  if (!Number.isFinite(time) || time < 0 || time >= renderDuration(context.project)) throw new Error('取帧时间必须位于时间线内。')
   if (!Number.isFinite(width) || width < 16 || width > 1920) throw new Error('取帧宽度需介于 16 和 1920 之间。')
   context.signal.throwIfAborted()
-  const active = context.project.tracks.flatMap(track => track.kind === 'audio' || track.kind === 'transition' ? [] : track.clips).filter(clip => clip.start <= time && clipEnd(clip) > time)
+  const active = context.project.tracks.flatMap(track => track.hidden || track.kind === 'audio' || track.kind === 'transition' ? [] : track.clips).filter(clip => clip.start <= time && clipEnd(clip) > time)
   const relatedResources: MediaToolResource[] = [...new Map(active.map(clip => {
     const asset = context.project.assets.find(asset => asset.id === clip.assetId)
     const resource = asset ? { assetId: asset.id, name: asset.name } : { clipId: clip.id, name: clip.name }
@@ -147,7 +148,7 @@ export async function preparePreviewTool(name: string, args: Record<string, unkn
     const issues = inspectExportStructure(context.project), scope: Record<string, unknown> = { projectStructure: true, mediaAnalyzed: false }
     if (!args.analyzeMedia || issues.some(issue => issue.severity === 'error')) return { data: { valid: !issues.some(issue => issue.severity === 'error'), issues, scope } }
     const range = previewRange(context.project, args), { runAssetTool } = await import('../native-asset-tools.ts')
-    const used = new Set(context.project.tracks.flatMap(track => track.clips.map(clip => clip.assetId).filter(Boolean)))
+    const used = new Set(context.project.tracks.filter(track => !track.hidden).flatMap(track => track.clips.map(clip => clip.assetId).filter(Boolean)))
     for (const asset of context.project.assets.filter(asset => used.has(asset.id))) {
       try { await runAssetTool('asset_probe', { asset }, context) } catch (cause) { context.signal.throwIfAborted(); issues.push({ severity: 'error', code: 'unreadable_media', message: `“${asset.name}”无法读取：${cause instanceof Error ? cause.message : String(cause)}` }) }
     }

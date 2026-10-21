@@ -26,7 +26,7 @@ async function installTimeline(page, rows) {
     }))
     window.editorState.value = validateProject(project, { trusted: true })
     window.editorStatus = ''
-    await new Promise(requestAnimationFrame)
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     document.querySelector('.timeline-scroll').scrollTo(0, 0)
   }, rows)
 }
@@ -472,7 +472,8 @@ async function main() {
       await dragTimelineDivider(page, -400)
       const layout = await editorLayout(page), availableHeight = layout.preview.height + layout.timeline.height
       assert(layout.preview.height >= Math.min(180, availableHeight * 180 / 330) - 1, `缩小窗口后预览失去可用空间：${JSON.stringify({ viewport, layout })}`)
-      assert(layout.timeline.height >= Math.min(150, availableHeight * 150 / 330) - 1, `缩小窗口后时间线失去可用空间：${JSON.stringify({ viewport, layout })}`)
+      const trackViewport = await page.locator('.timeline-scroll').evaluate(element => ({ height: element.clientHeight, content: element.querySelector('.timeline-content').getBoundingClientRect().height }))
+      assert(trackViewport.height > 24 && trackViewport.height <= trackViewport.content + 1, `时间线应保持可用且不超过轨道内容高度：${JSON.stringify({ viewport, layout, trackViewport })}`)
       assert(layout.timeline.bottom <= viewport.height + 1 && layout.preview.bottom <= layout.divider.top + 1, `缩小窗口后面板溢出可视区：${JSON.stringify({ viewport, layout })}`)
       const button = await page.getByTestId('export-project').boundingBox()
       assert(button.x >= layout.editor.left && button.x + button.width <= layout.editor.right + 1, '缩小窗口后导出按钮必须完整可见')

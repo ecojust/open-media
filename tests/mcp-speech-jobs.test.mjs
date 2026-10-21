@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createProject, createTextClip } from '../src/core/project.ts'
 import { createMcpSpeechJobs } from '../src/core/mcp-speech-jobs.ts'
-import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings, validateSpeechSettings } from '../src/core/speech-settings.ts'
+import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings, validateSpeechSettings, resolveMcpSpeechVoice, validateMcpSpeechSettings } from '../src/core/speech-settings.ts'
 
 const voice = { id: 'matcha_zh_en_female', name: '内置配音', language: 'zh', gender: 'female', status: 'bundled' }
 
@@ -13,6 +13,7 @@ function deferred() {
 }
 
 function fixture(overrides = {}) {
+  updateSpeechSettings({ voiceId: voice.id, rate: 1, alignText: true })
   let project = createProject('远程配音测试'), revision = 1, projectSession = 1, busy = false
   project.tracks[0].clips.push(createTextClip(project, { id: 'first', text: '第一段字幕。', start: 1, trimOut: 3 }))
   project.tracks[0].clips.push(createTextClip(project, { id: 'second', text: '第二段字幕。', start: 6, trimOut: 3 }))
@@ -67,7 +68,7 @@ test('设置使用同一数据源，严格校验并向订阅方提供副本', ()
   updateSpeechSettings({ voiceId: voice.id, rate: 1.2, alignText: false })
   assert.equal(notified.rate, 1.2)
   assert.equal(getSpeechSettings().voiceId, voice.id)
-  assert.deepEqual(validateSpeechSettings({ rate: 0.5 }), { voiceId: '', rate: 0.5, alignText: true })
+  assert.deepEqual(validateSpeechSettings({ rate: 0.5 }), { voiceId: voice.id, rate: 0.5, alignText: true })
   for (const patch of [{ rate: NaN }, { rate: 4 }, { alignText: 'false' }, { voiceId: 2 }, { extra: true }]) assert.throws(() => updateSpeechSettings(patch))
   stop()
   updateSpeechSettings({ voiceId: '', rate: 1, alignText: true })
@@ -239,7 +240,9 @@ test('选择无效字幕、锁定字幕及不可用声音不能被静默替代',
   assert.throws(() => f.service.startSpeech({ rate: 100 }), /语速/)
   assert.throws(() => f.service.startSpeech({ clipIds: [4] }), /字符串数组/)
   assert.equal(f.busy, false)
-  const done = await finish(f.service, f.service.startSpeech({ voiceId: 'not-installed' }).id)
+  assert.throws(() => f.service.startSpeech({ voiceId: 'not-installed' }), /用户当前选中/)
+  updateSpeechSettings({ voiceId: 'not-installed' })
+  const done = await finish(f.service, f.service.startSpeech().id)
   assert.equal(done.state, 'failed')
   assert.match(done.error, /下载或修复/)
   assert.equal(f.calls.begin.length, 0)
@@ -269,4 +272,64 @@ test('释放服务取消运行任务，随后拒绝新任务', async () => {
   assert.equal(f.service.status(job.id).state, 'cancelled')
   assert.equal(f.busy, false)
   assert.throws(() => f.service.startSpeech(), /已经关闭/)
+})
+
+
+test('多个已下载音色只允许用户当前选择，远程设置不能替换音色', async () => {
+  const voices = [voice, ...Array.from({ length: 4 }, (_, index) => ({ ...voice, id: `voice-${index}`, status: 'ready' }))]
+  const f = fixture({ native: { getSpeechStatus: async () => ({ ready: true, voices }) } })
+  updateSpeechSettings({ voiceId: 'voice-3', rate: 1.25 })
+  assert.equal(resolveMcpSpeechVoice(), 'voice-3')
+  assert.equal(validateMcpSpeechSettings({ rate: .9 }).voiceId, 'voice-3')
+  assert.throws(() => validateMcpSpeechSettings({ voiceId: voice.id }), /用户当前选中/)
+  assert.throws(() => f.service.startSpeech({ voiceId: voice.id }), /用户当前选中/)
+  assert.equal(f.calls.begin.length, 0)
+  assert.equal(f.busy, false)
+  const done = await finish(f.service, f.service.startSpeech().id)
+  assert.equal(done.state, 'completed', done.error)
+  assert.equal(done.voiceId, 'voice-3')
+  assert.ok(f.calls.begin.every(request => request.voiceId === 'voice-3' && request.speed === 1.25))
+  await f.service.dispose()
+})
+
+test('未选择音色时不得自行选择已下载声音', async () => {
+  const f = fixture()
+  updateSpeechSettings({ voiceId: '' })
+  assert.throws(() => f.service.startSpeech(), /先在配音面板选择/)
+  assert.equal(f.calls.begin.length, 0)
+  assert.equal(f.busy, false)
+  await f.service.dispose()
+})
+
+test('等待状态查询时用户换音色，不得使用旧选择启动生成', async () => {
+  const pending = deferred()
+  const f = fixture({ native: { getSpeechStatus: () => pending.promise } })
+  const job = f.service.startSpeech()
+  updateSpeechSettings({ voiceId: 'voice-new' })
+  pending.resolve({ ready: true, voices: [voice] })
+  const done = await finish(f.service, job.id)
+  assert.equal(done.state, 'failed')
+  assert.match(done.error, /音色已经变化/)
+  assert.equal(f.calls.begin.length, 0)
+  assert.equal(f.calls.commits.length, 0)
+  assert.equal(f.busy, false)
+  await f.service.dispose()
+})
+
+test('批次生成过程中换音色会清理旧结果，不会混用声音或提交半成品', async () => {
+  const pending = deferred()
+  const f = fixture({ begin: () => pending.promise })
+  const job = f.service.startSpeech()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.calls.begin.length, 1)
+  updateSpeechSettings({ voiceId: 'voice-new' })
+  pending.resolve(f.completed(f.calls.begin[0]))
+  const done = await finish(f.service, job.id)
+  assert.equal(done.state, 'failed')
+  assert.match(done.error, /音色已经变化/)
+  assert.equal(f.calls.begin.length, 1)
+  assert.equal(f.calls.commits.length, 0)
+  assert.equal(f.calls.discard.length, 1)
+  assert.deepEqual(f.project, f.original)
+  await f.service.dispose()
 })

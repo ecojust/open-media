@@ -2,6 +2,7 @@ type AppearanceTheme = 'light' | 'dark'
 interface AppearanceWindow {
   label: string
   setTheme(theme: AppearanceTheme | null): Promise<void>
+  setNativeAppearance?(theme: AppearanceTheme | null): Promise<void>
   setBackgroundColor(color: string): Promise<void>
 }
 interface AppearanceRequest {
@@ -16,7 +17,14 @@ interface AppearanceOptions {
 async function mainWindow(): Promise<AppearanceWindow | null> {
   if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return null
   const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow')
-  return getCurrentWebviewWindow()
+  const { invoke } = await import('@tauri-apps/api/core')
+  const target = getCurrentWebviewWindow()
+  return {
+    label: target.label,
+    setTheme: theme => target.setTheme(theme),
+    setNativeAppearance: theme => invoke<void>('set_main_window_appearance', { theme }),
+    setBackgroundColor: color => target.setBackgroundColor(color),
+  }
 }
 
 export function createNativeAppearanceSync(options: AppearanceOptions = {}) {
@@ -48,6 +56,10 @@ export function createNativeAppearanceSync(options: AppearanceOptions = {}) {
             // Native title contrast needs the appearance as well as the background.
             // System mode clears the override so native media queries keep following it.
             await target.setTheme(selected.nativeTheme)
+            if (disposed) return
+            // Keep the native title bar on the same appearance as the page. On macOS
+            // this applies the appearance to NSWindow, not only NSApplication.
+            await target.setNativeAppearance?.(selected.nativeTheme)
             if (disposed) return
             // Finish the window/webview background update before the next appearance.
             await target.setBackgroundColor(color)

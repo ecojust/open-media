@@ -155,6 +155,8 @@ export interface Track {
   name: string
   kind: TrackKind
   muted: boolean
+  /** Excluded from playback and compositing while retaining editable clips. */
+  hidden?: boolean
   locked: boolean
   clips: Clip[]
 }

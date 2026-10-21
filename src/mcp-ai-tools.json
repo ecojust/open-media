@@ -1,12 +1,14 @@
 [
   {
     "name": "open_media_ai_status",
-    "description": "查询主应用共享的所有 AI 模型、体积、许可、硬件要求、下载/运行环境状态及全局任务。包括已有语音与视频模型，不重复下载已有安装；忙碌时仍可查询。任务中的素材仅返回公开元数据。\n执行方式：同步返回本次查询或操作结果。",
+    "description": "查询主应用共享的所有 AI 模型、体积、许可、硬件要求、下载/运行环境状态及全局任务。包括已有语音与视频模型，不重复下载已有安装；忙碌时仍可查询。任务中的素材仅返回公开元数据。selectedModels 返回用户当前选择的图像、音乐、视频模型；generationCapabilities 分别列出文生图/文生音乐的 selectedModelId、availability、readyModelIds、生成 tool 和默认 route（mcp/agent/check-status），以及 local-first 策略。readyModelIds 最多包含对应用户所选模型，不包含其他已下载模型。生成额外图片或音乐前先读取本地能力：用户所选模型及运行环境均就绪时，默认优先使用对应 MCP 工具；只有对应能力不可用或用户明确要求 Agent 自行生成时才交由 Agent。不能通过指定其他 modelId 绕过用户选择；忙碌应等待，查询失败应重查，不自动下载模型。\n执行方式：同步返回本次查询或操作结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
         "probeRuntime": {
-          "type": "boolean"
+          "type": "boolean",
+          "default": true,
+          "description": "默认 true：重新检查本地图片/音乐模型文件与运行环境布局，不加载大模型、不执行推理、不下载；false 仅返回缓存状态。生成能力检查请使用 true。"
         },
         "expectedRevision": {
           "type": "integer",
@@ -161,7 +163,7 @@
   },
   {
     "name": "open_media_image_generate",
-    "description": "使用已下载的图像模型文生图或基础图生图。参考图片仅从当前工程 inputAssetId 解析；图生图不等同于指令式编辑。默认只生成，destination 可加入素材或时间线；图片插入视频轨道，默认展示5秒。快速模型不支持负面提示词，guidance 必须省略或为0，默认9步；另一模型默认50步，guidance映射到真实CFG。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "description": "使用已下载的图像模型文生图或基础图生图。参考图片仅从当前工程 inputAssetId 解析；图生图不等同于指令式编辑。默认只生成，destination 可加入素材或时间线；图片插入视频轨道，默认展示5秒。快速模型不支持负面提示词，guidance 必须省略或为0，默认9步；另一模型默认50步，guidance映射到真实CFG。 调用前读取 open_media_ai_status({probeRuntime:true})，读取对应 generationCapabilities.selectedModelId 和 readyModelIds；仅用户所选模型已就绪时默认使用本工具，用户明确要求 Agent 自行生成除外。只使用用户在界面当前选择的模型；省略 modelId 自动沿用该选择，传入其他模型 ID 会被拒绝。所选模型未就绪或不支持请求模式时报告原因，不能改用其他已下载模型。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -170,7 +172,8 @@
           "enum": [
             "qwen-image",
             "z-image-turbo"
-          ]
+          ],
+          "description": "可省略，自动使用用户当前所选模型；显式提供时必须与 selectedModelId 相同，不能切换模型。"
         },
         "prompt": {
           "type": "string",
@@ -276,7 +279,6 @@
         }
       },
       "required": [
-        "modelId",
         "prompt"
       ],
       "additionalProperties": false
@@ -306,7 +308,7 @@
   },
   {
     "name": "open_media_music_generate",
-    "description": "使用已下载的音乐模型生成纯音乐或有歌词歌曲。无歌词默认纯音乐，有歌词默认歌曲；显式 instrumental=true 不能同时填写歌词。默认30秒；快速模型默认8步且guidance仅支持1，另一模型默认50步、guidance=7。默认只生成，destination 可加入素材或音频轨道，片段使用真实生成时长。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "description": "使用已下载的音乐模型生成纯音乐或有歌词歌曲。无歌词默认纯音乐，有歌词默认歌曲；显式 instrumental=true 不能同时填写歌词。默认30秒；快速模型默认8步且guidance仅支持1，另一模型默认50步、guidance=7。默认只生成，destination 可加入素材或音频轨道，片段使用真实生成时长。 调用前读取 open_media_ai_status({probeRuntime:true})，读取对应 generationCapabilities.selectedModelId 和 readyModelIds；仅用户所选模型已就绪时默认使用本工具，用户明确要求 Agent 自行生成除外。只使用用户在界面当前选择的模型；省略 modelId 自动沿用该选择，传入其他模型 ID 会被拒绝。所选模型未就绪或不支持请求模式时报告原因，不能改用其他已下载模型。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -315,7 +317,8 @@
           "enum": [
             "ace-step-1.5-turbo",
             "ace-step-1.5-sft"
-          ]
+          ],
+          "description": "可省略，自动使用用户当前所选模型；显式提供时必须与 selectedModelId 相同，不能切换模型。"
         },
         "prompt": {
           "type": "string",
@@ -409,7 +412,6 @@
         }
       },
       "required": [
-        "modelId",
         "prompt"
       ],
       "additionalProperties": false

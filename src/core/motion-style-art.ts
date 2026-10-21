@@ -1,4 +1,5 @@
 import { getMotionStyle, type MotionStyle } from './motion-style-catalog.ts'
+import { drawCodeStylePoster } from './motion-code-style-art.ts'
 
 type Palette = MotionStyle['palette']
 type Context = CanvasRenderingContext2D
@@ -220,6 +221,8 @@ export async function renderMotionStyleArt(styleId: string, palette: Partial<Pal
 
 /** Compact static style sample used in the catalog; final motion is visible on the timeline. */
 export function drawMotionStylePoster(canvas: HTMLCanvasElement, styleId: string): void {
+  const style = getMotionStyle(styleId)
+  if (!style.presetSupported) { drawCodeStylePoster(canvas, style); return }
   const p=getMotionStyle(styleId).palette,ctx=canvas.getContext('2d')
   if(!ctx)return
   drawMotionStyleBackground(ctx,canvas.width,canvas.height,styleId)

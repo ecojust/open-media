@@ -33,6 +33,7 @@ struct Task {
 }
 struct State {
     models: Vec<AiModel>,
+    model_revision: u64,
     jobs: Vec<AiJob>,
     tasks: HashMap<String, Task>,
     download: Option<Download>,
@@ -95,6 +96,7 @@ impl AiGenerationManager {
         }
         let shared = Arc::new(Mutex::new(State {
             models: model_states,
+            model_revision: 0,
             jobs,
             tasks: HashMap::new(),
             download: None,
@@ -113,13 +115,27 @@ impl AiGenerationManager {
         })
     }
     pub fn models(&self, probe_runtime: bool) -> Result<Vec<AiModel>> {
-        // Status polling never initializes a GPU or re-hashes multi-gigabyte weights.
-        let _ = probe_runtime;
-        let state = self
-            .worker
-            .shared
-            .lock()
-            .map_err(|_| "AI 模型状态不可用。")?;
+        let revision = {
+            let state = self.worker.shared.lock()
+                .map_err(|_| "AI 模型状态不可用。")?;
+            if !probe_runtime || state.download.is_some() || state.closing {
+                return Ok(state.models.clone());
+            }
+            state.model_revision
+        };
+        // Explicit capability checks validate receipts, file stamps and runtime
+        // layout off the UI thread. Never initialize a GPU, start a process,
+        // download files or re-hash multi-gigabyte weights during status reads.
+        let mut runtimes = HashMap::new();
+        let checked = self.worker.catalog.iter()
+            .map(|model| {
+                let runtime = runtimes.entry(model.runtime_id.clone())
+                    .or_insert_with(|| runtime_status(&self.worker.root, model, &self.worker.runtimes))
+                    .clone();
+                model_state_with_runtime(&self.worker.root, model, runtime)
+            }).collect();
+        let mut state = self.worker.shared.lock().map_err(|_| "AI 模型状态不可用。")?;
+        apply_model_probe(&mut state, revision, checked);
         Ok(state.models.clone())
     }
     pub fn download(&self, id: &str, accepted_license: bool) -> Result<()> {
@@ -144,6 +160,7 @@ impl AiGenerationManager {
             if !state.tasks.is_empty() {
                 return Err("AI 图像或歌曲生成尚未结束，请完成后更新模型。".into());
             }
+            state.model_revision = state.model_revision.wrapping_add(1);
             state.download = Some(Download {
                 id: id.into(),
                 cancelled: cancelled.clone(),
@@ -171,6 +188,7 @@ impl AiGenerationManager {
                     *entry = next;
                 }
                 state.download = None;
+                state.model_revision = state.model_revision.wrapping_add(1);
                 refresh_shared_runtime_models(
                     &worker.root,
                     &worker.catalog,
@@ -680,6 +698,7 @@ impl Worker {
     }
     fn runtime_needs_repair(&self, runtime: &runtime_packages::SelectedRuntime, error: &str) {
         if let Ok(mut state) = self.shared.lock() {
+            state.model_revision = state.model_revision.wrapping_add(1);
             state
                 .verified_runtimes
                 .remove(&runtime_packages::path(&self.root.join("runtime"), runtime));
@@ -1001,6 +1020,33 @@ fn runtime_file_progress(name: &str, bytes: u64, size: u64, verifying: bool) -> 
         bytes.min(size) as f64 / scale,
         size as f64 / scale
     )
+}
+
+fn apply_model_probe(state: &mut State, revision: u64, mut checked: Vec<AiModel>) {
+    // A download may start and finish while files are inspected. Do not let its
+    // older probe replace progress or the newly installed model's final state.
+    if state.model_revision != revision || state.download.is_some() || state.closing {
+        return;
+    }
+    for next in &mut checked {
+        let Some(previous) = state.models.iter().find(|model| model.id == next.id) else {
+            continue;
+        };
+        if previous.runtime.state == "update-available" && previous.error.is_some()
+            && next.runtime.state == "ready"
+        {
+            // Generation's full checksum validation is stronger than this fast
+            // layout check. Only an explicit repair may clear that failure.
+            next.runtime = previous.runtime.clone();
+            next.state = previous.state.clone();
+            next.error = previous.error.clone();
+        } else if previous.state == "failed" && next.state != "ready" {
+            next.state = previous.state.clone();
+            next.error = previous.error.clone();
+        }
+    }
+    state.models = checked;
+    state.model_revision = state.model_revision.wrapping_add(1);
 }
 
 fn refresh_shared_runtime_models(

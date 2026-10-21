@@ -10,7 +10,7 @@ import { drawFragmentTransition, isFragmentEffect } from './fragment-transitions
 import { measureTextLayout, TextLayoutCache } from './text-layout.ts'
 
 export { clipOpacityAt } from './timeline.ts'
-import { clipDuration as previewClipDuration, projectDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
+import { clipDuration as previewClipDuration, renderDuration as previewDuration, clipOpacityAt, sourceTimeAt as mediaSourceTime } from './timeline.ts'
 export { previewClipDuration, previewDuration, mediaSourceTime }
 
 export function fitRect(sourceWidth: number, sourceHeight: number, width: number, height: number, fit: Clip['fit']): [number, number, number, number, number, number, number, number] {
@@ -180,6 +180,7 @@ export class TimelinePreview {
     this.assets = new Map(project.assets.map(asset => [asset.id, asset]))
     const valid = new Map<string, string>()
     for (const track of project.tracks) {
+      if (track.hidden) continue
       for (const clip of track.clips) {
         const asset = clip.assetId ? this.assets.get(clip.assetId) : undefined
         if (!asset) continue
@@ -194,7 +195,7 @@ export class TimelinePreview {
 
   private ensureEntries(time: number): Set<string> {
     const wanted: Clip[] = [], upcoming: Clip[] = []
-    for (const track of this.project.tracks) for (const clip of track.clips) {
+    for (const track of this.project.tracks.filter(track => !track.hidden)) for (const clip of track.clips) {
       if (!clip.assetId || !this.assets.has(clip.assetId)) continue
       if (this.preloadAll || time >= clip.start && time < clip.start + previewClipDuration(clip)) wanted.push(clip)
       else if (clip.start > time && clip.start <= time + 2) upcoming.push(clip)
@@ -215,7 +216,7 @@ export class TimelinePreview {
   }
 
   private activeEntries(time: number): MediaEntry[] {
-    return this.project.tracks.flatMap(track => track.clips
+    return this.project.tracks.filter(track => !track.hidden).flatMap(track => track.clips
       .filter(clip => time >= clip.start && time < clip.start + previewClipDuration(clip))
       .map(clip => this.entries.get(clip.id))).filter((entry): entry is MediaEntry => Boolean(entry))
   }
@@ -379,7 +380,7 @@ export class TimelinePreview {
 
   private continueSplitVideo(time: number, now: number): void {
     for (const track of this.project.tracks) {
-      if (track.kind !== 'video') continue
+      if (track.hidden || track.kind !== 'video') continue
       for (const clip of track.clips) {
         if (time < clip.start || time >= clip.start + previewClipDuration(clip)) continue
         const waiting = this.entries.get(clip.id)
@@ -416,6 +417,7 @@ export class TimelinePreview {
     this.playing = playing
     const active = new Set<string>()
     for (const track of this.project.tracks) {
+      if (track.hidden) continue
       for (const clip of track.clips) {
         const entry = this.entries.get(clip.id)
         if (!entry || !(entry.media instanceof HTMLMediaElement)) continue
@@ -543,7 +545,7 @@ export class TimelinePreview {
     ctx.fillStyle = project.background
     ctx.fillRect(0, 0, project.width, project.height)
     for (const track of [...project.tracks].reverse()) {
-      if (track.kind === 'transition') continue
+      if (track.hidden || track.kind === 'transition') continue
       for (const clip of track.clips) {
         if (this.lastTime < clip.start || this.lastTime >= clip.start + previewClipDuration(clip)) continue
         this.drawClip(clip, track)

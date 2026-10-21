@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createClip, createProject, createTextClip, createTrack, MAX_ASSETS, MAX_PROJECT_DURATION, MAX_TRACKS, validateProject } from '../src/core/project.ts'
+import { MOTION_STYLES } from '../src/core/motion-style-catalog.ts'
 import { prepareMotionStyleTool, planMotionClipGeneration } from '../src/core/motion-style-service.ts'
 import { isSharedEditorTool, prepareEditorTool } from '../src/core/editor-tool-service.ts'
 import { projectSourceAssets } from '../src/core/editor-assets.ts'
@@ -45,7 +46,7 @@ function dependencies(overrides={}) {
 test('catalog and dry run are side-effect free; isolated scenes always start at zero',async()=>{
   const project=fixture(),before=structuredClone(project),deps=dependencies({renderArt(){throw Error('must not render')}})
   const list=await prepareMotionStyleTool('open_media_motion_style_list',{},context(project),deps)
-  assert.equal(list.data.total,15);list.data.items[0].name='changed'
+  assert.equal(list.data.total,MOTION_STYLES.length);list.data.items[0].name='changed'
   assert.notEqual((await prepareMotionStyleTool('open_media_motion_style_list',{},context(project),deps)).data.items[0].name,'changed')
   const result=await prepareMotionStyleTool(tool,{...options(),dryRun:true,expectedRevision:3,expectedProjectId:project.id},context(project),deps)
   assert.equal(result.data.start,0);assert.equal(result.data.scenes[0].start,0);assert.equal(result.data.duration,4)
@@ -271,4 +272,25 @@ test('current-project background audio remains available without authorizing unr
   assert.deepEqual(prepared.data.sourceAssetIds,['photo','music'])
   await assert.rejects(prepareMotionStyleTool(tool,{...options(),musicAssetId:'unused',dryRun:true},context(project),deps))
   assert.deepEqual(deps.calls,[])
+})
+
+
+test('外部代码风格在预检查和生成前明确拒绝二维预设路径，不加载或写入媒体', async () => {
+  const codeStyles = MOTION_STYLES.filter(style => !style.presetSupported)
+  assert(codeStyles.length > 0)
+  for (const style of codeStyles) {
+    const project = fixture(), deps = dependencies()
+    project.mcpMotion.styleId = style.id
+    const before = structuredClone(project)
+    for (const dryRun of [true, false]) {
+      const input = { ...options(), styleId: style.id, dryRun }
+      await assert.rejects(prepareMotionStyleTool(tool, input, context(project), deps), /外部 Agent.*不支持内置二维预设/)
+      await assert.rejects(prepareMotionStyleTool(tool, { ...input, styleId: undefined }, context(project), deps), /外部 Agent.*不支持内置二维预设/)
+    }
+    assert.throws(() => planMotionClipGeneration(project, { ...options(), styleId: style.id }), /外部 Agent/)
+    assert.deepEqual(deps.calls, [])
+    assert.deepEqual(deps.revoked, [])
+    assert.deepEqual(deps.nativeEvents, [])
+    assert.deepEqual(project, before)
+  }
 })

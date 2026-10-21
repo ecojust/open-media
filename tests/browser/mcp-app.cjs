@@ -14,7 +14,7 @@ async function installNativeBridge(page) {
       counter: 1, running: true, connectedClients: 0, statusFailure: false, omitConnectionCount: false, holdNextStatus: false, holdClaimId: '', unexpected: [],
       mediaJobs: [{ id: 'existing-export', name: '已有视频导出', state: 'completed', progress: 1, outputPath: '/fixture/export.mp4' }],
       config: { host: '127.0.0.1', port: 39861, token: 'a'.repeat(64) },
-      backgroundColors: {}, nativeTheme: 'unset',
+      backgroundColors: {}, nativeTheme: 'unset', nativeWindowAppearance: 'unset', aiModels: [],
     }
     const status = () => ({ running: fixture.running, host: fixture.config.host, port: fixture.config.port,
       url: fixture.running ? `http://${fixture.config.host}:${fixture.config.port}/mcp` : null,
@@ -56,6 +56,11 @@ async function installNativeBridge(page) {
           fixture.nativeTheme = args.value
           return null
         }
+        if (command === 'set_main_window_appearance') {
+          if (!['light', 'dark', null].includes(args.theme)) throw new Error('主窗口外观参数无效')
+          fixture.nativeWindowAppearance = args.theme
+          return null
+        }
         if (command === 'plugin:window|set_background_color' || command === 'plugin:webview|set_webview_background_color') {
           if (args.label !== 'main' || !['#151923', '#f7f9fc'].includes(args.value)) throw new Error('主窗口背景参数无效')
           fixture.backgroundColors[command] = args.value
@@ -63,7 +68,7 @@ async function installNativeBridge(page) {
         }
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_media_jobs') return structuredClone(fixture.mediaJobs)
-        if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }
+        if (command === 'ai_get_status') return { models: structuredClone(fixture.aiModels), jobs: [], busy: false }
         if (command === 'get_video_generation_status') return { supported: false, runtimeReady: false, models: [] }
         if (command === 'list_video_generation_jobs') return []
         if (command === 'cancel_media_job') { fixture.mediaJobs.find(job => job.id === args.id).state = 'cancelled'; return null }
@@ -164,247 +169,100 @@ async function assertFloatingBar(page, width) {
   if (width) assert.equal(geometry.viewport, width)
 }
 
-async function verifyMcpFocus(browser, url) {
-  // Keep the focus clock separate from the request expiry and ordering scenarios below.
-  const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } })
-  const errors = []
+async function verifyMcpBannerTheme(browser, url) {
+  const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } }), errors = []
   page.on('pageerror', error => errors.push(error.message))
   page.setDefaultTimeout(15000)
   try {
-    // Assert timer boundaries independently of the browser's real-time CSS transition clock.
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await installNativeBridge(page)
     await page.goto(url)
     await completion(page, 'startup-replay')
     await createReadyProject(page)
-    await expect(page.getByTestId('editor-mcp-open')).toBeVisible()
     await page.waitForFunction(() => document.querySelector('#app').__vue_app__._instance.setupState.mcpServiceRunning)
     const now = await page.evaluate(() => Date.now())
-    await page.clock.install({ time: now })
-    await page.clock.pauseAt(now + 1000)
-    const shell = page.locator('.app-shell'), shade = page.getByTestId('mcp-focus-shade'), banner = page.getByTestId('mcp-processing-banner')
-    const expectNotWorking = async () => {
-      if (await banner.count()) await expect(banner).not.toHaveClass(/\bworking\b/)
-    }
-    const expectInactive = async () => {
-      await expect(shade).toHaveCount(0)
+    await page.clock.install({ time: now }); await page.clock.pauseAt(now + 1000)
+    const shell = page.locator('.app-shell'), banner = page.getByTestId('mcp-processing-banner')
+    const noDim = async () => {
+      await expect(page.getByTestId('mcp-focus-shade')).toHaveCount(0)
       await expect(shell).not.toHaveClass(/\bmcp-focus-dimmed\b/)
-      await expectNotWorking()
-    }
-    const expectDimmed = async value => {
-      await expect(shade).toHaveCount(1)
-      if (value) await expect(shell).toHaveClass(/\bmcp-focus-dimmed\b/)
-      else await expect(shell).not.toHaveClass(/\bmcp-focus-dimmed\b/)
-      await expect(shade).toHaveCSS('opacity', value ? '0.42' : '0')
+      await expect(shell).toHaveCSS('filter', 'none')
+      await expect(shell).toHaveCSS('opacity', '1')
     }
     const updateStatus = async patch => {
       await page.evaluate(patch => Object.assign(window.mcpAppFixture, patch), patch)
       await page.clock.runFor(1100)
     }
-    const click = async locator => {
-      const rect = await locator.boundingBox()
-      assert(rect, '需要实际点击的控件必须可见')
-      await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2)
-    }
-    const toggleService = async running => {
-      await click(page.getByTestId('editor-mcp-open'))
-      await expect(page.getByRole('dialog', { name: 'MCP 服务', exact: true })).toBeVisible()
-      const control = page.getByTestId('mcp-service-switch')
-      await expect(control).toHaveAttribute('aria-checked', String(!running))
-      await expect(control).toBeEnabled()
-      await click(control)
-      await expect(control).toHaveAttribute('aria-checked', String(running))
-      await click(page.getByRole('button', { name: '关闭MCP 服务', exact: true }))
-    }
-    const holdTool = async id => {
-      await page.evaluate(id => { window.mcpAppFixture.holdCompleteId = id }, id)
-      await enqueue(page, 'project_get', {}, { id, ttl: 120000 })
-      await page.waitForFunction(id => window.mcpAppFixture.heldCompletions.has(id), id)
-    }
-    const releaseTool = async id => {
-      await page.evaluate(id => {
-        const fixture = window.mcpAppFixture
-        fixture.holdCompleteId = ''; fixture.heldCompletions.get(id)(); fixture.heldCompletions.delete(id)
-      }, id)
-      await completion(page, id)
-    }
-
-    // Starting the service grants a full idle interval, even without any client or task.
-    await toggleService(false)
-    await expectInactive()
-    await toggleService(true)
-    await expectDimmed(false)
-    await expectNotWorking()
-    await page.clock.runFor(4999)
-    await expectDimmed(false)
-    await page.clock.runFor(1)
-    await expectDimmed(true)
-    await expect(page.getByTestId('editor-mcp-open')).not.toHaveClass(/\bconnected\b/)
-    await expectNotWorking()
-    const geometry = await editorGeometry(page)
-    await expect(shade).toHaveCSS('pointer-events', 'none')
-    await expect(shade).toHaveCSS('z-index', '80')
-    await page.screenshot({ path: '/tmp/open-media-mcp-focus-idle.png', fullPage: true })
-    await page.evaluate(() => window.mcpAppFixture.mediaJobs.push({ id: 'local-focus-export', name: '本地视频导出', state: 'running', progress: 0.4 }))
-    await page.clock.runFor(1100)
-    await page.waitForFunction(() => document.querySelector('#app').__vue_app__._instance.setupState.runningJobs === 1)
-    await expectDimmed(true)
-    await expectNotWorking()
-    await page.evaluate(() => { window.mcpAppFixture.mediaJobs.find(job => job.id === 'local-focus-export').state = 'completed' })
-
-    // Touch input and unchanged coordinates do not count as mouse activity.
-    await page.locator('.project-bar').dispatchEvent('pointermove', { pointerType: 'touch', clientX: 510, clientY: 250 })
-    await expectDimmed(true)
-    await page.mouse.move(510, 250)
-    await expectDimmed(false)
-    await page.clock.runFor(4000)
-    await page.locator('.project-bar').dispatchEvent('pointermove', { pointerType: 'mouse', clientX: 510, clientY: 250 })
-    await page.clock.runFor(999)
-    await expectDimmed(false)
-    await page.clock.runFor(1)
-    await expectDimmed(true)
-    // A child stopping bubbling still lets the document capture listener see movement.
-    await page.evaluate(() => {
-      const target = document.querySelector('.project-bar')
-      target.addEventListener('pointermove', event => event.stopPropagation(), { once: true })
-      target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: 520, clientY: 250 }))
+    const colors = async locator => locator.evaluate(element => {
+      const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1
+      const ctx = canvas.getContext('2d')
+      const luminance = color => {
+        ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1)
+        const channels = [...ctx.getImageData(0, 0, 1, 1).data].slice(0, 3).map(value => { const n = value / 255; return n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4 })
+        return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722
+      }
+      const style = getComputedStyle(element), foreground = luminance(style.color), background = luminance(style.backgroundColor)
+      return { foreground, background, contrast: (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05), color: style.color, backgroundColor: style.backgroundColor }
     })
-    await expectDimmed(false)
-    await page.clock.runFor(4900)
-    await page.mouse.move(530, 250)
+    const assertTheme = async theme => {
+      await expect(shell).toHaveAttribute('data-theme', theme)
+      await expect(banner).toHaveAttribute('data-theme', theme === 'dark' ? 'light' : 'dark')
+      const actual = await colors(banner)
+      assert.ok(theme === 'dark' ? actual.background > .75 : actual.background < .1, JSON.stringify({ theme, ...actual }))
+      assert.ok(actual.contrast >= 4.5, JSON.stringify(actual))
+      await page.getByTestId('mcp-processing-details').click()
+      const details = page.getByTestId('mcp-processing-detail-panel')
+      await expect(details).toBeVisible()
+      const detailColors = await colors(details)
+      assert.ok(theme === 'dark' ? detailColors.background > .75 : detailColors.background < .1, JSON.stringify(detailColors))
+      assert.ok(detailColors.contrast >= 4.5, JSON.stringify(detailColors))
+      await page.keyboard.press('Escape')
+      await noDim()
+    }
+    // Neither enabling the service alone nor a connected idle client dims the editor.
+    await page.clock.runFor(6000); await noDim()
+    await updateStatus({ connectedClients: 1 })
+    await expect(banner).toContainText('等待 MCP 操作')
+    const geometry = await editorGeometry(page)
+    await page.clock.runFor(30000); await noDim()
+    await page.mouse.move(500, 250); await noDim()
+    await page.clock.runFor(6000); await noDim()
+    await assertTheme('dark')
+    await page.screenshot({ path: '/tmp/open-media-mcp-contrast-dark.png', fullPage: true })
+    await page.getByTestId('theme-light').click(); await assertTheme('light')
+    await page.screenshot({ path: '/tmp/open-media-mcp-contrast-light.png', fullPage: true })
+    await page.getByTestId('theme-system').click()
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' }); await assertTheme('dark')
+    await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' }); await assertTheme('light')
+    assert.deepEqual(await editorGeometry(page), geometry, '反色状态条及详情不会推移编辑布局')
+
+    await page.evaluate(() => { window.mcpAppFixture.holdCompleteId = 'contrast-active-tool' })
+    await enqueue(page, 'project_get', {}, { id: 'contrast-active-tool', ttl: 120000 })
+    await page.waitForFunction(() => window.mcpAppFixture.heldCompletions.has('contrast-active-tool'))
+    await expect(banner).toHaveClass(/\bworking\b/)
+    await expect(banner).toContainText('MCP 正在调用')
+    await page.clock.runFor(6000); await noDim()
+    await assertTheme('light')
+    await page.evaluate(() => { const f = window.mcpAppFixture; f.holdCompleteId = ''; f.heldCompletions.get('contrast-active-tool')() })
+    await completion(page, 'contrast-active-tool'); await page.clock.runFor(1300)
+    await expect(banner).toContainText('等待 MCP 操作')
+    await noDim()
+
+    await page.setViewportSize({ width: 390, height: 844 })
     await page.clock.runFor(100)
-    await expectDimmed(false)
-    await page.clock.runFor(4899)
-    await expectDimmed(false)
-    await page.clock.runFor(1)
-    await expectDimmed(true)
-
-    // Tool activity only controls the animated banner; it never resets idle dimming.
-    await holdTool('focus-held-tool')
-    await expect(banner).toHaveAttribute('data-call-state', 'running')
-    await expectNotWorking()
-    await expectDimmed(true)
-    await updateStatus({ connectedClients: 1 })
-    await expect(banner).toHaveClass(/\bworking\b/)
-    await expect(banner).toHaveCSS('z-index', '90')
-    await expectDimmed(true)
-    assert.deepEqual(await editorGeometry(page), geometry, '全局暗化和流光不得改变编辑器布局')
-    await page.emulateMedia({ reducedMotion: 'no-preference' })
-    const glow = page.getByTestId('mcp-status-glow')
-    await expect(glow).toHaveAttribute('data-motion', 'animated')
-    await expect(glow).toHaveCSS('pointer-events', 'none')
+    await assertFloatingBar(page, 390)
+    await assertTheme('light')
+    await page.screenshot({ path: '/tmp/open-media-mcp-contrast-mobile.png', fullPage: true })
+    await page.setViewportSize({ width: 1500, height: 1000 })
     await page.clock.runFor(100)
-    const firstGlow = await glow.evaluate(canvas => canvas.toDataURL())
-    await page.clock.runFor(200)
-    assert.notEqual(await glow.evaluate(canvas => canvas.toDataURL()), firstGlow, '流光使用真实 Canvas 逐帧绘制')
-    await page.screenshot({ path: '/tmp/open-media-mcp-focus-dimmed.png', fullPage: true })
-    await page.emulateMedia({ reducedMotion: 'reduce' })
-    await expect(glow).toHaveAttribute('data-motion', 'static')
-    const stillGlow = await glow.evaluate(canvas => canvas.toDataURL())
-    await page.clock.runFor(200)
-    assert.equal(await glow.evaluate(canvas => canvas.toDataURL()), stillGlow, '减少动态效果时 Canvas 保持静态边框')
-    assert.notEqual(await banner.evaluate(element => getComputedStyle(element).boxShadow), 'none', '减少动态效果时保留静态高亮')
-    await expectDimmed(true)
-    await page.mouse.move(540, 250)
-    await expectDimmed(false)
-    await page.clock.runFor(2000)
-    await releaseTool('focus-held-tool')
-    await expect(banner).toHaveAttribute('data-call-state', 'completed')
-    await expectNotWorking()
-    await expectDimmed(false)
-    await page.evaluate(() => { window.mcpAppFixture.connectedClients = 0 })
-    await page.clock.runFor(2999)
-    await expect(page.getByTestId('editor-mcp-open')).not.toHaveClass(/\bconnected\b/)
-    await expectDimmed(false)
-    await page.clock.runFor(1)
-    await expectDimmed(true)
-    await updateStatus({ connectedClients: 1 })
-    await expectDimmed(true)
-    await holdTool('focus-following-tool')
-    await expect(banner).toHaveClass(/\bworking\b/)
-    await expectDimmed(true)
-    await releaseTool('focus-following-tool')
-    await expectNotWorking()
-    await expectDimmed(true)
-    console.log('PASS MCP聚焦：开启服务后静止5000ms暗化，鼠标移动恢复，任务和连接不重置计时；Canvas执行流光与减少动态静态边框不推移布局')
-
-    const imported = await tool(page, 'asset_import', { paths: ['/fixture/focus-import.png'] })
-    assert.equal(imported.state, 'running')
-    await page.waitForFunction(() => typeof window.mcpAppFixture.releaseImport === 'function')
-    await expect(banner).toHaveAttribute('data-call-state', 'completed')
-    await page.clock.runFor(1300)
-    await expect(banner).toContainText('MCP 正在处理')
-    await expect(banner).toHaveClass(/\bworking\b/)
-    await expectDimmed(true)
-    const asyncGeometry = await editorGeometry(page)
-    await click(page.getByRole('button', { name: '关于 Open Media', exact: true }))
-    const info = page.getByRole('dialog', { name: '关于 Open Media', exact: true })
-    await expect(info).toBeVisible()
-    await page.clock.runFor(5000)
-    await expectDimmed(true)
-    assert.equal(await info.evaluate(element => {
-      const button = element.querySelector('button'), rect = button.getBoundingClientRect()
-      return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-    }), true, '顶层信息弹窗必须位于暗化层上方且可命中')
-    await click(info.getByRole('button', { name: '关闭关于 Open Media', exact: true }))
-    await expect(info).not.toBeVisible()
-    await updateStatus({ connectedClients: 0 })
-    await expectNotWorking()
-    await expectDimmed(false)
-    await page.clock.runFor(3899)
-    await expectDimmed(false)
-    await page.clock.runFor(1)
-    await expectDimmed(true)
-    await expect(banner).toContainText('MCP 正在处理')
-    await updateStatus({ connectedClients: 1 })
-    await expect(banner).toHaveClass(/\bworking\b/)
-    await expectDimmed(true)
-    assert.deepEqual(await editorGeometry(page), asyncGeometry, '对话框、连接状态和异步工具完成不推移工作区')
-    await click(page.getByTestId('mcp-processing-tasks'))
-    const tasks = page.getByRole('dialog', { name: '处理任务', exact: true })
-    await expect(tasks).toBeVisible()
-    await page.clock.runFor(5000)
-    await expectDimmed(true)
-    const cancel = tasks.locator(`[data-mcp-job-id="${imported.jobId}"]`).getByRole('button', { name: /取消 MCP 任务/ })
-    assert.equal(await cancel.evaluate(button => {
-      const rect = button.getBoundingClientRect()
-      return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-    }), true, '任务弹窗及取消按钮必须位于暗化层上方且可命中')
-    await page.screenshot({ path: '/tmp/open-media-mcp-focus-dialog.png', fullPage: true })
-    await click(cancel)
-    await page.evaluate(() => { window.mcpAppFixture.releaseImport([]); window.mcpAppFixture.releaseImport = undefined })
-    await expect(tasks.locator(`[data-mcp-job-id="${imported.jobId}"]`)).toContainText('已取消')
-    await expectNotWorking()
-    await expectDimmed(false)
-    await page.clock.runFor(5000)
-    await expectDimmed(true)
-    await click(tasks.getByRole('button', { name: '关闭任务', exact: true }))
-    await expect(tasks).not.toBeVisible()
-
-    await holdTool('focus-stopped-tool')
-    await expectDimmed(false)
-    await page.clock.runFor(5000)
-    await expectDimmed(true)
-    await page.mouse.move(550, 250)
-    await expectDimmed(false)
-    await toggleService(false)
-    await expectInactive()
-    await releaseTool('focus-stopped-tool')
-    await page.mouse.move(560, 250)
-    await page.clock.runFor(6000)
-    await expectInactive()
-    await toggleService(true)
-    await expectDimmed(false)
-    await expectNotWorking()
-    await page.clock.runFor(4999)
-    await expectDimmed(false)
-    await page.clock.runFor(1)
-    await expectDimmed(true)
-    await toggleService(false)
-    await expectInactive()
-    assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+    await page.getByTestId('editor-mcp-open').click()
+    await page.getByTestId('mcp-service-switch').click()
+    await page.getByRole('button', { name: '关闭MCP 服务', exact: true }).click()
+    await expect(banner).not.toBeVisible()
+    await page.clock.runFor(6000); await noDim()
     assert.deepEqual(errors, [])
-    console.log('PASS MCP聚焦生命周期：异步任务流光持续、取消后仍按空闲时间暗化，信息/任务弹窗可点，停服立即清理暗化和定时器，重新开启等待完整5000ms')
+    assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
+    console.log('PASS MCP反色状态条：浅/深/系统主题、详情文字对比度、工作与等待、窄屏布局；闲置和移动鼠标均不暗化编辑器')
   } finally { await page.close() }
 }
 
@@ -510,7 +368,7 @@ async function verifyPersistentBanner(browser, url) {
     await expect(details).not.toBeVisible()
     await page.screenshot({ path: '/tmp/open-media-mcp-connected-waiting-mobile.png', fullPage: true })
     await page.setViewportSize({ width: 1500, height: 1000 })
-    // Sidebar width transitions use the browser compositor clock, separate from the idle timer.
+    // Sidebar width transitions use the browser compositor clock, separate from the simulated request clock.
     await expect.poll(async () => (await editorGeometry(page))['[data-testid="video-editor"]']).toEqual(geometry['[data-testid="video-editor"]'])
     await page.clock.runFor(1100)
     await assertFloatingBar(page, 1500)
@@ -616,12 +474,30 @@ async function verifyMotionPreferences(browser, url) {
     await prompt.pressSequentially('A short introduction')
     await expect(prompt).toHaveValue('A short introduction')
     await page.getByRole('button', { name: '关闭MCP 服务', exact: true }).click()
+    await page.evaluate(() => { window.mcpAppFixture.aiModels = [{ id: 'qwen-image', name: '本地图像模型', provider: 'image', capabilities: ['text-to-image', 'image-to-image'], version: '1', state: 'ready', size: 100, downloadedBytes: 100, hardware: '测试环境', runtime: { state: 'ready' }, bundled: false, requiresLicenseAcceptance: true }] })
+    await page.evaluate(async () => { (await import('/src/core/generation-settings.ts')).setGenerationModel('image', 'z-image-turbo') })
+    const unavailableSelection = await tool(page, 'ai_status')
+    assert.equal(unavailableSelection.generationCapabilities.image.route, 'agent', 'another ready model cannot replace the user choice')
+    assert.deepEqual(unavailableSelection.generationCapabilities.image.readyModelIds, [])
+    await page.evaluate(async () => { (await import('/src/core/generation-settings.ts')).setGenerationModel('image', 'qwen-image') })
     const { revision: briefRevision, execution: briefExecution, final: briefFinal, responseType: briefType, ...brief } = await tool(page, 'motion_brief_get')
     const readBrief = async () => { const { revision, execution, final, responseType, ...value } = await tool(page, 'motion_brief_get'); return value }
     assert.equal(brief.ready, true); assert.equal(brief.styleId, 'neon-retro')
     assert.deepEqual(brief.assetIds, ['creative-image']); assert.equal(brief.prompt, 'A short introduction')
     const current = await tool(page, 'project_get')
-    assert.deepEqual(current.mcpMotionBrief, brief)
+    const { additionalAssetGeneration: unchecked, ...storedBrief } = current.mcpMotionBrief
+    const { additionalAssetGeneration: checked, ...liveBrief } = brief
+    assert.deepEqual(storedBrief, liveBrief)
+    assert.equal(unchecked.checked, false)
+    assert.equal(unchecked.image.route, 'check-status')
+    assert.equal(checked.checked, true)
+    assert.equal(checked.image.route, 'mcp')
+    assert.deepEqual(checked.image.readyModelIds, ['qwen-image'])
+    assert.equal(checked.music.route, 'agent')
+    assert.equal(checked.policy.agentOverride, 'explicit-user-request')
+    assert.equal(await page.evaluate(() => window.mcpAppFixture.calls.some(call => call.command === 'ai_get_status' && call.args.probeRuntime === true)), true)
+    assert.equal(await page.evaluate(() => window.mcpAppFixture.calls.some(call => ['ai_generate', 'ai_model_download', 'ai_model_repair'].includes(call.command))), false)
+
     assert.equal(await page.evaluate(() => window.mcpAppFixture.calls.some(call => call.command === 'begin_motion_clip_render')), false, 'Configuring does not generate a video')
     // Remote history may change edits but cannot revive or overwrite the user's preferences.
     await tool(page, 'project_history', { direction: 'undo' })
@@ -638,7 +514,7 @@ async function verifyMotionPreferences(browser, url) {
     assert.match((await tool(page, 'job_get', { id: rejected.jobId })).error, /开启|就绪/)
     assert.deepEqual(errors, [])
     assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
-    console.log('PASS 完整App素材二创：用户配置同步MCP、输入空格保留、配置不触发生成、远程撤销/重做不更改用户选择、关闭后禁止生成')
+    console.log('PASS 完整App素材二创：实时本地能力检查/本地优先/缺失转Agent、用户配置同步MCP、输入空格保留、配置不触发生成、远程撤销/重做不更改用户选择、关闭后禁止生成')
   } finally { await page.close() }
 }
 
@@ -731,8 +607,8 @@ async function main() {
       await verifyCurrentProject(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
       return
     }
-    if (process.argv.includes('--focus-only')) {
-      await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+    if (process.argv.includes('--theme-only')) {
+      await verifyMcpBannerTheme(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
       return
     }
     await installNativeBridge(page)
@@ -740,8 +616,8 @@ async function main() {
     const replay = await completion(page, 'startup-replay')
     assert.equal(replay.isError, false, '渲染器监听建立后应领取遗漏事件的待处理请求')
     await expect(page.getByTestId('home-workspace')).toBeVisible()
-    const nativeAppearance = () => page.evaluate(() => ({ theme: window.mcpAppFixture.nativeTheme, colors: window.mcpAppFixture.backgroundColors }))
-    const expectedAppearance = (theme, color) => ({ theme, colors: { 'plugin:window|set_background_color': color, 'plugin:webview|set_webview_background_color': color } })
+    const nativeAppearance = () => page.evaluate(() => ({ theme: window.mcpAppFixture.nativeTheme, windowAppearance: window.mcpAppFixture.nativeWindowAppearance, colors: window.mcpAppFixture.backgroundColors }))
+    const expectedAppearance = (theme, color) => ({ theme, windowAppearance: theme, colors: { 'plugin:window|set_background_color': color, 'plugin:webview|set_webview_background_color': color } })
     await expect.poll(nativeAppearance).toEqual(expectedAppearance('dark', '#151923'))
     await page.getByTestId('theme-light').click()
     await expect.poll(nativeAppearance).toEqual(expectedAppearance('light', '#f7f9fc'))
@@ -1146,7 +1022,7 @@ async function main() {
     assert.deepEqual(await page.evaluate(() => window.mcpAppFixture.unexpected), [])
     assert.deepEqual(errors, [])
     await verifyMotionPreferences(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
-    await verifyMcpFocus(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
+    await verifyMcpBannerTheme(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyCurrentProject(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyProjectMediaIsolation(browser, `http://127.0.0.1:${server.httpServer.address().port}`)
     await verifyPersistentBanner(browser, `http://127.0.0.1:${server.httpServer.address().port}`)

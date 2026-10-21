@@ -22,6 +22,8 @@ use std::{
 pub mod analysis;
 #[path = "asset_tools_export.rs"]
 mod export_check;
+#[path = "asset_tools_read.rs"]
+mod source_read;
 
 const MAX_FILE: u64 = 1024 * 1024 * 1024;
 const MAX_RESERVED: u64 = 2 * MAX_FILE;
@@ -560,6 +562,7 @@ impl AssetTools {
                 }
                 Ok(value)
             }
+            "asset_read" => source_read::read_asset_chunk(store, &args["asset"], args, &control),
             "asset_get_frame" => analysis::frame(
                 store,
                 runtime,

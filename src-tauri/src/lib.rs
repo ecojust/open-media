@@ -29,6 +29,8 @@ pub mod motion_clip;
 pub mod image_clipboard;
 pub mod speech;
 pub mod video_generation;
+#[cfg(any(feature = "desktop", test))]
+mod window_appearance;
 pub mod ai_types;
 pub mod ai_execution;
 mod ai_download;
@@ -930,6 +932,10 @@ mod desktop {
         Ok(std::env::consts::OS.to_string())
     }
     #[tauri::command]
+    pub async fn set_main_window_appearance(window: tauri::WebviewWindow, theme: Option<String>) -> engine::Result<()> {
+        crate::window_appearance::apply(window, theme).await
+    }
+    #[tauri::command]
     pub fn show_main_window(window: tauri::WebviewWindow) -> engine::Result<()> {
         capture_picker::require_main(&window)?;
         capture_picker::restore_main_window(&window)
@@ -1412,6 +1418,7 @@ mod desktop {
                 cancel_video_generation,
                 configure_screenshot_shortcut,
                 get_desktop_platform,
+                set_main_window_appearance,
                 capture_screenshot,
                 show_main_window,
                 list_capture_devices,

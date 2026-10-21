@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { Project } from '../core/types'
 import { alignTextToSpeech, applySpeechResults, planSpeech, validateSpeechPlanCapacity, type SpeechSource } from '../core/speech'
-import { compactVoiceCatalog } from '../core/voice-catalog'
 import { voiceReady, voiceDownloading } from '../core/voice-downloads'
 import { bundledVoicePreviewUrl, VOICE_PREVIEW_TEXT } from '../core/voice-previews'
 import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../core/speech-settings'
@@ -71,10 +70,6 @@ function startGenerationTimer(): void {
 function errorText(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause) }
 function applyStatus(result: SpeechStatus): void {
   status.value = result
-  if (!result.voices.some(voice => voice.id === voiceId.value && voiceReady(voice))) {
-    const catalog = compactVoiceCatalog(result.voices).filter(voiceReady)
-    voiceId.value = catalog.find(voice => voice.language.toLowerCase().startsWith('zh'))?.id || catalog[0]?.id || ''
-  }
 }
 function stopStatusPoll(): void { clearTimeout(statusTimer); statusTimer = undefined }
 function scheduleStatusPoll(): void {

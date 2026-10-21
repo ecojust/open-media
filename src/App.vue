@@ -30,7 +30,7 @@ import { stampNewAssets } from './core/asset-times.ts'
 import { cloneProject, createClip, createProject, createTrack, validateProject } from './core/project.ts'
 import { withProjectFileTitle } from './core/project-title.ts'
 import { adoptFirstVideoSize } from './core/project-size.ts'
-import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, redoHistory, undoHistory } from './core/timeline.ts'
+import { addAssets, addClip, addTrack, commitHistory, createHistory, projectDuration, renderDuration, redoHistory, undoHistory } from './core/timeline.ts'
 import { deleteProject, listProjects, loadProject, saveProject as storeProject } from './core/storage.ts'
 import { createDraftSaveQueue, draftSaveErrorMessage } from './core/draft-save-queue.ts'
 import { exportProjectFile, importProjectFile } from './core/project-file.ts'
@@ -78,38 +78,8 @@ const mcpCompactStatus = computed(() => mcpBusy.value && activeMcpJob.value ? `$
 const mcpBannerVisible = computed(() => !booting.value && (mcpBusy.value || !!mcpToolActivity.value || mcpServiceRunning.value && mcpConnected.value))
 watch(mcpBannerVisible, visible => { if (!visible) mcpDetailsOpen.value = false })
 let mcpActivityDeadlineTimer: ReturnType<typeof setTimeout> | undefined, mcpActivityFeedbackTimer: ReturnType<typeof setTimeout> | undefined
-const mcpFocusActive = computed(() => native && !booting.value && mcpServiceRunning.value)
-const mcpWorkHighlighted = computed(() => mcpFocusActive.value && mcpConnected.value && (mcpBusy.value || mcpToolActivity.value?.state === 'running'))
-const mcpFocusDimmed = ref(false)
-let mcpFocusIdleTimer: ReturnType<typeof setTimeout> | undefined
-let mcpPointerPosition: { x: number; y: number } | undefined
-function clearMcpFocusIdle(): void { clearTimeout(mcpFocusIdleTimer); mcpFocusIdleTimer = undefined }
-function scheduleMcpFocusIdle(delay: number): void {
-  clearMcpFocusIdle()
-  mcpFocusIdleTimer = setTimeout(() => {
-    mcpFocusIdleTimer = undefined
-    if (!destroyed && mcpFocusActive.value) mcpFocusDimmed.value = true
-  }, delay)
-}
-function mcpPointerMoved(event: PointerEvent): void {
-  if (!mcpFocusActive.value || event.pointerType && event.pointerType !== 'mouse') return
-  if (mcpPointerPosition?.x === event.clientX && mcpPointerPosition.y === event.clientY) return
-  mcpPointerPosition = { x: event.clientX, y: event.clientY }
-  mcpFocusDimmed.value = false
-  scheduleMcpFocusIdle(5000)
-}
-function releaseMcpFocus(): void {
-  clearMcpFocusIdle(); mcpFocusDimmed.value = false
-  mcpPointerPosition = undefined
-  document.removeEventListener('pointermove', mcpPointerMoved, true)
-}
-watch(mcpFocusActive, active => {
-  releaseMcpFocus()
-  if (active) {
-    scheduleMcpFocusIdle(5000)
-    document.addEventListener('pointermove', mcpPointerMoved, { capture: true, passive: true })
-  }
-}, { flush: 'sync' })
+const mcpGlowActive = computed(() => native && !booting.value && mcpServiceRunning.value)
+const mcpWorkHighlighted = computed(() => mcpGlowActive.value && mcpConnected.value && (mcpBusy.value || mcpToolActivity.value?.state === 'running'))
 let mcpStatusRevision = 0, mcpObservedEpoch = getMcpServiceEpoch()
 let mcpBridgeError = ''
 let unlistenMcp: (() => void) | undefined, mcpRequestQueue = Promise.resolve()
@@ -157,7 +127,7 @@ const draftLabel = computed(() => draftState.value === 'error' ? '草稿保存�
 const autosaveProgress = computed(() => draftState.value === 'waiting' ? `${draftSeconds.value} 秒后保存` : draftState.value === 'pending' ? '保存中…' : '')
 function savedTime(value: string) { return new Date(value).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) }
 const lastSaveTitle = computed(() => lastSaveAt.value ? `${lastSaveKind.value === 'file' ? '项目文件' : '本地草稿'}上次保存：${savedTime(lastSaveAt.value)}` : '')
-function openVideoExport() { if (view.value === 'edit' && duration.value && !busy.value && !switching.value && !booting.value && !speechWorking.value && !projectMediaBusy.value && !mcpBusy.value) exportOpen.value = true }
+function openVideoExport() { if (view.value === 'edit' && renderDuration(project.value) > 0 && !busy.value && !switching.value && !booting.value && !speechWorking.value && !projectMediaBusy.value && !mcpBusy.value) exportOpen.value = true }
 function announce(message: string) { status.value = message }
 function fail(cause: unknown) { error.value = cause instanceof Error ? cause.message : String(cause); status.value = error.value }
 function notifyError(cause: unknown) { fail(cause); busy.value = '' }
@@ -927,7 +897,7 @@ function openJobs(): void {
 }
 function openMcp(): void { jobsOpen.value = false; mcpOpen.value = true; if (mcpBridgeError) fail(mcpBridgeError) }
 function updateMcpMotion(config: NonNullable<Project['mcpMotion']>): void {
-  if (destroyed || allowClose || booting.value || switching.value || mcpBusy.value || busy.value || guiToolActive || browserExporting.value || speechWorking.value) return
+  if (!mcpServiceRunning.value || destroyed || allowClose || booting.value || switching.value || mcpBusy.value || busy.value || guiToolActive || browserExporting.value || speechWorking.value) return
   const next = cloneProject(project.value)
   next.mcpMotion = structuredClone(config)
   commit(next, '已更新 MCP 素材二创配置', 'mcp-motion-settings')
@@ -1039,18 +1009,17 @@ onMounted(async () => {
     try { unlistenClose = await onNativeCloseRequest(() => { if (!allowClose) void nativeClose() }) } catch (cause) { fail(cause) }
   }
 })
-onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus(); nativeAppearance.dispose(); clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); window.removeEventListener('pointerdown', closeProjectMenuOutside); window.removeEventListener('resize', closeProjectMenuOnResize); for (const url of workspaceUrls) URL.revokeObjectURL(url); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
+onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); nativeAppearance.dispose(); clearMcpToolActivity(); cancelMcpPlayback(); unlistenMcp?.(); void mcpAutomation.dispose().catch(() => {}); if (native) void stopMcpService().catch(() => {}); screenshotAbort?.abort(); if (screenshotRequestId) void cancelCapturePicker(screenshotRequestId).catch(() => {}); unlistenScreenshot?.(); if (native) void configureScreenshotShortcut(null).catch(() => {}); draftGeneration++; cancelDraftCountdown(); clearTimeout(jobsTimer); unlistenClose?.(); mediaQuery?.removeEventListener('change', mediaChanged); window.removeEventListener('keydown', keyboard); window.removeEventListener('beforeunload', unload); window.removeEventListener('pointerdown', closeProjectMenuOutside); window.removeEventListener('resize', closeProjectMenuOnResize); for (const url of workspaceUrls) URL.revokeObjectURL(url); for (const entry of hydratedReleases) entry.release(); for (const url of ownedUrls) URL.revokeObjectURL(url) })
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'sidebar-appearance': sidebarControls, 'mcp-focus-dimmed': mcpFocusDimmed }" :data-theme="effectiveTheme" :data-platform="desktopPlatform" @dragover.prevent @drop="dropped">
+  <div class="app-shell" :class="{ 'sidebar-appearance': sidebarControls }" :data-theme="effectiveTheme" :data-platform="desktopPlatform" @dragover.prevent @drop="dropped">
     <header v-if="!sidebarControls" class="topbar">
       <button class="brand" :disabled="speechWorking || projectMediaBusy || mcpBusy" title="开始" @click="view='home'"><img src="/brand-mark.png" width="29" height="29" alt=""/><strong>Open Media</strong></button>
       <div class="topbar-end"><HeaderControls :theme="theme" :effective-theme="effectiveTheme" @update:theme="setTheme" :info-open="infoOpen" @open-info="openAiModels()"/></div>
     </header>
-    <div v-if="mcpFocusActive" class="mcp-focus-shade" data-testid="mcp-focus-shade" aria-hidden="true"/>
-    <section v-if="mcpBannerVisible" class="mcp-processing-banner" :class="{ connected: mcpConnected && mcpFocusActive, working: mcpWorkHighlighted }" data-testid="mcp-processing-banner" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state || (mcpBusy ? 'running' : 'idle')" :data-call-tool="mcpToolActivity?.tool" @keydown.esc.stop="mcpDetailsOpen=false">
-      <McpStatusGlow v-if="mcpConnected && mcpFocusActive" :active="true" :working="mcpWorkHighlighted"/>
+    <section v-if="mcpBannerVisible" class="mcp-processing-banner" :class="{ connected: mcpConnected && mcpGlowActive, working: mcpWorkHighlighted }" data-testid="mcp-processing-banner" :data-theme="effectiveTheme === 'dark' ? 'light' : 'dark'" aria-label="MCP 处理状态" :data-call-state="mcpToolActivity?.state || (mcpBusy ? 'running' : 'idle')" :data-call-tool="mcpToolActivity?.tool" @keydown.esc.stop="mcpDetailsOpen=false">
+      <McpStatusGlow v-if="mcpConnected && mcpGlowActive" :active="true" :working="mcpWorkHighlighted"/>
       <span v-if="mcpBusy || mcpToolActivity?.state==='running'" class="spinner small" aria-hidden="true"/><Icon v-else class="mcp-status-icon" :name="mcpToolActivity?.state==='failed' ? 'alert' : mcpToolActivity ? 'check' : 'mcp'" :size="16"/>
       <div class="mcp-processing-copy" role="status" aria-live="polite" :title="`${mcpActivityTitle} · ${mcpCompactStatus}`"><strong>{{ mcpActivityTitle }}</strong><span>{{ mcpCompactStatus }}</span></div>
       <span v-if="mcpBusy && activeMcpProgress!==undefined" class="mcp-processing-percent">{{ activeMcpProgress }}%</span>
@@ -1151,9 +1120,10 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
 .mcp-task-item progress{display:block;width:100%;height:5px;accent-color:var(--ui-accent)}
 .mcp-task-item .error-message{color:var(--ui-danger)}
 .mcp-processing-banner{position:fixed;z-index:90;top:calc(5px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);width:min(780px,calc(100vw - 360px));height:44px;display:flex;align-items:center;gap:9px;padding:0 11px;border:1px solid color-mix(in srgb,var(--ui-accent) 25%,var(--ui-line));border-radius:9px;background:var(--ui-surface);box-shadow:0 5px 24px #0002;color:var(--ui-text)}
+/* The status and its details share the opposite palette without changing the workspace. */
+.mcp-processing-banner[data-theme=light]{--ui-surface:#fff;--ui-line:#d6deeb;--ui-border-strong:#aebed5;--ui-text:#263044;--ui-muted:#586a84;--ui-accent:#285be0;--ui-hover:#edf2fc;--ui-shadow:0 12px 38px #20345c24;color-scheme:light}
+.mcp-processing-banner[data-theme=dark]{--ui-surface:#1d2230;--ui-line:#46546b;--ui-border-strong:#64748e;--ui-text:#e3e8f2;--ui-muted:#a3b1c7;--ui-accent:#91adff;--ui-hover:#2a3346;--ui-shadow:0 12px 38px #0006;color-scheme:dark}
 .app-shell.sidebar-appearance .mcp-processing-banner{top:calc(54px + env(safe-area-inset-top,0px))}
-.mcp-focus-shade{position:fixed;inset:0;z-index:80;background:#050916;opacity:0;pointer-events:none;transition:opacity .18s ease}
-.mcp-focus-dimmed .mcp-focus-shade{opacity:.42}
 .mcp-processing-banner.connected{border-color:color-mix(in srgb,#8c8afd 55%,var(--ui-line));box-shadow:0 0 16px #7195ff26,0 5px 24px #0002}
 .mcp-status-icon{flex:none;color:var(--ui-accent)}
 .mcp-processing-banner.working{border-color:#8c8afd;box-shadow:0 0 0 1px #8c8afd40,0 0 24px #7195ff55,0 6px 24px #0003}
@@ -1162,6 +1132,6 @@ onBeforeUnmount(() => { destroyed = true; releaseAiStatus?.(); releaseMcpFocus()
 .mcp-processing-progress{position:absolute;bottom:0;left:8px;right:8px;height:2px;overflow:hidden;border-radius:2px}.mcp-processing-progress i{display:block;height:100%;background:var(--ui-accent)}.mcp-processing-details{position:absolute;top:52px;right:0;width:min(440px,100%);max-height:min(280px,calc(100dvh - 128px));overflow:auto;padding:14px;border:1px solid var(--ui-line);border-radius:9px;background:var(--ui-surface);box-shadow:var(--ui-shadow);font-size:12px;line-height:1.6;overflow-wrap:anywhere}.mcp-processing-details p{margin:7px 0 0;color:var(--ui-muted);font-size:11px}.mcp-job-metrics{font-variant-numeric:tabular-nums}
 @media(max-width:700px){.mcp-processing-banner{top:calc(62px + env(safe-area-inset-top,0px));width:calc(100vw - 24px);gap:6px;padding:0 8px}.mcp-processing-copy{gap:6px}.mcp-processing-copy strong{font-size:10px}.mcp-action-label{display:none}.mcp-processing-actions button{width:28px;padding:0}.mcp-processing-percent{font-size:10px}}
 @media(max-width:640px){.mcp-processing-banner{top:calc(57px + env(safe-area-inset-top,0px))}}
-@media(prefers-reduced-motion:reduce){.mcp-processing-banner>.spinner{animation:none}.mcp-focus-shade{transition:none}}
+@media(prefers-reduced-motion:reduce){.mcp-processing-banner>.spinner{animation:none}}
 
 </style>

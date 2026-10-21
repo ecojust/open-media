@@ -1483,6 +1483,64 @@ fn muted_transition_does_not_affect_export_and_invalid_anchors_are_rejected() {
 }
 
 #[test]
+fn hidden_tracks_are_omitted_from_real_export_and_frame_preview() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let spec = json!({"kind":"timeline","project":{
+        "width":160,"height":120,"fps":20,"background":"#00ff00","assets":[asset],
+        "tracks":[
+            {"kind":"text","hidden":true,"clips":[{"id":"unprepared-title","start":0,"trimIn":0,"trimOut":20,"speed":1}]},
+            {"kind":"video","hidden":true,"clips":[{"id":"missing-overlay","assetId":"missing","start":0,"trimIn":0,"trimOut":10,"speed":1}]},
+            {"kind":"audio","hidden":true,"clips":[{"id":"inaudible","assetId":asset.id,"start":0,"trimIn":0,"trimOut":2,"speed":1,"volume":1}]},
+            {"kind":"transition","hidden":true,"clips":[{"id":"ignored-transition","transition":{"effect":"invalid","fromClipId":"missing","toClipId":"also-missing"}}]},
+            {"kind":"video","clips":[{"id":"visible","assetId":asset.id,"start":0,"trimIn":0,"trimOut":0.8,"speed":1,"width":160,"height":120,"volume":0}]}
+        ]
+    },"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"high"}});
+    let (_, probe) = run(temp.path(), &rt, spec.clone(), "hidden-tracks.mp4");
+    let duration: f64 = probe["format"]["duration"].as_str().unwrap().parse().unwrap();
+    assert!((duration - 0.8).abs() < 0.01, "hidden-only tail changed export duration: {duration}");
+    assert!(!probe["streams"].as_array().unwrap().iter().any(|stream| stream["codec_type"] == "audio"), "hidden audio was exported");
+    let decoded = decoded_video(&rt, &temp.path().join("hidden-tracks.mp4"));
+    assert_eq!(decoded.len(), 16 * 160 * 120 * 3);
+    assert!(decoded.chunks_exact(3).all(|pixel| pixel[0] > 220 && pixel[1] < 25 && pixel[2] < 25), "hidden overlay changed visible frames");
+    let store = MediaStore::new(temp.path()).unwrap();
+    let jobs = JobManager::default();
+    let preview = json!({"project":spec["project"],"frameOnly":true,"start":0.4,"width":160});
+    let job = crate::preview_tools::begin(&store, &rt, &jobs, &preview).unwrap();
+    assert_eq!(wait(&jobs, &job.id).state, "completed");
+    let frame = crate::preview_tools::result(&store, &rt, &jobs, &job.id).unwrap();
+    let pixels = decoded_video(&rt, Path::new(&frame.native_path));
+    assert_eq!(pixels.len(), 160 * 120 * 3);
+    assert!(pixels.chunks_exact(3).all(|pixel| pixel[0] > 220 && pixel[1] < 25 && pixel[2] < 25));
+    crate::preview_tools::discard(&store, &jobs, &job.id).unwrap();
+}
+
+#[test]
+fn hidden_transition_or_hidden_video_sources_do_not_change_visible_export() {
+    let temp = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let asset = sample(temp.path(), &rt);
+    let mut spec = transition_spec(&asset, "fade");
+    spec["project"]["tracks"][0]["hidden"] = json!(true);
+    run(temp.path(), &rt, spec.clone(), "hidden-transition.mp4");
+    let pixels = decoded_video(&rt, &temp.path().join("hidden-transition.mp4"));
+    let cut = &pixels[20 * 160 * 120 * 3..];
+    assert!(cut[2] > 220 && cut[1] < 25, "hidden transition changed the hard cut");
+
+    spec["project"]["tracks"][0]["hidden"] = json!(false);
+    spec["project"]["tracks"][1]["hidden"] = json!(true);
+    spec["project"]["tracks"].as_array_mut().unwrap().push(json!({"kind":"video","clips":[{
+        "id":"visible","assetId":asset.id,"start":0,"trimIn":0,"trimOut":0.8,"speed":1,"width":160,"height":120,"volume":0
+    }]}));
+    let (_, probe) = run(temp.path(), &rt, spec, "hidden-transition-sources.mp4");
+    let duration: f64 = probe["format"]["duration"].as_str().unwrap().parse().unwrap();
+    assert!((duration - 0.8).abs() < 0.01, "transition on hidden sources extended export");
+    let pixels = decoded_video(&rt, &temp.path().join("hidden-transition-sources.mp4"));
+    assert!(pixels.chunks_exact(3).all(|pixel| pixel[0] > 220 && pixel[1] < 25 && pixel[2] < 25));
+}
+
+#[test]
 fn transitions_keep_fractional_speed_adjusted_cuts_and_multiple_boundaries_in_sync() {
     let temp = tempfile::tempdir().unwrap();
     let rt = runtime();

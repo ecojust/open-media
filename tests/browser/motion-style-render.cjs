@@ -51,7 +51,7 @@ async function main() {
         return {hash:hash>>>0,luma:luma/(canvas.width*canvas.height*3),visible}
       }
       const checks=[]; let exportProject
-      for(const style of MOTION_STYLES){
+      for(const style of MOTION_STYLES.filter(style=>style.presetSupported)){
         const art=await renderMotionStyleArt(style.id,{},640,360)
         const resources={background:await importBlob(art.background,`${style.id}-background.png`),decoration:await importBlob(art.decoration,`${style.id}-decoration.png`)}
         const options={styleId:style.id,scenes:[{assetId:still.id,heading:'创意，从此动起来',caption:'素材 · 文字 · 节奏',duration:2},{assetId:video.id,heading:'生成效果片段，继续剪辑',duration:2}],musicAssetId:sound.id}

@@ -29,7 +29,7 @@ function assertUnchangedAfterFailure(project, tool, args, regex) {
 }
 
 test('MCP catalog is unique, restrictive and contains the declared runtime and editing operations', () => {
-  assert.equal(MCP_TOOLS.length, 100)
+  assert.equal(MCP_TOOLS.length, 101)
   assert.equal(new Set(MCP_TOOLS.map(tool => tool.name)).size, MCP_TOOLS.length)
   assert.equal(MCP_TOOLS.filter(tool => isProjectTool(tool.name)).length, 39)
   for (const tool of MCP_TOOLS) {
@@ -70,10 +70,18 @@ test('motion clip generation advertises real-video destinations, bounded inputs 
   assert.equal(compose.inputSchema.properties.destination.default, 'assets')
   assert.deepEqual(compose.inputSchema.required, ['scenes'])
   assert.deepEqual(compose.inputSchema.properties.destination.enum, ['assets', 'timeline'])
-  assert.deepEqual(compose.inputSchema.properties.styleId.enum, MOTION_STYLES.map(style => style.id))
+  const presets = MOTION_STYLES.filter(style => style.presetSupported)
+  const codeStyles = MOTION_STYLES.filter(style => !style.presetSupported)
+  assert.equal(presets.length, 15)
+  assert.equal(codeStyles.length, 10)
+  assert.deepEqual(compose.inputSchema.properties.styleId.enum, presets.map(style => style.id))
+  assert.match(list.description, /25 类/)
+  assert.match(list.description, /presetSupported/)
+  assert.match(compose.description, /presetSupported=true/)
   const validate = args => validateMcpToolArguments(compose.name, args)
   const scene = { assetId: 'existing-video', heading: '标题', caption: '素材说明', duration: 4, trimIn: 1 }
   const base = { styleId: 'tech-hud', scenes: [scene] }
+  for (const style of codeStyles) assert.throws(() => validate({ ...base, styleId: style.id }), undefined, `${style.id} is external-code only`)
   assert.doesNotThrow(() => validate({ scenes: [scene] }))
   assert.doesNotThrow(() => validate({ ...base, destination: 'timeline', insert: { trackId: 'existing-track', start: 12 }, title: '说明片', accent: '#abcdef', background: '#010203', textColor: '#FFFFFF', musicAssetId: 'existing-audio', musicVolume: 0.25, sourceAudio: true, tempo: 'energetic', logoAssetId: 'existing-image', dryRun: true, expectedRevision: 7, expectedProjectId: 'current-project' }))
   assert.doesNotThrow(() => validate({ ...base, scenes: Array.from({ length: 16 }, () => ({ ...scene, heading: '字'.repeat(120), caption: '字'.repeat(240), duration: 12 })) }))

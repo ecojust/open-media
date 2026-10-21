@@ -8,6 +8,8 @@ import type { Clip, MediaAsset, Project, ProjectHistory, Track, TrackKind } from
 export function clipDuration(clip: Clip): number { return visualClipDuration(clip) }
 export function clipEnd(clip: Clip): number { return clip.start + clipDuration(clip) }
 export function projectDuration(project: Project): number { return Math.max(0, ...project.tracks.flatMap((track) => track.clips.map(clipEnd))) }
+/** Playback/export bounds omit hidden tracks; the editing timeline keeps every clip. */
+export function renderDuration(project: Project): number { return Math.max(0, ...project.tracks.filter(track => !track.hidden && track.kind !== 'transition').flatMap(track => track.clips.map(clipEnd))) }
 export function isClipActive(clip: Clip, time: number): boolean { return time >= clip.start && time < clipEnd(clip) }
 export function sourceTimeAt(clip: Clip, time: number): number { return animatedSourceTimeAt(clip, time) }
 export function clipOpacityAt(clip: Clip, time: number): number {
@@ -19,7 +21,7 @@ export function clipOpacityAt(clip: Clip, time: number): number {
 
 export function activeClips(project: Project, time: number): { track: Track; clip: Clip; asset?: MediaAsset; sourceTime: number }[] {
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]))
-  return project.tracks.flatMap((track) => track.clips.filter((clip) => isClipActive(clip, time)).map((clip) => ({ track, clip, asset: clip.assetId ? assets.get(clip.assetId) : undefined, sourceTime: sourceTimeAt(clip, time) })))
+  return project.tracks.filter(track => !track.hidden).flatMap((track) => track.clips.filter((clip) => isClipActive(clip, time)).map((clip) => ({ track, clip, asset: clip.assetId ? assets.get(clip.assetId) : undefined, sourceTime: sourceTimeAt(clip, time) })))
 }
 
 function edit(project: Project, action: (copy: Project) => void): Project {
@@ -69,7 +71,7 @@ export function removeAsset(project: Project, assetId: string): Project {
 export function addTrack(project: Project, kindOrTrack: TrackKind | Track, name?: string): Project {
   return edit(project, (copy) => { copy.tracks.push(typeof kindOrTrack === 'string' ? createTrack(kindOrTrack, name) : JSON.parse(JSON.stringify(kindOrTrack)) as Track) })
 }
-export function setTrack(project: Project, trackId: string, patch: Partial<Pick<Track, 'name' | 'muted' | 'locked'>>): Project {
+export function setTrack(project: Project, trackId: string, patch: Partial<Pick<Track, 'name' | 'muted' | 'hidden' | 'locked'>>): Project {
   return edit(project, (copy) => { Object.assign(trackById(copy, trackId), patch) })
 }
 export function removeTrack(project: Project, trackId: string): Project {

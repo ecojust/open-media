@@ -29,7 +29,7 @@ export interface PreparedEditorTool {
   discard?: () => void | Promise<void>
 }
 
-const EXTRA_NAMES = new Set(['asset_upload', 'asset_import_url', 'asset_probe', 'asset_get_frame', 'asset_storyboard', 'asset_detect_scenes', 'asset_detect_idle', 'asset_ocr', 'timeline_get_frame', 'preview_render', 'audio_preview', 'artifact_read', 'timeline_batch_edit', 'project_snapshot', 'export_validate', 'project_video_compress', 'project_video_restore', 'clip_split_idle', 'motion_style_list', 'motion_clip_generate'].map(name => `open_media_${name}`))
+const EXTRA_NAMES = new Set(['asset_upload', 'asset_import_url', 'asset_read', 'asset_probe', 'asset_get_frame', 'asset_storyboard', 'asset_detect_scenes', 'asset_detect_idle', 'asset_ocr', 'timeline_get_frame', 'preview_render', 'audio_preview', 'artifact_read', 'timeline_batch_edit', 'project_snapshot', 'export_validate', 'project_video_compress', 'project_video_restore', 'clip_split_idle', 'motion_style_list', 'motion_clip_generate'].map(name => `open_media_${name}`))
 export function isSharedEditorTool(name: string): boolean { return EXTRA_NAMES.has(name) || isAudioEditorTool(name) }
 
 import { executeProjectTool, isProjectTool, validateMcpToolArguments } from './mcp-tools.ts'
@@ -66,13 +66,15 @@ export async function prepareEditorTool(name: string, input: Record<string, unkn
   } else if (isAudioEditorTool(name)) {
     result = await prepareAudioEditorTool(name, args, context)
     if (name === 'open_media_speech_generate_preview') {
-      const data = result.data as { asset: MediaAsset }, { artifactFromAsset } = await import('./editor-preview-tools.ts')
+      const data = result.data as { asset: MediaAsset; voiceId: string }, { artifactFromAsset } = await import('./editor-preview-tools.ts')
+      const { assertMcpSpeechVoice } = await import('./speech-settings.ts')
       try {
         const artifact = await artifactFromAsset(data.asset, context)
+        assertMcpSpeechVoice(data.voiceId)
         result.data = { ...data, asset: publicData(data.asset), ...artifact }
         const discard = result.discard
         // A read-only audition lives in the bounded artifact cache, never the project library.
-        result.accept = async () => { await discard?.() }
+        result.accept = async () => { assertMcpSpeechVoice(data.voiceId); await discard?.() }
       } catch (cause) { await result.discard?.(); throw cause }
     }
   } else if (name === 'open_media_timeline_batch_edit') {
@@ -133,6 +135,7 @@ export async function prepareEditorTool(name: string, input: Record<string, unkn
       const asset = projectAsset ?? (context.source === 'gui' && guiAsset && typeof guiAsset === 'object' && (guiAsset as MediaAsset).id === args.assetId ? guiAsset as MediaAsset : undefined)
       if (!asset) throw new Error('素材不存在，请重新读取素材列表。')
       const { assetId: _id, expectedRevision: _revision, ...parameters } = args
+      if (operation === 'asset_read' && Number(args.offset ?? 0) > 0 && !args.sourceVersion) throw new Error('续传素材需要首块返回的 sourceVersion，请从 offset=0 重新读取。')
       if (operation === 'asset_ocr') {
         const frame = await runAssetTool<import('../native-asset-tools.ts').AssetFrame>('asset_get_frame', { asset, time: args.time ?? 0, maxWidth: args.width ?? 1920 }, context)
         const { recognizeImageText } = await import('./image-ocr.ts'), { base64Blob } = await import('./tool-artifacts.ts')

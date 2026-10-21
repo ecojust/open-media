@@ -10,7 +10,8 @@ import { prepareNativeProject } from './native-project.ts'
 import { executeProjectTool, inspectMcpProject, isProjectTool, validateMcpToolArguments } from './mcp-tools.ts'
 import { createMcpSpeechJobs, type McpSpeechJob } from './mcp-speech-jobs.ts'
 import { isSharedEditorTool, prepareEditorTool } from './editor-tool-service.ts'
-import { getSpeechSettings, updateSpeechSettings } from './speech-settings.ts'
+import { getSpeechSettings, updateSpeechSettings, validateMcpSpeechSettings } from './speech-settings.ts'
+import { assertMcpGenerationModel, getGenerationModel, resolveMcpGenerationModel } from './generation-settings.ts'
 import { McpBusyError, mcpBlockingJob, mcpJobResponse, mcpSynchronousResponse, serializeMcpError, type McpBlockingOperation, type McpJobProtocol } from './mcp-response.ts'
 import { beginVideoGeneration, beginVideoModelDownload, cancelVideoGeneration, cancelVideoModelDownload, getVideoGenerationJob, getVideoGenerationStatus } from '../native-video-generation.ts'
 import { applyMcpVideoGeneration, prepareMcpVideoGeneration } from './mcp-video-generation.ts'
@@ -18,6 +19,7 @@ import { beginAiGeneration, cancelAiJob, cancelAiModelDownload, downloadAiModel,
 import { applyMcpAiGeneration, prepareMcpAiGeneration, publicAiJob, publicAiStatus } from './mcp-ai-generation.ts'
 import { MOTION_STYLES } from './motion-style-catalog.ts'
 import { getMcpMotionBrief } from './mcp-motion.ts'
+import { getMcpGenerationCapabilities } from './mcp-generation-capabilities.ts'
 
 export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
 export interface McpAutomationHost {
@@ -68,6 +70,7 @@ interface Operation {
   projectSession?: number
   controller: AbortController
   cancelNative?: () => Promise<void>
+  assertSelection?: () => void
   irrevocable?: boolean
 }
 interface ProjectSession { projectId: string; projectSession?: number }
@@ -112,6 +115,7 @@ export function createMcpAutomation(host: McpAutomationHost) {
   function check(operation: Operation): void {
     if (disposed || operation.controller.signal.aborted) throw new DOMException('MCP 任务已取消。', 'AbortError')
     if (host.getProject().id !== operation.job.projectId || host.getRevision() !== operation.job.revision || host.getProjectSession?.() !== operation.projectSession) throw new Error('项目已发生变化，本次操作未写入项目。请重新读取项目后重试。')
+    operation.assertSelection?.()
   }
   function changed(operation: Operation, stage?: string, progress?: number, metrics?: { encodedFrames?: number; outputTime?: number }): void {
     if (stage) operation.job.stage = stage
@@ -185,7 +189,20 @@ export function createMcpAutomation(host: McpAutomationHost) {
     if (expectedProjectId !== undefined && expectedProjectId !== host.getProject().id) throw new Error(`当前工程已变化：当前 projectId=${host.getProject().id}，请先重新读取当前工程。`)
     const startTool = (kind: string, label: string, action: (operation: Operation) => Promise<unknown>) => start(kind, label, action, name)
     if (args.expectedRevision !== undefined && args.expectedRevision !== host.getRevision()) throw new Error(`项目版本已变化：当前 revision=${host.getRevision()}，请先重新读取项目。`)
-    if (name === 'open_media_motion_brief_get') return { ...getMcpMotionBrief(host.getProject()), projectId: host.getProject().id, revision: host.getRevision() }
+    if (name === 'open_media_asset_read') {
+      const owner = currentSession(), revision = host.getRevision()
+      const prepared = await prepareEditorTool(name, args, { project: cloneProject(host.getProject()), revision, blobs: host.getBlobs(), source: 'mcp', signal: new AbortController().signal, onProgress: () => {} })
+      if (disposed || !sameSession(owner) || host.getRevision() !== revision) throw new Error('当前工程或版本已变化，本次素材读取结果已丢弃，请重新读取工程后开始传输。')
+      return { ...(prepared.data as Record<string, unknown>), projectId: owner.projectId, revision }
+    }
+    if (name === 'open_media_motion_brief_get') {
+      const owner = currentSession(), revision = host.getRevision(), project = cloneProject(host.getProject())
+      let capabilities = getMcpGenerationCapabilities()
+      try { capabilities = getMcpGenerationCapabilities(await getAiStatus(true)) }
+      catch { capabilities.checkError = '本地模型状态查询失败，请通过 open_media_ai_status 重新检查，不能据此判断本地能力缺失。' }
+      if (disposed || !sameSession(owner) || host.getRevision() !== revision) throw new Error('当前工程或版本已变化，本次二创配置查询结果已丢弃，请重新读取。')
+      return { ...getMcpMotionBrief(project, capabilities), projectId: owner.projectId, revision }
+    }
     if (name === 'open_media_motion_style_list') {
       const search = typeof args.search === 'string' ? args.search.trim().toLocaleLowerCase() : ''
       const items = MOTION_STYLES.filter(style => !search || [style.id, style.name, style.description, ...style.tags].join(' ').toLocaleLowerCase().includes(search))
@@ -193,11 +210,17 @@ export function createMcpAutomation(host: McpAutomationHost) {
       return {
         items: structuredClone(items), total: MOTION_STYLES.length, count: items.length,
         capabilities: {
-          editable: true, rendering: '2d', output: 'video-asset', layered: false,
+          editable: true, rendering: 'external-agent-code', output: 'video-asset', layered: false,
+          defaultPromptField: 'prompt', briefPromptField: 'effectivePrompt',
+          codeExecution: 'agent-environment', presetRendering: '2d', presetTool: 'open_media_motion_clip_generate',
+          presetStyleIds: MOTION_STYLES.filter(style => style.presetSupported).map(style => style.id),
+          codeOnlyStyleIds: MOTION_STYLES.filter(style => !style.presetSupported).map(style => style.id),
+          selectedPresetSupported: brief.style?.presetSupported ?? false,
           configurationTool: 'open_media_motion_brief_get', configurationOwner: 'user', execution: 'external-agent',
           enabled: brief.enabled, ready: brief.ready,
-          description: '使用当前工程的图片或视频生成真实效果视频，加入项目素材后作为普通片段继续剪辑与融合。',
-          limitations: ['文字、背景与动画会合成到视频内，修改这些内容需要重新生成。', '不生成真实三维模型或物理模拟。', '不执行流体模拟、逐帧折射或用户素材轮廓变形。'],
+          description: '默认由外部 Agent 根据风格提示词和所选素材编写代码、渲染视频，上传或导入当前工程后添加到轨道剪辑与融合；仅 presetSupported=true 的风格支持内置二维预设快捷路径，其他风格必须由 Agent 代码渲染。',
+          limitations: ['应用不执行任意代码；外部代码渲染所需环境由 Agent 提供。', '生成视频内的文字、背景与动画修改后需要重新渲染。'],
+          presetLimitations: ['内置二维预设不生成真实三维模型或物理模拟。', '内置二维预设不执行流体模拟、逐帧折射或用户素材轮廓变形。'],
         },
         projectId: host.getProject().id, revision: host.getRevision(),
       }
@@ -272,12 +295,15 @@ export function createMcpAutomation(host: McpAutomationHost) {
         available()
         return host.setPlayback({ ...(args.time !== undefined ? { time: args.time as number } : {}), ...(args.playing !== undefined ? { playing: args.playing as boolean } : {}), ...(args.selectedClipId !== undefined ? { selectedClipId: args.selectedClipId as string } : {}) })
       }
-      case 'open_media_speech_voices': return getSpeechStatus()
+      case 'open_media_speech_voices': {
+        const status = await getSpeechStatus(), selectedVoiceId = getSpeechSettings().voiceId
+        return { ...status, selectedVoiceId, selectionPolicy: 'user-selected-only', voices: status.voices.map(voice => ({ ...voice, selected: voice.id === selectedVoiceId, allowed: voice.id === selectedVoiceId })) }
+      }
       case 'open_media_speech_settings_get': return getSpeechSettings()
       case 'open_media_speech_settings_set': {
         available()
         const { expectedRevision: _revision, ...patch } = args
-        return updateSpeechSettings(patch)
+        return updateSpeechSettings(validateMcpSpeechSettings(patch))
       }
       case 'open_media_speech_generate': {
         available()
@@ -303,8 +329,11 @@ export function createMcpAutomation(host: McpAutomationHost) {
           poll: { tool: 'open_media_speech_model', arguments: { action: 'status', modelId } },
           cancel: { tool: 'open_media_speech_model', arguments: { action: 'cancel', modelId } } }
       }
-      case 'open_media_video_generation_status': return getVideoGenerationStatus()
-      case 'open_media_ai_status': return publicAiStatus(await getAiStatus(args.probeRuntime === true))
+      case 'open_media_video_generation_status': {
+        const status = await getVideoGenerationStatus(), selectedModelId = getGenerationModel('video')
+        return { ...status, selectedModelId, selectionPolicy: 'user-selected-only', models: status.models.map(model => ({ ...model, selected: model.id === selectedModelId, allowed: model.id === selectedModelId })) }
+      }
+      case 'open_media_ai_status': return publicAiStatus(await getAiStatus(args.probeRuntime !== false))
       case 'open_media_ai_job_get': return publicAiJob(await getAiJob(args.id as string))
       case 'open_media_ai_job_cancel': {
         const job = await getAiJob(args.id as string)
@@ -338,12 +367,15 @@ export function createMcpAutomation(host: McpAutomationHost) {
       case 'open_media_image_generate':
       case 'open_media_music_generate': {
         const provider = name === 'open_media_image_generate' ? 'image' : 'music'
-        const prepared = prepareMcpAiGeneration(host.getProject(), provider, args)
+        const modelId = resolveMcpGenerationModel(provider, args.modelId)
+        const prepared = prepareMcpAiGeneration(host.getProject(), provider, { ...args, modelId })
         return startTool(`${provider}-generation`, provider === 'image' ? '生成图片' : '生成歌曲', async operation => {
-          const modelStatus = await getAiStatus()
+          operation.assertSelection = () => assertMcpGenerationModel(provider, modelId)
+          const modelStatus = await getAiStatus(true)
           check(operation)
           const model = modelStatus.models.find(item => item.id === prepared.request.request.modelId)
-          if (!model || model.provider !== provider) throw new Error('所选模型不支持此生成类型，请查询 ai_status。')
+          const capability = provider === 'music' ? prepared.request.request.instrumental ? 'text-to-music' : 'lyrics-to-song' : prepared.request.request.inputAsset ? 'image-to-image' : 'text-to-image'
+          if (!model || model.provider !== provider || !model.capabilities.includes(capability)) throw new Error('所选模型不支持此生成类型，请查询 ai_status。')
           if (model.state !== 'ready' || model.runtime.state !== 'ready') throw new Error(model.error || model.runtime.reason || '请先下载或修复所选模型与推理环境。')
           changed(operation, provider === 'image' ? '正在启动图像生成' : '正在启动歌曲生成')
           // The request is not a registered native job yet. Keep an early abort
@@ -394,8 +426,10 @@ export function createMcpAutomation(host: McpAutomationHost) {
           }
         })
       case 'open_media_video_generation_start': {
-        const prepared = prepareMcpVideoGeneration(host.getProject(), args)
+        const modelId = resolveMcpGenerationModel('video', args.modelId)
+        const prepared = prepareMcpVideoGeneration(host.getProject(), { ...args, modelId })
         return startTool('video-generation', '生成视频', async operation => {
+          operation.assertSelection = () => assertMcpGenerationModel('video', modelId)
           const status = await getVideoGenerationStatus()
           check(operation)
           if (!status.supported) throw new Error(status.reason || '当前平台暂不支持本地视频生成。')

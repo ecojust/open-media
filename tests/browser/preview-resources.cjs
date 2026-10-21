@@ -105,9 +105,9 @@ async function main() {
     console.log(`PASS 六十个真实视频片段顺序播放、远距离来回跳转、重叠独立定位与资源释放：${JSON.stringify(report)}`)
 
     const thumbnails = await page.evaluate(async base64 => {
-      const source = await (await fetch('/src/components/AssetVideoThumbnail.vue')).text()
+      const source = await (await fetch('/src/components/AssetMediaPreview.vue')).text()
       const { createApp, h, ref, nextTick } = await import(source.match(/from ["']([^"']*\/vue\.js[^"']*)["']/)[1])
-      const Thumbnail = (await import('/src/components/AssetVideoThumbnail.vue')).default
+      const Thumbnail = (await import('/src/components/AssetMediaPreview.vue')).default
       const data = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
       const urls = [0, 1].map(() => URL.createObjectURL(new Blob([data], { type: 'video/webm' })))
       const callbacks = [], NativeObserver = window.IntersectionObserver
@@ -116,7 +116,7 @@ async function main() {
       }
       const sources = ref(Array.from({ length: 60 }, () => urls[0]))
       const host = document.createElement('div'); document.body.append(host)
-      const app = createApp({ render: () => h('div', { class: 'asset-list', style: 'width:160px;height:240px;overflow:auto' }, sources.value.map((src, index) => h(Thumbnail, { key: index, src, style: 'display:block;width:160px;height:80px' }))) })
+      const app = createApp({ render: () => h('div', { class: 'asset-list', style: 'width:160px;height:240px;overflow:auto' }, sources.value.map((src, index) => h(Thumbnail, { key: index, src, kind: 'video', active: false, style: 'display:block;width:160px;height:80px' }))) })
       app.mount(host)
       let mounted = true
       await nextTick()

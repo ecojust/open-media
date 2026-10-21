@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
-const props = defineProps<{ target: HTMLElement | null; modelValue: number; disabled?: boolean }>()
+const props = defineProps<{ target: HTMLElement | null; viewport?: HTMLElement | null; content?: HTMLElement | null; modelValue: number; disabled?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: number]; size: [height: number] }>()
 const divider = ref<HTMLElement | null>(null)
 const available = ref(0)
+const contentLimit = ref(Number.POSITIVE_INFINITY)
 const height = ref(0)
 const dragging = ref(false)
 const controlledPanelId = ref<string>()
@@ -13,7 +14,8 @@ const MIN_PREVIEW = 180
 const MIN_TIMELINE = 150
 const limits = computed(() => {
   const scale = Math.min(1, available.value / (MIN_PREVIEW + MIN_TIMELINE))
-  return { min: MIN_TIMELINE * scale, max: available.value - MIN_PREVIEW * scale }
+  const max = Math.max(0, Math.min(contentLimit.value, available.value - MIN_PREVIEW * scale))
+  return { min: Math.min(MIN_TIMELINE * scale, max), max }
 })
 const percentage = computed(() => available.value ? Math.round(height.value / available.value * 100) : 40)
 const minimumPercentage = computed(() => available.value ? Math.round(limits.value.min / available.value * 100) : 0)
@@ -44,7 +46,16 @@ function measure(): void {
   const paddingBottom = Number.parseFloat(getComputedStyle(root).paddingBottom) || 0
   const bottom = rootBounds.top + root.clientTop + root.clientHeight - paddingBottom
   available.value = Math.max(0, bottom - preview.getBoundingClientRect().top - handle.getBoundingClientRect().height)
-  controlledPanelId.value = handle.nextElementSibling?.id || undefined
+  const panel = handle.nextElementSibling, viewport = props.viewport, content = props.content
+  controlledPanelId.value = panel?.id || undefined
+  contentLimit.value = Number.POSITIVE_INFINITY
+  if (panel instanceof HTMLElement && viewport && content && panel.contains(viewport) && viewport.contains(content)) {
+    // scrollHeight is at least the viewport height, so it cannot detect empty
+    // space below the last track. Measure the natural content and real chrome.
+    const chrome = Math.max(0, panel.getBoundingClientRect().height - viewport.getBoundingClientRect().height)
+    const scrollbarAndBorders = Math.max(0, viewport.offsetHeight - viewport.clientHeight)
+    contentLimit.value = chrome + content.getBoundingClientRect().height + scrollbarAndBorders
+  }
   const ratio = Number.isFinite(props.modelValue) ? props.modelValue : DEFAULT_RATIO
   setHeight(available.value * Math.max(0, Math.min(1, ratio)))
 }
@@ -117,13 +128,17 @@ function keyboard(event: KeyboardEvent): void {
 
 watch(() => props.modelValue, scheduleMeasure)
 watch(() => props.disabled, value => { if (value) endDrag() })
-watch(() => props.target, target => {
+watch([() => props.target, () => props.viewport, () => props.content, divider], ([target, viewport, content, handle]) => {
   endDrag()
   observer?.disconnect()
   if (target) {
     observer = new ResizeObserver(scheduleMeasure)
-    observer.observe(target)
-    if (divider.value) observer.observe(divider.value)
+    const panel = handle?.nextElementSibling
+    const elements = new Set<Element>([target])
+    for (const element of [handle, panel, viewport, content, ...Array.from(panel?.children ?? [])]) {
+      if (element && target.contains(element)) elements.add(element)
+    }
+    for (const element of elements) observer.observe(element)
     scheduleMeasure()
   }
 }, { flush: 'post', immediate: true })

@@ -1,10 +1,12 @@
-import test from 'node:test'
+import test, { beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { createClip, createProject, createSubtitleClip } from '../src/core/project.ts'
 import { clipDuration, findClip } from '../src/core/timeline.ts'
 import { applySpeechPronunciation, getSpeechPronunciation, setSpeechPronunciation } from '../src/core/speech-pronunciation.ts'
 import { speechTimingPlan } from '../src/core/speech-timing.ts'
 import { planSpeech, applySpeechResults } from '../src/core/speech.ts'
+import { updateSpeechSettings } from '../src/core/speech-settings.ts'
+beforeEach(() => updateSpeechSettings({ voiceId: 'v', rate: 1, alignText: true }))
 import { prepareAudioEditorTool, speechIntervals } from '../src/core/audio-editor-tools.ts'
 import { exportSubtitles, importSubtitles, parseSubtitleFile } from '../src/core/subtitle-files.ts'
 function asset(id, duration=4, kind='audio') { return {id,name:id,kind,duration,width:kind==='video'?1920:0,height:kind==='video'?1080:0,size:1000,mime:kind==='audio'?'audio/wav':'video/mp4',url:`blob:${id}`,nativePath:`/media/${id}.wav`} }
@@ -27,3 +29,52 @@ test('原生结果不合法时丢弃生成文件并保持工程不变',async()=>
 test('响度测量允许锁定轨道，不修改片段并返回明确测量范围',async()=>{const p=fixture();p.tracks[2].locked=true;const result=await prepareAudioEditorTool('audio_loudness_analyze',{clipId:'music'},context(p),dependencies({audio:{beginAudioTool:async()=>({id:'analyze',state:'completed',stage:'完成',progress:1,result:{integratedLufs:-21,truePeakDbtp:-10,measured:true}})}}));assert.equal(result.data.integratedLufs,-21);assert.match(result.data.scope,/未混合/);assert.equal(result.project,undefined);await assert.rejects(prepareAudioEditorTool('audio_normalize',{clipId:'music'},context(p),dependencies()),/锁定/)})
 test('真实识别结果按片段起点平移，保留模型时间戳并导入字幕',async()=>{const p=fixture();p.tracks[2].clips[0].start=8;p.tracks[2].clips[0].trimIn=2;p.tracks[2].clips[0].trimOut=8;p.tracks[2].clips[0].speed=2;let spec;const deps=dependencies();deps.asr={beginAsrTranscription:async input=>{spec=input;return{id:'asr',state:'completed',stage:'完成',progress:1,result:{text:'你好世界',language:'zh',duration:3,modelId:'small',timestampKind:'model',wordSegmentation:'latin-whitespace-and-cjk-model-tokens',backend:'cpu',tokens:[],segments:[{text:'你好世界',start:.2,end:1.8,words:[{text:'你好',start:.2,end:.7},{text:'世界',start:.7,end:1.8}],tokens:[]}]}}},cancelAsrJob:async()=>{}};const result=await prepareAudioEditorTool('audio_transcribe',{action:'transcribe',clipId:'music',createSubtitles:true,granularity:'sentence'},context(p),deps);assert.equal(spec.trimIn,2);assert.equal(spec.speed,2);assert.equal(result.data.timestampKind,'model');assert.equal(result.data.timeOrigin,'timeline');assert.equal(result.data.segments[0].start,8.2);assert.equal(result.data.subtitleCount,1);assert.equal(findClip(result.project,result.data.clipIds[0]).clip.start,8.2);assert.equal(p.tracks.length,3)})
 test('缺少识别模型或原生识别失败不会生成字幕',async()=>{const p=fixture(),deps=dependencies();deps.asr={beginAsrTranscription:async()=>({id:'failed',state:'failed',progress:0,stage:'未就绪',error:'请先下载离线识别模型。'}),cancelAsrJob:async()=>{}};await assert.rejects(prepareAudioEditorTool('audio_transcribe',{action:'transcribe',clipId:'music',createSubtitles:true},context(p),deps),/先下载/);assert.equal(p.tracks.length,3)})
+
+
+test('MCP audition follows the selected voice and refuses another installed voice before native work', async () => {
+  updateSpeechSettings({ voiceId: 'selected' })
+  const calls = []
+  const deps = dependencies({ native: {
+    getSpeechStatus: async () => { calls.push('status'); return { ready: true, voices: [{ id: 'other', status: 'ready' }, { id: 'selected', status: 'ready' }] } },
+    beginSpeechJob: async request => { calls.push(request); return { id: request.requestId, state: 'completed', asset: asset('preview') } },
+  } })
+  const ctx = { ...context(), source: 'mcp' }
+  await assert.rejects(prepareAudioEditorTool('speech_generate_preview', { text: '测试', voiceId: 'other' }, ctx, deps), /用户当前选中/)
+  assert.equal(calls.length, 0)
+  const prepared = await prepareAudioEditorTool('speech_generate_preview', { text: '测试' }, ctx, deps)
+  assert.equal(prepared.data.voiceId, 'selected')
+  assert.equal(calls[1].voiceId, 'selected')
+  await prepared.discard()
+})
+
+test('MCP audition cannot fall back to another downloaded voice when selected voice is unavailable', async () => {
+  updateSpeechSettings({ voiceId: 'missing' })
+  let started = false
+  await assert.rejects(prepareAudioEditorTool('speech_generate_preview', { text: '测试' }, { ...context(), source: 'mcp' }, dependencies({ native: { beginSpeechJob: async () => { started = true } } })), /尚未就绪/)
+  assert.equal(started, false)
+})
+
+test('MCP audition detects selection changes during status query and discards results changed during synthesis', async () => {
+  for (const stage of ['status', 'synthesis']) {
+    updateSpeechSettings({ voiceId: 'v' })
+    let resolve
+    const pending = new Promise(done => { resolve = done })
+    const calls = []
+    const deps = dependencies({ native: {
+      getSpeechStatus: async () => stage === 'status' ? pending : { ready: true, voices: [{ id: 'v', status: 'ready' }] },
+      beginSpeechJob: async request => { calls.push(request); return pending },
+      cancelSpeechJob: async id => calls.push(`cancel:${id}`),
+      discardSpeechJob: async id => calls.push(`discard:${id}`),
+    } })
+    const run = prepareAudioEditorTool('speech_generate_preview', { text: '测试' }, { ...context(), source: 'mcp' }, deps)
+    await new Promise(done => setImmediate(done))
+    updateSpeechSettings({ voiceId: 'new' })
+    resolve(stage === 'status' ? { ready: true, voices: [{ id: 'v', status: 'ready' }] } : { id: calls[0].requestId, state: 'completed', asset: asset('preview') })
+    await assert.rejects(run, /音色已经变化/)
+    if (stage === 'status') assert.deepEqual(calls, [])
+    else {
+      assert.ok(calls.includes(`cancel:${calls[0].requestId}`))
+      assert.ok(calls.includes(`discard:${calls[0].requestId}`))
+    }
+  }
+})

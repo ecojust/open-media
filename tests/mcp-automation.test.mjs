@@ -6,8 +6,10 @@ import { IDBFactory } from 'fake-indexeddb'
 import { createClip, createProject, createSubtitleClip, createTextClip, cloneProject } from '../src/core/project.ts'
 import { addAssets, addClip, commitHistory, createHistory, findClip, redoHistory, undoHistory } from '../src/core/timeline.ts'
 import { getSpeechSettings, subscribeSpeechSettings, updateSpeechSettings } from '../src/core/speech-settings.ts'
+import { getGenerationModel, setGenerationModel } from '../src/core/generation-settings.ts'
 import { storeToolArtifact } from '../src/core/tool-artifacts.ts'
 import { addTransition } from '../src/core/transitions.ts'
+import { MOTION_STYLES } from '../src/core/motion-style-catalog.ts'
 
 // Replace only native/file/canvas I/O boundaries. The controller, project edits,
 // revision checks, undo history, speech settings and speech scheduler are real.
@@ -54,6 +56,10 @@ const localizeProject = project => ({ ...clone(project), assets: project.assets.
 const voice = { id: 'matcha_zh_en_female', name: 'Matcha 中英', language: 'zh-CN', status: 'bundled' }
 
 function fixture(initialProject = createProject('当前工程', { width: 640, height: 360 })) {
+  setGenerationModel('image', 'qwen-image')
+  setGenerationModel('music', 'ace-step-1.5-turbo')
+  setGenerationModel('video', 'h3-base-fl2va')
+  updateSpeechSettings({ voiceId: voice.id, rate: 1, alignText: true })
   globalThis.indexedDB = new IDBFactory()
   let history = createHistory(initialProject), revision = 7, projectSession = 1, busy = false, dirty = false, target
   let playback = { time: 2.5, playing: false, selectedClipId: '' }
@@ -70,7 +76,7 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
       ...['qwen-image', 'z-image-turbo'].map(id => ({ id, provider: 'image' })),
       ...['ace-step-1.5-turbo', 'ace-step-1.5-sft'].map(id => ({ id, provider: 'music' })),
       { id: 'f5-v1-base-fp32', provider: 'speech' }, { id: 'h3-base-fl2va', provider: 'video' },
-    ].map(model => ({ ...model, name: model.id, state: 'ready', runtime: { state: 'ready' }, size: 100, downloadedBytes: 100 })) } },
+    ].map(model => ({ ...model, capabilities: model.provider === 'image' ? ['text-to-image', 'image-to-image'] : model.provider === 'music' ? ['text-to-music', 'lyrics-to-song'] : [], hardware: '测试运行环境', name: model.id, state: 'ready', runtime: { state: 'ready' }, size: 100, downloadedBytes: 100 })) } },
     async downloadAiModel() { return io.getAiStatus() }, async repairAiModel() { return io.getAiStatus() }, async cancelAiModelDownload() { return io.getAiStatus() },
     async beginAiGeneration({ provider, request }) { return { id: request.requestId, provider, modelId: request.modelId, kind: 'generation', state: 'completed', stage: '完成', progress: 1, startedAt: Date.now(), elapsedSeconds: 1, cancelable: false,
       assets: [{ ...video(`generated-${request.requestId}`), kind: provider === 'image' ? 'image' : 'audio', name: provider === 'image' ? '生成.png' : '生成.wav', mime: provider === 'image' ? 'image/png' : 'audio/wav', duration: provider === 'image' ? 0 : 30, provenance: { kind: 'url', url: 'https://private.example/secret', sha256: 'a'.repeat(64), importedAt: 1 } }] } },
@@ -168,11 +174,20 @@ test('motion style discovery is synchronous, searchable and isolated from projec
   const all = await f.run('motion_style_list', { expectedProjectId: f.project.id, expectedRevision: f.revision })
   assert.equal(all.execution, 'synchronous')
   assert.equal(all.final, true)
-  assert.equal(all.total, 15)
-  assert.equal(all.count, 15)
-  assert.equal(all.items.length, 15)
+  assert.equal(all.total, 25)
+  assert.equal(all.count, 25)
+  assert.equal(all.items.length, 25)
   assert.equal(all.capabilities.editable, true)
-  assert.equal(all.capabilities.rendering, '2d')
+  assert.equal(all.capabilities.rendering, 'external-agent-code')
+  assert.equal(all.capabilities.presetRendering, '2d')
+  assert.equal(all.capabilities.briefPromptField, 'effectivePrompt')
+  assert.equal(all.capabilities.codeExecution, 'agent-environment')
+  assert.deepEqual(all.capabilities.presetStyleIds, MOTION_STYLES.filter(style => style.presetSupported).map(style => style.id))
+  assert.deepEqual(all.capabilities.codeOnlyStyleIds, MOTION_STYLES.filter(style => !style.presetSupported).map(style => style.id))
+  assert.equal(all.capabilities.presetStyleIds.length, 15)
+  assert.equal(all.capabilities.codeOnlyStyleIds.length, 10)
+  assert.equal(all.capabilities.selectedPresetSupported, false)
+  assert(all.items.every(item => typeof item.prompt === 'string' && item.prompt.includes(item.id)))
   assert.equal(all.capabilities.output, 'video-asset')
   assert.equal(all.capabilities.layered, false)
   assert.equal(all.capabilities.configurationTool, 'open_media_motion_brief_get')
@@ -183,7 +198,7 @@ test('motion style discovery is synchronous, searchable and isolated from projec
   assert.equal(all.projectId, f.project.id)
   const filtered = await f.run('motion_style_list', { search: '  TECH-HUD  ' })
   assert.deepEqual(filtered.items.map(style => style.id), ['tech-hud'])
-  assert.equal(filtered.total, 15)
+  assert.equal(filtered.total, 25)
   assert.equal(filtered.count, 1)
   assert.equal((await f.run('motion_style_list', { search: '科普' })).items[0].id, 'sticker-notes')
   assert.equal((await f.run('motion_style_list', { search: 'no-matching-style' })).count, 0)
@@ -198,6 +213,46 @@ test('motion style discovery is synchronous, searchable and isolated from projec
   assert.equal(f.commits.length, 0)
   assert.equal(f.controller.list().length, 0)
   await f.controller.dispose()
+})
+
+test('motion discovery and brief preserve code-only selection without advertising a local preset for it', async () => {
+  const project = createProject('代码风格任务')
+  project.assets.push(video())
+  const f = fixture(project)
+  for (const style of MOTION_STYLES) {
+    f.project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: style.id, prompt: '保持当前素材内容' }
+    const list = await f.run('motion_style_list', { search: style.id })
+    const brief = await f.run('motion_brief_get')
+    assert.deepEqual(list.items.map(item => item.id), [style.id])
+    assert.equal(list.capabilities.selectedPresetSupported, style.presetSupported)
+    assert.equal(brief.ready, true)
+    assert.equal(brief.styleId, style.id)
+    assert.equal(brief.workflow.presetGenerationTool, style.presetSupported ? 'open_media_motion_clip_generate' : null)
+    assert.equal(brief.style.presetSupported, style.presetSupported)
+  }
+  assert.equal(f.commits.length, 0)
+  assert.equal(f.controller.list().length, 0)
+  await f.controller.dispose()
+})
+
+test('code-only user selection rejects omitted-style preset jobs before any rendering or project change', async () => {
+  const codeStyles = MOTION_STYLES.filter(style => !style.presetSupported)
+  assert.equal(codeStyles.length, 10)
+  for (const style of codeStyles) {
+    const project = createProject('外部代码渲染')
+    project.assets.push(video())
+    project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: style.id }
+    const before = clone(project), f = fixture(project)
+    for (const dryRun of [true, false]) {
+      const done = await finished(f.controller, await f.run('motion_clip_generate', { scenes: [{ assetId: 'source-video' }], dryRun }))
+      assert.equal(done.state, 'failed')
+      assert.match(done.error, /外部 Agent.*不支持内置二维预设/)
+    }
+    assert.deepEqual(f.project, before)
+    assert.equal(f.calls.length, 0)
+    assert.equal(f.commits.length, 0)
+    await f.controller.dispose()
+  }
 })
 
 test('motion brief is discoverable while disabled or busy and contains safe detached user intent', async () => {
@@ -223,7 +278,10 @@ test('motion brief is discoverable while disabled or busy and contains safe deta
   assert.equal(/\/private\/|blob:/.test(JSON.stringify(configured)), false)
   configured.assetIds.push('injected')
   assert.deepEqual(f.project.mcpMotion.assetIds, ['source-video'])
-  assert.equal(f.calls.length, 0)
+  assert.deepEqual(f.calls.map(call => [call.name, call.args]), [['getAiStatus', [true]], ['getAiStatus', [true]]])
+  assert.equal(configured.additionalAssetGeneration.checked, true)
+  assert.deepEqual(configured.additionalAssetGeneration.image.readyModelIds, ['qwen-image'])
+  assert.equal(configured.additionalAssetGeneration.music.route, 'mcp')
   assert.equal(f.commits.length, 0)
   await f.controller.dispose()
 })
@@ -923,7 +981,7 @@ test('shared speech settings are used when generation omits voice, rate and alig
   assert.equal(findClip(f.project, 'spoken-caption').clip.trimOut, 5)
   assert.equal(f.project.tracks.flatMap(track => track.clips).filter(clip => clip.speech).length, 1)
   unsubscribe()
-  updateSpeechSettings({ voiceId: '', rate: 1, alignText: true })
+  updateSpeechSettings({ voiceId: voice.id, rate: 1, alignText: true })
   await f.controller.dispose()
 })
 
@@ -1246,6 +1304,7 @@ test('image/reference modes resolve only existing project assets and preserve ty
   await finished(f.controller, await f.run('video_generation_start', generation({ mode: 'image', firstFrameAssetId: 'image' })))
   const imageRequest = f.calls.find(call => call.name === 'beginVideoGeneration').args[0]
   assert.equal(imageRequest.shots[0].firstFrame.id, 'image')
+  setGenerationModel('video', 'h3-base-ref2va')
   const result = await finished(f.controller, await f.run('video_generation_start', { modelId: 'h3-base-ref2va', mode: 'reference', prompt: '保持参考画面的色彩', references: [{ assetId: 'video', kind: 'video', includeAudio: true }] }))
   assert.equal(result.state, 'completed')
   const referenceRequest = f.calls.filter(call => call.name === 'beginVideoGeneration').at(-1).args[0]
@@ -1253,6 +1312,7 @@ test('image/reference modes resolve only existing project assets and preserve ty
   assert.equal(referenceRequest.shots[0].references[0].includeAudio, true)
   assert.equal(referenceRequest.shots[0].seconds, 2)
   await assert.rejects(f.run('video_generation_start', { modelId: 'h3-base-ref2va', mode: 'reference', prompt: '保持参考画面的色彩', seconds: 1, references: [{ assetId: 'video', kind: 'video', includeAudio: true }] }), /2 秒/)
+  setGenerationModel('video', 'h3-base-fl2va')
   await assert.rejects(f.run('video_generation_start', generation({ mode: 'image', firstFrameAssetId: 'image', references: [{ assetId: 'video', kind: 'video' }] })), /参考素材/)
   await f.controller.dispose()
 })
@@ -1512,5 +1572,217 @@ test('AI generation reports measured native progress and preserves model warning
   assert.equal(result.state, 'completed')
   assert.equal(result.warning, '已回退 CPU')
   assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('motion briefing probes current local capabilities and does not generate or install extra media by itself', async () => {
+  const f = fixture(), original = clone(f.project), all = await f.io.getAiStatus()
+  let current = clone(all)
+  f.io.getAiStatus = async probe => { assert.equal(probe, true); return clone(current) }
+  let result = await f.run('motion_brief_get')
+  assert.equal(result.additionalAssetGeneration.image.route, 'mcp')
+  assert.equal(result.additionalAssetGeneration.music.route, 'mcp')
+  current.models = current.models.map(model => model.provider === 'image' ? { ...model, state: 'not-downloaded' } : model)
+  result = await f.run('motion_brief_get')
+  assert.equal(result.additionalAssetGeneration.image.route, 'agent')
+  assert.equal(result.additionalAssetGeneration.music.route, 'mcp')
+  current = { ...clone(all), busy: true }
+  result = await f.run('motion_brief_get')
+  assert.equal(result.additionalAssetGeneration.busy, true)
+  assert.equal(result.additionalAssetGeneration.image.route, 'mcp')
+  assert.equal(result.additionalAssetGeneration.policy.busy, 'wait')
+  current.models = []
+  result = await f.run('motion_brief_get')
+  assert.equal(result.additionalAssetGeneration.checked, true)
+  assert.equal(result.additionalAssetGeneration.image.route, 'agent')
+  assert.equal(result.additionalAssetGeneration.music.route, 'agent')
+  assert.ok(f.calls.every(call => call.name === 'getAiStatus'))
+  assert.deepEqual(f.project, original)
+  assert.equal(f.controller.list().length, 0)
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('local capability query failure remains unknown and cannot be confused with no installed model', async () => {
+  const f = fixture()
+  f.io.getAiStatus = async () => { throw new Error('private internal filesystem error') }
+  const brief = await f.run('motion_brief_get')
+  assert.equal(brief.additionalAssetGeneration.checked, false)
+  assert.equal(brief.additionalAssetGeneration.image.route, 'check-status')
+  assert.equal(brief.additionalAssetGeneration.music.availability, 'unknown')
+  assert.match(brief.additionalAssetGeneration.checkError, /查询失败/)
+  assert.doesNotMatch(JSON.stringify(brief), /private internal/)
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+for (const change of ['edit', 'switch', 'reopen', 'dispose']) test(`motion briefing discards stale intent when project changes during capability query: ${change}`, async () => {
+  const f = fixture(), pending = deferred(), local = await f.io.getAiStatus()
+  f.io.getAiStatus = () => pending.promise
+  const result = f.run('motion_brief_get', { expectedProjectId: f.project.id, expectedRevision: f.revision })
+  await until(() => f.calls.some(call => call.name === 'getAiStatus'))
+  if (change === 'edit') f.externalChange()
+  else if (change === 'switch') f.openOther()
+  else if (change === 'reopen') f.reopen()
+  else await f.controller.dispose()
+  pending.resolve(local)
+  await assert.rejects(result, /当前工程或版本已变化/)
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('AI status refreshes local capability metadata by default with explicit cached reads still available', async () => {
+  const f = fixture()
+  const result = await f.run('ai_status')
+  assert.deepEqual(f.calls[0], { name: 'getAiStatus', args: [true] })
+  assert.equal(result.generationCapabilities.checked, true)
+  assert.equal(result.generationCapabilities.image.route, 'mcp')
+  assert.equal(result.generationCapabilities.music.route, 'mcp')
+  await f.run('ai_status', { probeRuntime: false })
+  assert.deepEqual(f.calls.at(-1), { name: 'getAiStatus', args: [false] })
+  await f.controller.dispose()
+})
+
+for (const provider of ['image', 'music']) test(`ready local ${provider} capability can supply extra project media through the advertised MCP tool`, async () => {
+  const f = fixture()
+  f.project.assets.push(video())
+  f.project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud', prompt: '补充插画和纯音乐' }
+  const selection = clone(f.project.mcpMotion)
+  const brief = await f.run('motion_brief_get'), capability = brief.additionalAssetGeneration[provider]
+  const response = await f.controller.execute(capability.tool, { modelId: capability.readyModelIds[0], prompt: '简洁的额外创作素材', destination: 'assets', expectedProjectId: f.project.id, expectedRevision: f.revision, ...(provider === 'music' ? { instrumental: true } : { width: 512, height: 512 }) })
+  const result = await finished(f.controller, response)
+  assert.equal(result.state, 'completed', result.error)
+  assert.equal(f.project.assets.length, 2)
+  assert.deepEqual(f.project.mcpMotion, selection, '补充素材不改写用户所选原素材')
+  const assetId = result.result.assetIds[0]
+  f.io.runAssetTool = async (operation, args) => {
+    assert.equal(operation, 'asset_read'); assert.equal(args.asset.id, assetId)
+    return { assetId, totalBytes: 4, offset: 0, nextOffset: 4, done: true, base64: 'dGVzdA==', sourceVersion: 'a'.repeat(64), chunkSha256: 'b'.repeat(64) }
+  }
+  assert.equal((await f.run('asset_read', { assetId })).assetId, assetId)
+  assert.equal(f.calls.filter(call => call.name === 'beginAiGeneration').length, 1)
+  assert.equal(f.calls.some(call => ['downloadAiModel', 'repairAiModel'].includes(call.name)), false)
+  assert.equal(f.commits.length, 1)
+  await f.controller.dispose()
+})
+
+test('generation rechecks local installation and capability after discovery, without auto downloading missing models', async () => {
+  const f = fixture(), ready = await f.io.getAiStatus()
+  await f.run('motion_brief_get')
+  f.io.getAiStatus = async probe => { assert.equal(probe, true); return { ...clone(ready), models: ready.models.map(model => ({ ...model, runtime: { state: 'not-installed' } })) } }
+  let result = await finished(f.controller, await f.run('image_generate', aiImage({ destination: 'assets' })))
+  assert.equal(result.state, 'failed')
+  assert.match(result.error, /下载或修复/)
+  f.io.getAiStatus = async () => ({ ...clone(ready), models: ready.models.map(model => ({ ...model, capabilities: [] })) })
+  result = await finished(f.controller, await f.run('music_generate', aiMusic({ instrumental: true })))
+  assert.equal(result.state, 'failed')
+  assert.match(result.error, /不支持此生成类型/)
+  assert.ok(f.calls.every(call => call.name === 'getAiStatus'))
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('MCP reports selected models and refuses alternate installed models without native generation', async () => {
+  const f = fixture()
+  const status = await f.run('ai_status')
+  assert.deepEqual(status.selectedModels, { image: 'qwen-image', music: 'ace-step-1.5-turbo', video: 'h3-base-fl2va' })
+  assert.deepEqual(status.generationCapabilities.image.readyModelIds, ['qwen-image'])
+  assert.deepEqual(status.generationCapabilities.music.readyModelIds, ['ace-step-1.5-turbo'])
+  const videoStatus = await f.run('video_generation_status')
+  assert.equal(videoStatus.selectedModelId, 'h3-base-fl2va')
+  assert.deepEqual(videoStatus.models.filter(model => model.allowed).map(model => model.id), ['h3-base-fl2va'])
+  for (const [tool, args] of [
+    ['image_generate', aiImage({ modelId: 'z-image-turbo' })],
+    ['music_generate', aiMusic({ modelId: 'ace-step-1.5-sft' })],
+    ['video_generation_start', generation({ modelId: 'h3-base-ref2va', mode: 'reference' })],
+  ]) await assert.rejects(f.run(tool, args), /用户当前选择/)
+  assert.equal(f.calls.some(call => ['beginAiGeneration', 'beginVideoGeneration'].includes(call.name)), false)
+  assert.equal(f.controller.list().length, 0)
+  await f.controller.dispose()
+})
+
+for (const provider of ['image', 'music', 'video']) test(`omitted ${provider} model uses current user choice and tracks later GUI changes`, async () => {
+  const f = fixture()
+  const tool = provider === 'video' ? 'video_generation_start' : `${provider}_generate`
+  const args = { prompt: '生成测试', ...(provider === 'video' ? { mode: 'prompt' } : {}) }
+  const first = await finished(f.controller, await f.run(tool, args))
+  assert.equal(first.state, 'completed', first.error)
+  const request = f.calls.find(call => call.name === (provider === 'video' ? 'beginVideoGeneration' : 'beginAiGeneration')).args[0]
+  assert.equal(provider === 'video' ? request.modelId : request.request.modelId, getGenerationModel(provider))
+  if (provider !== 'video') {
+    const next = provider === 'image' ? 'z-image-turbo' : 'ace-step-1.5-sft'
+    setGenerationModel(provider, next)
+    const second = await finished(f.controller, await f.run(tool, args))
+    assert.equal(second.state, 'completed', second.error)
+    assert.equal(f.calls.filter(call => call.name === 'beginAiGeneration').at(-1).args[0].request.modelId, next)
+  }
+  await f.controller.dispose()
+})
+
+for (const provider of ['image', 'music', 'video']) test(`changing ${provider} model while readiness check is pending prevents stale generation`, async () => {
+  const f = fixture(), pending = deferred()
+  const statusTool = provider === 'video' ? 'getVideoGenerationStatus' : 'getAiStatus'
+  const ready = await f.io[statusTool]()
+  f.io[statusTool] = () => pending.promise
+  const args = { prompt: '不得使用旧选择', ...(provider === 'video' ? { mode: 'prompt' } : {}) }
+  const response = await f.run(provider === 'video' ? 'video_generation_start' : `${provider}_generate`, args)
+  await until(() => f.calls.some(call => call.name === statusTool))
+  setGenerationModel(provider, { image: 'z-image-turbo', music: 'ace-step-1.5-sft', video: 'h3-base-ref2va' }[provider])
+  pending.resolve(ready)
+  const result = await finished(f.controller, response)
+  assert.equal(result.state, 'failed')
+  assert.match(result.error, /用户当前选择/)
+  assert.equal(f.calls.some(call => ['beginAiGeneration', 'beginVideoGeneration'].includes(call.name)), false)
+  assert.equal(f.commits.length, 0)
+  await f.controller.dispose()
+})
+
+test('unavailable selected model never falls back to another installed model', async () => {
+  const f = fixture(), ready = await f.io.getAiStatus()
+  f.io.getAiStatus = async () => ({ ...ready, models: ready.models.map(model => model.id === 'qwen-image' ? { ...model, state: 'not-downloaded' } : model) })
+  const status = await f.run('ai_status')
+  assert.equal(status.generationCapabilities.image.selectedModelId, 'qwen-image')
+  assert.deepEqual(status.generationCapabilities.image.readyModelIds, [])
+  const result = await finished(f.controller, await f.run('image_generate', { prompt: '不能改选其他已下载模型' }))
+  assert.equal(result.state, 'failed')
+  assert.match(result.error, /下载或修复/)
+  assert.equal(f.calls.some(call => call.name === 'beginAiGeneration'), false)
+  assert.equal(getGenerationModel('image'), 'qwen-image')
+  await f.controller.dispose()
+})
+
+test('a model change during project asset preparation prevents stale results being committed', async () => {
+  const f = fixture(), pending = deferred()
+  let prepared
+  f.host.prepareProject = (project, options) => { prepared = project; options.assertCurrent(); return pending.promise }
+  const response = await f.run('image_generate', { prompt: '正在归档的素材', destination: 'assets' })
+  await until(() => !!prepared)
+  setGenerationModel('image', 'z-image-turbo')
+  pending.resolve(prepared)
+  const result = await finished(f.controller, response)
+  assert.equal(result.state, 'failed')
+  assert.match(result.error, /用户当前选择/)
+  assert.equal(f.commits.length, 0)
+  assert.equal(f.assets.length, 0)
+  await f.controller.dispose()
+})
+
+test('five installed speech voices do not grant MCP permission to change the selected voice', async () => {
+  const project = createProject('限定音色')
+  project.tracks[0].clips.push(createSubtitleClip(project, { id: 'speech-selection', text: '欢迎使用工程剪辑功能。' }))
+  const f = fixture(project), voices = Array.from({ length: 5 }, (_, index) => ({ ...voice, id: `voice-${index}` }))
+  updateSpeechSettings({ voiceId: 'voice-3' })
+  f.io.getSpeechStatus = async () => ({ ready: true, voices })
+  const status = await f.run('speech_voices')
+  assert.equal(status.selectedVoiceId, 'voice-3')
+  assert.deepEqual(status.voices.filter(item => item.allowed).map(item => item.id), ['voice-3'])
+  await assert.rejects(f.run('speech_settings_set', { voiceId: 'voice-1' }), /用户当前选中/)
+  await assert.rejects(f.run('speech_generate', { voiceId: 'voice-1' }), /用户当前选中/)
+  assert.equal(getSpeechSettings().voiceId, 'voice-3')
+  assert.equal(f.calls.some(call => call.name === 'beginSpeechJob'), false)
+  const result = await finished(f.controller, await f.run('speech_generate', { clipIds: ['speech-selection'] }))
+  assert.equal(result.state, 'completed', result.error)
+  assert.equal(f.calls.find(call => call.name === 'beginSpeechJob').args[0].voiceId, 'voice-3')
+  updateSpeechSettings({ voiceId: voice.id })
   await f.controller.dispose()
 })

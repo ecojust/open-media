@@ -434,3 +434,38 @@ test('媒体启动无响应会结束准备并暂停，可再次启动且旧请�
   media.resolvePlay()
   await retry
 })
+
+test('hiding a playing track immediately releases its decoder and showing it restores playback without changing clip data', t => {
+  const { preview, media, project, elements } = playbackHarness(t)
+  const track = project.tracks.find(track => track.kind === 'audio')
+  preview.render(1, true)
+  assert.equal(media.paused, false)
+  const hidden = structuredClone(project)
+  hidden.tracks.find(item => item.id === track.id).hidden = true
+  preview.setProject(hidden)
+  assert.equal(media.paused, true)
+  assert.equal(media.src, '')
+  assert.equal(preview.entries.size, 0)
+  preview.render(5, true)
+  assert.equal(elements.length, 1, 'hidden tracks must not allocate new media decoders')
+  preview.setProject(project)
+  preview.render(5, true)
+  assert.equal(elements.length, 2)
+  assert.equal(elements[1].paused, false)
+  assert.equal(track.muted, false)
+  assert.deepEqual(hidden.tracks.find(item => item.id === track.id).clips, track.clips)
+})
+
+test('hidden video tracks are never painted while their timeline clips remain present', t => {
+  const harness = playbackHarness(t, { video: true })
+  const { preview, project } = harness
+  preview.render(1, true)
+  assert.ok(harness.imagesDrawn > 0)
+  const drawn = harness.imagesDrawn
+  const hidden = structuredClone(project)
+  hidden.tracks.find(track => track.kind === 'video').hidden = true
+  preview.setProject(hidden)
+  preview.render(2, true)
+  assert.equal(harness.imagesDrawn, drawn)
+  assert.equal(hidden.tracks.find(track => track.kind === 'video').clips.length, 1)
+})

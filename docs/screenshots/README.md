@@ -52,3 +52,5 @@ node tests/browser/motion-style-render.cjs
 截图脚本使用本地示例图片、视频和配乐，不调用录屏或麦克风；设置 `BROWSER_ARTIFACTS` 可指定报告位置。界面截图展示配置方式，视频编码、解码及生成后素材入库需要分别通过测试确认；截图本身不作为生成成功的依据。
 
 目录中其余图片为历史文档配图，当前 README 使用上表 11 组工作区截图及素材二创截图。
+
+`motion-code-style-gallery.png` 展示 v0.3.6 新增 10 种代码创作风格的静态构图示意，使用应用内同一 Canvas 绘图函数，由 `tests/browser/motion-style-ui.cjs` 生成。它不是实际生成视频截图；视频由外部 Agent 根据用户所选素材和默认提示词渲染。

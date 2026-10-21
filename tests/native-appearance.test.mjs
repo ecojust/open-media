@@ -18,6 +18,7 @@ test('appearance leaves capture and recording windows untouched', async () => {
     const appearance = createNativeAppearanceSync({ getWindow: async () => ({
       label,
       setTheme: async theme => { calls.push(['theme', theme]) },
+      setNativeAppearance: async theme => { calls.push(['native-title', theme]) },
       setBackgroundColor: async color => { calls.push(['background', color]) },
     }) })
     await appearance.sync('dark')
@@ -199,4 +200,67 @@ test('disposing while native theme is in flight prevents later background and qu
   first.resolve()
   await completion
   assert.deepEqual(calls, [['theme', 'light']])
+})
+
+test('native title appearance finishes before dark background and clears its override in system mode', async () => {
+  const title = deferred(), calls = []
+  const appearance = createNativeAppearanceSync({ getWindow: async () => ({
+    label: 'main',
+    setTheme: async theme => { calls.push(['theme', theme]) },
+    setNativeAppearance: async theme => { calls.push(['native-title', theme]); if (theme === 'dark') await title.promise },
+    setBackgroundColor: async color => { calls.push(['background', color]) },
+  }) })
+  const dark = appearance.sync('dark')
+  await tick()
+  assert.deepEqual(calls, [['theme', 'dark'], ['native-title', 'dark']], 'dark background must wait for the native title contrast')
+  title.resolve()
+  await dark
+  await appearance.sync('dark')
+  await appearance.sync('dark', true)
+  await appearance.sync('light', true)
+  await appearance.sync('light')
+  assert.deepEqual(calls, [
+    ['theme', 'dark'], ['native-title', 'dark'], ['background', '#151923'],
+    ['theme', null], ['native-title', null], ['background', '#151923'],
+    ['theme', null], ['native-title', null], ['background', '#f7f9fc'],
+    ['theme', 'light'], ['native-title', 'light'], ['background', '#f7f9fc'],
+  ])
+})
+
+test('native title failure does not cache success or paint a mismatched background and can be retried', async () => {
+  const calls = [], warnings = []
+  let rejectTitle = true
+  const appearance = createNativeAppearanceSync({ warn: cause => warnings.push(cause), getWindow: async () => ({
+    label: 'main',
+    setTheme: async theme => { calls.push(['theme', theme]) },
+    setNativeAppearance: async theme => {
+      calls.push(['native-title', theme])
+      if (rejectTitle) throw new Error('native title update rejected')
+    },
+    setBackgroundColor: async color => { calls.push(['background', color]) },
+  }) })
+  await appearance.sync('dark')
+  assert.deepEqual(calls, [['theme', 'dark'], ['native-title', 'dark']])
+  assert.equal(warnings.length, 1)
+  rejectTitle = false
+  await appearance.sync('dark')
+  await appearance.sync('dark')
+  assert.deepEqual(calls.slice(2), [['theme', 'dark'], ['native-title', 'dark'], ['background', '#151923']])
+})
+
+test('disposing during native title update prevents background or queued appearance changes', async () => {
+  const title = deferred(), calls = []
+  const appearance = createNativeAppearanceSync({ getWindow: async () => ({
+    label: 'main',
+    setTheme: async theme => { calls.push(['theme', theme]) },
+    setNativeAppearance: async theme => { calls.push(['native-title', theme]); await title.promise },
+    setBackgroundColor: async color => { calls.push(['background', color]) },
+  }) })
+  const completion = appearance.sync('light')
+  await tick()
+  void appearance.sync('dark')
+  appearance.dispose()
+  title.resolve()
+  await completion
+  assert.deepEqual(calls, [['theme', 'light'], ['native-title', 'light']])
 })

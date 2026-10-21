@@ -72,11 +72,18 @@ function selectedAsset(project: Project, value: unknown, kind: 'audio' | 'image'
   return id
 }
 
+/** An external-code direction must never silently fall back to a different preset. */
+export function getMotionPresetStyle(id: string): MotionStyle {
+  const style = getMotionStyle(id)
+  if (!style.presetSupported) throw new Error(`“${style.name}”需要外部 Agent 根据默认提示词编写动画代码并渲染视频，不支持内置二维预设。请读取 open_media_motion_brief_get，渲染后通过 open_media_asset_upload 或 open_media_asset_import_url 回传工程。`)
+  return style
+}
+
 /** Validate and plan without creating IDs, media or timeline changes. */
 export function planMotionComposition(project: Project, options: MotionComposeOptions): MotionCompositionPlan {
   const input = record(options, OPTION_KEYS, '风格成片参数')
   const current = validateProject(project, { trusted: true })
-  const style = getMotionStyle(text(input.styleId, 80, '风格'))
+  const style = getMotionPresetStyle(text(input.styleId, 80, '风格'))
   const placement = input.placement === undefined ? 'append' : input.placement
   if (placement !== 'append' && placement !== 'prepend') throw new Error('请选择向前或向后添加。')
   const tempo = input.tempo === undefined ? 'balanced' : input.tempo
@@ -137,7 +144,7 @@ type RatioBox = readonly [number, number, number, number]
 interface SceneLayout { media: Box; heading: Box; caption: Box; align: 'left' | 'center' | 'right'; headingSize: number }
 
 // Separate compositions give each style its own reading order and negative space.
-const LANDSCAPE: Record<MotionStyleId, readonly [RatioBox, RatioBox, RatioBox]> = {
+const LANDSCAPE: Partial<Record<MotionStyleId, readonly [RatioBox, RatioBox, RatioBox]>> = {
   'paper-ink': [[.49,.19,.43,.62],[.08,.22,.34,.25],[.08,.55,.34,.15]],
   'iso-cards': [[.21,.25,.66,.52],[.08,.075,.66,.13],[.08,.82,.75,.09]],
   'flat-pop': [[.08,.25,.54,.63],[.67,.21,.25,.3],[.67,.6,.25,.19]],
@@ -157,6 +164,7 @@ const LANDSCAPE: Record<MotionStyleId, readonly [RatioBox, RatioBox, RatioBox]> 
 function layoutFor(project: Project, style: MotionStyle, sceneIndex: number): SceneLayout {
   const index = MOTION_STYLES.findIndex(item => item.id === style.id)
   let boxes = LANDSCAPE[style.id]
+  if (!style.presetSupported || !boxes) throw new Error('当前风格没有内置二维预设布局，请由外部 Agent 按默认提示词渲染。')
   if (project.height > project.width * 1.12) {
     const top = style.layout === 'collage' ? .25 : style.layout === 'stack' ? .30 : .28
     const inset = .085 + (index % 4) * .008

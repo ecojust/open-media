@@ -8,10 +8,15 @@ import type { MediaAsset } from '../core/types.ts'
 import type { AiGenerationRequest, AiProvider } from '../core/ai.ts'
 import { aiState, aiServiceError, observeAi, generateAi, stopAiJob, aiDuration, aiModelStateNames } from '../core/ai-service.ts'
 import { pickMediaAssets, revealMediaAsset } from '../native.ts'
+import { getGenerationModel, setGenerationModel, subscribeGenerationModels } from '../core/generation-settings.ts'
 
 const props = defineProps<{ provider: 'image' | 'music'; native: boolean; active: boolean; projectTitle: string; disabled?: boolean }>()
 const emit = defineEmits<{ 'open-models': [provider: AiProvider]; 'add-asset': [asset: MediaAsset]; 'add-timeline': [asset: MediaAsset]; 'edit-image': [asset: MediaAsset]; status: [message: string] }>()
-const modelId = ref(''), prompt = ref(''), negativePrompt = ref(''), lyrics = ref(''), instrumental = ref(false)
+const selectedModelId = ref(getGenerationModel(props.provider))
+const modelId = computed({ get: () => selectedModelId.value, set: (id: string) => { setGenerationModel(props.provider, id) } })
+const releaseModelSelection = subscribeGenerationModels(models => { selectedModelId.value = models[props.provider] })
+watch(() => props.provider, provider => { selectedModelId.value = getGenerationModel(provider) })
+const prompt = ref(''), negativePrompt = ref(''), lyrics = ref(''), instrumental = ref(false)
 const imageMode = ref<'text' | 'image'>('text'), inputAsset = ref<MediaAsset>(), size = ref('512x512'), strength = ref(.65)
 const steps = ref(props.provider === 'image' ? 9 : 8), guidance = ref(4), seed = ref(42), seconds = ref(30), bpm = ref<number>(), language = ref('zh'), keyScale = ref(''), lowMemory = ref(true)
 const starting = ref(false), selecting = ref(false), error = ref(''), selectedJob = ref(''), selectedAsset = ref(''), cancelling = ref('')
@@ -27,12 +32,12 @@ const working = computed(() => starting.value || jobs.value.some(job=>job.state=
 const job = computed(() => jobs.value.find(item => item.id === selectedJob.value) ?? jobs.value[0])
 const result = computed(() => libraryAssets.value.find(asset => asset.id === selectedLibraryAssetId.value) ?? job.value?.assets.find(asset => asset.id === selectedAsset.value) ?? job.value?.assets[0] ?? libraryAssets.value[0])
 const supportsNegative = computed(() => modelId.value === 'qwen-image')
-const unavailable = computed(() => !props.native ? '本地生成需要桌面端。' : !model.value ? '请前往 Info 下载所需模型。' : model.value.state !== 'ready' ? `${model.value.name}：${aiModelStateNames[model.value.state]}，请前往 Info 下载模型。` : model.value.runtime.state === 'unsupported' ? model.value.runtime.reason || '当前设备不支持这个模型。' : '')
+const unavailable = computed(() => !props.native ? '本地生成需要桌面端。' : !model.value ? '当前所选模型不可用，请在生成模型中选择，或前往 Info 检查模型。' : model.value.state !== 'ready' ? `${model.value.name}：${aiModelStateNames[model.value.state]}，请前往 Info 下载模型。` : model.value.runtime.state === 'unsupported' ? model.value.runtime.reason || '当前设备不支持这个模型。' : '')
 const invalid = computed(() => !prompt.value.trim() ? '请描述你想生成的内容。' : prompt.value.length > (image.value ? 6000 : 4096) ? '内容描述超过模型支持的长度。' : lyrics.value.length > 6000 ? '歌词不能超过 6000 字。' : !Number.isInteger(steps.value) || steps.value < 1 || steps.value > 100 ? '生成步数应为 1–100 的整数。' : !Number.isInteger(seed.value) || seed.value < 0 || seed.value > 4294967295 ? '随机种子无效。' : !image.value && (!Number.isFinite(seconds.value) || seconds.value < 10 || seconds.value > 180) ? '歌曲时长应为 10–180 秒。' : image.value && imageMode.value === 'image' && !inputAsset.value ? '请选择作为起点的图片。' : !image.value && !instrumental.value && !lyrics.value.trim() ? '请输入歌词，或切换为纯音乐。' : '')
 const canGenerate = computed(() => !props.disabled && !working.value && !unavailable.value && !invalid.value)
 const draftKey = computed(() => `open-media:ai-${props.provider}-draft:v1`)
-watch(models, values => { if (!modelId.value && values[0]) { modelId.value = (values.find(item=>item.state==='ready') ?? values.find(item=>item.id==='z-image-turbo') ?? values[0]).id; chooseModel() } })
 function chooseModel(): void { steps.value = image.value ? modelId.value === 'qwen-image' ? 30 : 9 : modelId.value.includes('sft') ? 50 : 8 }
+chooseModel()
 watch(() => props.active, active => { if (active) void refreshLibrary(); else document.querySelectorAll<HTMLMediaElement>(`[data-ai-provider="${props.provider}"] audio`).forEach(element=>element.pause()) })
 function selectJob(id: string): void { selectedLibraryAssetId.value = ''; selectedJob.value = id }
 function assetDate(asset: MediaAsset): string { return asset.addedAt ? new Date(asset.addedAt).toLocaleString('zh-CN', { hour12: false }) : '' }
@@ -44,7 +49,6 @@ watch([modelId,prompt,negativePrompt,lyrics,instrumental,imageMode,size,strength
 onMounted(() => {
   try {
     const draft = JSON.parse(localStorage.getItem(draftKey.value) || '{}')
-    if (typeof draft.modelId==='string') modelId.value=draft.modelId
     for (const [key,target] of [['prompt',prompt],['negativePrompt',negativePrompt],['lyrics',lyrics],['language',language],['keyScale',keyScale]] as const) if (typeof draft[key]==='string') target.value=draft[key].slice(0,key==='prompt'&&!image.value?4096:6000)
     for (const [key,target,min,max] of [['steps',steps,1,100],['guidance',guidance,0,20],['seed',seed,0,4294967295],['seconds',seconds,10,180],['strength',strength,.1,1]] as const) if (Number.isFinite(draft[key])) target.value=Math.max(min,Math.min(max,draft[key]))
     if (['512x512','768x768','1024x1024','1024x576','576x1024'].includes(draft.size)) size.value=draft.size
@@ -57,7 +61,7 @@ onMounted(() => {
   window.addEventListener('open-media:save-generation-drafts',persist)
   release=observeAi()
 })
-onBeforeUnmount(()=>{release?.();clearTimeout(saveTimer);persist();window.removeEventListener('beforeunload',persist);window.removeEventListener('open-media:save-generation-drafts',persist)})
+onBeforeUnmount(()=>{release?.();releaseModelSelection();clearTimeout(saveTimer);persist();window.removeEventListener('beforeunload',persist);window.removeEventListener('open-media:save-generation-drafts',persist)})
 async function pickImage(): Promise<void> {
   selecting.value=true;error.value=''
   try { const assets=await pickMediaAssets(); const asset=assets.find(item=>item.kind==='image'); if(asset) inputAsset.value=asset; else if(assets.length) error.value='请选择图片文件。' }
@@ -102,7 +106,7 @@ async function reveal(asset:MediaAsset):Promise<void>{try{await revealMediaAsset
     </div>
     <template #settings>
       <div class="ai-generation-settings"><h2>生成设置</h2>
-        <section class="ai-generation-card ai-model-choice"><label class="ai-model-select">生成模型<select v-model="modelId" :disabled="working" aria-label="生成模型" @change="chooseModel"><option v-if="!models.length" value="">请前往 Info 下载模型</option><option v-for="item in models" :key="item.id" :value="item.id">{{ item.name }} · {{ aiModelStateNames[item.state] }}</option></select></label><p class="ai-model-dependency">依靠 {{ model?.name || '本地模型' }}<span v-if="model?.state==='ready'"> · 已就绪</span><button :disabled="!native" @click="emit('open-models',provider)">{{ model?.state==='ready' ? '模型管理' : '请前往下载' }}<Icon name="chevron-right" :size="13"/></button></p></section>
+        <section class="ai-generation-card ai-model-choice"><label class="ai-model-select">生成模型<select v-model="modelId" :disabled="working" aria-label="生成模型" @change="chooseModel"><option v-if="modelId && !model" :value="modelId">{{ modelId }} · 当前所选模型不可用</option><option v-else-if="!modelId" value="">请选择生成模型</option><option v-for="item in models" :key="item.id" :value="item.id">{{ item.name }} · {{ aiModelStateNames[item.state] }}</option></select></label><p class="ai-model-dependency">依靠 {{ model?.name || '本地模型' }}<span v-if="model?.state==='ready'"> · 已就绪</span><button :disabled="!native" @click="emit('open-models',provider)">{{ model?.state==='ready' ? '模型管理' : '请前往下载' }}<Icon name="chevron-right" :size="13"/></button></p></section>
         <div class="ai-generation-parameters"><template v-if="image"><label>画幅<select v-model="size" :disabled="working" aria-label="生成图像尺寸"><option value="512x512">512 × 512</option><option value="768x768">768 × 768</option><option value="1024x1024">1024 × 1024</option><option value="1024x576">1024 × 576</option><option value="576x1024">576 × 1024</option></select></label><label v-if="imageMode==='image'">重绘强度<input v-model.number="strength" :disabled="working" aria-label="重绘强度" type="number" min="0.1" max="1" step="0.05"/></label><label v-if="supportsNegative">提示词引导<input v-model.number="guidance" :disabled="working" aria-label="提示词引导" type="number" min="0" max="20" step="0.5"/></label></template><template v-else><label>时长（秒）<input v-model.number="seconds" :disabled="working" aria-label="歌曲时长" type="number" min="10" max="180" step="1"/></label><label>节拍（可选）<input v-model.number="bpm" :disabled="working" aria-label="音乐节拍" type="number" min="30" max="240" placeholder="自动"/></label><label v-if="!instrumental">演唱语言<select v-model="language" :disabled="working" aria-label="演唱语言"><option value="zh">中文</option><option value="en">英语</option><option value="ja">日语</option><option value="ko">韩语</option><option value="es">西班牙语</option></select></label><label>调性（可选）<input v-model="keyScale" :disabled="working" aria-label="音乐调性" maxlength="40" placeholder="例如 C major"/></label></template><label>生成步数<input v-model.number="steps" :disabled="working" aria-label="生成步数" type="number" min="1" max="100"/></label><label>随机种子<input v-model.number="seed" :disabled="working" aria-label="生成随机种子" type="number" min="0" max="4294967295"/></label></div>
         <label class="ai-low-memory"><input v-model="lowMemory" :disabled="working" type="checkbox"/>低内存模式<small>减少权重常驻占用，生成可能更慢；不保证峰值内存。</small></label>
         <p v-if="error || aiServiceError" class="ai-generation-error" role="alert">{{ error || aiServiceError }}</p><div class="ai-generation-submit"><p>{{ unavailable || invalid || '优先使用可用 GPU，无法运行时报告原因并尝试 CPU。' }}</p><button class="primary" :disabled="!canGenerate" data-testid="ai-generation-start" @click="generate"><span v-if="starting" class="spinner small"/><Icon v-else name="sparkles" :size="16"/>{{ starting ? '正在提交…' : '开始生成' }}</button></div>

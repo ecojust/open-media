@@ -83,7 +83,7 @@ function cuts(project: Project): TransitionCut[] {
 /** Prefer the selected video track, then the nearest unambiguous cut elsewhere. */
 export function findTransitionCut(project: Project, time: number, preferredTrackId?: string, options: { includeLocked?: boolean; minimumDuration?: number } = {}): TransitionCut | undefined {
   if (!Number.isFinite(time)) return undefined
-  const candidates = cuts(project).filter(cut => (options.includeLocked || !project.tracks.find(track => track.id === cut.trackId)!.locked) && cut.maxDuration >= (options.minimumDuration ?? 2 / project.fps) - EPSILON)
+  const candidates = cuts(project).filter(cut => !project.tracks.find(track => track.id === cut.trackId)!.hidden && (options.includeLocked || !project.tracks.find(track => track.id === cut.trackId)!.locked) && cut.maxDuration >= (options.minimumDuration ?? 2 / project.fps) - EPSILON)
   const preferred = candidates.filter(cut => cut.trackId === preferredTrackId)
   return (preferred.length ? preferred : candidates).sort((a, b) => Math.abs(a.time - time) - Math.abs(b.time - time) || a.time - b.time)[0]
 }
@@ -264,8 +264,9 @@ export function transitionVisualForParameters(sourceEffect: TransitionEffect, vi
 
 /** Matching native export semantics: each side fades/masks toward the cut. */
 export function transitionVisualAt(project: Project, clipId: string, time: number): TransitionVisual | undefined {
+  if (project.tracks.some(track => track.hidden && track.clips.some(clip => clip.id === clipId))) return undefined
   for (const track of project.tracks) {
-    if (track.kind !== 'transition' || track.muted) continue
+    if (track.kind !== 'transition' || track.hidden || track.muted) continue
     for (const clip of track.clips) {
       const binding = clip.transition
       if (!binding || (binding.fromClipId !== clipId && binding.toClipId !== clipId) || time < clip.start || time >= endOf(clip)) continue

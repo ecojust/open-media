@@ -14,7 +14,7 @@ const visible = computed(() => visibleVisualClips(props.project, props.time))
 const selected = computed(() => {
   if (props.disabled) return undefined
   const item = dragging.value ? findClip(props.project, props.clipId) : visible.value.find(item => item.clip.id === props.clipId)
-  return item && !item.track.locked ? item.clip : undefined
+  return item && !item.track.locked && !item.track.hidden ? item.clip : undefined
 })
 let drag: { pointerId: number; handle: SVGRectElement; original: Clip; start: PreviewPosition; inverse: DOMMatrix; scale: number; others: Clip[]; moved: boolean; lastEvent: PointerEvent } | undefined
 

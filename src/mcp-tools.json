@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_project_get",
-    "description": "读取当前工程、画面设置、全部轨道和片段ID、素材元数据、字幕问题及总时长。时间单位为秒，坐标为项目像素，轨道顺序从前景到背景。不返回文件路径或内部URL。\n包含用户配置的 mcpMotion 与只读 mcpMotionBrief；素材二创应先读取该任务说明或 open_media_motion_brief_get，由外部 Agent 规划后执行。\n执行方式：同步返回最终结果。",
+    "description": "读取当前工程、画面设置、全部轨道和片段ID、素材元数据、字幕问题及总时长。时间单位为秒，坐标为项目像素，轨道顺序从前景到背景。不返回文件路径或内部URL。\n包含用户配置的 mcpMotion 与只读 mcpMotionBrief；素材二创应先读取该任务说明或 open_media_motion_brief_get，由外部 Agent 规划后执行。本快照的 additionalAssetGeneration 未查询本地模型，需调用 motion_brief_get 或 ai_status({probeRuntime:true}) 获取实时能力；可用本地图片/音乐模型优先，用户明确要求 Agent 自行生成除外。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -284,7 +284,7 @@
   },
   {
     "name": "open_media_track_update",
-    "description": "修改轨道名称、静音/隐藏或锁定状态。解除锁定后才能编辑该轨道。\n执行方式：同步返回最终结果。",
+    "description": "修改轨道名称、静音、隐藏或锁定状态。hidden=true 时整条轨道不参与播放、画面合成和音频/视频导出；muted 只控制声音（转场轨道为停用效果）。解除锁定后才能编辑该轨道。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -304,6 +304,10 @@
             },
             "muted": {
               "type": "boolean"
+            },
+            "hidden": {
+              "type": "boolean",
+              "description": "隐藏整条轨道并排除播放与导出，保留其片段和编辑位置；false 恢复参与。"
             },
             "locked": {
               "type": "boolean"
@@ -2168,7 +2172,7 @@
   },
   {
     "name": "open_media_speech_voices",
-    "description": "列出实际可用及可按需下载的声音、模型状态、硬件要求。\n执行方式：同步返回最终结果。",
+    "description": "列出实际可用及可按需下载的声音、模型状态、硬件要求；selectedVoiceId 表示用户当前所选音色。目录中其他已下载声音仅用于查看，MCP 配音与试听只能使用当前所选音色。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2203,7 +2207,7 @@
   },
   {
     "name": "open_media_speech_settings_get",
-    "description": "读取当前配音音色、语速与字幕对齐设置。\n执行方式：同步返回最终结果。",
+    "description": "读取用户当前配音音色、语速与字幕对齐设置；voiceId 是 MCP 配音及试听唯一允许使用的音色，由用户在界面选择。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2238,14 +2242,15 @@
   },
   {
     "name": "open_media_speech_settings_set",
-    "description": "更新公共配音设置，不生成音频。\n执行方式：同步返回最终结果。",
+    "description": "更新公共配音语速与字幕对齐设置，不生成音频。音色只能由用户在界面切换；若提供 voiceId，必须与当前选择相同，否则拒绝。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
         "voiceId": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 200
+          "maxLength": 200,
+          "description": "可省略；仅允许用户当前所选音色（speech_settings_get.voiceId / speech_voices.selectedVoiceId），不能通过 MCP 更换音色。"
         },
         "rate": {
           "type": "number",
@@ -2286,7 +2291,7 @@
   },
   {
     "name": "open_media_speech_generate",
-    "description": "为指定字幕生成配音，不传clipIds则批量处理全部字幕；使用已下载模型，返回异步jobId，可查询进度及取消。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "为指定字幕生成配音，不传 clipIds 则批量处理全部字幕；只使用用户当前所选音色，省略 voiceId 自动沿用该选择，显式提供其他音色会被拒绝。所选声音未就绪时需先下载或修复，不自动改用其他已下载声音。返回异步 jobId，可查询进度及取消。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2305,7 +2310,8 @@
         "voiceId": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 200
+          "maxLength": 200,
+          "description": "可省略；仅允许用户当前所选音色（speech_settings_get.voiceId / speech_voices.selectedVoiceId），不能通过 MCP 更换音色。"
         },
         "rate": {
           "type": "number",
@@ -3362,7 +3368,7 @@
   },
   {
     "name": "open_media_speech_generate_preview",
-    "description": "合成一句可试听的配音，不加入时间线。返回异步任务；文本应用读法词典。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "合成一句可试听的配音，不加入时间线；文本应用读法词典。只使用用户当前所选音色，省略 voiceId 自动沿用该选择，显式提供其他音色会被拒绝。所选声音未就绪时报告原因，不自动换用其他声音。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -3373,7 +3379,9 @@
         },
         "voiceId": {
           "type": "string",
-          "maxLength": 200
+          "maxLength": 200,
+          "description": "可省略；仅允许用户当前所选音色（speech_settings_get.voiceId / speech_voices.selectedVoiceId），不能通过 MCP 更换音色。",
+          "minLength": 1
         },
         "rate": {
           "type": "number",
@@ -4417,6 +4425,61 @@
           "failed",
           "cancelled"
         ]
+      }
+    }
+  },
+  {
+    "name": "open_media_asset_read",
+    "description": "分块读取当前工程素材的原文件供客户端代码渲染使用；不转码、不返回本地路径。使用 motion_brief_get 返回的 assetId 可读取当前工作副本。首块 offset=0 返回 sourceVersion，续传必须携带同一 sourceVersion；按 nextOffset 拼接 base64 并校验各块 chunkSha256。文件或工程变化时重新开始。执行方式：同步返回最终结果。",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 262144
+        },
+        "sourceVersion": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "首块返回的文件版本；offset>0 时必填。它是文件版本标识，不是完整文件内容 SHA256。"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expectedProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "从 project_get 获取的当前工程 ID；不一致时拒绝执行。"
+        }
+      },
+      "required": [
+        "assetId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": false
+    },
+    "_meta": {
+      "openmedia/execution": {
+        "mode": "synchronous",
+        "responseType": "result"
       }
     }
   },
@@ -6001,7 +6064,7 @@
   },
   {
     "name": "open_media_video_generation_status",
-    "description": "查询本地视频生成平台支持、运行时、模型大小、下载与校验状态；忙碌时仍可调用。\n执行方式：同步返回最终结果。",
+    "description": "查询本地视频生成平台支持、运行时、模型大小、下载与校验状态，以及用户当前的 selectedModelId；忙碌时仍可调用。模型目录不等于 MCP 可任选的模型，生成只能使用 selectedModelId。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -6098,7 +6161,7 @@
   },
   {
     "name": "open_media_video_generation_start",
-    "description": "通过提示词、首尾帧、参考素材或分镜生成视频。FL2VA 支持 prompt/image/storyboard，Ref2VA 支持 reference。素材仅用当前工程 assetId 引用，不接受文件路径；每镜1–15秒，最多20镜，图音视频参考限制由模型核验。默认512×512、20步、1秒、低内存；使用有声视频参考时默认2秒。所有镜头成功后一次加入素材；可用 insert 指定视频轨道和时间（省略轨道会新建），mode=shots逐镜或combined合并插入，可整体撤销。失败或取消不修改工程；生成完成后 result 返回 assetIds、clipIds、nativeJobId。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "通过提示词、首尾帧、参考素材或分镜生成视频。只使用用户在界面当前选择的模型；省略 modelId 自动沿用该选择，传入其他模型 ID 会被拒绝。所选模型未就绪或不支持请求模式时报告原因，不能改用其他已下载模型。FL2VA 支持 prompt/image/storyboard，Ref2VA 支持 reference。素材仅用当前工程 assetId 引用，不接受文件路径；每镜1–15秒，最多20镜，图音视频参考限制由模型核验。默认512×512、20步、1秒、低内存；使用有声视频参考时默认2秒。所有镜头成功后一次加入素材；可用 insert 指定视频轨道和时间（省略轨道会新建），mode=shots逐镜或combined合并插入，可整体撤销。失败或取消不修改工程；生成完成后 result 返回 assetIds、clipIds、nativeJobId。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -6107,7 +6170,8 @@
           "enum": [
             "h3-base-fl2va",
             "h3-base-ref2va"
-          ]
+          ],
+          "description": "可省略，自动使用 video_generation_status.selectedModelId；显式提供时必须与用户当前选择相同，模式不匹配时需用户在界面修改选择。"
         },
         "mode": {
           "type": "string",
@@ -6308,7 +6372,6 @@
         }
       },
       "required": [
-        "modelId",
         "mode"
       ],
       "additionalProperties": false
@@ -6338,12 +6401,14 @@
   },
   {
     "name": "open_media_ai_status",
-    "description": "查询主应用共享的所有 AI 模型、体积、许可、硬件要求、下载/运行环境状态及全局任务。包括已有语音与视频模型，不重复下载已有安装；忙碌时仍可查询。任务中的素材仅返回公开元数据。\n执行方式：同步返回本次查询或操作结果。",
+    "description": "查询主应用共享的所有 AI 模型、体积、许可、硬件要求、下载/运行环境状态及全局任务。包括已有语音与视频模型，不重复下载已有安装；忙碌时仍可查询。任务中的素材仅返回公开元数据。selectedModels 返回用户当前选择的图像、音乐、视频模型；generationCapabilities 分别列出文生图/文生音乐的 selectedModelId、availability、readyModelIds、生成 tool 和默认 route（mcp/agent/check-status），以及 local-first 策略。readyModelIds 最多包含对应用户所选模型，不包含其他已下载模型。生成额外图片或音乐前先读取本地能力：用户所选模型及运行环境均就绪时，默认优先使用对应 MCP 工具；只有对应能力不可用或用户明确要求 Agent 自行生成时才交由 Agent。不能通过指定其他 modelId 绕过用户选择；忙碌应等待，查询失败应重查，不自动下载模型。\n执行方式：同步返回本次查询或操作结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
         "probeRuntime": {
-          "type": "boolean"
+          "type": "boolean",
+          "default": true,
+          "description": "默认 true：重新检查本地图片/音乐模型文件与运行环境布局，不加载大模型、不执行推理、不下载；false 仅返回缓存状态。生成能力检查请使用 true。"
         },
         "expectedRevision": {
           "type": "integer",
@@ -6498,7 +6563,7 @@
   },
   {
     "name": "open_media_image_generate",
-    "description": "使用已下载的图像模型文生图或基础图生图。参考图片仅从当前工程 inputAssetId 解析；图生图不等同于指令式编辑。默认只生成，destination 可加入素材或时间线；图片插入视频轨道，默认展示5秒。快速模型不支持负面提示词，guidance 必须省略或为0，默认9步；另一模型默认50步，guidance映射到真实CFG。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "description": "使用已下载的图像模型文生图或基础图生图。参考图片仅从当前工程 inputAssetId 解析；图生图不等同于指令式编辑。默认只生成，destination 可加入素材或时间线；图片插入视频轨道，默认展示5秒。快速模型不支持负面提示词，guidance 必须省略或为0，默认9步；另一模型默认50步，guidance映射到真实CFG。 调用前读取 open_media_ai_status({probeRuntime:true})，读取对应 generationCapabilities.selectedModelId 和 readyModelIds；仅用户所选模型已就绪时默认使用本工具，用户明确要求 Agent 自行生成除外。只使用用户在界面当前选择的模型；省略 modelId 自动沿用该选择，传入其他模型 ID 会被拒绝。所选模型未就绪或不支持请求模式时报告原因，不能改用其他已下载模型。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -6507,7 +6572,8 @@
           "enum": [
             "qwen-image",
             "z-image-turbo"
-          ]
+          ],
+          "description": "可省略，自动使用用户当前所选模型；显式提供时必须与 selectedModelId 相同，不能切换模型。"
         },
         "prompt": {
           "type": "string",
@@ -6613,7 +6679,6 @@
         }
       },
       "required": [
-        "modelId",
         "prompt"
       ],
       "additionalProperties": false
@@ -6643,7 +6708,7 @@
   },
   {
     "name": "open_media_music_generate",
-    "description": "使用已下载的音乐模型生成纯音乐或有歌词歌曲。无歌词默认纯音乐，有歌词默认歌曲；显式 instrumental=true 不能同时填写歌词。默认30秒；快速模型默认8步且guidance仅支持1，另一模型默认50步、guidance=7。默认只生成，destination 可加入素材或音频轨道，片段使用真实生成时长。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
+    "description": "使用已下载的音乐模型生成纯音乐或有歌词歌曲。无歌词默认纯音乐，有歌词默认歌曲；显式 instrumental=true 不能同时填写歌词。默认30秒；快速模型默认8步且guidance仅支持1，另一模型默认50步、guidance=7。默认只生成，destination 可加入素材或音频轨道，片段使用真实生成时长。 调用前读取 open_media_ai_status({probeRuntime:true})，读取对应 generationCapabilities.selectedModelId 和 readyModelIds；仅用户所选模型已就绪时默认使用本工具，用户明确要求 Agent 自行生成除外。只使用用户在界面当前选择的模型；省略 modelId 自动沿用该选择，传入其他模型 ID 会被拒绝。所选模型未就绪或不支持请求模式时报告原因，不能改用其他已下载模型。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，completed 后读取 result，failed 后读取 errorDetails；使用 open_media_job_cancel({id:jobId}) 取消。忙碌错误附带阻塞任务的查询与取消链接。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -6652,7 +6717,8 @@
           "enum": [
             "ace-step-1.5-turbo",
             "ace-step-1.5-sft"
-          ]
+          ],
+          "description": "可省略，自动使用用户当前所选模型；显式提供时必须与 selectedModelId 相同，不能切换模型。"
         },
         "prompt": {
           "type": "string",
@@ -6746,7 +6812,6 @@
         }
       },
       "required": [
-        "modelId",
         "prompt"
       ],
       "additionalProperties": false
@@ -7107,7 +7172,7 @@
   },
   {
     "name": "open_media_motion_brief_get",
-    "description": "首先读取用户在 MCP 弹窗中设置的素材二创任务：enabled、ready、errors、已选工程素材、指定风格、目标说明和推荐工作流。外部 Agent 应先用素材探测、抽帧或联系表理解内容，再自行规划 scenes、文案、时长、节奏及后续剪辑，调用 motion_clip_generate 生成视频后使用普通轨道、片段、字幕、音频、转场工具整合，并通过预览和导出校验检查结果。应用不会自行调用大模型或后台自动执行。此工具只读，不能启用功能、改变所选素材或风格；禁用或未配置时提示用户到 MCP 弹窗设置。\n执行方式：同步返回最终结果，只读查询。",
+    "description": "首先读取用户在 MCP 弹窗中设置的素材二创任务：enabled、ready、errors、实际可用/已选数量、所选视觉素材、指定风格，以及 workflowPrompt（默认代码生成流程）、stylePrompt（所选风格默认提示词）、userPrompt（用户额外要求）、effectivePrompt（合并后的执行提示词）。prompt 保留用户额外文本。自动刷新本地模型状态，并在 additionalAssetGeneration 返回用户所选图像/音乐模型的 selectedModelId、可用状态与 local-first 路由；检查失败返回 checked=false、checkError、route=check-status，不能当成没有模型。生成额外图片或音乐前先读取本地能力：默认优先使用用户所选模型和运行环境均就绪的 MCP 生成工具；readyModelIds 仅包含用户所选模型，不能换用其他已下载模型，只有对应能力不可用或用户明确要求 Agent 自行生成时才交由 Agent；忙碌应等待，查询失败应重查，不自动下载模型。外部 Agent 应使用 effectivePrompt，通过 asset_read 分块读取所选源素材，在自己的执行环境编写确定性动画代码并渲染真实视频，再用 asset_upload 或 asset_import_url 导入当前工程，通过 clip_add 和剪辑工具与完整工程融合并检查结果。应用不会自行调用大模型或执行任意代码。motion_clip_generate 是有限二维预设的可选快捷路径。此工具只读，不能启用功能、改变所选素材或风格。\n执行方式：同步返回最终结果，只读查询。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -7140,7 +7205,7 @@
   },
   {
     "name": "open_media_motion_style_list",
-    "description": "查询素材二创的 15 类二维效果风格，返回 items、total、count、配色、标签和能力说明。search 可按名称、说明、标签或风格 ID 过滤。以当前工程素材生成真实视频片段后回到项目素材继续剪辑；不生成真实三维模型、流体模拟或素材轮廓变形。\n执行方式：同步返回最终结果，只读查询。",
+    "description": "查询素材二创的 25 类视觉风格，返回 items、total、count；每个风格包含 presetSupported 和独立的 prompt（代码渲染方向、标志特征、构图、运动与检查要求）、配色和标签。search 可按名称、说明、标签或风格 ID 过滤。默认由外部 Agent 根据所选素材写代码渲染视频，导入后放到轨道继续剪辑。capabilities 通过 presetStyleIds、codeOnlyStyleIds 和 selectedPresetSupported 区分内置二维预设与必须由 Agent 代码渲染的风格；应用不执行任意代码。\n执行方式：同步返回最终结果，只读查询。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -7177,7 +7242,7 @@
   },
   {
     "name": "open_media_motion_clip_generate",
-    "description": "仅供外部 MCP Agent 使用；先调用 open_media_motion_brief_get 读取用户任务。必须由用户在 MCP 弹窗启用并选择素材和风格；scenes 与 Logo 只能引用用户选定的视觉素材，配乐使用当前工程的音频素材，styleId 默认用户选定风格且不允许改为其他风格。由外部 Agent 分析素材并决定场景、文案、时长与节奏，本工具负责实际视频编码，应用不自行调用大模型。对当前工程已导入的图片或视频进行素材二创，按风格与场景顺序真实编码为一个视频素材，包含背景、装饰、文案、入退场动画及可选配乐与 Logo。尺寸与帧率沿用当前工程。默认 destination=assets 只加入项目素材，原有轨道保持不变；destination=timeline 可通过 insert 指定未锁定的视频轨道与 start，默认放在工程结尾，未指定轨道时新建一个普通视频轨道。成功只新增一个视频素材及可选的一个普通视频片段；不会把内部合成图层展开到工程，不新建或切换工程。每场默认 4 秒，可设置 2–12 秒；视频剩余不足时缩短场景并返回 warnings。dryRun=true 只预检并返回场景计划与目的地，不编码、不导入、不修改工程。完成结果含 assetId、styleId、sourceAssetIds、duration、width、height、destination、renderer，插入时间线时含 clipId 与 trackId。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可通过 open_media_job_cancel({id:jobId}) 取消；生成失败、取消或工程变化不会写入部分结果，成功可一次撤销。",
+    "description": "内置二维预设快捷合成工具，仅支持 motion_style_list 中 presetSupported=true 的 15 种风格；其他风格即使省略 styleId 也会拒绝，不会改用近似预设。不执行 Agent 提交的代码；自定义代码渲染应遵循 motion_brief_get.effectivePrompt，在 Agent 环境渲染后上传或导入视频。仅供外部 MCP Agent 使用；先调用 open_media_motion_brief_get 读取用户任务。必须由用户在 MCP 弹窗启用并选择素材和风格；scenes 与 Logo 只能引用用户选定的视觉素材，配乐使用当前工程的音频素材，styleId 默认用户选定风格且不允许改为其他风格。由外部 Agent 分析素材并决定场景、文案、时长与节奏，本工具负责实际视频编码，应用不自行调用大模型。对当前工程已导入的图片或视频进行素材二创，按风格与场景顺序真实编码为一个视频素材，包含背景、装饰、文案、入退场动画及可选配乐与 Logo。尺寸与帧率沿用当前工程。默认 destination=assets 只加入项目素材，原有轨道保持不变；destination=timeline 可通过 insert 指定未锁定的视频轨道与 start，默认放在工程结尾，未指定轨道时新建一个普通视频轨道。成功只新增一个视频素材及可选的一个普通视频片段；不会把内部合成图层展开到工程，不新建或切换工程。每场默认 4 秒，可设置 2–12 秒；视频剩余不足时缩短场景并返回 warnings。dryRun=true 只预检并返回场景计划与目的地，不编码、不导入、不修改工程。完成结果含 assetId、styleId、sourceAssetIds、duration、width、height、destination、renderer，插入时间线时含 clipId 与 trackId。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可通过 open_media_job_cancel({id:jobId}) 取消；生成失败、取消或工程变化不会写入部分结果，成功可一次撤销。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -7204,7 +7269,7 @@
             "liquid-color",
             "expressive-type"
           ],
-          "description": "省略时使用用户在 MCP 弹窗选择的风格；显式指定必须与用户配置一致。"
+          "description": "仅支持 presetSupported=true 的风格。省略时使用用户在 MCP 弹窗选择的风格；若该风格不支持内置预设则拒绝。显式指定必须与用户配置一致。"
         },
         "scenes": {
           "type": "array",

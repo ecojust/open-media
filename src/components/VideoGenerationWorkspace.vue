@@ -8,6 +8,7 @@ import type { MediaAsset } from '../core/types.ts'
 import { VIDEO_GENERATION_MAX_SHOTS, videoGenerationActualSeconds, videoGenerationRequestError, type VideoGenerationJob, type VideoGenerationMode, type VideoGenerationModel, type VideoGenerationRequest, type VideoGenerationShot, type VideoGenerationStatus } from '../core/video-generation.ts'
 import { beginVideoGeneration, cancelVideoGeneration, getVideoGenerationStatus, listVideoGenerationJobs } from '../native-video-generation.ts'
 import { pickMediaAssets, revealMediaAsset } from '../native.ts'
+import { getGenerationModel, setGenerationModel, subscribeGenerationModels } from '../core/generation-settings.ts'
 
 const props = defineProps<{ native: boolean; active: boolean; projectTitle: string; disabled?: boolean }>()
 const emit = defineEmits<{ 'busy-change': [busy: boolean]; status: [message: string]; 'open-mcp': []; 'open-models': [provider: 'video']; 'add-asset': [asset: MediaAsset]; 'add-timeline': [asset: MediaAsset] }>()
@@ -18,7 +19,10 @@ const modes: { id: VideoGenerationMode; title: string; icon: string; detail: str
   { id: 'reference', title: '参考素材', icon: 'layers', detail: '使用图片、视频和声音作为参考' },
   { id: 'storyboard', title: '分镜', icon: 'film', detail: '分别描述每个镜头，按顺序生成' },
 ]
-const mode = ref<VideoGenerationMode>('prompt'), modelId = ref(''), shots = ref<VideoGenerationShot[]>([newShot()])
+const selectedModelId = ref(getGenerationModel('video'))
+const modelId = computed({ get: () => selectedModelId.value, set: (id: string) => { setGenerationModel('video', id) } })
+const releaseModelSelection = subscribeGenerationModels(models => { selectedModelId.value = models.video })
+const mode = ref<VideoGenerationMode>('prompt'), shots = ref<VideoGenerationShot[]>([newShot()])
 const size = ref('512x512'), steps = ref(20), seed = ref(42), lowMemory = ref(true), joinShots = ref(true)
 const catalog = ref<VideoGenerationStatus>(), checking = ref(false), error = ref(''), pollError = ref(''), draftError = ref('')
 const jobs = ref<VideoGenerationJob[]>([]), selectedJobId = ref(''), selectedAssetId = ref(''), cancelling = ref('')
@@ -38,7 +42,7 @@ const selectedJob = computed(() => jobs.value.find(job => job.id === selectedJob
 const results = computed(() => selectedJob.value ? [...(selectedJob.value.combinedAsset ? [selectedJob.value.combinedAsset] : []), ...selectedJob.value.assets] : [])
 const previewAsset = computed(() => libraryAssets.value.find(asset => asset.id === selectedLibraryAssetId.value) ?? results.value.find(asset => asset.id === selectedAssetId.value) ?? results.value[0] ?? libraryAssets.value[0])
 const invalid = computed(() => videoGenerationRequestError(makeRequest('validation')))
-const unavailable = computed(() => !props.native ? '视频生成需要 Apple 芯片 Mac 桌面端。' : catalog.value && !catalog.value.supported ? catalog.value.reason || '当前设备不支持本地视频生成。' : !selectedModel.value ? '请等待模型检查完成。' : !modeAvailable(mode.value) ? '当前模型不支持此生成方式，请切换模型。' : selectedModel.value.state !== 'ready' ? '请前往 Info 下载所选模型。' : !catalog.value?.runtimeReady ? '视频生成组件尚未就绪，请前往 Info 检查模型。' : '')
+const unavailable = computed(() => !props.native ? '视频生成需要 Apple 芯片 Mac 桌面端。' : catalog.value && !catalog.value.supported ? catalog.value.reason || '当前设备不支持本地视频生成。' : !selectedModel.value ? catalog.value ? '当前所选模型不可用，请手动选择生成模型。' : '请等待模型检查完成。' : !modeAvailable(mode.value) ? '当前模型不支持此生成方式，请切换模型。' : selectedModel.value.state !== 'ready' ? '请前往 Info 下载所选模型。' : !catalog.value?.runtimeReady ? '视频生成组件尚未就绪，请前往 Info 检查模型。' : '')
 const canGenerate = computed(() => !props.disabled && !working.value && !unavailable.value && !invalid.value)
 watch(busy, value => emit('busy-change', value), { immediate: true })
 watch(results, values => { if (!values.some(asset => asset.id === selectedAssetId.value)) selectedAssetId.value = values[0]?.id || '' })
@@ -70,7 +74,6 @@ function restoreDraft(): void {
     if (!raw) return
     const value = JSON.parse(raw)
     if (modes.some(item => item.id === value.mode)) mode.value = value.mode
-    if (typeof value.modelId === 'string') modelId.value = value.modelId
     if (Array.isArray(value.shots) && value.shots.length) {
       const validAsset = (asset: unknown): asset is MediaAsset => !!asset && typeof asset === 'object' && typeof (asset as MediaAsset).id === 'string' && typeof (asset as MediaAsset).name === 'string' && typeof (asset as MediaAsset).url === 'string' && ['image', 'video', 'audio'].includes((asset as MediaAsset).kind) && ['duration', 'width', 'height', 'size'].every(key => Number.isFinite((asset as unknown as Record<string, unknown>)[key]))
       const restored = value.shots.filter((shot: unknown) => !!shot && typeof shot === 'object').slice(0, VIDEO_GENERATION_MAX_SHOTS).map((shot: VideoGenerationShot) => ({
@@ -96,7 +99,6 @@ async function refresh(): Promise<void> {
     const [next, nextJobs] = await Promise.all([getVideoGenerationStatus(), listVideoGenerationJobs()])
     if (destroyed) return
     catalog.value = next; jobs.value = nextJobs.slice().sort((a, b) => b.startedAt - a.startedAt); pollError.value = ''
-    if (!next.models.some(item => item.id === modelId.value)) { const candidate = next.models.find(item => item.modes.includes(mode.value)); modelId.value = candidate?.id || next.models[0]?.id || '' }
   } catch (cause) { if (!destroyed) pollError.value = message(cause) }
   finally {
     refreshing = false; checking.value = false; clearTimeout(pollTimer)
@@ -134,7 +136,7 @@ async function cancelJob(job: VideoGenerationJob): Promise<void> {
 }
 async function reveal(asset: MediaAsset): Promise<void> { try { await revealMediaAsset(asset) } catch (cause) { error.value = message(cause) } }
 onMounted(() => { void refresh(); clockTimer = setInterval(() => { if (activeJobs.value.length) elapsedNow.value = Date.now() }, 1000) })
-onBeforeUnmount(() => { destroyed = true; clearTimeout(pollTimer); clearTimeout(draftTimer); clearInterval(clockTimer); persistDraft(); emit('busy-change', false) })
+onBeforeUnmount(() => { destroyed = true; releaseModelSelection(); clearTimeout(pollTimer); clearTimeout(draftTimer); clearInterval(clockTimer); persistDraft(); emit('busy-change', false) })
 </script>
 
 <template>

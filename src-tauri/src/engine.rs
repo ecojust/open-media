@@ -1571,7 +1571,7 @@ fn timeline_plan(
     let mut clips = Vec::new();
     let mut total = 0.0_f64;
     for track in tracks.iter().rev() {
-        if track["kind"] == "transition" {
+        if track["hidden"] == true || track["kind"] == "transition" {
             continue;
         }
         let items = track["clips"].as_array().ok_or("轨道片段无效。")?;

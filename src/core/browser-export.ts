@@ -45,7 +45,7 @@ export async function exportTimelineWebM(project: Project, options: BrowserVideo
     if (options.signal?.aborted) throw new DOMException('已取消导出', 'AbortError')
     stream = canvas.captureStream(fps)
     const audibleAssetIds = new Set(project.assets.filter(asset => asset.kind === 'audio' || asset.kind === 'video').map(asset => asset.id))
-    const hasAudibleMedia = project.tracks.some(track => !track.muted && track.kind !== 'text'
+    const hasAudibleMedia = project.tracks.some(track => !track.hidden && !track.muted && track.kind !== 'text'
       && track.clips.some(clip => clip.volume > 0 && !!clip.assetId && audibleAssetIds.has(clip.assetId)))
     // An unconnected audio destination produces no packets and can stall video-only recordings.
     if (hasAudibleMedia) for (const track of audioStream.getAudioTracks()) stream.addTrack(track)

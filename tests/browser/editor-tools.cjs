@@ -27,7 +27,7 @@ async function verifyNativeProjectPreparation(browser, url) {
         if (managed.handled) return managed.value
         if (command === 'get_desktop_platform') return 'macos'
         if (command === 'plugin:event|listen') return ++counter
-        if (command === 'plugin:event|unlisten' || command.startsWith('plugin:window|') || command.startsWith('plugin:webview|')) return null
+        if (command === 'plugin:event|unlisten' || command === 'set_main_window_appearance' || command.startsWith('plugin:window|') || command.startsWith('plugin:webview|')) return null
         if (command === 'configure_screenshot_shortcut') return args.shortcut
         if (command === 'get_media_jobs' || command === 'mcp_pending') return []
         if (command === 'ai_get_status') return { models: [], jobs: [], busy: false }

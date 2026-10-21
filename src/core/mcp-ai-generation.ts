@@ -2,6 +2,8 @@ import { createClip, createTrack, newId } from './project.ts'
 import { addAssets, addClips, addTrack, clipDuration } from './timeline.ts'
 import type { AiGenerationRequest, AiJob, AiStatus } from './ai.ts'
 import type { MediaAsset, Project } from './types.ts'
+import { getMcpGenerationCapabilities } from './mcp-generation-capabilities.ts'
+import { getGenerationModel } from './generation-settings.ts'
 
 export interface McpAiDestination {
   destination: 'generated' | 'assets' | 'timeline'
@@ -60,7 +62,10 @@ export function publicAiJob(job: AiJob) {
     poll: { tool: 'open_media_ai_job_get', arguments: { id: job.id } },
     cancel: job.cancelable ? { tool: 'open_media_ai_job_cancel', arguments: { id: job.id } } : null }
 }
-export function publicAiStatus(status: AiStatus) { return { ...status, jobs: status.jobs.map(publicAiJob) } }
+export function publicAiStatus(status: AiStatus) {
+  const selectedModels = { image: getGenerationModel('image'), music: getGenerationModel('music'), video: getGenerationModel('video') }
+  return { ...status, jobs: status.jobs.map(publicAiJob), selectedModels, selectionPolicy: 'user-selected-only', generationCapabilities: getMcpGenerationCapabilities(status) }
+}
 
 /** Prepare a detached result; the controller commits it once after revision validation. */
 export function applyMcpAiGeneration(project: Project, job: AiJob, prepared: PreparedMcpAiGeneration) {

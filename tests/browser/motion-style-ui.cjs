@@ -27,7 +27,7 @@ async function mount(page, url) {
     const photo = await importMediaFile(new File([photoBytes], '封面图片.png', { type: 'image/png' })); photo.id = 'source-photo'
     const musicBytes = await (await fetch(BACKGROUND_MUSIC[0].url)).blob()
     const music = await importMediaFile(new File([musicBytes], '柔和配乐.mp3', { type: 'audio/mpeg' })); music.id = 'source-music'
-    const fixture = window.motionStyle = { current: shallowRef(createProject()), editor: ref(), theme: ref('dark'), native: ref(false), open: ref(false), editingBusy: ref(false), jobs: ref([]), events: [], calls: [], toolCalls: [], captures: 0, imports: 0, commits: 0, pendingRequests: 0, connectedClients: 1, running: true, config: { host: '127.0.0.1', port: 39861, token: 'example-local-access-token' } }
+    const fixture = window.motionStyle = { current: shallowRef(createProject()), editor: ref(), theme: ref('dark'), native: ref(false), open: ref(false), editingBusy: ref(false), jobs: ref([]), events: [], calls: [], toolCalls: [], captures: 0, imports: 0, commits: 0, pendingRequests: 0, connectedClients: 1, running: false, failStart: false, failStatus: false, config: { host: '127.0.0.1', port: 39861, token: 'example-local-access-token' } }
     const commit = next => { fixture.current.value = validateProject(next, { trusted: true }); fixture.commits++ }
     fixture.motionChange = config => { const next = JSON.parse(JSON.stringify(fixture.current.value)); next.mcpMotion = normalizeMcpMotion(config); commit(next); fixture.events.push(JSON.parse(JSON.stringify(config))) }
     fixture.brief = () => getMcpMotionBrief(fixture.current.value)
@@ -67,10 +67,13 @@ async function mount(page, url) {
     fixture.app.mount('#app')
     // Only the MCP service bridge is simulated. Sources and the editor preview
     // are real media; this suite verifies configuration and never renders output.
+    const serviceStatus = () => ({ running: fixture.running, host: fixture.config.host, port: fixture.config.port, url: fixture.running ? 'http://127.0.0.1:39861/mcp' : null, pendingRequests: fixture.pendingRequests, connectedClients: fixture.running ? fixture.connectedClients : 0 })
     window.__TAURI_INTERNALS__ = { invoke: async command => {
       fixture.calls.push(command)
       if (command === 'mcp_get_config') return { ...fixture.config }
-      if (command === 'mcp_get_status') return { running: fixture.running, host: fixture.config.host, port: fixture.config.port, url: fixture.running ? 'http://127.0.0.1:39861/mcp' : null, pendingRequests: fixture.pendingRequests, connectedClients: fixture.connectedClients }
+      if (command === 'mcp_get_status') { if (fixture.failStatus) throw new Error('连接状态暂不可用'); return serviceStatus() }
+      if (command === 'mcp_start') { if (fixture.failStart) throw new Error('服务启动失败'); fixture.running = true; return serviceStatus() }
+      if (command === 'mcp_stop') { fixture.running = false; return serviceStatus() }
       throw new Error(`Unexpected native operation: ${command}`)
     } }
     fixture.native.value = true
@@ -96,12 +99,23 @@ async function main() {
     const dialog = page.getByRole('dialog', { name: 'MCP 服务', exact: true }), section = page.getByTestId('mcp-motion-config')
     const toggle = section.getByRole('switch', { name: '素材二创', exact: true })
     await expect(toggle).toHaveAttribute('aria-checked', 'false')
-    await expect(toggle).toBeEnabled()
+    const serviceToggle = page.getByTestId('mcp-service-switch')
+    await expect(toggle).toBeDisabled()
+    await expect(section).toContainText('请先开启 MCP 服务')
     await expect(section.locator('[data-motion-style-id]')).toHaveCount(0)
     assert.equal(await page.evaluate(() => window.motionStyle.current.value.mcpMotion), undefined, '打开配置不能写入工程')
+    await page.evaluate(() => { window.motionStyle.failStart = true })
+    await serviceToggle.click()
+    await expect(dialog).toContainText('服务启动失败')
+    await expect(toggle).toBeDisabled()
+    assert.equal(await page.evaluate(() => window.motionStyle.commits), 0)
+    await page.evaluate(() => { window.motionStyle.failStart = false })
+    await serviceToggle.click()
+    await expect(serviceToggle).toHaveAttribute('aria-checked', 'true')
+    await expect(toggle).toBeEnabled()
     await toggle.click()
     await expect(section).toContainText('需先在工程导入素材')
-    await expect(section.locator('[data-motion-style-id]')).toHaveCount(15)
+    await expect(section.locator('[data-motion-style-id]')).toHaveCount(25)
     await expect(section.locator('input[type=file]')).toHaveCount(0)
     await expect(section.getByRole('button', { name: /生成|导入/ })).toHaveCount(0)
     await expect(section).toContainText('由外部 Agent 读取配置并编排、生成与剪辑')
@@ -109,7 +123,7 @@ async function main() {
     await expect(section).toContainText('不包含真实三维建模或物理模拟')
     await page.keyboard.press('Escape')
     await expect(dialog).not.toBeVisible(); await expect(page.getByTestId('editor-mcp-open')).toBeFocused()
-    console.log('PASS MCP默认关闭、空工程指引、15风格；界面仅配置，无导入/生成入口')
+    console.log('PASS MCP未启动或启动失败时禁用二创；开启后可配置、空工程指引、25风格，无直接生成入口')
 
     await page.evaluate(() => window.motionStyle.populate())
     const card = id => page.locator(`[data-source-asset-id="${id}"]`)
@@ -125,6 +139,30 @@ async function main() {
     await toggle.click()
     const source = id => section.locator(`[data-motion-asset-id="${id}"]`)
     await expect(section.getByRole('checkbox')).toHaveCount(2)
+    await expect(section.getByTestId('mcp-motion-available-count')).toHaveText('2 个可用')
+    await expect(section.getByTestId('mcp-motion-selection-count')).toHaveText('已选 0 个')
+    await page.evaluate(() => {
+      const project = JSON.parse(JSON.stringify(window.motionStyle.current.value))
+      const photo = project.assets.find(asset => asset.id === 'source-photo'), music = project.assets.find(asset => asset.id === 'source-music')
+      for (let index = 0; index < 9; index++) project.assets.push({ ...photo, id: `count-photo-${index}`, name: `计数图片 ${index}.png` })
+      for (let index = 0; index < 3; index++) project.assets.push({ ...music, id: `count-audio-${index}`, name: `计数音频 ${index}.mp3` })
+      window.motionStyle.current.value = project
+    })
+    assert.equal(await page.evaluate(() => window.motionStyle.current.value.assets.length), 16)
+    await expect(section.getByRole('checkbox')).toHaveCount(11)
+    await expect(section.getByTestId('mcp-motion-available-count')).toHaveText('11 个可用')
+    await expect(section.getByTestId('mcp-motion-selection-count')).toHaveText('已选 0 个')
+    await section.getByLabel('筛选二创素材').fill('计数图片')
+    await expect(section.getByRole('checkbox')).toHaveCount(9)
+    await expect(section.getByTestId('mcp-motion-search-count')).toHaveText('匹配 9 / 11 个可用素材')
+    await section.getByLabel('筛选二创素材').fill('')
+    await page.evaluate(() => {
+      const project = JSON.parse(JSON.stringify(window.motionStyle.current.value))
+      project.assets = project.assets.filter(asset => !asset.id.startsWith('count-'))
+      window.motionStyle.current.value = project
+    })
+    await expect(section.getByRole('checkbox')).toHaveCount(2)
+    console.log('PASS 16个总素材中的11个可用视觉素材显示准确，已选/搜索数量分别标明，不显示选择上限')
     await expect(section).not.toContainText('柔和配乐.mp3')
     await expect(section).not.toContainText('内部包装图层')
     const snapshot = await page.evaluate(() => JSON.parse(JSON.stringify(window.motionStyle.current.value)))
@@ -137,6 +175,53 @@ async function main() {
     assert.deepEqual(configured.project.assets, snapshot.assets); assert.deepEqual(configured.project.tracks, snapshot.tracks)
     assert.deepEqual(configured.project.mcpMotion.assetIds, ['source-video', 'source-photo']); assert.equal(configured.project.mcpMotion.styleId, 'tech-hud')
     assert.equal(configured.brief.ready, true); assert.equal(configured.tools.length, 0)
+    assert.equal(configured.brief.generationMode, 'agent-code-render')
+    assert.equal(configured.brief.workflow.codeExecution, 'external-agent')
+    assert.equal(configured.brief.userPrompt, configured.project.mcpMotion.prompt)
+    assert.ok(configured.brief.effectivePrompt.includes(configured.brief.stylePrompt))
+    assert.ok(configured.brief.effectivePrompt.includes(configured.brief.userPrompt))
+    const defaults = section.getByTestId('mcp-motion-default-prompt')
+    await defaults.locator('summary').click()
+    await expect(section.getByTestId('mcp-motion-style-prompt')).toBeVisible()
+    await expect(section.getByTestId('mcp-motion-style-prompt')).toContainText('科技视窗')
+    await expect(defaults).toContainText('外部 Agent')
+    await expect(defaults).toContainText('open_media_asset_read')
+    const extraPrompt = await prompt.inputValue()
+    await section.getByRole('button', { name: '像素节拍', exact: true }).click()
+    await expect(section.getByTestId('mcp-motion-style-prompt')).toContainText('最近邻')
+    await expect(prompt).toHaveValue(extraPrompt)
+    const changedBrief = await page.evaluate(() => window.motionStyle.brief())
+    assert.notEqual(changedBrief.stylePrompt, configured.brief.stylePrompt)
+    assert.equal(changedBrief.userPrompt, configured.brief.userPrompt)
+    assert.ok(changedBrief.effectivePrompt.includes(changedBrief.stylePrompt))
+    await prompt.fill('')
+    assert.ok((await page.evaluate(() => window.motionStyle.brief().effectivePrompt)).includes('最近邻'))
+    const codeStyles = await page.evaluate(async () => (await import('/src/core/motion-style-catalog.ts')).MOTION_STYLES.filter(style => !style.presetSupported).map(style => ({ id: style.id, name: style.name })))
+    assert.equal(codeStyles.length, 10)
+    const posters = new Set()
+    for (const style of codeStyles) {
+      await section.locator(`[data-motion-style-id="${style.id}"]`).click()
+      await expect(section.getByTestId('mcp-motion-style-prompt')).toContainText(style.name)
+      const brief = await page.evaluate(() => window.motionStyle.brief())
+      assert.equal(brief.ready, true)
+      assert.equal(brief.workflow.presetGenerationTool, null)
+      assert.equal(brief.style.presetSupported, false)
+      assert.equal(brief.userPrompt, '')
+      assert.match(brief.stylePrompt, /5\. /)
+      posters.add(await section.locator(`[data-motion-style-id="${style.id}"] canvas`).evaluate(canvas => {
+        const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+        const colors = new Set()
+        for (let i = 0; i < pixels.length; i += 4) colors.add(`${pixels[i]},${pixels[i + 1]},${pixels[i + 2]}`)
+        if (colors.size < 30) throw new Error('Style thumbnail is blank or lacks its composition')
+        return canvas.toDataURL()
+      }))
+    }
+    assert.equal(posters.size, 10, 'Each code style has its own composition preview')
+    assert.equal(await page.evaluate(() => window.motionStyle.toolCalls.length), 0)
+    await section.getByRole('button', { name: '科技视窗', exact: true }).click()
+    await prompt.fill(extraPrompt)
+    await defaults.locator('summary').click()
+    console.log('PASS 默认风格prompt自动切换、额外prompt保留、空输入仍有完整代码渲染要求')
     await prompt.press('End'); await prompt.press('Space'); await prompt.press('Space')
     assert.ok((await page.evaluate(() => window.motionStyle.current.value.mcpMotion.prompt)).endsWith('  '), '自动保存保留输入中的空格')
     await prompt.fill('以现有演示视频和封面图片制作 20 秒介绍，突出操作步骤与最终效果。\n科技感画面，标题简洁，节奏清晰。')
@@ -151,6 +236,28 @@ async function main() {
     await expect(toggle).toHaveAttribute('aria-checked', 'true')
     await expect(source('source-video')).toHaveAttribute('aria-checked', 'true')
     await expect(section.getByRole('button', { name: '科技视窗', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    const savedConfig = await page.evaluate(() => JSON.parse(JSON.stringify(window.motionStyle.current.value.mcpMotion)))
+    const savedCommits = await page.evaluate(() => window.motionStyle.commits)
+    await serviceToggle.click()
+    await expect(serviceToggle).toHaveAttribute('aria-checked', 'false')
+    await expect(toggle).toBeDisabled()
+    await expect(section).toContainText('请先开启 MCP 服务')
+    await expect(section.getByRole('checkbox')).toHaveCount(0)
+    await expect(section.locator('[data-motion-style-id]')).toHaveCount(0)
+    assert.deepEqual(await page.evaluate(() => window.motionStyle.current.value.mcpMotion), savedConfig)
+    assert.equal(await page.evaluate(() => window.motionStyle.commits), savedCommits, '停止服务不改工程配置')
+    await serviceToggle.click()
+    await expect(toggle).toBeEnabled()
+    await expect(source('source-video')).toHaveAttribute('aria-checked', 'true')
+    await expect(section.getByRole('button', { name: '科技视窗', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(prompt).toHaveValue(savedConfig.prompt)
+    await page.evaluate(() => { window.motionStyle.failStatus = true })
+    await expect(dialog).toContainText('无法读取连接信息')
+    await expect(toggle).toBeDisabled(); await expect(source('source-video')).toBeDisabled(); await expect(prompt).toBeDisabled()
+    await page.evaluate(() => { window.motionStyle.failStatus = false })
+    await expect(toggle).toBeEnabled()
+    assert.deepEqual(await page.evaluate(() => window.motionStyle.current.value.mcpMotion), savedConfig)
+    console.log('PASS 停止MCP禁用并隐藏二创配置，重新开启恢复素材/风格/提示词；状态查询失败时禁止修改')
     await page.evaluate(() => { window.motionStyle.editingBusy.value = true })
     await expect(toggle).toBeDisabled(); await expect(source('source-photo')).toBeDisabled(); await expect(prompt).toBeDisabled()
     await expect(section).toContainText('正在处理任务')
@@ -170,10 +277,18 @@ async function main() {
     console.log('PASS 关闭重开保持工程配置；本地/MCP任务与待执行请求期间禁止修改；关闭开关保留选择')
 
     await page.evaluate(() => window.motionStyle.addSources())
-    for (let index = 1; index <= 14; index++) await source(`extra-${index}`).click()
-    await expect(source('extra-15')).toBeDisabled(); await expect(section).toContainText('已达到 16 个素材上限')
-    assert.equal(await page.evaluate(() => window.motionStyle.current.value.mcpMotion.assetIds.length), 16)
-    await source('extra-14').click(); await expect(source('extra-15')).toBeEnabled()
+    await expect(section.getByTestId('mcp-motion-available-count')).toHaveText('18 个可用')
+    for (let index = 1; index <= 16; index++) await source(`extra-${index}`).click()
+    await expect(section.getByTestId('mcp-motion-selection-count')).toHaveText('已选 18 个')
+    await expect(section).not.toContainText('最多')
+    await expect(section).not.toContainText('素材上限')
+    assert.equal(await page.evaluate(() => window.motionStyle.current.value.mcpMotion.assetIds.length), 18)
+    await page.getByRole('button', { name: '关闭MCP 服务', exact: true }).click()
+    await page.getByTestId('editor-mcp-open').click()
+    await expect(section.getByTestId('mcp-motion-selection-count')).toHaveText('已选 18 个')
+    await expect(source('extra-16')).toHaveAttribute('aria-checked', 'true')
+    assert.equal(await page.evaluate(() => window.motionStyle.brief().selectedAssetCount), 18)
+    await source('extra-15').click(); await expect(source('extra-15')).toBeEnabled()
     await section.getByLabel('筛选二创素材').fill('画面 15')
     await expect(section.getByRole('checkbox')).toHaveCount(1)
     await source('extra-15').click()
@@ -195,8 +310,29 @@ async function main() {
     assert.equal(await page.evaluate(() => window.motionStyle.current.value.mcpMotion.styleId), '')
     assert.equal(await page.evaluate(() => window.motionStyle.toolCalls.length), 0)
     assert.equal(await page.evaluate(() => window.motionStyle.captures), 0)
+    const gallery = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
+    await gallery.goto(`http://127.0.0.1:${server.httpServer.address().port}/__motion_style__`)
+    await gallery.evaluate(async () => {
+      const { MOTION_STYLES } = await import('/src/core/motion-style-catalog.ts')
+      const { drawMotionStylePoster } = await import('/src/core/motion-style-art.ts')
+      document.body.innerHTML = ''
+      document.body.style.cssText = 'margin:0;height:auto;background:#111722;color:#edf0f6;font-family:sans-serif;padding:32px;box-sizing:border-box'
+      const heading = document.createElement('h1'); heading.textContent = 'Open Media · 素材二创'; heading.style.cssText = 'font-size:26px;margin:0 0 10px'; document.body.append(heading)
+      const caption = document.createElement('p'); caption.textContent = '10 种代码创作方向 · 构图示意，实际视频由 Agent 根据所选素材渲染'; caption.style.cssText = 'font-size:14px;color:#9ca9bd;margin:0 0 26px'; document.body.append(caption)
+      const grid = document.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px'; document.body.append(grid)
+      for (const style of MOTION_STYLES.filter(style => !style.presetSupported)) {
+        const card = document.createElement('div'); card.style.cssText = 'overflow:hidden;border:1px solid #303949;border-radius:10px;background:#1c2432'
+        const canvas = document.createElement('canvas'); canvas.width = 720; canvas.height = 405; canvas.style.cssText = 'width:100%;height:auto;display:block'; drawMotionStylePoster(canvas, style.id)
+        const name = document.createElement('h2'); name.textContent = style.name; name.style.cssText = 'font-size:17px;margin:14px 14px 8px'
+        const tags = document.createElement('p'); tags.textContent = style.tags.join(' · '); tags.style.cssText = 'font-size:12px;color:#a8b6cd;margin:0 14px 15px'
+        card.append(canvas, name, tags); grid.append(card)
+      }
+    })
+    await gallery.locator('body').screenshot({ path: path.join(output, 'motion-code-style-gallery.png') })
+    await gallery.close()
     assert.deepEqual(errors, [])
-    console.log('PASS 16素材上限、搜索、失效选择修复、项目切换隔离、窄屏滚动，无媒体生成或设备采集')
+    console.log('PASS 10种新风格选择、默认提示词、独立构图缩略图与外部代码能力标记')
+    console.log('PASS 18个视觉素材全部可选并保存重开，搜索/失效选择修复/项目切换/窄屏滚动，无媒体生成或设备采集')
     console.log(`截图：${output}`)
   } finally { await browser?.close(); await server.close() }
 }

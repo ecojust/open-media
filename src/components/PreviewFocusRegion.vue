@@ -11,7 +11,7 @@ const svg = ref<SVGSVGElement>(), region = ref<NormalizedRect>()
 const selected = computed(() => {
   if (!props.active || props.disabled) return undefined
   const found = findClip(props.project, props.clipId)
-  if (!found || found.track.kind !== 'video' || found.track.locked || props.time < found.clip.start || props.time >= found.clip.start + clipDuration(found.clip)) return undefined
+  if (!found || found.track.kind !== 'video' || found.track.locked || found.track.hidden || props.time < found.clip.start || props.time >= found.clip.start + clipDuration(found.clip)) return undefined
   return animatedClipAt(found.clip, props.time)
 })
 const selection = computed(() => {

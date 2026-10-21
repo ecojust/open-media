@@ -15,12 +15,13 @@ function fixture(size = { width: 1920, height: 1080 }) {
   return project
 }
 function options(patch = {}) { return { styleId: 'paper-ink', scenes: [{ assetId: 'picture', heading: '可编辑的标题', caption: '独立说明文字', duration: 4 }, { assetId: 'footage', heading: '第二个场景', duration: 5, trimIn: 1 }], ...patch } }
+const PRESET_STYLES = MOTION_STYLES.filter(style => style.presetSupported)
 const allClips = project => project.tracks.flatMap(track => track.clips)
 function sourceClip(result, index = 0) { return result.project.tracks.find(track => track.name.endsWith('· 素材卡片')).clips[index] }
 
-test('十五种风格都生成原生可编辑图层，标题、色彩、构图与运动各有区别', () => {
+test('内置预设生成原生可编辑图层，标题、色彩、构图与运动各有区别', () => {
   const signatures = new Set()
-  for (const style of MOTION_STYLES) {
+  for (const style of PRESET_STYLES) {
     const original = fixture(), before = structuredClone(original)
     const result = composeMotionProject(original, options({ styleId: style.id }), resources())
     assert.deepEqual(original, before)
@@ -49,7 +50,8 @@ test('十五种风格都生成原生可编辑图层，标题、色彩、构图�
     assert.equal(result.project.tracks.find(track => track.name.endsWith('· 背景')).clips.length, 1)
     assert.equal(projectDuration(result.project), 9)
   }
-  assert.equal(signatures.size, 15)
+  assert.equal(PRESET_STYLES.length, 15)
+  assert.equal(signatures.size, PRESET_STYLES.length)
 })
 
 test('规划可重复执行且不产生项目修改；默认时长、素材标题和覆盖色返回明确值', () => {
@@ -68,7 +70,7 @@ test('规划可重复执行且不产生项目修改；默认时长、素材标�
 
 test('横屏、竖屏、方形的文字与主体保持安全边距；动画缩放和时刻有界', () => {
   for (const size of [{ width: 1920, height: 1080 }, { width: 1080, height: 1920 }, { width: 1000, height: 1000 }]) {
-    for (const style of MOTION_STYLES) {
+    for (const style of PRESET_STYLES) {
       const result = composeMotionProject(fixture(size), options({ styleId: style.id }), resources())
       for (const clip of allClips(result.project)) {
         for (const [property, frames] of Object.entries(clip.keyframes ?? {})) {
@@ -173,7 +175,7 @@ test('有意留空的标题与说明不生成空字幕，长文本保留完整�
 
 test('窄标题框考虑实际24像素内边距和整行高度，短中文、120字与显式换行均不裁切', () => {
   for (const heading of ['创意，从此动起来', '中'.repeat(120), '第一行\n第二行\n\n第四行']) {
-    for (const style of MOTION_STYLES) {
+    for (const style of PRESET_STYLES) {
       for (const size of [{width:640,height:360},{width:1080,height:1920}]) {
         const result = composeMotionProject(fixture(size),options({styleId:style.id,scenes:[{assetId:'picture',heading}]}),resources())
         const clip = allClips(result.project).find(item => item.text === heading)
@@ -271,8 +273,8 @@ test('原视频标识和历史工作副本标识都解析到当前压缩工作�
   }
 })
 
-test('所有风格只生成原生缩放平移动画和普通淡入淡出，避免旋转与透明度逐像素表达式', () => {
-  for (const style of MOTION_STYLES) {
+test('内置预设只生成原生缩放平移动画和普通淡入淡出，避免旋转与透明度逐像素表达式', () => {
+  for (const style of PRESET_STYLES) {
     const result = composeMotionProject(fixture(),options({styleId:style.id}),resources())
     for (const clip of allClips(result.project)) {
       assert.equal(clip.rotation,0)
@@ -283,5 +285,18 @@ test('所有风格只生成原生缩放平移动画和普通淡入淡出，避�
         assert(Object.keys(clip.keyframes).every(key => ['x','y','scaleX','scaleY'].includes(key)))
       }
     }
+  }
+})
+
+
+test('外部代码风格不会被合成为近似二维预设，也不改变工程', () => {
+  const codeStyles = MOTION_STYLES.filter(style => !style.presetSupported)
+  assert(codeStyles.length > 0)
+  const project = fixture(), before = structuredClone(project)
+  for (const style of codeStyles) {
+    const input = options({ styleId: style.id })
+    assert.throws(() => planMotionComposition(project, input), /外部 Agent.*不支持内置二维预设/)
+    assert.throws(() => composeMotionProject(project, input, resources()), /外部 Agent.*不支持内置二维预设/)
+    assert.deepEqual(project, before)
   }
 })

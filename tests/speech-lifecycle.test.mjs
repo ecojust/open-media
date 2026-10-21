@@ -24,7 +24,7 @@ beforeEach(() => {
     removeItem: key => { stored.delete(key) },
     clear: () => { stored.clear() },
   } })
-  updateSpeechSettings({ voiceId: '', rate: 1, alignText: true })
+  updateSpeechSettings({ voiceId: 'voice-1', rate: 1, alignText: true })
 })
 afterEach(() => {
   for (const harness of mountedPanels) harness.dispose()
@@ -143,7 +143,7 @@ test('uninstalled voices cannot be synthesized or dynamically previewed and neve
   const harness = panel({ getSpeechStatus: async () => downloadableCatalog() })
   try {
     await settle()
-    assert.equal(harness.state.voiceId.value, 'voice-1', 'defaults skip the uninstalled Chinese voice')
+    assert.equal(harness.state.voiceId.value, 'voice-1', 'catalog loading preserves the configured bundled voice')
     await harness.state.previewVoice('extra-zh')
     assert.deepEqual(harness.calls, [])
     harness.state.voiceId.value = 'extra-zh'
@@ -288,7 +288,8 @@ test('closing during local playback startup invalidates late playback results', 
   } finally { harness.dispose() }
 })
 
-test('Chinese narration is selected by default even when the bundled manifest lists English voices first', async () => {
+test('the saved Chinese voice is preserved even when the manifest lists English voices first', async () => {
+  updateSpeechSettings({ voiceId: 'chinese-default' })
   const harness = panel({ getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'english-first', name: '英语声音', language: 'en-US' }, { id: 'chinese-default', name: '中文声音', language: 'zh-CN' }] }) })
   try {
     await settle()
@@ -298,9 +299,9 @@ test('Chinese narration is selected by default even when the bundled manifest li
   } finally { harness.dispose() }
 })
 
-test('the first available voice remains usable when a runtime provides no Chinese voice', async () => {
+test('a catalog with only other voices never replaces the saved choice', async () => {
   const harness = panel({ getSpeechStatus: async () => ({ ready: true, voices: [{ id: 'english-only', name: '英语声音', language: 'en-GB' }] }) })
-  try { await settle(); assert.equal(harness.state.voiceId.value, 'english-only') } finally { harness.dispose() }
+  try { await settle(); assert.equal(harness.state.voiceId.value, 'voice-1'); await harness.state.generate(); assert.equal(harness.calls.some(call => call[0] === 'begin'), false) } finally { harness.dispose() }
 })
 
 test('batch synthesis inserts real returned assets in one undoable project change and retains accepted files', async () => {
@@ -459,6 +460,7 @@ test('disabling alignment preserves text duration and forwards the chosen voice 
 })
 
 test('card audition uses the requested voice and shared corpus without selecting it or changing the timeline', async () => {
+  updateSpeechSettings({ voiceId: 'chinese-selected' })
   const harness = panel({ getSpeechStatus: async () => ({ ready: true, voices: [
     { id: 'chinese-selected', name: '中文女声', language: 'zh-CN', gender: 'female' },
     { id: 'english-audition', name: '英文女声', language: 'en-US', gender: 'female' },
@@ -546,4 +548,21 @@ test('explicit clip generation works while settings stay closed, loads defaults 
     assert.match(harness.state.notice.value, /文字起点和时长已对齐关联语音/)
     assert.equal(harness.props.active, false)
   } finally { harness.dispose() }
+})
+
+
+test('catalog refresh never replaces the selected voice when it is missing or unavailable', async () => {
+  for (const state of ['not-downloaded', 'failed', 'downloading', 'missing']) {
+    updateSpeechSettings({ voiceId: 'extra-zh' })
+    const catalog = downloadableCatalog(state)
+    if (state === 'missing') catalog.voices = catalog.voices.filter(voice => voice.id !== 'extra-zh')
+    const harness = panel({ getSpeechStatus: async () => catalog })
+    try {
+      await settle()
+      assert.equal(harness.state.voiceId.value, 'extra-zh')
+      assert.equal(getSpeechSettings().voiceId, 'extra-zh')
+      await harness.state.generate()
+      assert.equal(harness.calls.some(call => call[0] === 'begin'), false)
+    } finally { harness.dispose() }
+  }
 })

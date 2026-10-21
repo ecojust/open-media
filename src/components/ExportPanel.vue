@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Project } from '../core/types.ts'
-import { projectDuration } from '../core/timeline.ts'
+import { renderDuration } from '../core/timeline.ts'
 import { exportTimelineWebM } from '../core/browser-export.ts'
 import { downloadBlob } from '../core/media-import.ts'
 import { prepareNativeProject } from '../core/native-project.ts'
@@ -22,7 +22,7 @@ let elapsedTimer: ReturnType<typeof setInterval> | undefined, elapsedStartedAt =
 let controller: AbortController | undefined, timer: ReturnType<typeof setTimeout> | undefined
 let destroyed = false
 const job = ref<MediaJob>()
-const duration = computed(() => projectDuration(props.project))
+const duration = computed(() => renderDuration(props.project))
 const showAdjustedSize = computed(() => config.value.width !== props.project.width || config.value.height !== props.project.height)
 const dimensionError = computed(() => config.value.width > 7680 || config.value.height > 7680 ? '导出尺寸最大支持 7680 × 7680，请在预览上方调整画面尺寸。' : '')
 const outputProgress = computed(() => {

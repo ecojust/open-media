@@ -22,11 +22,11 @@ export async function prepareNativeProject(source: Project, signal?: AbortSignal
   const rasterScale = options.rasterScale ?? 1
   if (!Number.isFinite(rasterScale) || rasterScale <= 0 || rasterScale > 1) throw new Error('字幕准备比例无效。')
   const project = cloneProject(source)
-  const selected = project.tracks.flatMap(track => track.kind === 'transition' || options.skipText && track.kind === 'text' || options.visualOnly && track.kind === 'audio' ? [] : track.clips).filter(clip => !range || (range.end === undefined ? clip.start <= range.start : clip.start < range.end) && clipEnd(clip) > range.start)
+  const selected = project.tracks.flatMap(track => track.hidden || track.kind === 'transition' || options.skipText && track.kind === 'text' || options.visualOnly && track.kind === 'audio' ? [] : track.clips).filter(clip => !range || (range.end === undefined ? clip.start <= range.start : clip.start < range.end) && clipEnd(clip) > range.start)
   const clipIds = new Set(selected.map(clip => clip.id)), assetIds = new Set(selected.map(clip => clip.assetId))
-  const assets = project.assets.filter(asset => !range || assetIds.has(asset.id))
+  const assets = project.assets.filter(asset => assetIds.has(asset.id))
   let completed = 0
-  const total = assets.filter(asset => !asset.nativePath).length + (options.skipText ? 0 : project.tracks.filter(track => track.kind === 'text').reduce((sum, track) => sum + track.clips.filter(clip => clipIds.has(clip.id) && clip.overlay?.kind !== 'blur').length, 0))
+  const total = assets.filter(asset => !asset.nativePath).length + (options.skipText ? 0 : project.tracks.filter(track => !track.hidden && track.kind === 'text').reduce((sum, track) => sum + track.clips.filter(clip => clipIds.has(clip.id) && clip.overlay?.kind !== 'blur').length, 0))
   for (const asset of assets) {
     signal?.throwIfAborted()
     if (asset.nativePath) continue
@@ -46,7 +46,7 @@ export async function prepareNativeProject(source: Project, signal?: AbortSignal
   }
   const textAssets: Record<string, MediaAsset> = {}
   for (const track of project.tracks) {
-    if (options.skipText || track.kind !== 'text') continue
+    if (track.hidden || options.skipText || track.kind !== 'text') continue
     for (const clip of track.clips) {
       if (!clipIds.has(clip.id) || clip.overlay?.kind === 'blur') continue
       signal?.throwIfAborted()

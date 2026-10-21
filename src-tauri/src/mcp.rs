@@ -655,7 +655,7 @@ async fn handle(
             };
             success(
                 id,
-                json!({"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"Open Media","version":env!("CARGO_PKG_VERSION")},"instructions":"通过工具编辑当前桌面工程。素材二创前先调用 open_media_motion_brief_get，遵循用户启用状态、所选素材、风格与创作要求，分析素材后策划镜头并生成效果片段，再通过剪辑工具组合成片。长任务返回 jobId，请使用任务查询工具读取进度；修改会同步到桌面，保存需调用保存工具。"}),
+                json!({"protocolVersion":version,"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"Open Media","version":env!("CARGO_PKG_VERSION")},"instructions":"通过工具编辑当前桌面工程。素材二创前先调用 open_media_motion_brief_get，遵循启用状态、所选素材和 effectivePrompt：默认生成流程加所选风格提示词，再叠加用户额外要求。用 asset_read 读取所选素材，由外部 Agent 编写代码并渲染视频，上传或导入后添加到轨道融合；应用不执行任意代码，motion_clip_generate 只是有限二维预设快捷路径。需要额外图片或音乐时，先查询 open_media_ai_status（probeRuntime=true）或读取 motion_brief_get.additionalAssetGeneration；用户当前所选模型与运行环境就绪时，默认优先调用 open_media_image_generate / open_media_music_generate，只有对应能力不可用或用户明确要求 Agent 自行生成时才用 Agent 自带能力。所有配音、试听、图像、音乐、视频生成都只能使用用户在界面当前选择的模型或音色；省略 modelId / voiceId 沿用选择，传入其他标识会被拒绝，不能通过 speech_settings_set 更换音色。读取 selectedModels / selectedModelId / selectedVoiceId，不把完整下载目录当作可任选的生成模型；所选模型未就绪或模式不支持时报告原因，不自动切换其他已下载模型。忙碌应等待，状态查询失败应重查，不自动下载模型；生成完成后再导入或插入工程。长任务返回 jobId，请使用任务查询工具读取进度；修改会同步到桌面，保存需调用保存工具。"}),
             )
         }
         "ping" => {

@@ -2,8 +2,7 @@ import type { MediaAsset, Project } from './types.ts'
 import type { SpeechJob, SpeechRequest, SpeechStatus } from '../native.ts'
 import { cloneProject } from './project.ts'
 import { applySpeechResults, planSpeech, validateSpeechPlanCapacity, type SpeechPlan, type SpeechResult, type SpeechOverlap } from './speech.ts'
-import { getSpeechSettings, validateSpeechSettings, type SpeechSettings } from './speech-settings.ts'
-import { compactVoiceCatalog } from './voice-catalog.ts'
+import { assertMcpSpeechVoice, validateMcpSpeechSettings, type SpeechSettings } from './speech-settings.ts'
 import { voiceReady } from './voice-downloads.ts'
 import { applySpeechPronunciation } from './speech-pronunciation.ts'
 import { getSpeechAlignment } from './speech-timing.ts'
@@ -84,6 +83,7 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
   function publish(operation: Operation): void { options.onChange?.(snapshot(operation)) }
   function check(operation: Operation): void {
     if (operation.controller.signal.aborted || disposed) throw new Error('已取消语音生成，时间线保持原样。')
+    assertMcpSpeechVoice(operation.job.voiceId)
     if (options.getProject().id !== operation.job.projectId || options.getRevision() !== operation.job.revision || options.getProjectSession?.() !== operation.projectSession) throw new Error('项目已经变化，本次语音未写入时间线，请重新生成。')
   }
   function wait(operation: Operation): Promise<void> {
@@ -130,10 +130,6 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
     try {
       const status = await options.native.getSpeechStatus()
       check(operation)
-      if (!operation.job.voiceId) {
-        const voices = compactVoiceCatalog(status.voices).filter(voiceReady)
-        operation.job.voiceId = voices.find(voice => voice.language.toLowerCase().startsWith('zh'))?.id || voices[0]?.id || ''
-      }
       if (!status.ready) throw new Error(status.error || '语音组件暂不可用。')
       if (!voiceReady(status.voices.find(voice => voice.id === operation.job.voiceId))) throw new Error('所选声音尚不可用，请先下载或修复模型。')
       const results: SpeechResult[] = []
@@ -192,7 +188,7 @@ export function createMcpSpeechJobs(options: McpSpeechJobsOptions) {
     if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).some(key => !['clipIds', 'voiceId', 'rate', 'alignText'].includes(key))) throw new Error('配音请求参数无效。')
     if (request.clipIds !== undefined && (!Array.isArray(request.clipIds) || request.clipIds.some(id => typeof id !== 'string' || !id))) throw new Error('字幕标识必须是字符串数组。')
     const patch = Object.fromEntries(Object.entries(request).filter(([key]) => key !== 'clipIds')) as Partial<SpeechSettings>
-    const settings = validateSpeechSettings(patch, getSpeechSettings())
+    const settings = validateMcpSpeechSettings(patch)
     const project = cloneProject(options.getProject())
     const revision = options.getRevision()
     const plan = planSpeech(project, request.clipIds)

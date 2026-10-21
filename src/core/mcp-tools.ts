@@ -1,6 +1,6 @@
 import catalog from '../mcp-tools.json' with { type: 'json' }
 import { cloneProject, createClip, createSubtitleClip, createTextClip, createTrack, newId, validateProject } from './project.ts'
-import { addClip, addTrack, applySubtitleStyleToTrack, clipDuration, clipEnd, deleteClip, duplicateClip, findClip, moveClip, projectDuration, removeAsset, removeTrack, reorderTrack, setTrack, splitClip, trimClip, updateClip } from './timeline.ts'
+import { addClip, addTrack, applySubtitleStyleToTrack, clipDuration, clipEnd, deleteClip, duplicateClip, findClip, moveClip, projectDuration, renderDuration, removeAsset, removeTrack, reorderTrack, setTrack, splitClip, trimClip, updateClip } from './timeline.ts'
 import { closeTimelineGaps, deleteClipAndCloseGap, restoreAudioClipLength, trimClipAtPlayhead } from './timeline-editing.ts'
 import { resizeProject } from './project-size.ts'
 import { CLIP_FILTER_PRESETS, DEFAULT_CLIP_FILTERS } from './clip-filters.ts'
@@ -136,7 +136,7 @@ function publicAsset(asset: MediaAsset): Omit<MediaAsset, 'url' | 'sourceUrl' | 
 /** Return a detached view without capability URLs or local filesystem paths. */
 export function inspectMcpProject(project: Project) {
   const copy = cloneProject(project)
-  return { ...copy, assets: copy.assets.map(publicAsset), duration: projectDuration(project), mcpMotionBrief: getMcpMotionBrief(project),
+  return { ...copy, assets: copy.assets.map(publicAsset), duration: projectDuration(project), renderDuration: renderDuration(project), mcpMotionBrief: getMcpMotionBrief(project),
     tracks: copy.tracks.map(track => ({ ...track, clipCount: track.clips.length, clips: track.clips.map(clip => ({ ...clip, duration: clipDuration(clip), end: clipEnd(clip) })), subtitleIssues: trackSubtitleIssues(track) })) }
 }
 function requireTrack(project: Project, id: string): Track {
@@ -201,7 +201,7 @@ export function executeProjectTool(project: Project, name: string, rawArgs: unkn
       return changed(next, { track }, '添加轨道', { trackId: track.id })
     }
     case 'open_media_track_update': {
-      const next = setTrack(project, string('trackId'), args.patch as Partial<Pick<Track, 'name' | 'muted' | 'locked'>>)
+      const next = setTrack(project, string('trackId'), args.patch as Partial<Pick<Track, 'name' | 'muted' | 'hidden' | 'locked'>>)
       return changed(next, { track: JSON.parse(JSON.stringify(requireTrack(next, string('trackId')))) }, '更新轨道')
     }
     case 'open_media_track_remove': return changed(removeTrack(project, string('trackId')), { removedTrackId: args.trackId }, '删除轨道')

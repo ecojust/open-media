@@ -6,6 +6,9 @@
 
 ```sh
 ./node_modules/.bin/tauri icon src/assets/branding/open-media-logo.png --output src-tauri/icons
+node scripts/generate-macos-icon.mjs
 ```
 
 `public/brand-mark.png` 使用生成的 `128x128@2x.png`，供顶部和信息弹窗显示；`public/favicon.png` 使用生成的 `32x32.png`，供浏览器标签页显示。图标自身带透明边距与圆角，界面无需再次裁切。上述命令只转换图标资源，不构建应用。
+
+macOS 应用图标使用单独的画布取景：保留原稿图案，以主体居中，四周约 2.5% 留白，避免 Dock 与“应用程序”中的图标偏小。`scripts/generate-macos-icon.mjs` 只重新生成 `src-tauri/icons/icon.icns`，包含各倍率图层，不改变原稿、界面图标及其他平台资源。单独调整 macOS 图标时只需运行第二条命令。

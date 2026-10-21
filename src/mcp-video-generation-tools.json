@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_video_generation_status",
-    "description": "查询本地视频生成平台支持、运行时、模型大小、下载与校验状态；忙碌时仍可调用。\n执行方式：同步返回最终结果。",
+    "description": "查询本地视频生成平台支持、运行时、模型大小、下载与校验状态，以及用户当前的 selectedModelId；忙碌时仍可调用。模型目录不等于 MCP 可任选的模型，生成只能使用 selectedModelId。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -98,7 +98,7 @@
   },
   {
     "name": "open_media_video_generation_start",
-    "description": "通过提示词、首尾帧、参考素材或分镜生成视频。FL2VA 支持 prompt/image/storyboard，Ref2VA 支持 reference。素材仅用当前工程 assetId 引用，不接受文件路径；每镜1–15秒，最多20镜，图音视频参考限制由模型核验。默认512×512、20步、1秒、低内存；使用有声视频参考时默认2秒。所有镜头成功后一次加入素材；可用 insert 指定视频轨道和时间（省略轨道会新建），mode=shots逐镜或combined合并插入，可整体撤销。失败或取消不修改工程；生成完成后 result 返回 assetIds、clipIds、nativeJobId。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
+    "description": "通过提示词、首尾帧、参考素材或分镜生成视频。只使用用户在界面当前选择的模型；省略 modelId 自动沿用该选择，传入其他模型 ID 会被拒绝。所选模型未就绪或不支持请求模式时报告原因，不能改用其他已下载模型。FL2VA 支持 prompt/image/storyboard，Ref2VA 支持 reference。素材仅用当前工程 assetId 引用，不接受文件路径；每镜1–15秒，最多20镜，图音视频参考限制由模型核验。默认512×512、20步、1秒、低内存；使用有声视频参考时默认2秒。所有镜头成功后一次加入素材；可用 insert 指定视频轨道和时间（省略轨道会新建），mode=shots逐镜或combined合并插入，可整体撤销。失败或取消不修改工程；生成完成后 result 返回 assetIds、clipIds、nativeJobId。\n执行方式：异步操作：立即返回 jobId（兼容 id），此时不是最终结果。使用 open_media_job_get({id:jobId}) 查询；state=completed 后读取 result，failed 时读取 errorDetails；可用 open_media_job_cancel({id:jobId}) 取消。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -107,7 +107,8 @@
           "enum": [
             "h3-base-fl2va",
             "h3-base-ref2va"
-          ]
+          ],
+          "description": "可省略，自动使用 video_generation_status.selectedModelId；显式提供时必须与用户当前选择相同，模式不匹配时需用户在界面修改选择。"
         },
         "mode": {
           "type": "string",
@@ -308,7 +309,6 @@
         }
       },
       "required": [
-        "modelId",
         "mode"
       ],
       "additionalProperties": false

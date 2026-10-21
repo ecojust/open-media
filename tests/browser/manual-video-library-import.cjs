@@ -49,7 +49,7 @@ async function main() {
           state.calls.push({ command, args: structuredClone(recordedArgs) })
           if (command === 'get_desktop_platform') return 'linux'
           if (command === 'plugin:event|listen') return ++callbackId
-          if (['plugin:event|unlisten', 'plugin:window|set_theme', 'plugin:window|set_background_color', 'plugin:webview|set_webview_background_color', 'mcp_stop'].includes(command)) return null
+          if (['plugin:event|unlisten', 'plugin:window|set_theme', 'set_main_window_appearance', 'plugin:window|set_background_color', 'plugin:webview|set_webview_background_color', 'mcp_stop'].includes(command)) return null
           if (command === 'configure_screenshot_shortcut') return args.shortcut
           if (['get_media_jobs', 'mcp_pending', 'list_managed_projects'].includes(command)) return []
           if (command === 'ensure_project_media') return { directory: `/projects/${args.projectId}`, assets: args.assets.map(value => ({ assetId: value.id, nativePath: `/projects/${args.projectId}/media/${value.id}.webm`, size: value.size })) }
