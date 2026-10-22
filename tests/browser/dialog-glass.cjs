@@ -69,7 +69,7 @@ async function main() {
       const jobsShade = await checkShade(page.locator('.modal-shade'), theme)
       assert.equal(jobsShade.background, nativeShade.background)
       await page.getByRole('button', { name: '关闭任务', exact: true }).click()
-      await page.getByRole('button', { name: '轨道操作', exact: true }).first().click()
+      await page.locator('.track-row').filter({ has: page.locator('.timeline-clip.text') }).getByRole('button', { name: '轨道操作', exact: true }).click()
       await page.getByRole('menuitem', { name: '删除轨道', exact: true }).click()
       const deleted = page.getByRole('dialog', { name: '删除轨道', exact: true })
       await expect(deleted).toBeVisible(); await checkPanel(deleted, theme)
