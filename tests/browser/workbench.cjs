@@ -176,6 +176,8 @@ async function main() {
     await page.getByLabel('片段时长', { exact: true }).press('Tab')
     await expect(page.locator('.timeline-clip')).toHaveCount(3)
     await page.getByTestId('preview-play').click()
+    // A second click during decoder preparation cancels playback; wait until it has actually started.
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '暂停（空格）')
     await page.waitForTimeout(450)
     await page.getByTestId('preview-play').click()
     const pixel = await page.getByTestId('video-preview').evaluate(canvas => [...canvas.getContext('2d').getImageData(20, 20, 1, 1).data])
