@@ -122,6 +122,8 @@ async function main() {
     await expect(dialog.getByRole('button', { name: '关闭剪辑优化', exact: true })).toBeDisabled()
     for (const name of ['节奏检查', '声画对齐', '声音平衡', '字幕样式', '画面聚焦']) await expect(tab(name)).toBeDisabled()
     await page.keyboard.press('Escape'); await expect(dialog).toBeVisible()
+    // Busy UI precedes native dispatch; this scenario verifies cancellation of an already running job.
+    await page.waitForFunction(() => typeof window.editingAssist.cancelAnalysis === 'function')
     await dialog.getByRole('button', { name: '取消处理', exact: true }).click()
     await expect(dialog.getByText('已取消', { exact: true })).toBeVisible()
     await expect(dialog.getByRole('button', { name: '关闭剪辑优化', exact: true })).toBeEnabled()
