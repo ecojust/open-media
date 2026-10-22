@@ -169,7 +169,7 @@ test('背景音乐放入专用轨道，保留默认音量和淡入淡出', async
 
 test('片头标题覆盖后仍可编辑，前插时所有既有片段整体后移', async () => {
   const f = fixture('video'), project = createProject()
-  project.tracks[0].clips.push(createTextClip(project, { id: 'existing-text', text: '既有字幕', start: 1 }))
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'existing-text', text: '既有字幕', start: 1 }))
   const prepared = await prepareMcpMaterial(project, { kind: 'video_segment', id: 'intro', placement: 'prepend', heading: '新的标题', subheading: '' }, f.dependencies)
   assert.equal(prepared.project.tracks.flatMap(track => track.clips).find(clip => clip.id === 'existing-text').start, 6)
   const titles = prepared.project.tracks.find(track => track.name === '片头片尾文字')
@@ -178,7 +178,7 @@ test('片头标题覆盖后仍可编辑，前插时所有既有片段整体后�
   assert.equal(titles.clips[0].start, 0)
   const clip = prepared.project.tracks.flatMap(track => track.clips).find(item => item.id === prepared.selection.clipId)
   assert.equal(clip.start, 0)
-  assert.equal(project.tracks[0].clips[0].start, 1)
+  assert.equal(project.tracks.find(track => track.kind === 'text').clips[0].start, 1)
   assert.equal(prepared.assets[0].asset.libraryRole, 'video-segment')
   assert.equal(prepared.project.assets[0].libraryRole, 'video-segment')
 })
@@ -219,8 +219,8 @@ test('空文件、媒体类型不符及锁定前插均不修改项目', async ()
   const project = createProject(), f = fixture()
   await assert.rejects(prepareMcpMaterial(project, { kind: 'music', id: 'piano' }, { ...f.dependencies, fetchBlob: async () => new Blob([]) }), /文件为空/)
   await assert.rejects(prepareMcpMaterial(project, { kind: 'video_segment', id: 'intro' }, f.dependencies), /本地媒体文件/)
-  project.tracks[0].locked = true
-  project.tracks[0].clips.push(createTextClip(project, { text: '锁定字幕' }))
+  project.tracks.find(track => track.kind === 'text').locked = true
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { text: '锁定字幕' }))
   const video = fixture('video'), before = structuredClone(project)
   await assert.rejects(prepareMcpMaterial(project, { kind: 'video_segment', id: 'intro' }, video.dependencies), /解锁/)
   assert.deepEqual(project, before)
@@ -266,7 +266,7 @@ test('通用模板通过专题检索，文字、配色、时长和动作一次�
 
 test('片头片尾自定义时长使用完整动画，标题布局保持可编辑且原项目原子后移', async () => {
   const f = fixture('video'), project = createProject()
-  project.tracks[0].clips.push(createTextClip(project, { id: 'existing', text: '既有内容', start: 2 }))
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'existing', text: '既有内容', start: 2 }))
   const result = await prepareMcpMaterial(project, { kind: 'video_segment', id: 'intro', duration: 8, titleLayout: 'left', heading: '自定义章节' }, f.dependencies)
   const clips = result.project.tracks.flatMap(track => track.clips)
   const movie = clips.find(clip => clip.id === result.selection.clipId)
@@ -274,7 +274,7 @@ test('片头片尾自定义时长使用完整动画，标题布局保持可编�
   assert.equal(clips.find(clip => clip.id === 'existing').start, 10)
   const title = clips.find(clip => clip.text === '自定义章节')
   assert.equal(title.trimOut, 8); assert.equal(title.textAlign, 'left')
-  assert.equal(project.tracks[0].clips[0].start, 2)
+  assert.equal(project.tracks.find(track => track.kind === 'text').clips[0].start, 2)
   await assert.rejects(prepareMcpMaterial(project, { kind: 'video_segment', id: 'intro', duration: 40 }, f.dependencies), /时长/)
   await assert.rejects(prepareMcpMaterial(project, { kind: 'watermark', id: 'editable', titleLayout: 'left' }, f.dependencies), /仅适用/)
 })

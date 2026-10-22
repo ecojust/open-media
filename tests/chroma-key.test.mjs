@@ -80,7 +80,7 @@ test('项目只允许视觉片段抠像，并在移至音轨时移除画面属�
     const changed = updateClip(project, clip.id, { chromaKey: key })
     assert.deepEqual(findClip(changed, clip.id).clip.chromaKey, key)
     const invalid = structuredClone(project)
-    invalid.tracks[0].clips = [createTextClip(project, { chromaKey: key })]
+    invalid.tracks.find(track => track.kind === 'text').clips = [createTextClip(project, { chromaKey: key })]
     assert.throws(() => validateProject(invalid), /抠像只能用于/)
     const audioTrack = changed.tracks.find(track => track.kind === 'audio')
     const moved = moveClip(changed, clip.id, audioTrack.id, 0)

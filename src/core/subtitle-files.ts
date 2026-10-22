@@ -97,7 +97,7 @@ export function importSubtitleCues(project: Project, input: SubtitleCue[], optio
   let track = options.trackId ? copy.tracks.find(item => item.id === options.trackId) : undefined
   if (options.trackId && (!track || track.kind !== 'text')) throw new Error('请选择有效的字幕轨道。')
   if (track?.locked) throw new Error('字幕轨道已锁定。')
-  if (!track) { track = createTrack('text', '导入字幕'); copy.tracks.unshift(track) }
+  if (!track) { track = createTrack('text', '导入字幕'); copy.tracks.push(track) }
   const clipIds: string[] = []
   for (const cue of cues) { const clip = createSubtitleClip(copy, { text: cue.text, name: cue.text.slice(0, 100), start: cue.start, trimOut: cue.end - cue.start }); track.clips.push(clip); clipIds.push(clip.id) }
   copy.updatedAt = new Date().toISOString()

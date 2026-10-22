@@ -306,8 +306,8 @@ export function composeMotionProject(project: Project, options: MotionComposeOpt
     logo.clips.push(createClip(assets.get(plan.logoAssetId)!,next,{name:'品牌标志',start:plan.start,trimOut:plan.duration,x:next.width*.94-side,y:next.height*.055,width:side,height:side,volume:0,fit:'contain'}))
   }
   if (music && plan.musicAssetId) music.clips.push(createClip(assets.get(plan.musicAssetId)!,next,{name:'成片背景音乐',start:plan.start,trimOut:plan.duration,volume:plan.musicVolume,fadeIn:Math.min(.45,plan.duration*.15),fadeOut:Math.min(.7,plan.duration*.2)}))
-  const tracks = [logo,headings,captions,accents,media,frames,decorations,backgrounds,music].filter((track): track is Track => Boolean(track?.clips.length))
-  next.tracks.unshift(...tracks)
+  const tracks = [backgrounds,frames,media,accents,headings,captions,decorations,logo,music].filter((track): track is Track => Boolean(track?.clips.length))
+  next.tracks.push(...tracks)
   next.markers = [...(next.markers ?? []), ...plan.scenes.map((scene,index) => ({ id: newId('marker'), time: scene.start, label: scene.heading || `场景 ${index+1}`, kind: 'chapter' as const, color: plan.palette.accent }))].sort((a,b) => a.time-b.time)
   next.updatedAt = new Date().toISOString()
   const result = validateProject(next, { trusted: true })

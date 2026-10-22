@@ -30,7 +30,7 @@ test('水印从精确播放头开始，位于最前景，静音且一次撤销�
   const asset = visual()
   const result = addWatermark(original, asset, 3.25)
   const { clip, track } = findClip(result.project, result.clipId)
-  assert.equal(result.project.tracks[0].id, result.trackId)
+  assert.equal(result.project.tracks.at(-1).id, result.trackId)
   assert.equal(track.name, '水印轨道')
   assert.equal(track.kind, 'video')
   assert.equal(track.locked, false)
@@ -89,9 +89,9 @@ test('复用空闲水印轨道时按裁剪与速度计算边界，并将轨道�
     const result = addWatermark(project, visual('new', { duration }), start)
     assert.equal(result.trackId, track.id)
     assert.equal(result.project.tracks.length, project.tracks.length)
-    assert.equal(result.project.tracks[0].id, track.id)
-    assert.deepEqual(result.project.tracks[0].clips[0], track.clips[0])
-    assert.equal(result.project.tracks[0].clips.length, 2)
+    assert.equal(result.project.tracks.at(-1).id, track.id)
+    assert.deepEqual(result.project.tracks.at(-1).clips[0], track.clips[0])
+    assert.equal(result.project.tracks.at(-1).clips.length, 2)
   }
 })
 
@@ -100,7 +100,7 @@ test('重叠水印新增前景轨道，保留原素材和片段', () => {
     const { project, track } = withWatermarkTrack()
     const result = addWatermark(project, visual('new', { duration }), start)
     assert.notEqual(result.trackId, track.id)
-    assert.equal(result.project.tracks[0].id, result.trackId)
+    assert.equal(result.project.tracks.at(-1).id, result.trackId)
     assert.equal(result.project.tracks.length, project.tracks.length + 1)
     assert.deepEqual(result.project.tracks.find((item) => item.id === track.id), track)
   }
@@ -155,7 +155,7 @@ test('成功和失败均不更改输入，输出素材和轨道与输入互相�
   deepFreeze(asset)
   const result = addWatermark(project, asset, 0)
   result.project.assets.at(-1).name = '外部修改'
-  result.project.tracks[0].clips[0].start = 99
+  result.project.tracks.at(-1).clips[0].start = 99
   assert.deepEqual(project, original)
   assert.equal(asset.name, '动态水印.webm')
   assert.throws(() => addWatermark(project, asset, -1), /起点/)
@@ -205,5 +205,5 @@ test('轨道上限时拒绝新增，但空闲水印轨道仍可复用', () => {
   const result = addWatermark(project, visual(), 0)
   assert.equal(result.trackId, project.tracks.at(-1).id)
   assert.equal(result.project.tracks.length, MAX_TRACKS)
-  assert.equal(result.project.tracks[0].id, result.trackId)
+  assert.equal(result.project.tracks.at(-1).id, result.trackId)
 })

@@ -11,11 +11,11 @@ function asset(id, duration, kind = 'audio', extra = {}) {
 }
 function addPair(project, id, start, textDuration, speechDuration, overrides = {}) {
   const text = createSubtitleClip(project, { id, text: `第 ${id} 段讲解`, start, trimOut: textDuration })
-  project.tracks[0].clips.push(text)
+  project.tracks.find(track => track.kind === 'text').clips.push(text)
   const audio = asset(`${id}-source`, speechDuration)
   project.assets.push(audio)
   const clip = createClip(audio, project, { id: `${id}-speech`, start, speech: { textClipId: id, text: text.text, voiceId: 'voice', rate: 1 }, ...overrides })
-  project.tracks[2].clips.push(clip)
+  project.tracks.find(track => track.kind === 'audio').clips.push(clip)
   return { text, audio, clip }
 }
 function fixture() {
@@ -25,7 +25,7 @@ function fixture() {
   addPair(project, 'three', 10, 2, 2)
   const video = asset('video', 20, 'video')
   project.assets.push(video)
-  project.tracks[1].clips.push(createClip(video, project, { id: 'visual' }))
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(video, project, { id: 'visual' }))
   return project
 }
 
@@ -48,13 +48,13 @@ test('字幕跟随真实配音，保持所有声音、视频位置和现有停�
   const result = previewSpeechAlignment(project, { mode: 'subtitle', gap: 0 })
   assert.equal(findClip(result.project, 'one').clip.start, .5)
   assert.equal(clipDuration(findClip(result.project, 'one').clip), 4)
-  assert.deepEqual(result.project.tracks[2], before.tracks[2])
-  assert.deepEqual(result.project.tracks[1], before.tracks[1])
+  assert.deepEqual(result.project.tracks.find(track => track.kind === 'audio'), before.tracks.find(track => track.kind === 'audio'))
+  assert.deepEqual(result.project.tracks.find(track => track.kind === 'video'), before.tracks.find(track => track.kind === 'video'))
   assert.equal(result.changedSubtitleCount, 1)
   assert.equal(result.movedSpeechCount, 0)
   assert.ok(result.remainingIssues.some(issue => issue.kind === 'overlap'))
   assert.deepEqual(project, before)
-  assert.equal(original.tracks[0].clips[0].trimOut, 2)
+  assert.equal(original.tracks.find(track => track.kind === 'text').clips[0].trimOut, 2)
 })
 
 test('顺延保留原有一句停顿和后续节奏，一次提交可整体撤销且重复应用不继续推远', () => {
@@ -87,11 +87,11 @@ test('已足够长的停顿不会再追加最小停顿，过短停顿只补足�
 
 test('轨道范围保护其他字幕和水印，范围内未配音的后续字幕同步顺延', () => {
   const project = fixture()
-  project.tracks[0].clips.push(createSubtitleClip(project, { id: 'unspoken', start: 4, trimOut: 1, text: '尚未配音' }), { ...createSubtitleClip(project, { id: 'watermark', start: 4, trimOut: 2, text: '角标' }), textRole: 'watermark' })
+  project.tracks.find(track => track.kind === 'text').clips.push(createSubtitleClip(project, { id: 'unspoken', start: 4, trimOut: 1, text: '尚未配音' }), { ...createSubtitleClip(project, { id: 'watermark', start: 4, trimOut: 2, text: '角标' }), textRole: 'watermark' })
   const other = createTrack('text', '其他讲解')
   other.clips.push(createSubtitleClip(project, { id: 'untouched', start: 4, trimOut: 2, text: '其他轨道' }))
   project.tracks.push(other)
-  const result = previewSpeechAlignment(project, { mode: 'ripple', gap: .2, textTrackId: project.tracks[0].id })
+  const result = previewSpeechAlignment(project, { mode: 'ripple', gap: .2, textTrackId: project.tracks.find(track => track.kind === 'text').id })
   assert.equal(findClip(result.project, 'unspoken').clip.start, 7.2)
   assert.equal(findClip(result.project, 'watermark').clip.start, 4)
   assert.equal(findClip(result.project, 'untouched').clip.start, 4)
@@ -99,13 +99,13 @@ test('轨道范围保护其他字幕和水印，范围内未配音的后续字�
 
 test('需要改动的锁定轨道原子拒绝，只读声音位置可用于字幕跟随', () => {
   const project = fixture(), original = structuredClone(project)
-  project.tracks[2].locked = true
+  project.tracks.find(track => track.kind === 'audio').locked = true
   assert.doesNotThrow(() => previewSpeechAlignment(project, { mode: 'subtitle', gap: 0 }))
   assert.throws(() => previewSpeechAlignment(project, { mode: 'ripple', gap: .2 }), /锁定/)
   assert.equal(findClip(project, 'two').clip.start, 3)
-  project.tracks[0].locked = true
+  project.tracks.find(track => track.kind === 'text').locked = true
   assert.throws(() => previewSpeechAlignment(project, { mode: 'subtitle', gap: 0 }), /锁定/)
-  assert.deepEqual(project.tracks[0].clips, original.tracks[0].clips)
+  assert.deepEqual(project.tracks.find(track => track.kind === 'text').clips, original.tracks.find(track => track.kind === 'text').clips)
 })
 
 test('文字过期明确要求重新生成；隐藏或静音的关联配音不参与修改', () => {
@@ -113,7 +113,7 @@ test('文字过期明确要求重新生成；隐藏或静音的关联配音不�
   findClip(project, 'one').clip.text = '已经修改的讲解'
   assert.ok(inspectSpeechAlignment(project).issues.some(issue => issue.kind === 'text-changed'))
   assert.throws(() => previewSpeechAlignment(project, { mode: 'ripple', gap: .2 }), /重新生成/)
-  project.tracks[2].muted = true
+  project.tracks.find(track => track.kind === 'audio').muted = true
   const report = inspectSpeechAlignment(project)
   assert.equal(report.mutedCount, 3)
   assert.equal(report.issues.length, 0)
@@ -126,7 +126,7 @@ function splitShotFixture() {
   addPair(project, 'two', 2, 2, 2)
   const video = asset('video', 4, 'video')
   project.assets.push(video)
-  project.tracks[1].clips.push(createClip(video, project, { id: 'shot-a', trimOut: 2 }), createClip(video, project, { id: 'shot-b', start: 2, trimIn: 2, trimOut: 4 }))
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(video, project, { id: 'shot-a', trimOut: 2 }), createClip(video, project, { id: 'shot-b', start: 2, trimIn: 2, trimOut: 4 }))
   project.markers = [{ id: 'chapter', time: 2, label: '下一段', kind: 'chapter' }]
   project = addTransition(project, 2, 'fade', 1)
   return project
@@ -170,7 +170,7 @@ test('整条长视频、复杂镜头、锁定转场和跨镜头内容不会被�
 
 test('配音生成入口保留已存在的长停顿，不重复附加最小间隔', () => {
   const project = createProject('生成后对齐')
-  project.tracks[0].clips.push(createSubtitleClip(project, { id: 'one', text: '第一段', trimOut: 2 }), createSubtitleClip(project, { id: 'two', text: '第二段', start: 5, trimOut: 2 }))
+  project.tracks.find(track => track.kind === 'text').clips.push(createSubtitleClip(project, { id: 'one', text: '第一段', trimOut: 2 }), createSubtitleClip(project, { id: 'two', text: '第二段', start: 5, trimOut: 2 }))
   const source = planSpeech(project, ['one']).sources[0]
   const result = applySpeechResults(project, [{ source, asset: asset('speech', 4), voiceId: 'voice', rate: 1 }], { alignment: { mode: 'ripple', gap: .5 } })
   assert.equal(findClip(result.project, 'two').clip.start, 7)

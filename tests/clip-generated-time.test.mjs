@@ -16,7 +16,7 @@ function clock(t) { t.mock.timers.enable({ apis: ['Date'], now: Date.parse(initi
 function fixture() {
   const original = createProject('片段生成时间')
   const clip = createTextClip(original, { id: 'subtitle', text: '原始字幕' })
-  return { project: addClip(original, original.tracks[0].id, clip), clip }
+  return { project: addClip(original, original.tracks.find(track => track.kind === 'text').id, clip), clip }
 }
 
 test('字幕、媒体、水印和录音统一记录实际加入时间，可显式保留来源时间', t => {
@@ -38,11 +38,11 @@ test('移动、裁剪、变换、样式、复制及分割保留内容来源时�
   const { project, clip } = fixture()
   t.mock.timers.tick(1500)
   const positioned = updateClip(project, clip.id, { x: 100, y: 120, width: 900, height: 120, rotation: 15, fontSize: 45, color: '#ffcc55', text: clip.text })
-  const moved = moveClip(positioned, clip.id, positioned.tracks[0].id, 1)
+  const moved = moveClip(positioned, clip.id, positioned.tracks.find(track => track.kind === 'text').id, 1)
   const trimmed = trimClipAtPlayhead(moved, clip.id, 3, 'end')
   assert.equal(findClip(trimmed, clip.id).clip.generatedAt, initial)
   for (const next of [duplicateClip(trimmed, clip.id), splitClip(trimmed, clip.id, 2)]) {
-    assert(next.tracks[0].clips.every(item => item.generatedAt === initial))
+    assert(next.tracks.find(track => track.kind === 'text').clips.every(item => item.generatedAt === initial))
   }
   const changed = updateClip(trimmed, clip.id, { text: '新的文字内容' })
   assert.equal(findClip(changed, clip.id).clip.generatedAt, new Date().toISOString())

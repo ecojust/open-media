@@ -63,7 +63,7 @@ export function addTextWatermark(project: Project, material: WatermarkMaterial, 
   const next = cloneProject(project)
   const track = existing ? next.tracks.find(item => item.id === existing.id)! : createTrack('text', '文字水印轨道')
   track.clips.push(clip)
-  next.tracks = [track, ...next.tracks.filter(item => item.id !== track.id)]
+  next.tracks = [...next.tracks.filter(item => item.id !== track.id), track]
   next.updatedAt = new Date().toISOString()
   return { project: validateProject(next, { trusted: true }), clipId: clip.id, trackId: track.id }
 }
@@ -106,7 +106,7 @@ export function addWatermark(project: Project, asset: MediaAsset, start: number,
   if (!existingAsset) next.assets.push({ ...source })
   const track = existing ? next.tracks.find((item) => item.id === existing.id)! : createTrack('video', '水印轨道')
   track.clips.push(clip)
-  next.tracks = [track, ...next.tracks.filter((item) => item.id !== track.id)]
+  next.tracks = [...next.tracks.filter((item) => item.id !== track.id), track]
   next.updatedAt = new Date().toISOString()
   return { project: validateProject(next, { trusted: true }), clipId: clip.id, trackId: track.id }
 }

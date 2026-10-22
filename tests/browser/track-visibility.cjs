@@ -26,7 +26,7 @@ async function main() {
       const Editor = (await import('/src/components/VideoEditor.vue')).default
       const project = createProject('轨道隐藏验证', { width: 320, height: 180, fps: 20, background: '#000000' })
       project.tracks = []
-      for (const [id, color, length] of [['red', '#cc2233', 3], ['blue', '#2244dd', 3], ['tail', '#55bb66', 12]]) {
+      for (const [id, color, length] of [['tail', '#55bb66', 12], ['blue', '#2244dd', 3], ['red', '#cc2233', 3]]) {
         const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180
         const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, 320, 180)
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))

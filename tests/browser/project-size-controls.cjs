@@ -20,7 +20,7 @@ async function main() {
       const { createProject, createTextClip, cloneProject, validateProject } = await import('/src/core/project.ts')
       const { createHistory, commitHistory, undoHistory, redoHistory } = await import('/src/core/timeline.ts')
       const original = createProject('实时画面尺寸')
-      original.tracks[0].clips = [createTextClip(original, { text: '测试缩放', fontSize: 64 })]
+      original.tracks.find(track => track.kind === 'text').clips = [createTextClip(original, { text: '测试缩放', fontSize: 64 })]
       const state = shallowRef(original), disabled = ref(false), controls = ref(null), visible = ref(true)
       let history = createHistory(original), continuous
       window.sizeFixture = {
@@ -48,7 +48,7 @@ async function main() {
     assert.equal(await height.evaluate(element => element.getBoundingClientRect().height), 32)
     const state = () => page.evaluate(() => {
       const project = window.sizeFixture.state.value
-      return { width: project.width, height: project.height, fontSize: project.tracks[0].clips[0]?.fontSize, past: window.sizeFixture.historyLength() }
+      return { width: project.width, height: project.height, fontSize: project.tracks.find(track => track.kind === 'text').clips[0]?.fontSize, past: window.sizeFixture.historyLength() }
     })
     await width.focus(); await width.fill('19')
     assert.deepEqual(await state(), { width: 19, height: 1080, fontSize: 4, past: 1 })

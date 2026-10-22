@@ -59,7 +59,7 @@ async function main() {
       const Panel = (await import('/src/components/SpeechPanel.vue')).default
       const freshProject = () => {
         const project = createProject('字幕进度测试')
-        project.tracks[0].clips = ['第一段测试字幕', '第二段测试字幕'].map((text, index) => createTextClip(project, { id: `text-${index}`, text, start: index * 4, trimOut: 3 }))
+        project.tracks.find(track => track.kind === 'text').clips = ['第一段测试字幕', '第二段测试字幕'].map((text, index) => createTextClip(project, { id: `text-${index}`, text, start: index * 4, trimOut: 3 }))
         return project
       }
       state.project = shallowRef(freshProject()); state.active = ref(true); state.panel = ref(null)

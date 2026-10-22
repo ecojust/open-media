@@ -22,7 +22,7 @@ function textTrack(project: Project, trackId: unknown, name: string): Track {
   let track = trackId === undefined ? project.tracks.find(t => t.kind === 'text' && t.name === name && !t.locked) : project.tracks.find(t => t.id === requiredText(trackId, '轨道标识'))
   if (trackId !== undefined && !track) throw new Error('轨道不存在。')
   if (track && (track.kind !== 'text' || track.locked)) throw new Error('请选择未锁定的文字轨道。')
-  if (!track) { track = createTrack('text', name); project.tracks.unshift(track) }
+  if (!track) { track = createTrack('text', name); project.tracks.push(track) }
   return track
 }
 function trimAnimation(clip: Clip): void {
@@ -125,7 +125,7 @@ export function executeVisualTool(project: Project, name: string, value: unknown
       if (asset?.kind !== 'image') throw new Error('Logo需要已有的图片素材。')
       const track = createTrack('video', 'Logo轨道'), start = Math.min(...clips.map(c => c.start)), end = Math.max(...clips.map(c => c.start + clipDuration(c)))
       track.clips.push(createClip(asset, next, { id: newId('clip'), name: 'Logo', start, trimOut: end - start, x: next.width * 0.82, y: next.height * 0.05, width: next.width * 0.13, height: next.height * 0.13, volume: 0 }))
-      next.tracks.unshift(track)
+      next.tracks.push(track)
     }
     selection = clips[0]!.id; label = '定制模板'; data = { clipIds: clips.map(c => c.id) }
   } else throw new Error(`未知视觉工具：${name}`)

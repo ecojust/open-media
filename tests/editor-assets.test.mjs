@@ -28,13 +28,13 @@ test('风格背景与装饰保存后仍归类隐藏，用户同名图片继续�
   const project = createProject()
   const image = (id, patch = {}) => video(id, { name: '风格成片-背景.png', kind: 'image', duration: 0, mime: 'image/png', ...patch })
   project.assets.push(image('user-photo'), image('style-background', { libraryRole: 'motion-style' }), image('style-decoration', { libraryRole: 'motion-style' }))
-  project.tracks[1].clips.push(createClip(project.assets[1], project), createClip(project.assets[2], project))
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(project.assets[1], project), createClip(project.assets[2], project))
   const json = JSON.stringify(project)
   for (const trusted of [true, false]) {
     const reopened = validateProject(JSON.parse(json), { trusted })
     assert.deepEqual(projectSourceAssets(reopened).map(asset => asset.id), ['user-photo'])
     assert.deepEqual(reopened.assets.map(asset => asset.libraryRole), [undefined, 'motion-style', 'motion-style'])
-    assert.deepEqual(reopened.tracks[1].clips.map(clip => clip.assetId), ['style-background', 'style-decoration'])
+    assert.deepEqual(reopened.tracks.find(track => track.kind === 'video').clips.map(clip => clip.assetId), ['style-background', 'style-decoration'])
   }
   const invalid = JSON.parse(json); invalid.assets[1].libraryRole = 'unrecognized-role'
   assert.throws(() => validateProject(invalid, { trusted: true }), /素材库用途/)
@@ -62,7 +62,7 @@ test('重复加入按路径采用旧工程素材标识和名称，不打断旧�
   const existing = video('old-project-id', { name: '用户重命名.mp4', nativePath: '/app/recordings/shared.mp4', url: 'blob:existing-preview', addedAt: '2026-10-18T10:00:00.000Z' })
   project.assets.push(existing)
   const original = createClip(existing, project)
-  project.tracks[1].clips.push(original)
+  project.tracks.find(track => track.kind === 'video').clips.push(original)
   const incoming = video('stored-shared', { nativePath: existing.nativePath, name: 'UUID.mp4', width: 3840, height: 2160 })
   const first = addEditorAssetToTimeline(project, incoming, { start: 4 })
   const second = addEditorAssetToTimeline(first.project, incoming, { start: 8 })
@@ -70,8 +70,8 @@ test('重复加入按路径采用旧工程素材标识和名称，不打断旧�
   assert.equal(second.addedAsset, false)
   assert.equal(second.assetId, existing.id)
   assert.deepEqual(second.project.assets, [existing])
-  assert.deepEqual(second.project.tracks[1].clips[0], original)
-  assert.deepEqual(second.project.tracks[1].clips.map(clip => clip.assetId), [existing.id, existing.id, existing.id])
+  assert.deepEqual(second.project.tracks.find(track => track.kind === 'video').clips[0], original)
+  assert.deepEqual(second.project.tracks.find(track => track.kind === 'video').clips.map(clip => clip.assetId), [existing.id, existing.id, existing.id])
   assert.deepEqual([second.project.width, second.project.height], [1280, 720])
   assert.deepEqual(validateProject(second.project, { trusted: true }), second.project)
 })
@@ -95,17 +95,17 @@ test('跨平台路径去重，网页素材按现有ID复用，冲突ID不会替�
 test('明确的目标轨道必须存在、解锁且兼容，失败时工程与目录素材保持不变', () => {
   const project = createProject(), source = video('selected'), before = structuredClone({ project, source })
   assert.throws(() => addEditorAssetToTimeline(project, source, { trackId: 'missing' }), /不存在/)
-  assert.throws(() => addEditorAssetToTimeline(project, source, { trackId: project.tracks[0].id }), /类型/)
-  assert.throws(() => addEditorAssetToTimeline(project, audio('audio'), { trackId: project.tracks[1].id }), /类型/)
-  assert.throws(() => addEditorAssetToTimeline(project, video('image', { kind: 'image', duration: 0 }), { trackId: project.tracks[2].id }), /类型/)
+  assert.throws(() => addEditorAssetToTimeline(project, source, { trackId: project.tracks.find(track => track.kind === 'text').id }), /类型/)
+  assert.throws(() => addEditorAssetToTimeline(project, audio('audio'), { trackId: project.tracks.find(track => track.kind === 'video').id }), /类型/)
+  assert.throws(() => addEditorAssetToTimeline(project, video('image', { kind: 'image', duration: 0 }), { trackId: project.tracks.find(track => track.kind === 'audio').id }), /类型/)
   const locked = structuredClone(project)
-  locked.tracks[1].locked = true
-  assert.throws(() => addEditorAssetToTimeline(locked, source, { trackId: locked.tracks[1].id }), /解锁/)
+  locked.tracks.find(track => track.kind === 'video').locked = true
+  assert.throws(() => addEditorAssetToTimeline(locked, source, { trackId: locked.tracks.find(track => track.kind === 'video').id }), /解锁/)
   assert.deepEqual({ project, source }, before)
   assert.equal(locked.assets.length, 0)
-  assert.equal(locked.tracks[1].clips.length, 0)
-  const soundOnly = addEditorAssetToTimeline(project, source, { trackId: project.tracks[2].id })
-  assert.equal(soundOnly.trackId, project.tracks[2].id)
+  assert.equal(locked.tracks.find(track => track.kind === 'video').clips.length, 0)
+  const soundOnly = addEditorAssetToTimeline(project, source, { trackId: project.tracks.find(track => track.kind === 'audio').id })
+  assert.equal(soundOnly.trackId, project.tracks.find(track => track.kind === 'audio').id)
 })
 
 test('默认添加不占用水印或背景音乐轨道，没有普通可用轨道时只创建一条', () => {
@@ -113,10 +113,11 @@ test('默认添加不占用水印或背景音乐轨道，没有普通可用轨�
   project.tracks = [createTrack('video', '水印轨道'), createTrack('audio', '背景音乐轨道')]
   const edit = addEditorAssetToTimeline(project, video('source'))
   assert.equal(edit.project.tracks.length, 3)
-  assert.equal(edit.project.tracks[0].clips.length, 0)
-  assert.equal(edit.project.tracks[1].clips.length, 0)
-  assert.equal(edit.project.tracks[2].kind, 'video')
-  assert.equal(edit.project.tracks[2].clips.length, 1)
+  assert.equal(edit.project.tracks.find(track => track.name === '水印轨道').clips.length, 0)
+  assert.equal(edit.project.tracks.find(track => track.name === '背景音乐轨道').clips.length, 0)
+  assert.equal(edit.project.tracks[0].id, edit.trackId)
+  assert.equal(edit.project.tracks[0].kind, 'video')
+  assert.equal(edit.project.tracks[0].clips.length, 1)
 })
 
 test('时长、媒体参数、项目上限失败都不能留下半注册素材或半创建轨道', () => {
@@ -133,7 +134,7 @@ test('时长、媒体参数、项目上限失败都不能留下半注册素材�
   cases.push([assetsFull, source, {}])
   const clipsFull = createProject()
   clipsFull.assets.push(source)
-  clipsFull.tracks[1].clips = Array.from({ length: MAX_CLIPS }, (_, index) => createClip(source, clipsFull, { id: `clip-${index}` }))
+  clipsFull.tracks.find(track => track.kind === 'video').clips = Array.from({ length: MAX_CLIPS }, (_, index) => createClip(source, clipsFull, { id: `clip-${index}` }))
   cases.push([clipsFull, source, {}])
   const tracksFull = createProject()
   tracksFull.tracks = Array.from({ length: MAX_TRACKS }, (_, index) => ({ ...createTrack('video'), id: `track-${index}`, locked: true }))
@@ -146,4 +147,40 @@ test('时长、媒体参数、项目上限失败都不能留下半注册素材�
   const existingAtLimit = addEditorAssetToTimeline(assetsFull, { ...assetsFull.assets[0], id: 'catalog-new-id' })
   assert.equal(existingAtLimit.addedAsset, false)
   assert.equal(existingAtLimit.project.assets.length, MAX_ASSETS)
+})
+
+test('默认图片作为可定位静态叠层后置，等比居中且不放大，重叠图片分轨', () => {
+  const project = createProject('叠层图片', { width: 640, height: 360 })
+  const image = video('overlay', { kind: 'image', duration: 0, width: 800, height: 800, mime: 'image/png' })
+  const first = addEditorAssetToTimeline(project, image, { start: 2 })
+  const track = first.project.tracks.at(-1), clip = track.clips[0]
+  assert.equal(track.id, first.trackId); assert.equal(track.name, '图片轨道')
+  assert.deepEqual([clip.x, clip.y, clip.width, clip.height, clip.start, clip.trimOut, clip.volume], [230, 90, 180, 180, 2, 5, 0])
+  assert.equal(first.project.autoSizeFromVideo, project.autoSizeFromVideo)
+  const second = addEditorAssetToTimeline(first.project, image, { start: 3 })
+  assert.notEqual(second.trackId, first.trackId)
+  assert.equal(second.project.tracks.at(-1).id, second.trackId)
+  assert.deepEqual(second.project.tracks.find(track => track.id === first.trackId), track)
+  const adjacent = addEditorAssetToTimeline(first.project, image, { start: 7 })
+  assert.equal(adjacent.trackId, first.trackId)
+  assert.equal(adjacent.project.tracks.length, first.project.tracks.length)
+  const small = addEditorAssetToTimeline(project, { ...image, width: 40, height: 20 })
+  assert.deepEqual([small.project.tracks.at(-1).clips[0].width, small.project.tracks.at(-1).clips[0].height], [40, 20])
+  const explicit = addEditorAssetToTimeline(first.project, image, { trackId: project.tracks[0].id, start: 2 })
+  assert.equal(explicit.trackId, project.tracks[0].id)
+  assert.equal(explicit.project.tracks.length, first.project.tracks.length)
+  assert.deepEqual(explicit.project.tracks.map(track => track.id), first.project.tracks.map(track => track.id))
+})
+
+test('图片自动复用跳过隐藏和锁定轨道，后续视频仍添加到主画面而非图片轨道', () => {
+  const image = video('image', { kind: 'image', duration: 0, mime: 'image/png' })
+  for (const property of ['hidden', 'locked']) {
+    const first = addEditorAssetToTimeline(createProject(), image)
+    first.project.tracks.at(-1)[property] = true
+    const next = addEditorAssetToTimeline(first.project, image, { start: 8 })
+    assert.notEqual(next.trackId, first.trackId)
+    assert.equal(next.project.tracks.at(-1).id, next.trackId)
+    const source = addEditorAssetToTimeline(next.project, video('main-video'))
+    assert.equal(source.trackId, first.project.tracks[0].id)
+  }
 })

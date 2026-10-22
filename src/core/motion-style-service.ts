@@ -7,7 +7,7 @@ import { assertProjectRevision } from './project-operations.ts'
 import { cloneProject, createClip, createTrack, MAX_ASSETS, MAX_CLIPS, MAX_PROJECT_DURATION, MAX_TRACKS, validateProject } from './project.ts'
 import { clipEnd, projectDuration } from './timeline.ts'
 import { videoWorkingCopyResolver } from './video-working-copies.ts'
-import { assertMcpMotionRequest } from './mcp-motion.ts'
+import { assertMcpMotionRequest, publicMotionStyle } from './mcp-motion.ts'
 
 export interface MotionClipGenerateOptions extends Omit<MotionComposeOptions, 'placement' | 'styleId'> {
   styleId?: string
@@ -114,7 +114,7 @@ export async function prepareMotionStyleTool(name: string, args: Record<string, 
   check(context)
   assertProjectRevision(args.expectedRevision as number | undefined, context.revision)
   if (args.expectedProjectId !== undefined && args.expectedProjectId !== context.project.id) throw new Error('当前工程已经变化，请重新读取工程后操作。')
-  if (name === 'open_media_motion_style_list') return { data: { items: structuredClone(MOTION_STYLES), total: MOTION_STYLES.length } }
+  if (name === 'open_media_motion_style_list') return { data: { items: MOTION_STYLES.map(publicMotionStyle), total: MOTION_STYLES.length } }
   if (name !== 'open_media_motion_clip_generate') throw new Error('未知效果短片工具。')
   if (context.source !== 'mcp') throw new Error('效果短片仅供 MCP 客户端调用，请在 MCP 设置中选择素材和风格后交由 AI 规划。')
   const { dryRun, expectedRevision: _revision, expectedProjectId: _projectId, ...input } = args
@@ -188,7 +188,7 @@ export async function prepareMotionStyleTool(name: string, args: Record<string, 
       const track = existing ?? createTrack('video','效果短片轨道')
       const clip = createClip(finalAsset,next,{start,fit:'contain'})
       track.clips.push(clip)
-      if (!existing) next.tracks.unshift(track)
+      if (!existing) next.tracks.push(track)
       selection = { trackId:track.id,clipId:clip.id }
       insertionData = { ...selection,start }
     }

@@ -21,8 +21,8 @@ async function main() {
       const { createHistory, commitHistory, undoHistory } = await import('/src/core/timeline.ts')
       const Panel = (await import('/src/components/editor-tools/SubtitleStyleAssist.vue')).default
       const project = createProject('字幕统一组件验证'), second = createTrack('text', '第二字幕'), locked = createTrack('text', '锁定字幕')
-      project.tracks[0].id = 'main'; second.id = 'second'; locked.id = 'locked'; locked.locked = true
-      project.tracks[0].clips = [
+      project.tracks.find(track => track.kind === 'text').id = 'main'; second.id = 'second'; locked.id = 'locked'; locked.locked = true
+      project.tracks.find(track => track.kind === 'text').clips = [
         createSubtitleClip(project, { id: 'source', text: '参考样式', color: '#ffcc00', fontSize: 48, start: 0, trimOut: 5 }),
         createSubtitleClip(project, { id: 'target', text: '第二句', start: 5 }),
         createTextClip(project, { id: 'title', textRole: 'watermark', text: '章节标题' }),

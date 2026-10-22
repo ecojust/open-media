@@ -92,11 +92,11 @@ test('横屏、竖屏、方形的文字与主体保持安全边距；动画缩�
 test('后插保留所有旧轨道，从静音锁定轨道也计入的末尾开始', () => {
   const project = fixture()
   const clip = createClip(project.assets[1],project,{start:12,trimIn:2,trimOut:8})
-  project.tracks[1].clips.push(clip); project.tracks[1].muted = true; project.tracks[1].locked = true
+  project.tracks.find(track => track.kind === 'video').clips.push(clip); project.tracks.find(track => track.kind === 'video').muted = true; project.tracks.find(track => track.kind === 'video').locked = true
   project.markers = [{ id:'old-marker',time:15,label:'原标记',kind:'review' }]
   const result = composeMotionProject(project,options(),resources())
   assert.equal(result.data.start,18); assert.equal(projectDuration(result.project),27)
-  assert.deepEqual(result.project.tracks.slice(-project.tracks.length),project.tracks)
+  assert.deepEqual(result.project.tracks.slice(0,project.tracks.length),project.tracks)
   assert.deepEqual(result.project.markers.find(marker => marker.id === 'old-marker'),project.markers[0])
   assert.deepEqual(result.project.markers.filter(marker => marker.id !== 'old-marker').map(marker => marker.time),[18,22])
   const media = sourceClip(result,1)
@@ -108,7 +108,7 @@ test('前插整体移动音画、字幕及标记，完整保留绑定与旧关�
   const subtitle = createTextClip(project,{start:2,trimOut:3,text:'原字幕'})
   const video = createClip(project.assets[1],project,{start:1,trimIn:1,trimOut:9,speed:2,keyframes:{x:[{time:0,value:20},{time:4,value:40}]}})
   const audio = createClip(project.assets[2],project,{start:2,trimOut:3,speech:{textClipId:subtitle.id,text:subtitle.text,voiceId:'local-voice',rate:1}})
-  project.tracks[0].clips.push(subtitle); project.tracks[1].clips.push(video); project.tracks[2].clips.push(audio)
+  project.tracks.find(track => track.kind === 'text').clips.push(subtitle); project.tracks.find(track => track.kind === 'video').clips.push(video); project.tracks.find(track => track.kind === 'audio').clips.push(audio)
   project.markers = [{ id:'chapter-original',time:2,label:'正文',kind:'chapter' }]
   const before = structuredClone(project), result = composeMotionProject(project,options({placement:'prepend'}),resources())
   for (const clip of allClips(project)) assert.deepEqual(findClip(result.project,clip.id).clip,{...clip,start:clip.start+9})
@@ -145,7 +145,7 @@ test('原声开关、可循环配乐、标志图片都保持独立可编辑轨�
   assert.equal(musicTrack.kind,'audio'); assert.equal(music.assetId,'music'); assert.equal(music.trimOut,9)
   assert.equal(music.volume,.35); assert.equal(music.fadeIn,.45); assert.equal(music.fadeOut,.7)
   assert.equal(clipEnd(music),result.data.start+result.data.duration)
-  const logo = result.project.tracks[0]
+  const logo = result.project.tracks.find(track => track.name.endsWith('· 标志'))
   assert.match(logo.name,/标志/); assert.equal(logo.clips[0].assetId,'logo'); assert.equal(clipDuration(logo.clips[0]),9)
   assert(!result.project.tracks.some(track => track.kind === 'transition'))
   assert.equal(result.project.assets.length,6)
@@ -215,11 +215,11 @@ test('图像资源失效或标识冲突时原子失败，未就地写入任何�
 })
 
 test('提前检查锁轨、时长、标记和素材/轨道/片段容量上限', () => {
-  const locked = fixture(); locked.tracks[1].clips.push(createClip(locked.assets[1],locked)); locked.tracks[1].locked = true
+  const locked = fixture(); locked.tracks.find(track => track.kind === 'video').clips.push(createClip(locked.assets[1],locked)); locked.tracks.find(track => track.kind === 'video').locked = true
   assert.throws(() => planMotionComposition(locked,options({placement:'prepend'})),/解锁/)
   const emptyLocked = fixture(); emptyLocked.tracks.forEach(track => { track.locked = true })
   assert.doesNotThrow(() => composeMotionProject(emptyLocked,options({placement:'prepend'}),resources()))
-  const long = fixture(); long.tracks[0].clips.push(createTextClip(long,{start:MAX_PROJECT_DURATION-3,trimOut:3}))
+  const long = fixture(); long.tracks.find(track => track.kind === 'text').clips.push(createTextClip(long,{start:MAX_PROJECT_DURATION-3,trimOut:3}))
   assert.throws(() => planMotionComposition(long,options()),/24 小时/)
   const markers = fixture(); markers.markers = Array.from({length:1000},(_,i) => ({id:`marker-${i}`,time:i,label:`章节${i}`,kind:'chapter'}))
   assert.throws(() => planMotionComposition(markers,options()),/1000 个标记/)
@@ -230,7 +230,7 @@ test('提前检查锁轨、时长、标记和素材/轨道/片段容量上限', 
   const assets = fixture(); assets.assets.push(...Array.from({length:MAX_ASSETS-assets.assets.length},(_,i) => asset(`extra-${i}`)))
   assert.throws(() => planMotionComposition(assets,options()),/1000 个素材/)
   const clips = fixture(), base = createTextClip(clips)
-  clips.tracks[0].clips = Array.from({length:MAX_CLIPS-3},(_,i) => ({...base,id:`clip-${i}`}))
+  clips.tracks.find(track => track.kind === 'text').clips = Array.from({length:MAX_CLIPS-3},(_,i) => ({...base,id:`clip-${i}`}))
   assert.throws(() => planMotionComposition(clips,options()),/10000 个片段/)
 })
 
@@ -247,7 +247,7 @@ test('保存为项目数据再校验可恢复所有原生动画；第二次成�
 
 test('超过桌面导出有效片段上限时规划和结果都明确警告，未越权修改全局容量', () => {
   const project = fixture(), base = createTextClip(project)
-  project.tracks[0].clips = Array.from({length:499},(_,index) => ({...base,id:`existing-${index}`}))
+  project.tracks.find(track => track.kind === 'text').clips = Array.from({length:499},(_,index) => ({...base,id:`existing-${index}`}))
   const input = options({scenes:[{assetId:'picture',heading:'',caption:''}]})
   const plan = planMotionComposition(project,input)
   assert.equal(plan.warnings.length,1)

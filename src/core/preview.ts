@@ -544,7 +544,7 @@ export class TimelinePreview {
     ctx.globalAlpha = 1
     ctx.fillStyle = project.background
     ctx.fillRect(0, 0, project.width, project.height)
-    for (const track of [...project.tracks].reverse()) {
+    for (const track of project.tracks) {
       if (track.hidden || track.kind === 'transition') continue
       for (const clip of track.clips) {
         if (this.lastTime < clip.start || this.lastTime >= clip.start + previewClipDuration(clip)) continue

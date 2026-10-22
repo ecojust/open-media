@@ -84,10 +84,10 @@ async function installEditor(page, baseURL) {
     const audio = { id: 'audio-source', kind: 'audio', name: '音频轨道.wav', url: URL.createObjectURL(audioBlob), duration: 2, width: 0, height: 0, size: audioBlob.size, mime: audioBlob.type }
     let project = createProject('片段滤镜验证', { width: 320, height: 180, fps: 20 })
     const imageTrack = createTrack('video', '透明图片轨道')
-    project.tracks[0].clips = [createTextClip(project, { id: 'filter-text', textRole: 'watermark', text: '', name: '原色水印底板', x: 0, y: 132, width: 100, height: 40, background: '#2244dd', trimOut: 1.5 })]
-    project.tracks[1].clips = [createClip(video, project, { id: 'filter-video', trimOut: 1.5 })]
+    project.tracks.find(track => track.kind === 'text').clips = [createTextClip(project, { id: 'filter-text', textRole: 'watermark', text: '', name: '原色水印底板', x: 0, y: 132, width: 100, height: 40, background: '#2244dd', trimOut: 1.5 })]
+    project.tracks.find(track => track.kind === 'video').clips = [createClip(video, project, { id: 'filter-video', trimOut: 1.5 })]
     imageTrack.clips = [createClip(picture, project, { id: 'filter-image', x: 200, y: 20, width: 64, height: 64, trimOut: 1.5 })]
-    project.tracks[2].clips = [createClip(audio, project, { id: 'filter-audio', trimOut: 1.5 })]
+    project.tracks.find(track => track.kind === 'audio').clips = [createClip(audio, project, { id: 'filter-audio', trimOut: 1.5 })]
     project.tracks.splice(1, 0, imageTrack)
     project.assets = [video, picture, audio]
     project = validateProject(project, { trusted: true })

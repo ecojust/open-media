@@ -20,7 +20,7 @@ async function mountNativeExport(page, baseURL, scenario) {
     let project = createProject('原生取消验证', { width: 320, height: 180 })
     const asset = { id: 'native-test-image', name: '导出素材.png', kind: 'image', url, duration: 1, width: 32, height: 18, size: blob.size, mime: 'image/png', ...(scenario === 'save-dialog' ? { nativePath: '/native-fixture/image.png' } : {}) }
     project = addAsset(project, asset)
-    project = addClip(project, project.tracks[1].id, createClip(asset, project, { trimOut: 1 }))
+    project = addClip(project, project.tracks.find(track => track.kind === 'video').id, createClip(asset, project, { trimOut: 1 }))
     if (scenario === 'prepare') project = addAsset(project, { ...asset, id: 'unused-second-image', name: '第二个素材.png' })
     const state = { calls: [], busy: [], statuses: [], jobs: [], nativeJob: undefined, releaseImport: undefined, releaseSave: undefined }
     window.nativeHarness = state

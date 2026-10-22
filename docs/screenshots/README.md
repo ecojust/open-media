@@ -42,7 +42,7 @@ node scripts/screenshots-editor.cjs
 
 ## 素材二创截图
 
-`motion-style-light.png` 与 `motion-style-dark.png` 用于展示 v0.3.4 的 MCP 素材二创配置：启用开关、当前工程素材选择、视觉风格和可选创作目标。配置由外部 Agent 读取；用户在 Agent 中发起任务后，才开始分析与生成。`motion-style-gallery.png` 展示同一组素材的 15 种风格配色与版式。
+`motion-style-light.png` 与 `motion-style-dark.png` 用于展示当前 MCP 素材二创配置：启用开关、当前工程素材选择、视觉风格和可选创作目标。配置由外部 Agent 读取；用户在 Agent 中发起任务后，才开始分析、生成独立素材并编排轨道，最终成片由剪辑器合成。`motion-style-gallery.png` 展示同一组素材的 15 种风格配色与版式。
 
 ```sh
 node tests/browser/motion-style-ui.cjs
@@ -53,4 +53,4 @@ node tests/browser/motion-style-render.cjs
 
 目录中其余图片为历史文档配图，当前 README 使用上表 11 组工作区截图及素材二创截图。
 
-`motion-code-style-gallery.png` 展示 v0.3.6 新增 10 种代码创作风格的静态构图示意，使用应用内同一 Canvas 绘图函数，由 `tests/browser/motion-style-ui.cjs` 生成。它不是实际生成视频截图；视频由外部 Agent 根据用户所选素材和默认提示词渲染。
+`motion-code-style-gallery.png` 展示 v0.3.6 新增 10 种代码创作风格的静态构图示意，使用应用内同一 Canvas 绘图函数，由 `tests/browser/motion-style-ui.cjs` 生成。它不是实际生成视频截图；Agent 根据用户所选素材和默认提示词生成独立素材，在工程轨道中分层编排，最终成片由剪辑器合成。

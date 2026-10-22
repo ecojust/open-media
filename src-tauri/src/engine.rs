@@ -1570,7 +1570,9 @@ fn timeline_plan(
     let transitions = transitions::Transitions::from_project(project)?;
     let mut clips = Vec::new();
     let mut total = 0.0_f64;
-    for track in tracks.iter().rev() {
+    // Track position is the stacking index: composite lower indices first so
+    // later image, video and text tracks all cover the same lower layers.
+    for track in tracks {
         if track["hidden"] == true || track["kind"] == "transition" {
             continue;
         }

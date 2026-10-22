@@ -124,7 +124,7 @@ export function addTransition(project: Project, time: number, effect: Transition
   }
   let track = next.tracks.find(track => track.kind === 'transition')
   if (track?.locked) throw new Error('请先解锁转场轨道。')
-  if (!track) { track = createTrack('transition'); next.tracks.unshift(track) }
+  if (!track) { track = createTrack('transition'); next.tracks.push(track) }
   track.clips.push({ id: newId('clip'), generatedAt: new Date().toISOString(), name: effectName(effect), start: cut.time - length / 2,
     trimIn: 0, trimOut: length, speed: 1, volume: 0, opacity: 1, x: 0, y: 0, width: project.width, height: project.height,
     rotation: 0, fit: 'contain', fadeIn: 0, fadeOut: 0, transition: { effect, fromClipId: cut.fromClipId, toClipId: cut.toClipId, ...options } })

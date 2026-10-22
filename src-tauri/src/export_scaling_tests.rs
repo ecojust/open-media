@@ -621,8 +621,8 @@ fn long_project(runtime: &Runtime, store: &MediaStore) -> Value {
     json!({"kind":"timeline","textAssets":text_assets,"project":{
         "width":1920,"height":1080,"fps":30,"background":"#000000",
         "assets":[recording,music,speech],"tracks":[
-            {"kind":"text","clips":text}, {"kind":"transition","clips":transitions},
-            {"kind":"video","clips":video}, {"kind":"audio","clips":voices},
+            {"kind":"video","clips":video}, {"kind":"transition","clips":transitions},
+            {"kind":"text","clips":text}, {"kind":"audio","clips":voices},
             {"kind":"audio","clips":[{"id":"music","assetId":music.id,"start":0,
                 "trimIn":0,"trimOut":600,"speed":1,"volume":0.1}]},
         ]},"config":{"width":160,"height":90,"fps":10,"format":"mp4","quality":"draft"}})

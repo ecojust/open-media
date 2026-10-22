@@ -17,7 +17,7 @@ async function main(){
  const result=await page.evaluate(async()=>{
   const {createProject,createClip}=await import('/src/core/project.ts'),{TimelinePreview}=await import('/src/core/preview.ts'),{executeVisualTool:run}=await import('/src/core/visual-tools.ts'),{exportTimelineWebM}=await import('/src/core/browser-export.ts'),{addTransition}=await import('/src/core/transitions.ts')
   const source=document.createElement('canvas');source.width=160;source.height=90;const sc=source.getContext('2d');sc.fillStyle='#ff0000';sc.fillRect(0,0,80,90);sc.fillStyle='#0000ff';sc.fillRect(80,0,80,90)
-  const p=createProject('视觉预览',{width:160,height:90,fps:20,background:'#000000'});p.assets=[{id:'image',kind:'image',name:'红蓝',url:source.toDataURL(),duration:0,width:160,height:90,size:20,mime:'image/png'},{id:'movie',kind:'video',name:'源视频',url:URL.createObjectURL(await (await fetch('/visual-source.webm')).blob()),duration:2,width:160,height:90,size:100,mime:'video/webm'}];p.tracks[1].clips=[createClip(p.assets[0],p,{id:'clip',trimOut:2,volume:0})]
+  const p=createProject('视觉预览',{width:160,height:90,fps:20,background:'#000000'});p.assets=[{id:'image',kind:'image',name:'红蓝',url:source.toDataURL(),duration:0,width:160,height:90,size:20,mime:'image/png'},{id:'movie',kind:'video',name:'源视频',url:URL.createObjectURL(await (await fetch('/visual-source.webm')).blob()),duration:2,width:160,height:90,size:100,mime:'video/webm'}];p.tracks.find(track => track.kind === 'video').clips=[createClip(p.assets[0],p,{id:'clip',trimOut:2,volume:0})]
   const canvas=document.querySelector('canvas'),preview=new TimelinePreview(canvas,p);await preview.prepare();const pixel=(x,y)=>[...canvas.getContext('2d').getImageData(x,y,1,1).data]
   const render=async(project,t)=>{preview.setProject(project);await preview.prepare();await preview.seekReady(t);preview.render(t);return pixel(80,45)}
   const crop=run(p,'clip_crop',{clipId:'clip',crop:{x:.5,y:0,width:.5,height:1}}).project
@@ -28,10 +28,10 @@ async function main(){
   const mask=run(p,'overlay_add',{kind:'mask',start:0,duration:2,x:20,y:20,width:40,height:40,color:'#00ff00'}).project;await render(mask,1);const maskPixel=pixel(30,30)
   const blur=run(p,'overlay_add',{kind:'blur',start:0,duration:2,x:50,y:5,width:60,height:80,blurRadius:10}).project;await render(blur,1);const blurPixel=pixel(80,45)
   const spotlight=run(p,'overlay_add',{kind:'spotlight',start:0,duration:2,x:100,y:20,width:30,height:30,opacity:1}).project;await render(spotlight,1);const spotlightPixels=[pixel(20,20),pixel(110,30)]
-  const movie=structuredClone(p);movie.tracks[1].clips=[createClip(p.assets[1],movie,{id:'movie-clip',volume:0})]
+  const movie=structuredClone(p);movie.tracks.find(track => track.kind === 'video').clips=[createClip(p.assets[1],movie,{id:'movie-clip',volume:0})]
   const frozen=run(movie,'clip_freeze_frame',{clipId:'movie-clip',sourceTime:1.5,duration:2}).project;const frozenPixels=[];for(const t of [.1,1.5])frozenPixels.push(await render(frozen,t))
-  const split=structuredClone(movie);split.tracks[1].clips=[createClip(p.assets[1],movie,{id:'before',trimOut:1,opacity:.5,volume:0}),createClip(p.assets[1],movie,{id:'after',start:1,trimIn:1,trimOut:2,opacity:.5,volume:0})]
-  let colored=addTransition(split,1,'fade',1);colored=run(colored,'transition_parameters_set',{clipId:colored.tracks[0].clips[0].id,color:'#00ff00'}).project
+  const split=structuredClone(movie);split.tracks.find(track => track.kind === 'video').clips=[createClip(p.assets[1],movie,{id:'before',trimOut:1,opacity:.5,volume:0}),createClip(p.assets[1],movie,{id:'after',start:1,trimIn:1,trimOut:2,opacity:.5,volume:0})]
+  let colored=addTransition(split,1,'fade',1);colored=run(colored,'transition_parameters_set',{clipId:colored.tracks.find(track => track.kind === 'transition').clips[0].id,color:'#00ff00'}).project
   const fadePixel=await render(colored,.75)
   let overlays=createProject('通用标注导出',{width:480,height:240,fps:20,background:'#000000'})
   const kinds=['ellipse','brackets','double-arrow','leader','underline','check']

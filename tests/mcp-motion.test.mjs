@@ -9,7 +9,7 @@ import { saveProject, loadProject } from '../src/core/storage.ts'
 import { MOTION_STYLES } from '../src/core/motion-style-catalog.ts'
 import { setGenerationModel } from '../src/core/generation-settings.ts'
 import { getMcpGenerationCapabilities } from '../src/core/mcp-generation-capabilities.ts'
-import { normalizeMcpMotion, getMcpMotionBrief, mcpMotionAssets, assertMcpMotionRequest } from '../src/core/mcp-motion.ts'
+import { normalizeMcpMotion, getMcpMotionBrief, mcpMotionAssets, assertMcpMotionRequest, publicMotionStyle } from '../src/core/mcp-motion.ts'
 
 beforeEach(() => { setGenerationModel('image', 'ready-image'); setGenerationModel('music', 'ready-music') })
 
@@ -69,12 +69,12 @@ test('brief只返回当前所选视觉素材的公开元数据和可执行工作
   assert.equal(brief.style.id, 'flat-pop')
   assert.equal(brief.prompt, project.mcpMotion.prompt)
   assert.equal(brief.workflow.codeExecution, 'external-agent')
-  assert.equal(brief.workflow.presetGenerationTool, 'open_media_motion_clip_generate')
+  assert.equal(brief.workflow.presetGenerationTool, null)
   assert(brief.instructions.some(instruction => instruction.includes('自行规划')))
   assert(brief.workflow.editingTools.includes('open_media_clip_add'))
   const toolNames = new Set(JSON.parse(readFileSync(new URL('../src/mcp-tools.json', import.meta.url), 'utf8')).map(tool => tool.name))
   for (const [key, names] of Object.entries(brief.workflow)) {
-    if (key === 'codeExecution' || names === null) continue
+    if (!key.endsWith('Tools') || names === null) continue
     for (const name of Array.isArray(names) ? names : [names]) assert(toolNames.has(name), `workflow tool exists: ${name}`)
   }
   for (const asset of brief.assets) for (const key of ['url', 'sourceUrl', 'nativePath']) assert.equal(key in asset, false)
@@ -84,7 +84,7 @@ test('brief只返回当前所选视觉素材的公开元数据和可执行工作
   assert.notEqual(getMcpMotionBrief(project).style.palette.accent, '#000000')
 })
 
-test('代码专用风格保持可执行的外部任务，但不得通过内置预设生成或静默替换风格', () => {
+test('所有风格采用分层任务，独立本地预设校验不静默替换不支持的风格', () => {
   const { project } = fixture()
   const presets = MOTION_STYLES.filter(style => style.presetSupported)
   const codeStyles = MOTION_STYLES.filter(style => !style.presetSupported)
@@ -94,12 +94,12 @@ test('代码专用风格保持可执行的外部任务，但不得通过内置�
     project.mcpMotion.styleId = style.id
     const before = structuredClone(project), brief = getMcpMotionBrief(project)
     assert.equal(brief.ready, true)
-    assert.equal(brief.style.presetSupported, style.presetSupported)
-    assert.equal(brief.workflow.presetGenerationTool, style.presetSupported ? 'open_media_motion_clip_generate' : null)
+    assert.equal('presetSupported' in brief.style, false)
+    assert.equal(brief.workflow.presetGenerationTool, null)
     const args = { scenes: [{ assetId: 'selected' }] }
     if (style.presetSupported) assert.equal(assertMcpMotionRequest(project, args).styleId, style.id)
     else {
-      assert(brief.instructions.some(instruction => instruction.includes('不得用近似预设替代')))
+      assert(brief.instructions.some(instruction => instruction.includes('不得用整片预渲染或近似预设替代')))
       assert(brief.effectivePrompt.includes(style.prompt))
       for (const input of [args, { ...args, styleId: style.id }]) {
         assert.throws(() => assertMcpMotionRequest(project, input), /外部 Agent.*不支持内置二维预设.*open_media_asset_upload.*open_media_asset_import_url/)
@@ -187,7 +187,7 @@ test('本地草稿、JSON校验和便携项目保存导入均保留代码专用�
       try {
         assert.deepEqual(imported.project.mcpMotion, project.mcpMotion)
         assert.equal(getMcpMotionBrief(imported.project).ready, true)
-        assert.equal(getMcpMotionBrief(imported.project).style.presetSupported, false)
+        assert.equal('presetSupported' in getMcpMotionBrief(imported.project).style, false)
         assert.equal(imported.project.assets[0].nativePath, undefined)
         assert.deepEqual(validateProject(JSON.parse(JSON.stringify(imported.project))).mcpMotion, project.mcpMotion)
       } finally { imported.revoke() }
@@ -197,7 +197,7 @@ test('本地草稿、JSON校验和便携项目保存导入均保留代码专用�
 })
 
 
-test('每种风格都有不同的默认代码生成提示，额外要求为空也完整，切换风格保留用户文本', () => {
+test('每种风格都有独立素材分层方案，额外要求为空也完整，切换风格保留用户文本', () => {
   const { project } = fixture()
   const userText = '标题保持中文\n只做 8 秒，最后一秒留白  '
   project.mcpMotion.prompt = userText
@@ -205,17 +205,25 @@ test('每种风格都有不同的默认代码生成提示，额外要求为空�
   for (const style of MOTION_STYLES) {
     project.mcpMotion.styleId = style.id
     const brief = getMcpMotionBrief(project)
-    assert.equal(brief.generationMode, 'agent-code-render')
+    assert.equal(brief.generationMode, 'agent-assets-timeline')
+    assert.equal(brief.workflow.finalComposition, 'editor-timeline')
+    assert.equal(brief.workflow.trackOrder, 'back-to-front')
+    assert.equal(brief.workflow.zIndex, 'array-index')
+    assert.equal(brief.workflow.presetGenerationTool, null)
+    assert.deepEqual(brief.workflow.assetOutputs, ['image', 'transparent-image', 'effect-video', 'green-screen-effect'])
     assert.equal(brief.stylePrompt, style.prompt)
     assert.equal(brief.userPrompt, userText)
     assert.equal(brief.prompt, userText)
     assert.match(brief.stylePrompt, new RegExp(style.id))
-    assert.match(brief.stylePrompt, /代码/)
+    assert.match(brief.stylePrompt, /素材与轨道方案：/)
+    assert.match(brief.stylePrompt, /不能将主内容和装饰一起烘焙成视频/)
+    assert.match(brief.stylePrompt, /最终成片由编辑器合成/)
+    assert.match(brief.stylePrompt, /zIndex/)
     assert(brief.stylePrompt.length > 250)
     assert(brief.effectivePrompt.indexOf(brief.workflowPrompt) < brief.effectivePrompt.indexOf(brief.stylePrompt))
     assert(brief.effectivePrompt.indexOf(brief.stylePrompt) < brief.effectivePrompt.indexOf(userText))
     assert.match(brief.workflowPrompt, new RegExp(`${project.width} × ${project.height}`))
-    for (const phrase of ['renderAt(t)', 'sourceVersion', 'chunkSha256', 'open_media_asset_upload', 'open_media_clip_add', '不执行任意代码']) assert(brief.effectivePrompt.includes(phrase))
+    for (const phrase of ['renderAt(t)', 'sourceVersion', 'chunkSha256', 'open_media_asset_upload', 'open_media_clip_add', '不执行任意代码', 'open_media_clip_keyframes_set', 'open_media_export_start', 'clip_update.patch', '保留 alpha', '禁止让 Agent 将整段成片', '回传前须栅格化为 PNG']) assert(brief.effectivePrompt.includes(phrase))
     prompts.add(brief.stylePrompt)
   }
   assert.equal(prompts.size, 25)
@@ -357,5 +365,34 @@ test('默认提示限定按需生成、先查对应能力、本地优先、明�
   }
   assert.deepEqual(brief.assetIds, ['selected', 'logo'])
   assert.equal(brief.workflow.codeExecution, 'external-agent')
-  assert.equal(brief.generationMode, 'agent-code-render')
+  assert.equal(brief.generationMode, 'agent-assets-timeline')
+})
+
+
+test('分层流程只推荐现有工具，绿幕通过片段更新设置，最终使用编辑器导出', () => {
+  const { project } = fixture(), brief = getMcpMotionBrief(project)
+  const tools = JSON.parse(readFileSync(new URL('../src/mcp-tools.json', import.meta.url), 'utf8'))
+  const byName = new Map(tools.map(tool => [tool.name, tool]))
+  assert.equal(byName.has('open_media_motion_clip_generate'), false)
+  assert(brief.workflow.editingTools.includes('open_media_track_reorder'))
+  assert(brief.workflow.editingTools.includes('open_media_clip_keyframes_set'))
+  assert(brief.workflow.editingTools.includes('open_media_clip_crop'))
+  assert(brief.workflow.editingTools.includes('open_media_title_add'))
+  assert.deepEqual(brief.workflow.exportTools, ['open_media_export_start'])
+  assert(byName.get('open_media_clip_update').inputSchema.properties.patch.properties.chromaKey)
+  assert.match(brief.workflowPrompt, /底图放前面的轨道.*主内容放中间.*装饰图片.*放后面的轨道/)
+  assert.match(brief.workflowPrompt, /图片像固定字幕一样设置 start、trimOut、x、y、width、height/)
+  assert.match(brief.workflowPrompt, /图效不能包含已选原视频、整段主画面或已混入的字幕与音乐/)
+  assert.doesNotMatch(brief.workflowPrompt, /clip_add\.options.*chromaKey/)
+})
+
+
+test('公开风格移除内部预设能力标记，嵌套返回值不影响默认目录', () => {
+  const style = MOTION_STYLES.find(style => style.presetSupported)
+  const original = structuredClone(style), publicStyle = publicMotionStyle(style)
+  assert.equal('presetSupported' in publicStyle, false)
+  assert.equal(publicStyle.prompt, style.prompt)
+  publicStyle.palette.accent = '#000000'
+  publicStyle.tags.push('changed')
+  assert.deepEqual(style, original)
 })

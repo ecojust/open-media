@@ -16,7 +16,7 @@ const watermark = {
 function fixture() {
   let project = createProject('字幕样式')
   const clip = createSubtitleClip(project, { text: '第一句字幕', generatedAt: '2026-01-01T00:00:00.000Z', start: 3, trimOut: 9 })
-  project = addClip(project, project.tracks[0].id, clip)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, clip)
   return { project, clip }
 }
 function matches(clip, expected) {
@@ -42,7 +42,7 @@ test('最后修改的字幕成为来源，选择、正文、时间变化及未�
   const { project, clip } = fixture()
   let next = updateClip(project, clip.id, style)
   const second = createSubtitleClip(next)
-  next = addClip(next, project.tracks[0].id, second)
+  next = addClip(next, project.tracks.find(track => track.kind === 'text').id, second)
   next = updateClip(next, second.id, { fontSize: 78, x: 400 })
   next = updateClip(next, clip.id, { text: '改正文', start: 7, trimOut: 0.2, x: style.x })
   assert.equal(findClip(next, clip.id).clip.fadeOut, 0.2, '时长裁剪可缩短当前字幕淡出，但不改变下一条字幕默认值')
@@ -52,7 +52,7 @@ test('最后修改的字幕成为来源，选择、正文、时间变化及未�
   const snapshot = structuredClone(next)
   assert.throws(() => updateClip(next, clip.id, { width: 0 }), /宽度/)
   assert.deepEqual(next, snapshot)
-  const locked = setTrack(next, project.tracks[0].id, { locked: true })
+  const locked = setTrack(next, project.tracks.find(track => track.kind === 'text').id, { locked: true })
   assert.throws(() => updateClip(locked, clip.id, { x: 900 }), /解锁/)
   assert.deepEqual(locked.subtitleStyle, next.subtitleStyle)
 })
@@ -83,7 +83,7 @@ test('文字水印模板独立于字幕样式，轨道改名或移动后仍不�
   assert.equal(text.fontSize, 120, '水印按自身模板缩放，不能套用字幕的42号字')
   assert.equal(text.rotation, 0); assert.equal(text.textRole, 'watermark')
   next = setTrack(next, result.trackId, { name: '章节装饰' })
-  next = moveClip(next, result.clipId, project.tracks[0].id, 0)
+  next = moveClip(next, result.clipId, project.tracks.find(track => track.kind === 'text').id, 0)
   next = updateClip(next, result.clipId, { fontSize: 16, x: 8, background: '#000000' })
   matches(createSubtitleClip(next), style)
   assert.equal(validateProject(next).tracks.flatMap(track => track.clips).find(clip => clip.id === result.clipId).textRole, 'watermark')
@@ -93,16 +93,16 @@ test('旧文档无需默认样式也可打开，旧字幕编辑可记忆，旧�
   const project = createProject()
   const clip = createTextClip(project)
   delete clip.textRole
-  project.tracks[0].clips.push(clip)
+  project.tracks.find(track => track.kind === 'text').clips.push(clip)
   const old = validateProject(project)
   assert.equal(old.subtitleStyle, undefined)
-  const renamedSubtitle = setTrack(old, project.tracks[0].id, { name: '文字水印轨道' })
+  const renamedSubtitle = setTrack(old, project.tracks.find(track => track.kind === 'text').id, { name: '文字水印轨道' })
   assert.equal(findClip(renamedSubtitle, clip.id).clip.textRole, 'subtitle')
   matches(createSubtitleClip(updateClip(renamedSubtitle, clip.id, style)), style)
   matches(createSubtitleClip(updateClip(old, clip.id, style)), style)
-  project.tracks[0].name = '文字水印轨道'
+  project.tracks.find(track => track.kind === 'text').name = '文字水印轨道'
   const imported = validateProject(project)
-  const renamed = setTrack(imported, project.tracks[0].id, { name: '标题装饰' })
+  const renamed = setTrack(imported, project.tracks.find(track => track.kind === 'text').id, { name: '标题装饰' })
   const edited = updateClip(renamed, clip.id, style)
   assert.equal(findClip(edited, clip.id).clip.textRole, 'watermark')
   assert.equal(edited.subtitleStyle, undefined)
@@ -129,16 +129,16 @@ test('旧项目字幕及默认样式缺少纵向对齐时保留居中，非法�
   const { project, clip } = fixture()
   const old = updateClip(project, clip.id, style)
   delete old.subtitleStyle.textVerticalAlign
-  delete old.tracks[0].clips[0].textVerticalAlign
+  delete old.tracks.find(track => track.kind === 'text').clips[0].textVerticalAlign
   const loaded = validateProject(old)
   assert.equal(loaded.subtitleStyle.textVerticalAlign, 'middle')
-  assert.equal(loaded.tracks[0].clips[0].textVerticalAlign, 'middle')
+  assert.equal(loaded.tracks.find(track => track.kind === 'text').clips[0].textVerticalAlign, 'middle')
   assert.equal(createSubtitleClip(loaded).textVerticalAlign, 'middle')
   for (const alignment of ['top', 'middle', 'bottom']) {
     const changed = updateClip(loaded, clip.id, { textVerticalAlign: alignment })
     assert.equal(changed.subtitleStyle.textVerticalAlign, alignment)
-    assert.equal(changed.tracks[0].clips[0].y, loaded.tracks[0].clips[0].y)
-    assert.equal(changed.tracks[0].clips[0].height, loaded.tracks[0].clips[0].height)
+    assert.equal(changed.tracks.find(track => track.kind === 'text').clips[0].y, loaded.tracks.find(track => track.kind === 'text').clips[0].y)
+    assert.equal(changed.tracks.find(track => track.kind === 'text').clips[0].height, loaded.tracks.find(track => track.kind === 'text').clips[0].height)
   }
   assert.throws(() => updateClip(loaded, clip.id, { textVerticalAlign: 'invalid' }), /纵向对齐/)
 })
@@ -146,11 +146,11 @@ test('旧项目字幕及默认样式缺少纵向对齐时保留居中，非法�
 function trackStyleFixture() {
   const { project, clip } = fixture()
   const sourceStyle = { ...style, fadeIn: 3, fadeOut: 4 }
-  Object.assign(project.tracks[0].clips[0], sourceStyle)
+  Object.assign(project.tracks.find(track => track.kind === 'text').clips[0], sourceStyle)
   const short = createSubtitleClip(project, { text: '短句内容', name: '保留片段名称', start: 15, trimIn: 1, trimOut: 4, speed: 2, generatedAt: '2026-02-01T00:00:00.000Z' })
   const long = createSubtitleClip(project, { text: '较长的另一句内容', start: 20, trimOut: 8, generatedAt: '2026-02-02T00:00:00.000Z' })
   const movedWatermark = createTextClip(project, { textRole: 'watermark', text: '章节标题', x: 10, color: '#66ccff' })
-  project.tracks[0].clips.push(short, long, movedWatermark)
+  project.tracks.find(track => track.kind === 'text').clips.push(short, long, movedWatermark)
   const otherTrack = createTrack('text', '另一组字幕')
   otherTrack.clips.push(createSubtitleClip(project, { text: '其他轨道', x: 18 }))
   project.tracks.push(otherTrack)
@@ -163,8 +163,8 @@ test('同轨道应用字幕属性只调整其他字幕的视觉配置，保留�
   const { sourceId, short, long, movedWatermark, otherTrack, sourceStyle } = setup
   const asset = { id: 'linked-audio', name: '配音.wav', kind: 'audio', url: 'blob:linked-audio', duration: 3, width: 0, height: 0, size: 20, mime: 'audio/wav' }
   setup.project.assets.push(asset)
-  setup.project.tracks[2].locked = true
-  setup.project.tracks[2].clips.push(createClip(asset, setup.project, { speech: { textClipId: short.id, text: '旧版短句内容', voiceId: 'local-voice', rate: 1.2 } }))
+  setup.project.tracks.find(track => track.kind === 'audio').locked = true
+  setup.project.tracks.find(track => track.kind === 'audio').clips.push(createClip(asset, setup.project, { speech: { textClipId: short.id, text: '旧版短句内容', voiceId: 'local-voice', rate: 1.2 } }))
   const project = validateProject(setup.project, { trusted: true })
   const before = structuredClone(project)
   const next = applySubtitleStyleToTrack(project, sourceId)
@@ -174,7 +174,7 @@ test('同轨道应用字幕属性只调整其他字幕的视觉配置，保留�
   assert.deepEqual(findClip(next, long.id).clip, { ...findClip(project, long.id).clip, ...sourceStyle })
   assert.deepEqual(findClip(next, movedWatermark.id).clip, findClip(project, movedWatermark.id).clip, '移动过来的文字水印不会被当作字幕')
   assert.deepEqual(next.tracks.find(track => track.id === otherTrack.id), project.tracks.find(track => track.id === otherTrack.id))
-  assert.deepEqual(next.tracks[2], project.tracks[2], '关联配音原文与绑定保留，不自动更新或解除')
+  assert.deepEqual(next.tracks.find(track => track.kind === 'audio'), project.tracks.find(track => track.kind === 'audio'), '关联配音原文与绑定保留，不自动更新或解除')
   assert.deepEqual(next.assets, project.assets)
   assert.deepEqual(next.subtitleStyle, sourceStyle, '新增字幕记忆本次应用的来源样式，不以短字幕裁剪后的值覆盖')
   matches(createSubtitleClip(next), sourceStyle)
@@ -203,7 +203,7 @@ test('同轨道字幕属性拒绝锁定、失效和水印来源，无目标或�
   const before = structuredClone(project)
   assert.throws(() => applySubtitleStyleToTrack(project, 'missing'), /不存在/)
   assert.throws(() => applySubtitleStyleToTrack(project, movedWatermark.id), /请选择字幕/)
-  assert.throws(() => applySubtitleStyleToTrack(setTrack(project, project.tracks[0].id, { locked: true }), sourceId), /解锁/)
+  assert.throws(() => applySubtitleStyleToTrack(setTrack(project, project.tracks.find(track => track.kind === 'text').id, { locked: true }), sourceId), /解锁/)
   assert.deepEqual(project, before)
   const single = fixture()
   assert.equal(applySubtitleStyleToTrack(single.project, single.clip.id), single.project)
@@ -214,6 +214,6 @@ test('同轨道字幕属性拒绝锁定、失效和水印来源，无目标或�
   const mediaAsset = { id: 'video-source', name: '片段.mp4', kind: 'video', url: 'blob:video-source', duration: 5, width: 1920, height: 1080, size: 20, mime: 'video/mp4' }
   project.assets.push(mediaAsset)
   const mediaClip = createClip(mediaAsset, project)
-  project.tracks[1].clips.push(mediaClip)
+  project.tracks.find(track => track.kind === 'video').clips.push(mediaClip)
   assert.throws(() => applySubtitleStyleToTrack(validateProject(project, { trusted: true }), mediaClip.id), /请选择字幕/)
 })

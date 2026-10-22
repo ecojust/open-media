@@ -133,8 +133,8 @@ test('标题位置尺寸接受边界像素值，非法值和 slide 关键帧溢�
   ]) assertAtomicFailure(project, () => run(project, 'title_add', { ...titleArgs, ...geometry }))
   assertAtomicFailure(project, () => run(project, 'title_add', { ...titleArgs, y: 65536 }))
   const locked = structuredClone(project)
-  locked.tracks[0].locked = true
-  assertAtomicFailure(locked, () => run(locked, 'title_add', { ...titleArgs, trackId: locked.tracks[0].id, y: 1510 }), /锁定|解锁/)
+  locked.tracks.find(track => track.kind === 'text').locked = true
+  assertAtomicFailure(locked, () => run(locked, 'title_add', { ...titleArgs, trackId: locked.tracks.find(track => track.kind === 'text').id, y: 1510 }), /锁定|解锁/)
 })
 
 for (const [label, update] of updaters) {

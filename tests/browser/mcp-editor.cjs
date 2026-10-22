@@ -99,7 +99,7 @@ async function main() {
     await assert.rejects(setState({ time: 2 }), /正在处理操作/)
     await text.fill('输入中的文字不会被外部选择覆盖')
     assert.equal((await setState({ playing: false })).playing, false)
-    assert.equal(await page.evaluate(() => window.mcpEditorFixture.current.value.tracks[0].clips[0].text), '输入中的文字不会被外部选择覆盖')
+    assert.equal(await page.evaluate(() => window.mcpEditorFixture.current.value.tracks.find(track => track.kind === 'text').clips[0].text), '输入中的文字不会被外部选择覆盖')
     await text.blur()
     assert.equal(await busy(), false)
     const eventsBefore = await page.evaluate(() => [...window.mcpEditorFixture.busyEvents])

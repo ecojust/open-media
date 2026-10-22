@@ -15,9 +15,9 @@ function fixture() {
   const second = createTextClip(project, { id: 'text-second', text: '第二段文字。', start: 8, trimOut: 3 })
   const music = audio('background-music', 30)
   project = addAsset(project, music)
-  project = addClip(project, project.tracks[2].id, createClip(music, project, { id: 'music-clip', start: 1 }))
-  project = addClip(project, project.tracks[0].id, text)
-  project = addClip(project, project.tracks[0].id, second)
+  project = addClip(project, project.tracks.find(track => track.kind === 'audio').id, createClip(music, project, { id: 'music-clip', start: 1 }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, text)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, second)
   return { project, text, second, music }
 }
 
@@ -28,7 +28,7 @@ function result(project, clipId, assetId, duration = 4) {
 
 test('批量计划按字幕起点排列，空白、锁定与非字幕片段有明确跳过原因', () => {
   let { project, text, second } = fixture()
-  project = addClip(project, project.tracks[0].id, createTextClip(project, { id: 'blank-text', text: ' \n  ' }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, createTextClip(project, { id: 'blank-text', text: ' \n  ' }))
   const plan = planSpeech(project, [second.id, text.id, text.id, 'blank-text', 'music-clip', 'missing'])
   assert.deepEqual(plan.sources.map((source) => source.clipId), [text.id, second.id])
   assert.equal(plan.sources[0].text, '第一段文字。')
@@ -36,7 +36,7 @@ test('批量计划按字幕起点排列，空白、锁定与非字幕片段有�
   assert.equal(plan.skipped.length, 3)
   assert.match(plan.skipped[0].reason, /为空/)
   assert.match(plan.skipped[1].reason, /不存在/)
-  const locked = setTrack(project, project.tracks[0].id, { locked: true })
+  const locked = setTrack(project, project.tracks.find(track => track.kind === 'text').id, { locked: true })
   assert.equal(planSpeech(locked).sources.length, 0)
   assert.match(planSpeech(locked).skipped[0].reason, /锁定/)
   assert.deepEqual(planSpeech(project, []).sources, [])
@@ -59,7 +59,7 @@ test('真实音频时长确定字幕长度和配音起点，音乐及其它素�
   assert.equal(clipDuration(speech.clip), 2.75)
   assert.equal(speech.clip.speech.textClipId, text.id)
   assert.equal(speech.clip.speech.text, '第一段文字。')
-  assert.notEqual(speech.track.id, project.tracks[2].id)
+  assert.notEqual(speech.track.id, project.tracks.find(track => track.kind === 'audio').id)
   assert.deepEqual(findClip(applied.project, 'music-clip'), findClip(project, 'music-clip'))
   assert.deepEqual(findClip(applied.project, second.id).clip, second)
   assert.deepEqual(applied.overlaps, [])
@@ -131,7 +131,7 @@ test('异步过期结果、锁定轨道和非法音频均原子拒绝', () => {
   assert.throws(() => applySpeechResults(locked, [result(applied.project, text.id, 'replacement')]), /锁定/)
   assert.throws(() => deleteClip(locked, text.id), /解锁/)
   assert.throws(() => splitClip(locked, text.id, 3), /解锁/)
-  assert.throws(() => removeTrack(locked, project.tracks[0].id), /解锁/)
+  assert.throws(() => removeTrack(locked, project.tracks.find(track => track.kind === 'text').id), /解锁/)
 })
 
 test('配音绑定导入必须指向唯一字幕，数据类型和语速受校验', () => {
@@ -159,7 +159,7 @@ test('删除和分割字幕保留已生成语音，复制和分割语音解除�
   const removed = deleteClip(applied.project, text.id)
   assert.equal(findClip(removed, audioId).clip.speech.textClipId, undefined)
   assert.equal(findClip(removed, audioId).clip.speech.text, '第一段文字。')
-  assert.equal(findClip(removeTrack(applied.project, project.tracks[0].id), audioId).clip.speech.textClipId, undefined)
+  assert.equal(findClip(removeTrack(applied.project, project.tracks.find(track => track.kind === 'text').id), audioId).clip.speech.textClipId, undefined)
   assert.equal(findClip(splitClip(applied.project, text.id, 3), audioId).clip.speech.textClipId, undefined)
   const duplicated = duplicateClip(applied.project, audioId)
   const voices = duplicated.tracks.flatMap((track) => track.clips.filter((clip) => clip.speech))
@@ -173,7 +173,7 @@ test('删除和分割字幕保留已生成语音，复制和分割语音解除�
 test('配音真实波形字节随便携项目保存并恢复绑定', async () => {
   let project = createProject('可携带配音')
   const text = createTextClip(project, { text: '可保存的配音', id: 'portable-text' })
-  project = addClip(project, project.tracks[0].id, text)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, text)
   const samples = 8000
   const bytes = new Uint8Array(44 + samples * 2)
   const view = new DataView(bytes.buffer)
@@ -198,7 +198,7 @@ test('配音真实波形字节随便携项目保存并恢复绑定', async () =>
 
 test('合成上限按 Unicode 码点计数，超长字幕在批量开始前明确跳过', () => {
   let project = createProject('字符上限')
-  const trackId = project.tracks[0].id
+  const trackId = project.tracks.find(track => track.kind === 'text').id
   project = addClip(project, trackId, createTextClip(project, { id: 'max-text', text: '\u{20000}'.repeat(4000) }))
   project = addClip(project, trackId, createTextClip(project, { id: 'long-text', text: '字'.repeat(4001) }))
   const plan = planSpeech(project)
@@ -225,7 +225,7 @@ test('批量预检明确拒绝超过素材槽的整批计划，不会静默削�
 test('预检检查新增片段容量，并将替换旧配音按一个片段计数', () => {
   const { project, text } = fixture()
   const clip = findClip(project, 'music-clip').clip
-  project.tracks[2].clips.push(...Array.from({ length: MAX_CLIPS - 4 }, (_, index) => ({ ...clip, id: `extra-${index}` })))
+  project.tracks.find(track => track.kind === 'audio').clips.push(...Array.from({ length: MAX_CLIPS - 4 }, (_, index) => ({ ...clip, id: `extra-${index}` })))
   assert.equal(project.tracks.reduce((count, track) => count + track.clips.length, 0), MAX_CLIPS - 1)
   assert.throws(() => validateSpeechPlanCapacity(project, planSpeech(project)), /片段.*数量限制/)
   const applied = applySpeechResults(project, [result(project, text.id, 'last-clip')])
@@ -247,7 +247,7 @@ test('预检已满轨道和同一起点的最少需求，逐条已知时长继�
 test('实际配音长度超过24小时边界时及时拒绝，未知长度不假定为长音频', () => {
   let project = createProject('时间线末尾')
   const text = createTextClip(project, { id: 'end-text', text: '结束', start: MAX_PROJECT_DURATION - 2, trimOut: 1 })
-  project = addClip(project, project.tracks[0].id, text)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, text)
   const plan = planSpeech(project)
   assert.doesNotThrow(() => validateSpeechPlanCapacity(project, plan))
   assert.doesNotThrow(() => validateSpeechPlanCapacity(project, plan, new Map([[text.id, 2]])))

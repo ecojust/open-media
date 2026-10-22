@@ -10,7 +10,7 @@ function fixture(offset = 0) {
   let project = createProject('转场验证', { width: 320, height: 180, fps: 20 })
   const video = { id: 'source', name: '视频.mp4', kind: 'video', url: 'blob:test', duration: 20, width: 320, height: 180, size: 200, mime: 'video/mp4' }
   project = addAsset(project, video)
-  const trackId = project.tracks[1].id
+  const trackId = project.tracks.find(track => track.kind === 'video').id
   for (const [id, start, trimIn, trimOut] of [['first', offset, 0, 4], ['second', offset + 4, 4, 8], ['third', offset + 8, 8, 12]]) {
     project = addClip(project, trackId, createClip(video, project, { id, start, trimIn, trimOut }))
   }
@@ -63,7 +63,7 @@ test('转场预设绑定最近切点，居中且不改变时间线总长度', ()
     assert.equal(transition.transition.fromClipId, 'first')
     assert.equal(transition.transition.toClipId, 'second')
     assert.equal(projectDuration(edited), 12)
-    assert.equal(validateProject(edited).tracks[0].kind, 'transition')
+    assert.equal(validateProject(edited).tracks.find(track => track.kind === 'transition').kind, 'transition')
   }
   assert.equal(effectClips(project).length, 0)
 })
@@ -106,7 +106,7 @@ test('优先当前视频轨道，锁定视频或转场轨道不允许新增/修�
   assert.equal(findTransitionCut(project, 3.9, other.id).trackId, other.id)
   assert.equal(findTransitionCut(setTrack(project, other.id, { locked: true }), 3.9, other.id).trackId, trackId)
   const withEffect = addTransition(project, 4, 'fade')
-  const transition = effectClips(withEffect)[0], effectTrack = withEffect.tracks[0]
+  const transition = effectClips(withEffect)[0], effectTrack = withEffect.tracks.find(track => track.kind === 'transition')
   assert.throws(() => addTransition(setTrack(withEffect, effectTrack.id, { locked: true }), 4, 'zoom'), /解锁/)
   assert.throws(() => updateTransition(setTrack(withEffect, trackId, { locked: true }), transition.id, 'zoom', 2), /解锁/)
 })
@@ -128,7 +128,7 @@ test('删除、移动及裁剪视频清理失效转场，分割前一段保留�
   const splitIncoming = splitClip(edited, 'second', 5)
   assert.equal(effectClips(splitIncoming)[0].transition.toClipId, 'second')
   assert.equal(clipDuration(effectClips(splitIncoming)[0]), 1)
-  const locked = setTrack(edited, edited.tracks[0].id, { locked: true })
+  const locked = setTrack(edited, edited.tracks.find(track => track.kind === 'transition').id, { locked: true })
   assert.throws(() => deleteClip(locked, 'second'), /解锁转场/)
   assert.throws(() => splitClip(locked, 'first', 2), /解锁转场/)
 })
@@ -145,7 +145,7 @@ test('接拢空隙同步移动转场；转场禁止自由移动、裁剪、复�
   assert.throws(() => splitClip(edited, effect.id, 7), /不能分割/)
   assert.throws(() => trimClipAtPlayhead(edited, effect.id, 7, 'start'), /不能按播放头裁剪/)
   assert.throws(() => updateClip(edited, effect.id, { start: 0 }), /转场属性/)
-  assert.throws(() => closeTimelineGaps(setTrack(edited, edited.tracks[0].id, { locked: true })), /解锁转场/)
+  assert.throws(() => closeTimelineGaps(setTrack(edited, edited.tracks.find(track => track.kind === 'transition').id, { locked: true })), /解锁转场/)
 })
 
 test('保存校验拒绝无效引用、脱离切点、超时长及重复切点', () => {
@@ -161,7 +161,7 @@ test('保存校验拒绝无效引用、脱离切点、超时长及重复切点',
   ]) {
     const copy = structuredClone(edited); mutate(effectClips(copy)[0]); assert.throws(() => validateProject(copy))
   }
-  const duplicate = structuredClone(edited); duplicate.tracks[0].clips.push({ ...effectClips(duplicate)[0], id: 'duplicate' })
+  const duplicate = structuredClone(edited); duplicate.tracks.find(track => track.kind === 'transition').clips.push({ ...effectClips(duplicate)[0], id: 'duplicate' })
   assert.throws(() => validateProject(duplicate), /只能使用一个/)
   const misplaced = structuredClone(edited); misplaced.tracks.find(track => track.id === trackId).clips[0].transition = effectClips(edited)[0].transition
   assert.throws(() => validateProject(misplaced), /只能用于转场轨道/)
@@ -178,7 +178,7 @@ test('预览效果、边界和静音开关正确，转场不成为预览选择�
     assert.equal(transitionVisualAt(edited, 'second', 4).visibility, 0)
     assert.equal(transitionVisualAt(edited, 'first', 4), undefined)
     assert.equal(transitionVisualAt(edited, 'second', 5), undefined)
-    assert.equal(transitionVisualAt(setTrack(edited, edited.tracks[0].id, { muted: true }), 'first', 3.5), undefined)
+    assert.equal(transitionVisualAt(setTrack(edited, edited.tracks.find(track => track.kind === 'transition').id, { muted: true }), 'first', 3.5), undefined)
     assert(!visibleVisualClips(edited, 3.5).some(item => item.track.kind === 'transition'))
   }
   const fade = transitionVisualAt(addTransition(project, 4, 'fade', 2), 'first', 3.5)

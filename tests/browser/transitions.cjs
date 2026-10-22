@@ -45,7 +45,7 @@ async function main() {
     const { exportTimelineWebM } = await import('/src/core/browser-export.ts')
     const project = createProject('转场真实画面验证', { width: 160, height: 90, fps: 20, background: '#102030' })
     project.assets = await Promise.all(['red', 'cyan'].map(async id => ({ id, kind: 'video', name: `${id}.webm`, url: URL.createObjectURL(await (await fetch(`/transition-${id}.webm`)).blob()), duration: 2, width: 160, height: 90, mime: 'video/webm', size: 100 })))
-    project.tracks[1].clips = project.assets.map((asset, index) => createClip(asset, project, { id: `${asset.id}-clip`, start: index * 2, trimOut: 2, volume: 0 }))
+    project.tracks.find(track => track.kind === 'video').clips = project.assets.map((asset, index) => createClip(asset, project, { id: `${asset.id}-clip`, start: index * 2, trimOut: 2, volume: 0 }))
     const source = validateProject(project, { trusted: true })
     const canvas = document.querySelector('canvas'), preview = new TimelinePreview(canvas, source)
     const points = [[16, 9], [48, 27], [80, 45], [112, 63], [144, 81], [16, 81], [144, 9], [4, 45], [20, 45], [140, 45], [156, 45], [80, 1], [80, 12], [80, 78], [80, 89]]

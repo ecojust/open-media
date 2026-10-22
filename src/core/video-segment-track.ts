@@ -35,8 +35,8 @@ export function insertVideoSegment(project: Project, asset: MediaAsset, placemen
     && track.clips.some(clip => assets.get(clip.assetId ?? '')?.kind === 'video'
       && Math.abs(placement === 'prepend' ? clip.start : clipEnd(clip) - end) < 1e-6))
   const videoTrack = boundaryTrack ?? project.tracks.find(track => track.kind === 'video' && track.name === '视频片段轨道' && !track.locked && !track.muted)
-  const videoLayer = videoTrack ? project.tracks.indexOf(videoTrack) : project.tracks.length
-  const textTrack = textCount ? project.tracks.find((track, index) => index < videoLayer && track.kind === 'text' && track.name === '片头片尾文字' && !track.locked && !track.muted) : undefined
+  const videoLayer = videoTrack ? project.tracks.indexOf(videoTrack) : -1
+  const textTrack = textCount ? project.tracks.find((track, index) => index > videoLayer && track.kind === 'text' && track.name === '片头片尾文字' && !track.locked && !track.muted) : undefined
   const newTracks = Number(!videoTrack) + Number(textCount > 0 && !textTrack)
   if (project.tracks.length + newTracks > MAX_TRACKS) throw new Error(`项目最多容纳 ${MAX_TRACKS} 条轨道，请移除不用的轨道后再添加。`)
 
@@ -47,7 +47,7 @@ export function insertVideoSegment(project: Project, asset: MediaAsset, placemen
   const target = videoTrack ? next.tracks.find(track => track.id === videoTrack.id)! : createTrack('video', '视频片段轨道')
   const clip = createClip(source, next, { start, speed, fit: caption ? 'cover' : 'contain' })
   target.clips.push(clip)
-  if (!videoTrack) next.tracks.push(target)
+  if (!videoTrack) next.tracks.unshift(target)
   if (textCount) {
     const titles = textTrack ? next.tracks.find(track => track.id === textTrack.id)! : createTrack('text', '片头片尾文字')
     for (const [isHeading, value] of [[true, heading], [false, subheading]] as const) {
@@ -59,7 +59,7 @@ export function insertVideoSegment(project: Project, asset: MediaAsset, placemen
         fadeIn: Math.min(isHeading ? 0.65 : 0.95, duration / 3), fadeOut: Math.min(0.45, duration / 3),
       }))
     }
-    if (!textTrack) next.tracks.unshift(titles)
+    if (!textTrack) next.tracks.push(titles)
   }
   next.updatedAt = new Date().toISOString()
   return { project: validateProject(next, { trusted: true }), clipId: clip.id, trackId: target.id, start, duration }

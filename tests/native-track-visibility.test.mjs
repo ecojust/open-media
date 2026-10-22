@@ -17,13 +17,13 @@ test('native composition preparation reads only used visible media and never ras
     const hiddenVideo = { ...image, id: 'hidden-video', name: 'missing.mp4', kind: 'video', url: 'blob:missing-hidden-video', duration: 20, mime: 'video/mp4' }
     const hiddenAudio = { ...hiddenVideo, id: 'hidden-audio', name: 'missing.wav', kind: 'audio', width: 0, height: 0, url: 'blob:missing-hidden-audio', mime: 'audio/wav' }
     project.assets.push(image, hiddenVideo, hiddenAudio, { ...hiddenVideo, id: 'unused', url: 'blob:missing-unused' })
-    project.tracks[1].clips.push(createClip(image, project, { trimOut: 2 }))
+    project.tracks.find(track => track.kind === 'video').clips.push(createClip(image, project, { trimOut: 2 }))
     const hiddenTrack = { ...createTrack('video'), hidden: true, clips: [createClip(hiddenVideo, project)] }
     project.tracks.push(hiddenTrack)
-    project.tracks[2].hidden = true
-    project.tracks[2].clips.push(createClip(hiddenAudio, project))
-    project.tracks[0].hidden = true
-    project.tracks[0].clips.push(createSubtitleClip(project, { text: '不应栅格化的隐藏字幕' }))
+    project.tracks.find(track => track.kind === 'audio').hidden = true
+    project.tracks.find(track => track.kind === 'audio').clips.push(createClip(hiddenAudio, project))
+    project.tracks.find(track => track.kind === 'text').hidden = true
+    project.tracks.find(track => track.kind === 'text').clips.push(createSubtitleClip(project, { text: '不应栅格化的隐藏字幕' }))
     const prepared = await prepareNativeProject(project, undefined, { importAsset: async (bytes, name) => {
       imports.push({ bytes: new TextDecoder().decode(bytes), name })
       return { ...image, nativePath: '/prepared/image.png', url: 'asset://prepared' }

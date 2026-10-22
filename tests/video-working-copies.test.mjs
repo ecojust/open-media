@@ -29,14 +29,14 @@ test('导入后未添加任何片段，也展示工作副本并用于后续拖�
 })
 
 test('MCP和批量新增片段使用当前工作副本，仍保留指定的裁剪、速度和位置', () => {
-  const { project, original, copy } = fixture(), track = project.tracks[1]
+  const { project, original, copy } = fixture(), track = project.tracks.find(track => track.kind === 'video')
   const options = { trimIn: 30, trimOut: 50, start: 7, speed: 2, x: 100 }
   const result = executeProjectTool(project, 'open_media_clip_add', { trackId: track.id, assetId: original.id, options })
-  const clip = result.project.tracks[1].clips[0]
+  const clip = result.project.tracks.find(track => track.kind === 'video').clips[0]
   assert.equal(clip.assetId, copy.id)
   for (const [key, value] of Object.entries(options)) assert.equal(clip[key], value)
   const batch = addClips(project, track.id, [createClip(original, project, options), createClip(copy, project, { start: 50 })])
-  assert.ok(batch.tracks[1].clips.every(item => item.assetId === copy.id))
+  assert.ok(batch.tracks.find(track => track.kind === 'video').clips.every(item => item.assetId === copy.id))
 })
 
 test('录屏目录刷新后的不同ID仍按原路径找到已压缩副本，不重新登记或读取原视频', () => {
@@ -56,14 +56,14 @@ test('恢复后卡片和后续添加都采用原件，旧副本保留但不会�
   assert.equal(restored.assets.length, 2)
   assert.deepEqual(activeCompressedVideos(restored), [])
   assert.equal(addEditorAssetToTimeline(restored, original).assetId, original.id)
-  assert.equal(addClip(restored, restored.tracks[1].id, createClip(copy, restored)).tracks[1].clips[0].assetId, original.id)
+  assert.equal(addClip(restored, restored.tracks.find(track => track.kind === 'video').id, createClip(copy, restored)).tracks.find(track => track.kind === 'video').clips[0].assetId, original.id)
 })
 
 test('旧工程按时间线推断当前副本，没有使用的旧压缩文件不抢占新素材', () => {
   const { project, original, copy } = fixture()
   delete project.assets[1].compression.active
   assert.equal(workingVideoAsset(project, original).id, original.id)
-  project.tracks[1].clips.push(createClip(copy, project))
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(copy, project))
   assert.equal(workingVideoAsset(project, original).id, copy.id)
   assert.deepEqual(projectSourceAssets(project).map(asset => asset.id), [copy.id])
 })

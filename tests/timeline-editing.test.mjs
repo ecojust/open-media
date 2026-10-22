@@ -10,7 +10,7 @@ function fixture() {
   const video = { id: 'video', name: '视频.mp4', kind: 'video', url: 'blob:video', duration: 30, width: 1920, height: 1080, size: 1024, mime: 'video/mp4' }
   const audio = { id: 'audio', name: '声音.wav', kind: 'audio', url: 'blob:audio', duration: 30, width: 0, height: 0, size: 512, mime: 'audio/wav' }
   project = addAsset(addAsset(project, video), audio)
-  return { project, video, audio, videoTrack: project.tracks[1].id, audioTrack: project.tracks[2].id, textTrack: project.tracks[0].id }
+  return { project, video, audio, videoTrack: project.tracks.find(track => track.kind === 'video').id, audioTrack: project.tracks.find(track => track.kind === 'audio').id, textTrack: project.tracks.find(track => track.kind === 'text').id }
 }
 
 function addMedia(project, trackId, asset, id, start, duration, overrides = {}) {

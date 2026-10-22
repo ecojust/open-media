@@ -7,7 +7,7 @@ async function main(){
  browser=await chromium.launch({headless:true,executablePath:process.env.BROWSER_EXECUTABLE||chromium.executablePath(),args:['--no-sandbox']});const page=await browser.newPage();await page.route('**/native-preview-fixture',r=>r.fulfill({contentType:'text/html',body:'<div>临时预览</div>'}));await page.goto(`${url}/native-preview-fixture`)
  const result=await page.evaluate(async()=>{
   const {createProject,createClip}=await import('/src/core/project.ts'),{runTimelinePreview}=await import('/src/native-preview-tools.ts')
-  const asset={id:'source',kind:'video',name:'视频',url:'asset://source',nativePath:'/safe/media/source.mp4',duration:3,width:160,height:90,size:100,mime:'video/mp4'},project=createProject('测试',{width:160,height:90});project.assets=[asset];project.tracks[1].clips=[createClip(asset,project)]
+  const asset={id:'source',kind:'video',name:'视频',url:'asset://source',nativePath:'/safe/media/source.mp4',duration:3,width:160,height:90,size:100,mime:'video/mp4'},project=createProject('测试',{width:160,height:90});project.assets=[asset];project.tracks.find(track => track.kind === 'video').clips=[createClip(asset,project)]
   let mode='success',poll=0,resolveBegin,called=[],progress=[]
   window.__TAURI_INTERNALS__={convertFileSrc:path=>`asset://localhost${path}`,invoke:async(command,args)=>{
    called.push(command)

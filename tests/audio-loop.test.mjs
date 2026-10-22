@@ -42,7 +42,7 @@ test('仅音频轨道可循环，分离的视频声音也可循环，24小时上
   invalid.tracks.find(track => track.kind === 'video').clips.push(clip)
   assert.throws(() => validateProject(invalid), /超出素材/)
   assert.throws(() => trimClip(project, clip.id, 0, 86401), /范围/)
-  assert.throws(() => addClip(project, project.tracks[1].id, createClip(asset, project, { id: 'invalid', trimOut: 4 })), /超出素材/)
+  assert.throws(() => addClip(project, project.tracks.find(track => track.kind === 'video').id, createClip(asset, project, { id: 'invalid', trimOut: 4 })), /超出素材/)
 })
 
 test('恢复原长度保留位置速度音量，夹紧淡入淡出，可从循环后的分割点恢复', () => {

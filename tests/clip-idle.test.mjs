@@ -18,10 +18,10 @@ function fixture(options = {}) {
   const asset = { id:'source',name:'视频.mp4',kind:'video',url:'asset://localhost/media/video.mp4',nativePath:'/media/video.mp4',mime:'video/mp4',duration:60,width:1920,height:1080,size:1000 }
   project.assets.push(asset)
   const clip = createClip(asset,project,{id:'target',start:10,trimIn:5,trimOut:25,...options})
-  project.tracks[1].clips.push(clip)
-  project.tracks[0].clips.push(createTextClip(project,{id:'subtitle',text:'内容保持完整',start:12,trimOut:4}))
-  project.tracks[2].clips.push(createClip(asset,project,{id:'sound',start:10,trimIn:5,trimOut:25}))
-  return {project,clip,asset,track:project.tracks[1]}
+  project.tracks.find(track => track.kind === 'video').clips.push(clip)
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project,{id:'subtitle',text:'内容保持完整',start:12,trimOut:4}))
+  project.tracks.find(track => track.kind === 'audio').clips.push(createClip(asset,project,{id:'sound',start:10,trimIn:5,trimOut:25}))
+  return {project,clip,asset,track:project.tracks.find(track => track.kind === 'video')}
 }
 const detected = (...ranges) => ({intervals:ranges.map(([start,end])=>({kind:'freeze',start,end,confidence:.9}))})
 const pieces = result => result.project.tracks.find(t=>t.kind==='video').clips
@@ -33,8 +33,8 @@ test('static source spans split atomically and preserve source coverage, timing 
   assert.deepEqual(project,before)
   assert.equal(result.data.splitCount,4);assert.equal(result.data.repeatCount,2);assert.equal(result.data.repeatDuration,6)
   assert.deepEqual(pieces(result).map(c=>[c.start,c.trimIn,c.trimOut,c.classification]),[[10,5,7,undefined],[11,7,13,'repeat'],[14,13,17,undefined],[16,17,23,'repeat'],[19,23,25,undefined]])
-  assert.deepEqual(result.project.tracks[0],project.tracks[0]);assert.deepEqual(result.project.tracks[2],project.tracks[2])
-  assert.equal(clipEnd(pieces(result).at(-1)),clipEnd(project.tracks[1].clips[0]))
+  assert.deepEqual(result.project.tracks.find(track => track.kind === 'text'),project.tracks.find(track => track.kind === 'text'));assert.deepEqual(result.project.tracks.find(track => track.kind === 'audio'),project.tracks.find(track => track.kind === 'audio'))
+  assert.equal(clipEnd(pieces(result).at(-1)),clipEnd(project.tracks.find(track => track.kind === 'video').clips[0]))
   const history=commitHistory(createHistory(project),result.project);assert.deepEqual(undoHistory(history).present,project)
 })
 test('only freeze detection qualifies; silence, black and distant repeated frames never split',()=>{
@@ -69,8 +69,8 @@ test('split keeps source-time and animation continuity for trimmed speed ramps a
 })
 test('outgoing transition rebinds to last split and incoming retains first ID without moving or resizing',()=>{
   const {project,asset}=fixture({start:5,trimIn:0,trimOut:20})
-  project.tracks[1].clips.unshift(createClip(asset,project,{id:'before',start:0,trimIn:0,trimOut:5}))
-  project.tracks[1].clips.push(createClip(asset,project,{id:'after',start:25,trimIn:20,trimOut:25}))
+  project.tracks.find(track => track.kind === 'video').clips.unshift(createClip(asset,project,{id:'before',start:0,trimIn:0,trimOut:5}))
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(asset,project,{id:'after',start:25,trimIn:20,trimOut:25}))
   const withTransitions=addTransition(addTransition(project,5,'fade',1),25,'zoom',1)
   const originalTransitions=withTransitions.tracks.find(t=>t.kind==='transition').clips
   const result=splitIdleVideoClip(withTransitions,{clipId:'target'},detected([5,10]))
@@ -80,7 +80,7 @@ test('outgoing transition rebinds to last split and incoming retains first ID wi
 })
 test('cuts that would shrink a transition or restart an existing fade reject without changing input',()=>{
   const {project,asset}=fixture({start:0,trimIn:0,trimOut:20})
-  project.tracks[1].clips.push(createClip(asset,project,{id:'after',start:20,trimOut:5}))
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(asset,project,{id:'after',start:20,trimOut:5}))
   const withTransition=addTransition(project,20,'fade',1), before=structuredClone(withTransition)
   assert.throws(()=>splitIdleVideoClip(withTransition,{clipId:'target'},detected([10,19.8])),/缩短已有转场/)
   assert.deepEqual(withTransition,before)
@@ -88,27 +88,27 @@ test('cuts that would shrink a transition or restart an existing fade reject wit
 })
 test('classification is saved, old documents remain ordinary, splits and copies keep repeat without changing playback data',()=>{
   const {project,clip}=fixture(), old=validateProject(JSON.parse(JSON.stringify(project)),{trusted:true})
-  assert.equal(old.tracks[1].clips[0].classification,undefined)
+  assert.equal(old.tracks.find(track => track.kind === 'video').clips[0].classification,undefined)
   const result=classifyVideoClip(project,'target','repeat')
   const reopened=validateProject(JSON.parse(JSON.stringify(result.project)),{trusted:true})
-  const tagged=reopened.tracks[1].clips[0],{classification,...other}=tagged
+  const tagged=reopened.tracks.find(track => track.kind === 'video').clips[0],{classification,...other}=tagged
   assert.equal(classification,'repeat');assert.deepEqual(other,clip)
-  const split=splitClip(reopened,'target',15);assert.ok(split.tracks[1].clips.every(c=>c.classification==='repeat'))
+  const split=splitClip(reopened,'target',15);assert.ok(split.tracks.find(track => track.kind === 'video').clips.every(c=>c.classification==='repeat'))
   const copied=executeProjectTool(reopened,'open_media_clip_duplicate',{clipId:'target'}).project
-  assert.ok(copied.tracks[1].clips.every(c=>c.classification==='repeat'))
-  const cleared=classifyVideoClip(reopened,'target','normal');assert.equal(cleared.project.tracks[1].clips[0].classification,undefined)
-  const invalid=cloneProject(project);invalid.tracks[1].clips[0].classification='arbitrary';assert.throws(()=>validateProject(invalid,{trusted:true}),/片段类型/)
+  assert.ok(copied.tracks.find(track => track.kind === 'video').clips.every(c=>c.classification==='repeat'))
+  const cleared=classifyVideoClip(reopened,'target','normal');assert.equal(cleared.project.tracks.find(track => track.kind === 'video').clips[0].classification,undefined)
+  const invalid=cloneProject(project);invalid.tracks.find(track => track.kind === 'video').clips[0].classification='arbitrary';assert.throws(()=>validateProject(invalid,{trusted:true}),/片段类型/)
 })
 test('locks, unsupported sources, invalid detector ranges and capacity reject without partial editing',()=>{
-  const {project}=fixture();project.tracks[1].locked=true
+  const {project}=fixture();project.tracks.find(track => track.kind === 'video').locked=true
   assert.throws(()=>splitIdleVideoClip(project,{clipId:'target'},detected([8,15])),/解锁/)
   assert.throws(()=>classifyVideoClip(project,'target','repeat'),/解锁/)
-  project.tracks[1].locked=false
+  project.tracks.find(track => track.kind === 'video').locked=false
   assert.throws(()=>splitIdleVideoClip(project,{clipId:'subtitle'},detected([8,15])),/视频/)
   assert.throws(()=>splitIdleVideoClip(project,{clipId:'target'},detected([8,7])),/无效/)
   assert.throws(()=>splitIdleVideoClip(project,{clipId:'target'},{}),/未返回有效/)
-  const template=project.tracks[0].clips[0]
-  project.tracks[0].clips=Array.from({length:MAX_CLIPS-2},(_,i)=>({...template,id:`text-${i}`}))
+  const template=project.tracks.find(track => track.kind === 'text').clips[0]
+  project.tracks.find(track => track.kind === 'text').clips=Array.from({length:MAX_CLIPS-2},(_,i)=>({...template,id:`text-${i}`}))
   const before=structuredClone(project)
   assert.throws(()=>splitIdleVideoClip(project,{clipId:'target'},detected([8,15])),/上限/)
   assert.deepEqual(project,before)
@@ -116,7 +116,7 @@ test('locks, unsupported sources, invalid detector ranges and capacity reject wi
 test('classification supports atomic MCP batch and the published schemas match async behavior',()=>{
   const {project}=fixture()
   const batch=executeTimelineBatch(project,{operations:[{tool:'open_media_clip_classify',arguments:{clipId:'target',classification:'repeat'}}]}, {revision:1,execute:executeProjectTool})
-  assert.equal(batch.project.tracks[1].clips[0].classification,'repeat')
+  assert.equal(batch.project.tracks.find(track => track.kind === 'video').clips[0].classification,'repeat')
   const schema=MCP_TOOLS.find(t=>t.name==='open_media_clip_split_idle')
   assert.equal(schema._meta['openmedia/execution'].mode,'asynchronous')
   assert.equal(schema._meta['openmedia/execution'].cancelTool,'open_media_job_cancel')

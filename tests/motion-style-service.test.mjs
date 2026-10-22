@@ -15,7 +15,7 @@ function fixture(size={width:1280,height:720}) {
   const project = createProject('原始剪辑工程',size)
   project.assets.push(image('photo'),image('unused'))
   project.mcpMotion={enabled:true,assetIds:['photo'],styleId:'flat-pop'}
-  project.tracks[0].clips.push(createTextClip(project,{start:7,trimOut:5,text:'原字幕不参与短片渲染'}))
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project,{start:7,trimOut:5,text:'原字幕不参与短片渲染'}))
   project.markers=[{id:'original-marker',time:8,label:'原章节',kind:'chapter'}]
   return project
 }
@@ -59,7 +59,7 @@ test('catalog and dry run are side-effect free; isolated scenes always start at 
 test('asset generation is independent of locked/full/long existing timelines and reserves only one final asset',()=>{
   const project=fixture()
   project.tracks=Array.from({length:MAX_TRACKS},()=>({...createTrack('text'),locked:true}))
-  project.tracks[0].clips.push(createTextClip(project,{start:MAX_PROJECT_DURATION-4,trimOut:4}))
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project,{start:MAX_PROJECT_DURATION-4,trimOut:4}))
   project.assets.push(...Array.from({length:MAX_ASSETS-1-project.assets.length},(_,index)=>image(`extra-${index}`)))
   const plan=planMotionClipGeneration(project,options())
   assert.equal(plan.start,0);assert.equal(plan.duration,4);assert.deepEqual(plan.warnings,[])
@@ -102,8 +102,8 @@ test('timeline destination inserts exactly one ordinary video clip on a new trac
     assert.deepEqual(plan.insert,{start:start??12})
     const result=await prepareMotionStyleTool(tool,input,context(project),deps)
     assert.equal(result.project.tracks.length,project.tracks.length+1)
-    assert.deepEqual(result.project.tracks.slice(1),project.tracks)
-    const track=result.project.tracks[0]
+    assert.deepEqual(result.project.tracks.slice(0,-1),project.tracks)
+    const track=result.project.tracks.at(-1)
     assert.equal(track.kind,'video');assert.equal(track.clips.length,1)
     assert.equal(track.clips[0].start,start??12);assert.equal(track.clips[0].assetId,result.data.assetId)
     assert.deepEqual(result.selection,{trackId:track.id,clipId:track.clips[0].id})
@@ -114,13 +114,13 @@ test('timeline destination inserts exactly one ordinary video clip on a new trac
 })
 
 test('explicit destination track is validated before rendering and never shifts existing clips',async()=>{
-  const project=fixture(),track=project.tracks[1]
+  const project=fixture(),track=project.tracks.find(track => track.kind === 'video')
   track.clips.push(createClip(project.assets[0],project,{start:5,trimOut:5}))
   const input={...options(),destination:'timeline',insert:{trackId:track.id,start:1}}
   const result=await prepareMotionStyleTool(tool,input,context(project),dependencies())
   assert.equal(result.project.tracks.length,project.tracks.length)
-  assert.deepEqual(result.project.tracks[1].clips[0],track.clips[0]);assert.equal(result.project.tracks[1].clips.length,2)
-  for(const insert of [{trackId:track.id,start:6},{trackId:'missing'},{trackId:project.tracks[0].id},{start:NaN},{start:'1'},{start:-1},{start:1,extra:1}])assert.throws(()=>planMotionClipGeneration(project,{...options(),destination:'timeline',insert}))
+  assert.deepEqual(result.project.tracks.find(track => track.kind === 'video').clips[0],track.clips[0]);assert.equal(result.project.tracks.find(track => track.kind === 'video').clips.length,2)
+  for(const insert of [{trackId:track.id,start:6},{trackId:'missing'},{trackId:project.tracks.find(track => track.kind === 'text').id},{start:NaN},{start:'1'},{start:-1},{start:1,extra:1}])assert.throws(()=>planMotionClipGeneration(project,{...options(),destination:'timeline',insert}))
   track.locked=true
   assert.throws(()=>planMotionClipGeneration(project,input),/解锁/)
   assert.doesNotThrow(()=>planMotionClipGeneration(project,options()))
@@ -224,13 +224,13 @@ test('host rejection releases final output once while accepted outputs remain ow
   }
 })
 
-test('shared MCP runner exposes the capability and validates arguments before rendering',async()=>{
-  const project=fixture()
-  assert.equal(isSharedEditorTool(tool),true);assert.equal(isSharedEditorTool('open_media_motion_compose'),false)
-  const result=await prepareEditorTool(tool,{...options(),dryRun:true,expectedRevision:3},context(project))
-  assert.equal(result.data.dryRun,true);assert.equal(result.data.destination,'assets');assert.equal(result.project,undefined)
-  await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true,expectedRevision:2},context(project)),/revision/)
-  await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true,placement:'append'},context(project)))
+test('shared runner rejects the removed flattened motion tool before rendering or mutating the project',async()=>{
+  const project=fixture(), before=structuredClone(project)
+  assert.equal(isSharedEditorTool(tool),false);assert.equal(isSharedEditorTool('open_media_motion_compose'),false)
+  for (const dryRun of [false,true]) {
+    await assert.rejects(prepareEditorTool(tool,{...options(),dryRun,expectedRevision:3},context(project)),/独立素材与轨道编排/)
+  }
+  assert.deepEqual(project,before)
 })
 
 test('effect generation and dry run require an enabled ready current-project MCP configuration',async()=>{
@@ -261,7 +261,7 @@ test('configured style is authoritative and omitted style uses it; scene and log
 test('GUI callers cannot bypass MCP-only generation even with valid configuration or dry run',async()=>{
   const project=fixture(),deps=dependencies()
   for(const dryRun of [false,true])await assert.rejects(prepareMotionStyleTool(tool,{...options(),dryRun},{...context(project),source:'gui'},deps),/仅供 MCP/)
-  await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true},{...context(project),source:'gui'}),/MCP/)
+  await assert.rejects(prepareEditorTool(tool,{...options(),dryRun:true},{...context(project),source:'gui'}),/独立素材与轨道编排/)
   assert.deepEqual(deps.calls,[])
 })
 

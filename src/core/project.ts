@@ -36,7 +36,7 @@ export function createTrack(kind: TrackKind = 'video', name?: string): Track {
 
 export function createProject(title = '未命名项目', options: Partial<Pick<Project, 'width' | 'height' | 'fps' | 'background'>> = {}): Project {
   const now = new Date().toISOString()
-  return validateProject({ version: 1, id: newId('project'), title, width: 1920, height: 1080, fps: 30, background: '#101018', ...options, autoSizeFromVideo: options.width === undefined && options.height === undefined, createdAt: now, updatedAt: now, assets: [], tracks: [createTrack('text'), createTrack('video'), createTrack('audio')] }, { trusted: true })
+  return validateProject({ version: 1, id: newId('project'), title, width: 1920, height: 1080, fps: 30, background: '#101018', ...options, autoSizeFromVideo: options.width === undefined && options.height === undefined, createdAt: now, updatedAt: now, assets: [], tracks: [createTrack('video'), createTrack('audio'), createTrack('text')] }, { trusted: true })
 }
 
 export function createClip(asset: MediaAsset, project: Pick<Project, 'width' | 'height'>, options: Partial<Clip> = {}): Clip {

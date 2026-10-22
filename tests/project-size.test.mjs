@@ -64,13 +64,13 @@ test('手动尺寸、旧项目与再次打开的已有项目均保持原设置�
 test('首次导入按比例移动现有画面与字幕样式，不改内容、时间或音频几何，输入保持不可变', () => {
   let project = createProject()
   const subtitle = createSubtitleClip(project, { text: '沿用字幕配置', start: 2, color: '#ffcc55', textAlign: 'right' })
-  project = addClip(project, project.tracks[0].id, subtitle)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, subtitle)
   project = updateClip(project, subtitle.id, { x: 240, width: 1200 })
   const audio = { ...portrait, id: 'voice', kind: 'audio', width: 0, height: 0, mime: 'audio/wav' }
   project = addAssets(project, [audio])
-  project = addClip(project, project.tracks[2].id, createClip(audio, project))
+  project = addClip(project, project.tracks.find(track => track.kind === 'audio').id, createClip(audio, project))
   const original = structuredClone(project)
-  const next = importAssets(project, [portrait]), clip = next.tracks[0].clips[0]
+  const next = importAssets(project, [portrait]), clip = next.tracks.find(track => track.kind === 'text').clips[0]
   const sx = 1080 / 1920, sy = 1920 / 1080
   for (const item of [clip, next.subtitleStyle]) {
     assert.equal(item.x, 240 * sx); assert.equal(item.y, subtitle.y * sy)
@@ -80,10 +80,10 @@ test('首次导入按比例移动现有画面与字幕样式，不改内容、�
   }
   assert.equal(clip.text, subtitle.text); assert.equal(clip.start, subtitle.start)
   assert.equal(clip.generatedAt, subtitle.generatedAt)
-  assert.deepEqual(next.tracks[2], project.tracks[2])
+  assert.deepEqual(next.tracks.find(track => track.kind === 'audio'), project.tracks.find(track => track.kind === 'audio'))
   assert.deepEqual(project, original)
   const tiny = importAssets(project, [video('small', 16, 16)])
-  assert.equal(tiny.tracks[0].clips[0].fontSize, 4)
+  assert.equal(tiny.tracks.find(track => track.kind === 'text').clips[0].fontSize, 4)
 })
 
 test('源尺寸状态与导入一起撤销重做，并在项目文件中持久化', async () => {
@@ -124,24 +124,24 @@ test('手动调整同时缩放视觉片段和默认字幕，保留素材、音�
   const sound = { ...video('sound', 0, 0), kind: 'audio', mime: 'audio/wav', duration: 10 }
   project = addAssets(project, [source, sound])
   const visual = createClip(source, project, { start: 3, trimIn: 2, trimOut: 12, speed: 2, x: -120, y: 50, width: 1000, height: 600, rotation: 45, opacity: 0.7, fit: 'cover', fadeIn: 0.2 })
-  project = addClip(project, project.tracks[1].id, visual)
-  project = addClip(project, project.tracks[2].id, createClip(sound, project, { start: 2, trimOut: 16, x: 80, width: 400 }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, visual)
+  project = addClip(project, project.tracks.find(track => track.kind === 'audio').id, createClip(sound, project, { start: 2, trimOut: 16, x: 80, width: 400 }))
   const subtitle = createSubtitleClip(project, { text: '尺寸调整', start: 4, color: '#ffcc55', textVerticalAlign: 'bottom' })
-  project = addClip(project, project.tracks[0].id, subtitle)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, subtitle)
   project = updateClip(project, subtitle.id, { x: 120, y: 640, width: 1400, height: 240, fontSize: 72 })
   project.updatedAt = '2001-01-01T00:00:00.000Z'
   const original = structuredClone(project)
   const next = resizeProject(project, 960, 2160)
-  const resized = next.tracks[1].clips[0]
+  const resized = next.tracks.find(track => track.kind === 'video').clips[0]
   assert.deepEqual([resized.x, resized.y, resized.width, resized.height], [-60, 100, 500, 1200])
   for (const key of ['start', 'trimIn', 'trimOut', 'speed', 'rotation', 'opacity', 'fit', 'fadeIn', 'generatedAt']) assert.equal(resized[key], visual[key])
-  for (const style of [next.tracks[0].clips[0], next.subtitleStyle]) {
+  for (const style of [next.tracks.find(track => track.kind === 'text').clips[0], next.subtitleStyle]) {
     assert.deepEqual([style.x, style.y, style.width, style.height, style.fontSize], [60, 1280, 700, 480, 36])
     assert.equal(style.color, '#ffcc55')
     assert.equal(style.textVerticalAlign, 'bottom')
   }
   assert.deepEqual(next.assets, original.assets)
-  assert.deepEqual(next.tracks[2], original.tracks[2])
+  assert.deepEqual(next.tracks.find(track => track.kind === 'audio'), original.tracks.find(track => track.kind === 'audio'))
   for (const key of ['title', 'id', 'createdAt', 'fps', 'background']) assert.equal(next[key], original[key])
   assert.equal(next.autoSizeFromVideo, false)
   assert.ok(Date.parse(next.updatedAt) > Date.parse(original.updatedAt))
@@ -151,15 +151,15 @@ test('手动调整同时缩放视觉片段和默认字幕，保留素材、音�
 test('极端尺寸变更保留有效的几何和字号范围', () => {
   let project = createProject('极小画布', { width: 16, height: 16 })
   const subtitle = createSubtitleClip(project, { x: -100, y: 100, width: 100, height: 100, fontSize: 1024 })
-  project = addClip(project, project.tracks[0].id, subtitle)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, subtitle)
   project = updateClip(project, subtitle.id, { fontSize: 2048 })
   const huge = resizeProject(project, 16384, 16384)
-  for (const style of [huge.tracks[0].clips[0], huge.subtitleStyle]) {
+  for (const style of [huge.tracks.find(track => track.kind === 'text').clips[0], huge.subtitleStyle]) {
     assert.deepEqual([style.x, style.y, style.width, style.height, style.fontSize], [-65536, 65536, 65536, 65536, 2048])
   }
   const smallClip = createSubtitleClip(huge, { width: 1, height: 1, fontSize: 4 })
-  const small = resizeProject(addClip(huge, huge.tracks[0].id, smallClip), 16, 16)
-  assert.deepEqual([small.tracks[0].clips[1].width, small.tracks[0].clips[1].height, small.tracks[0].clips[1].fontSize], [1, 1, 4])
+  const small = resizeProject(addClip(huge, huge.tracks.find(track => track.kind === 'text').id, smallClip), 16, 16)
+  assert.deepEqual([small.tracks.find(track => track.kind === 'text').clips[1].width, small.tracks.find(track => track.kind === 'text').clips[1].height, small.tracks.find(track => track.kind === 'text').clips[1].fontSize], [1, 1, 4])
 })
 
 test('重复尺寸不产生新状态，明确确认相同尺寸仍会关闭首次自动匹配', () => {
@@ -179,12 +179,12 @@ test('重复尺寸不产生新状态，明确确认相同尺寸仍会关闭首�
 test('源尺寸取自已校正方向的视频素材，忽略片段的缩放、旋转与适配方式', () => {
   let project = addAssets(createProject('手动项目', { width: 1920, height: 1080 }), [portrait])
   const clip = createClip(portrait, project, { x: 90, y: 50, width: 200, height: 300, rotation: 90, fit: 'fill' })
-  project = addClip(project, project.tracks[1].id, clip)
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, clip)
   const original = structuredClone(project)
   assert.deepEqual(videoClipSourceSize(project, clip.id), { width: 1080, height: 1920 })
   const result = resizeProjectToVideoClip(project, clip.id)
   assert.deepEqual([result.width, result.height, result.autoSizeFromVideo], [1080, 1920, false])
-  assert.equal(result.tracks[1].clips[0].rotation, 90)
+  assert.equal(result.tracks.find(track => track.kind === 'video').clips[0].rotation, 90)
   assert.deepEqual(result.assets, project.assets)
   assert.deepEqual(project, original)
 })
@@ -192,13 +192,13 @@ test('源尺寸取自已校正方向的视频素材，忽略片段的缩放、�
 test('匹配源尺寸拒绝锁定、非视频、缺失素材以及非法源尺寸', () => {
   let project = addAssets(createProject(), [portrait, { ...landscape, id: 'still', kind: 'image', mime: 'image/png' }])
   const clip = createClip(portrait, project)
-  project = addClip(project, project.tracks[1].id, clip)
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, clip)
   const image = createClip(project.assets[1], project)
-  project = addClip(project, project.tracks[1].id, image)
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, image)
   const audioTrackVideo = createClip(portrait, project)
-  project = addClip(project, project.tracks[2].id, audioTrackVideo)
+  project = addClip(project, project.tracks.find(track => track.kind === 'audio').id, audioTrackVideo)
   const subtitle = createSubtitleClip(project)
-  project = addClip(project, project.tracks[0].id, subtitle)
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, subtitle)
   for (const id of ['missing', image.id, audioTrackVideo.id, subtitle.id]) {
     assert.equal(videoClipSourceSize(project, id), undefined)
     assert.throws(() => resizeProjectToVideoClip(project, id), /源视频素材/)
@@ -207,7 +207,7 @@ test('匹配源尺寸拒绝锁定、非视频、缺失素材以及非法源尺�
   assert.equal(videoClipSourceSize(missingSource, clip.id), undefined)
   assert.throws(() => resizeProjectToVideoClip(missingSource, clip.id), /源视频素材/)
   const locked = structuredClone(project)
-  locked.tracks[1].locked = true
+  locked.tracks.find(track => track.kind === 'video').locked = true
   assert.deepEqual(videoClipSourceSize(locked, clip.id), { width: 1080, height: 1920 })
   assert.throws(() => resizeProjectToVideoClip(locked, clip.id), /解锁/)
   for (const width of [8, 20000, 853.5, NaN]) {
@@ -219,7 +219,7 @@ test('匹配源尺寸拒绝锁定、非视频、缺失素材以及非法源尺�
 test('手动尺寸及视觉位置可整体撤销重做，项目文件往返保持尺寸和字幕默认样式', async () => {
   let initial = createProject()
   const subtitle = createSubtitleClip(initial, { text: '保存尺寸和样式' })
-  initial = addClip(initial, initial.tracks[0].id, subtitle)
+  initial = addClip(initial, initial.tracks.find(track => track.kind === 'text').id, subtitle)
   initial = updateClip(initial, subtitle.id, { color: '#ffeedd', textAlign: 'right' })
   const resized = resizeProject(initial, 853, 479)
   const history = commitHistory(createHistory(initial), resized)

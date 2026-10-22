@@ -134,7 +134,7 @@ onBeforeUnmount(() => { disposed = true; revision++; stopPoll() })
         <div class="mcp-footer"><p class="mcp-feedback" :class="{ error: error || statusError }" :role="error || statusError ? 'alert' : 'status'">{{ feedback }}</p><button type="button" class="mcp-copy" :disabled="!canCopy" data-testid="mcp-copy-config" @click="copyConfig"><Icon name="copy" :size="14" />复制配置</button></div>
         <section v-if="project" class="mcp-motion" data-testid="mcp-motion-config">
           <div class="mcp-status-row mcp-motion-heading"><Icon name="sparkles" :size="15" /><strong>素材二创</strong><span class="mcp-motion-scope">当前工程</span><button type="button" role="switch" class="mcp-switch" aria-label="素材二创" :aria-checked="motion.enabled" :disabled="motionBlocked" data-testid="mcp-motion-switch" @click="changeMotion({ enabled: !motion.enabled })"><span /></button></div>
-          <p class="mcp-motion-description">由外部 Agent 读取配置并编排、生成与剪辑。选择风格后，自动附加对应提示词，用代码生成效果片段，再放入工程轨道融合。</p>
+          <p class="mcp-motion-description">由外部 Agent 读取配置，用代码生成图片、透明或绿幕特效素材，再分层放入工程轨道。主内容、文字与装饰可独立调整，最终成片由剪辑器合成。</p>
           <p v-if="!loading && !service.running" class="mcp-motion-message" role="status">请先开启 MCP 服务，再配置素材二创。</p>
           <template v-if="motion.enabled && service.running">
             <p v-if="motionBlocked && configReady && !statusError" class="mcp-motion-message" role="status">正在处理任务，完成后可修改二创配置。</p>
@@ -159,14 +159,14 @@ onBeforeUnmount(() => { disposed = true; revision++; stopPoll() })
             </div>
             <p v-if="motionStyle" class="mcp-motion-style-description">{{ motionStyle.description }}</p>
             <details v-if="motionStyle && motionBrief" class="mcp-motion-defaults" data-testid="mcp-motion-default-prompt">
-              <summary><Icon name="sparkles" :size="13" />默认风格与生成流程<span>自动附加</span></summary>
+              <summary><Icon name="sparkles" :size="13" />默认风格与分层流程<span>自动附加</span></summary>
               <div class="mcp-motion-default-body">
                 <h4>{{ motionStyle.name }} · 默认提示词</h4><p data-testid="mcp-motion-style-prompt">{{ motionBrief.stylePrompt }}</p>
-                <h4>代码生成与剪辑流程</h4><p>{{ motionBrief.workflowPrompt }}</p>
-                <p v-if="motionStyle.note" class="mcp-motion-preset-note">{{ motionStyle.presetSupported ? '内置快捷合成说明' : '创作说明' }}：{{ motionStyle.note }}</p>
+                <h4>素材生成与轨道编排流程</h4><p>{{ motionBrief.workflowPrompt }}</p>
+                <p v-if="motionStyle.note" class="mcp-motion-preset-note">创作说明：{{ motionStyle.note }}</p>
               </div>
             </details>
-            <label class="mcp-field mcp-motion-prompt">创作要求（额外提示，可选）<textarea :value="motion.prompt || ''" aria-label="二创创作要求" rows="2" :maxlength="MAX_MCP_MOTION_PROMPT" :disabled="motionBlocked" placeholder="补充时长、故事、文案、节奏等要求；留空也会使用上方默认风格与生成流程。" @input="changeMotion({ prompt: ($event.target as HTMLTextAreaElement).value })" /></label>
+            <label class="mcp-field mcp-motion-prompt">创作要求（额外提示，可选）<textarea :value="motion.prompt || ''" aria-label="二创创作要求" rows="2" :maxlength="MAX_MCP_MOTION_PROMPT" :disabled="motionBlocked" placeholder="补充时长、故事、文案、节奏等要求；留空也会使用上方默认风格与分层流程。" @input="changeMotion({ prompt: ($event.target as HTMLTextAreaElement).value })" /></label>
             <p v-if="motionBrief?.errors.length" class="mcp-motion-message mcp-motion-warning" role="status">{{ motionBrief.errors.join(' ') }}</p>
             <button v-if="invalidMotionSelection" type="button" class="mcp-copy mcp-motion-clear" :disabled="motionBlocked" @click="changeMotion({ assetIds: [...selectedMotionIds] })">清除失效选择</button>
             <p v-if="motionBrief?.ready" class="mcp-motion-message" role="status">配置已就绪，请在连接的 Agent 中发起二创任务。</p>

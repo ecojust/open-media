@@ -131,7 +131,7 @@ fn native_keyframes_crop_freeze_and_blur_are_actual_frame_operations() {
     assert_eq!(bytes.len(), 60 * 64 * 48 * 3);
     assert_eq!(pixel(&bytes, 0, 40, 20), pixel(&bytes, 59, 40, 20));
     let mut blurred = spec(&asset, clip(&asset));
-    blurred["project"]["tracks"].as_array_mut().unwrap().insert(0,json!({"kind":"text","clips":[{"id":"blur","start":0,"trimIn":0,"trimOut":2,"speed":1,"x":16,"y":0,"width":32,"height":48,"opacity":1,"overlay":{"kind":"blur","blurRadius":8}}]}));
+    blurred["project"]["tracks"].as_array_mut().unwrap().push(json!({"kind":"text","clips":[{"id":"blur","start":0,"trimIn":0,"trimOut":2,"speed":1,"x":16,"y":0,"width":32,"height":48,"opacity":1,"overlay":{"kind":"blur","blurRadius":8}}]}));
     let (bytes, _) = render(temp.path(), &rt, &blurred);
     let mixed = pixel(&bytes, 10, 31, 20);
     assert!(

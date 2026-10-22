@@ -1,7 +1,7 @@
 [
   {
     "name": "open_media_project_get",
-    "description": "读取当前工程、画面设置、全部轨道和片段ID、素材元数据、字幕问题及总时长。时间单位为秒，坐标为项目像素，轨道顺序从前景到背景。不返回文件路径或内部URL。\n包含用户配置的 mcpMotion 与只读 mcpMotionBrief；素材二创应先读取该任务说明或 open_media_motion_brief_get，由外部 Agent 规划后执行。本快照的 additionalAssetGeneration 未查询本地模型，需调用 motion_brief_get 或 ai_status({probeRuntime:true}) 获取实时能力；可用本地图片/音乐模型优先，用户明确要求 Agent 自行生成除外。\n执行方式：同步返回最终结果。",
+    "description": "读取当前工程、画面设置、全部轨道和片段ID、素材元数据、字幕问题及总时长。时间单位为秒，坐标为项目像素，轨道顺序从背景到前景，每条轨道的 zIndex 为从 0 开始的数组下标；越靠后 zIndex 越大、画面越靠上，音频和转场轨道不直接绘制视觉图层。不返回文件路径或内部URL。\n包含用户配置的 mcpMotion 与只读 mcpMotionBrief；素材二创应先读取该任务说明或 open_media_motion_brief_get，由外部 Agent 规划后执行。本快照的 additionalAssetGeneration 未查询本地模型，需调用 motion_brief_get 或 ai_status({probeRuntime:true}) 获取实时能力；可用本地图片/音乐模型优先，用户明确要求 Agent 自行生成除外。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -228,7 +228,7 @@
   },
   {
     "name": "open_media_track_add",
-    "description": "新增视频、音频、字幕或转场轨道。返回新轨道ID。\n执行方式：同步返回最终结果。",
+    "description": "新增视频（也支持图片）、音频、字幕或转场轨道。默认添加在最后，作为最高层级；可用 zIndex 或 index 指定位置。返回轨道ID及实际 zIndex，层级按当前数组顺序派生，重排后请重新读取工程。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -249,7 +249,8 @@
         "index": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 99
+          "maximum": 99,
+          "description": "轨道位置，从0开始，也就是zIndex；越大越靠前景。"
         },
         "expectedRevision": {
           "type": "integer",
@@ -262,6 +263,12 @@
           "minLength": 1,
           "maxLength": 200,
           "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
+        },
+        "zIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99,
+          "description": "目标堆叠层级，从0开始，与index等价。若同时提供，两者必须相同。"
         }
       },
       "required": [
@@ -394,7 +401,7 @@
   },
   {
     "name": "open_media_track_reorder",
-    "description": "移动轨道到指定的从0开始位置；顺序由前景到背景。\n执行方式：同步返回最终结果。",
+    "description": "按 zIndex 或 index 移动轨道（必填其中一个）。轨道从背景到前景排列，0 为底层；越靠后的轨道层级越高。移动后其他轨道的 zIndex 随数组顺序更新，预览和导出保持一致。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -407,7 +414,8 @@
         "index": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 99
+          "maximum": 99,
+          "description": "轨道位置，从0开始，也就是zIndex；越大越靠前景。"
         },
         "expectedRevision": {
           "type": "integer",
@@ -420,11 +428,16 @@
           "minLength": 1,
           "maxLength": 200,
           "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
+        },
+        "zIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 99,
+          "description": "目标堆叠层级，从0开始，与index等价。若同时提供，两者必须相同。"
         }
       },
       "required": [
-        "trackId",
-        "index"
+        "trackId"
       ],
       "additionalProperties": false
     },
@@ -443,7 +456,7 @@
   },
   {
     "name": "open_media_clip_add",
-    "description": "将已导入素材添加到指定视频或音频轨道。start为项目时间，trimIn/trimOut为源媒体时间。音频允许延长以循环播放。\n执行方式：同步返回最终结果。",
+    "description": "将已导入的视频、图片或音频添加到指定轨道。图片使用 video 轨道，作为固定时长的独立图层，默认等比居中且不超过半画布，可设置 x/y/width/height/opacity/rotation 与入退场；透明图片保留透明区域。start 为项目时间，trimIn/trimOut 为源媒体时间；静态图片 trimOut 设置显示时长。背景图片可显式设为全画布，装饰图片应放较高 zIndex 的独立轨道。绿幕特效通过 clip_update.chromaKey 配置抠色，运动通过 clip_keyframes_set 设置；最终由剪辑器合成。音频允许延长以循环播放。\n执行方式：同步返回最终结果。",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -7172,7 +7185,7 @@
   },
   {
     "name": "open_media_motion_brief_get",
-    "description": "首先读取用户在 MCP 弹窗中设置的素材二创任务：enabled、ready、errors、实际可用/已选数量、所选视觉素材、指定风格，以及 workflowPrompt（默认代码生成流程）、stylePrompt（所选风格默认提示词）、userPrompt（用户额外要求）、effectivePrompt（合并后的执行提示词）。prompt 保留用户额外文本。自动刷新本地模型状态，并在 additionalAssetGeneration 返回用户所选图像/音乐模型的 selectedModelId、可用状态与 local-first 路由；检查失败返回 checked=false、checkError、route=check-status，不能当成没有模型。生成额外图片或音乐前先读取本地能力：默认优先使用用户所选模型和运行环境均就绪的 MCP 生成工具；readyModelIds 仅包含用户所选模型，不能换用其他已下载模型，只有对应能力不可用或用户明确要求 Agent 自行生成时才交由 Agent；忙碌应等待，查询失败应重查，不自动下载模型。外部 Agent 应使用 effectivePrompt，通过 asset_read 分块读取所选源素材，在自己的执行环境编写确定性动画代码并渲染真实视频，再用 asset_upload 或 asset_import_url 导入当前工程，通过 clip_add 和剪辑工具与完整工程融合并检查结果。应用不会自行调用大模型或执行任意代码。motion_clip_generate 是有限二维预设的可选快捷路径。此工具只读，不能启用功能、改变所选素材或风格。\n执行方式：同步返回最终结果，只读查询。",
+    "description": "读取用户在 MCP 弹窗设置的素材二创任务：enabled、ready、errors、实际可用/已选数量、所选视觉素材与风格，以及 workflowPrompt、stylePrompt、userPrompt、effectivePrompt。生成方式为 agent-assets-timeline：Agent 用代码生成独立图片、透明图层、透明或绿幕特效等素材，使用 asset_read 读取所选源素材，通过 asset_upload/asset_import_url 回传；通过 track_add/track_reorder、clip_add/clip_update、关键帧、文字、配音与转场工具编排，最终画面与成片由剪辑器合成，禁止用外部完整视频替代分层工程。轨道顺序从背景到前景，zIndex 为数组下标。自动刷新 additionalAssetGeneration 的本地模型能力；默认优先用户当前选择且运行就绪的图片/音乐模型，readyModelIds 只含用户选择。未知或查询失败须用 ai_status(probeRuntime:true) 重查，忙碌则等待；只有确认不可用或用户明确要求 Agent 自制才使用 Agent 自带能力，不自动下载或切换模型。应用不执行任意代码；25种风格均走分层流程，旧 motion_clip_generate 整片工具不再提供。此工具只读，不能启用功能、改变素材选择、风格或用户要求。\n执行方式：同步返回最终结果，只读查询。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -7205,7 +7218,7 @@
   },
   {
     "name": "open_media_motion_style_list",
-    "description": "查询素材二创的 25 类视觉风格，返回 items、total、count；每个风格包含 presetSupported 和独立的 prompt（代码渲染方向、标志特征、构图、运动与检查要求）、配色和标签。search 可按名称、说明、标签或风格 ID 过滤。默认由外部 Agent 根据所选素材写代码渲染视频，导入后放到轨道继续剪辑。capabilities 通过 presetStyleIds、codeOnlyStyleIds 和 selectedPresetSupported 区分内置二维预设与必须由 Agent 代码渲染的风格；应用不执行任意代码。\n执行方式：同步返回最终结果，只读查询。",
+    "description": "查询素材二创的25类视觉风格，返回items、total、count；每种包含独立prompt（素材生成、构图、时间线动画与检查要求）、配色和标签。search按名称、说明、标签或风格ID过滤。所有风格统一由Agent生成独立素材，使用编辑器的轨道、图片片段、字幕、关键帧和转场组合，保留各层可编辑；最终由剪辑器预览与导出。capabilities说明 layered=true、output=layered-timeline、finalComposition=editor-timeline 及从底到顶的层级规则。所有风格均不提供整片生成工具；查询不公开内部旧预设标记。应用不执行任意代码。\n执行方式：同步返回最终结果，只读查询。",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -7237,187 +7250,6 @@
         "mode": "synchronous",
         "responseType": "result",
         "final": true
-      }
-    }
-  },
-  {
-    "name": "open_media_motion_clip_generate",
-    "description": "内置二维预设快捷合成工具，仅支持 motion_style_list 中 presetSupported=true 的 15 种风格；其他风格即使省略 styleId 也会拒绝，不会改用近似预设。不执行 Agent 提交的代码；自定义代码渲染应遵循 motion_brief_get.effectivePrompt，在 Agent 环境渲染后上传或导入视频。仅供外部 MCP Agent 使用；先调用 open_media_motion_brief_get 读取用户任务。必须由用户在 MCP 弹窗启用并选择素材和风格；scenes 与 Logo 只能引用用户选定的视觉素材，配乐使用当前工程的音频素材，styleId 默认用户选定风格且不允许改为其他风格。由外部 Agent 分析素材并决定场景、文案、时长与节奏，本工具负责实际视频编码，应用不自行调用大模型。对当前工程已导入的图片或视频进行素材二创，按风格与场景顺序真实编码为一个视频素材，包含背景、装饰、文案、入退场动画及可选配乐与 Logo。尺寸与帧率沿用当前工程。默认 destination=assets 只加入项目素材，原有轨道保持不变；destination=timeline 可通过 insert 指定未锁定的视频轨道与 start，默认放在工程结尾，未指定轨道时新建一个普通视频轨道。成功只新增一个视频素材及可选的一个普通视频片段；不会把内部合成图层展开到工程，不新建或切换工程。每场默认 4 秒，可设置 2–12 秒；视频剩余不足时缩短场景并返回 warnings。dryRun=true 只预检并返回场景计划与目的地，不编码、不导入、不修改工程。完成结果含 assetId、styleId、sourceAssetIds、duration、width、height、destination、renderer，插入时间线时含 clipId 与 trackId。\n执行方式：异步操作，立即返回 jobId；使用 open_media_job_get({id:jobId}) 查询，state=completed 后读取 result，可通过 open_media_job_cancel({id:jobId}) 取消；生成失败、取消或工程变化不会写入部分结果，成功可一次撤销。",
-    "inputSchema": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "scenes"
-      ],
-      "properties": {
-        "styleId": {
-          "type": "string",
-          "enum": [
-            "paper-ink",
-            "iso-cards",
-            "flat-pop",
-            "line-focus",
-            "studio-depth",
-            "shape-rhythm",
-            "sticker-notes",
-            "tech-hud",
-            "editorial-collage",
-            "aurora-glass",
-            "geometric-grid",
-            "neon-retro",
-            "pixel-arcade",
-            "liquid-color",
-            "expressive-type"
-          ],
-          "description": "仅支持 presetSupported=true 的风格。省略时使用用户在 MCP 弹窗选择的风格；若该风格不支持内置预设则拒绝。显式指定必须与用户配置一致。"
-        },
-        "scenes": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 16,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "assetId"
-            ],
-            "properties": {
-              "assetId": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160,
-                "description": "motion_brief_get 返回的用户已选图片或视频素材 ID，可使用其已启用的压缩工作副本。"
-              },
-              "heading": {
-                "type": "string",
-                "maxLength": 120
-              },
-              "caption": {
-                "type": "string",
-                "maxLength": 240
-              },
-              "duration": {
-                "type": "number",
-                "minimum": 2,
-                "maximum": 12,
-                "default": 4
-              },
-              "trimIn": {
-                "type": "number",
-                "minimum": 0,
-                "description": "视频源起点，单位秒；图片不使用此参数。"
-              }
-            }
-          }
-        },
-        "title": {
-          "type": "string",
-          "maxLength": 120
-        },
-        "accent": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}$"
-        },
-        "background": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}$"
-        },
-        "textColor": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}$"
-        },
-        "musicAssetId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 160,
-          "description": "当前工程中的音频素材 ID，用作效果视频配乐（合成在生成的视频内）。"
-        },
-        "musicVolume": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1
-        },
-        "sourceAudio": {
-          "type": "boolean"
-        },
-        "tempo": {
-          "type": "string",
-          "enum": [
-            "calm",
-            "balanced",
-            "energetic"
-          ]
-        },
-        "logoAssetId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 160,
-          "description": "motion_brief_get 返回的用户已选图片素材 ID，用作生成视频内的 Logo。"
-        },
-        "dryRun": {
-          "type": "boolean",
-          "default": false
-        },
-        "expectedRevision": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "expectedProjectId": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200,
-          "description": "可选：从 project_get 获取的当前工程 ID；不一致时拒绝执行，请重新读取当前工程。"
-        },
-        "destination": {
-          "type": "string",
-          "enum": [
-            "assets",
-            "timeline"
-          ],
-          "default": "assets",
-          "description": "默认只将编码视频加入项目素材；timeline 额外插入一个普通视频片段。"
-        },
-        "insert": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "仅适用于 destination=timeline；start 默认当前工程结尾。",
-          "properties": {
-            "trackId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 160,
-              "description": "当前工程中未锁定的视频轨道；省略时新建一个普通视频轨道。"
-            },
-            "start": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 86400
-            }
-          }
-        }
-      }
-    },
-    "annotations": {
-      "readOnlyHint": false,
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false
-    },
-    "_meta": {
-      "openmedia/execution": {
-        "mode": "asynchronous",
-        "responseType": "job",
-        "jobIdField": "jobId",
-        "statusField": "state",
-        "pollingTool": "open_media_job_get",
-        "cancelTool": "open_media_job_cancel",
-        "resultField": "result",
-        "errorField": "errorDetails",
-        "terminalStates": [
-          "completed",
-          "failed",
-          "cancelled"
-        ]
       }
     }
   }

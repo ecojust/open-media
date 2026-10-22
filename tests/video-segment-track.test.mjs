@@ -15,9 +15,9 @@ function populated() {
   const audio = asset('speech', { kind: 'audio', width: 0, height: 0, mime: 'audio/wav', duration: 4 })
   const text = createTextClip(project, { start: 3, trimOut: 4, text: '原始字幕' })
   project.assets.push(video, audio)
-  project.tracks[0].clips.push(text)
-  project.tracks[1].clips.push(createClip(video, project, { start: 2, trimIn: 4, trimOut: 20, speed: 2 }))
-  project.tracks[2].clips.push(createClip(audio, project, { start: 3, speech: { textClipId: text.id, text: text.text, voiceId: 'model', rate: 1 } }))
+  project.tracks.find(track => track.kind === 'text').clips.push(text)
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(video, project, { start: 2, trimIn: 4, trimOut: 20, speed: 2 }))
+  project.tracks.find(track => track.kind === 'audio').clips.push(createClip(audio, project, { start: 3, speech: { textClipId: text.id, text: text.text, voiceId: 'model', rate: 1 } }))
   return project
 }
 
@@ -43,20 +43,20 @@ test('前插整体后移所有原片段，保留音画字幕绑定、裁剪与�
 
 test('后插使用全部轨道最大结束时间，锁定和静音轨道仍计入，已有内容原样保留', () => {
   const project = populated()
-  project.tracks[2].clips[0].start = 25
-  project.tracks[2].locked = true; project.tracks[2].muted = true
+  project.tracks.find(track => track.kind === 'audio').clips[0].start = 25
+  project.tracks.find(track => track.kind === 'audio').locked = true; project.tracks.find(track => track.kind === 'audio').muted = true
   const originalDuration = projectDuration(project)
   const result = insertVideoSegment(project, asset(), 'append')
   assert.equal(result.start, originalDuration)
   assert.equal(result.start, 29)
-  assert.deepEqual(result.project.tracks.slice(0, project.tracks.length), project.tracks)
+  assert.deepEqual(result.project.tracks.filter(track => track.id !== result.trackId), project.tracks)
   assert.equal(clipEnd(findClip(result.project, result.clipId).clip), 34)
 })
 
 test('内置模板添加独立可编辑标题，空标题不生成空字幕，也不覆盖字幕默认配置', () => {
   const project = createProject()
   const result = insertVideoSegment(project, asset(), 'append', { heading: ' 定制标题 ', subheading: ' 自由编辑 ', textColor: '#abcdef' })
-  const titles = result.project.tracks[0]
+  const titles = result.project.tracks.at(-1)
   assert.equal(titles.name, '片头片尾文字')
   assert.equal(titles.kind, 'text')
   assert.deepEqual(titles.clips.map(clip => clip.text), ['定制标题', '自由编辑'])
@@ -139,7 +139,7 @@ test('连续添加复用素材和可编辑轨道，标题时段跟随整体平�
   assert.equal(second.project.assets.length, 1); assert.equal(second.duration, 5)
   assert.equal(first.trackId, second.trackId)
   assert.equal(findClip(second.project, first.clipId).clip.start, 5)
-  assert.equal(second.project.tracks[0].clips.length, 4)
+  assert.equal(second.project.tracks.find(track => track.name === '片头片尾文字').clips.length, 4)
   first.project.tracks.find(track => track.id === first.trackId).muted = true
   assert.notEqual(insertVideoSegment(first.project, asset(), 'append').trackId, first.trackId)
 })
@@ -149,10 +149,10 @@ test('片头和片尾优先沿用相接的主视频轨道，支持与正文之�
   const source = asset('main', { duration: 20 })
   project.assets.push(source)
   const main = createClip(source, project)
-  project.tracks[1].clips.push(main)
-  project.tracks[1].name = '我的主视频'
+  project.tracks.find(track => track.kind === 'video').clips.push(main)
+  project.tracks.find(track => track.kind === 'video').name = '我的主视频'
   const opening = insertVideoSegment(project, asset('opening'), 'prepend', VIDEO_SEGMENT_PRESETS[0])
-  assert.equal(opening.trackId, project.tracks[1].id)
+  assert.equal(opening.trackId, project.tracks.find(track => track.kind === 'video').id)
   assert.equal(findClip(opening.project, opening.clipId).track.name, '我的主视频')
   const withOpeningTransition = addTransition(opening.project, 5, 'fade', 1, opening.trackId)
   const ending = insertVideoSegment(withOpeningTransition, asset('ending'), 'append', VIDEO_SEGMENT_PRESETS[5])
@@ -188,7 +188,7 @@ test('无效素材、方向、标题、超时和容量拒绝时保持操作原�
   assert.throws(() => insertVideoSegment(project, asset(), 'append', { heading: 'x', subheading: '', textColor: 'url(bad)' }), /颜色/)
   assert.deepEqual(project, before)
   const long = createProject(), source = asset('long', { duration: MAX_PROJECT_DURATION })
-  long.assets.push(source); long.tracks[1].clips.push(createClip(source, long))
+  long.assets.push(source); long.tracks.find(track => track.kind === 'video').clips.push(createClip(source, long))
   assert.throws(() => insertVideoSegment(long, asset(), 'prepend'), /24 小时/)
   const fullAssets = createProject()
   fullAssets.assets = Array.from({ length: MAX_ASSETS }, (_, index) => asset(`asset-${index}`))
@@ -197,8 +197,8 @@ test('无效素材、方向、标题、超时和容量拒绝时保持操作原�
   const fullTracks = createProject()
   fullTracks.tracks = Array.from({ length: MAX_TRACKS }, () => createTrack('audio'))
   assert.throws(() => insertVideoSegment(fullTracks, asset(), 'append'), /100 条轨道/)
-  const fullClips = populated(), base = fullClips.tracks[1].clips[0]
-  fullClips.tracks[1].clips = Array.from({ length: MAX_CLIPS - 3 }, (_, index) => ({ ...base, id: `clip-${index}` }))
+  const fullClips = populated(), base = fullClips.tracks.find(track => track.kind === 'video').clips[0]
+  fullClips.tracks.find(track => track.kind === 'video').clips = Array.from({ length: MAX_CLIPS - 3 }, (_, index) => ({ ...base, id: `clip-${index}` }))
   assert.throws(() => insertVideoSegment(fullClips, asset(), 'append', VIDEO_SEGMENT_PRESETS[0]), /10000 个片段/)
 })
 

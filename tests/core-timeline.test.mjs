@@ -50,10 +50,10 @@ test('锁定轨道禁止编辑，跨轨移动校验素材兼容性', () => {
   const { project, clip, track } = fixture()
   const locked = setTrack(project, track.id, { locked: true })
   assert.throws(() => deleteClip(locked, clip.id), /解锁/)
-  assert.throws(() => moveClip(locked, clip.id, project.tracks[2].id, 0), /解锁/)
-  assert.throws(() => moveClip(project, clip.id, project.tracks[0].id, 0), /字幕和媒体/)
-  const moved = moveClip(project, clip.id, project.tracks[2].id, 1)
-  assert.equal(moved.tracks[2].clips[0].id, clip.id)
+  assert.throws(() => moveClip(locked, clip.id, project.tracks.find(track => track.kind === 'audio').id, 0), /解锁/)
+  assert.throws(() => moveClip(project, clip.id, project.tracks.find(track => track.kind === 'text').id, 0), /字幕和媒体/)
+  const moved = moveClip(project, clip.id, project.tracks.find(track => track.kind === 'audio').id, 1)
+  assert.equal(moved.tracks.find(track => track.kind === 'audio').clips[0].id, clip.id)
   assert.throws(() => removeAsset(project, 'asset-video'), /正在时间线/)
   const without = removeAsset(deleteClip(project, clip.id), 'asset-video')
   assert.equal(without.assets.length, 0)
@@ -63,8 +63,8 @@ test('静态图片和字幕可延长，视频时长有限，轨道重叠保留�
   let project = createProject('图文')
   const image = { id: 'image', name: '图.png', kind: 'image', url: 'blob:image', duration: 5, width: 320, height: 240, size: 12, mime: 'image/png' }
   project = addAsset(project, image)
-  project = addClip(project, project.tracks[1].id, createClip(image, project, { trimOut: 20 }))
-  project = addClip(project, project.tracks[0].id, createTextClip(project, { text: '第三秒出现', start: 3, trimOut: 2 }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, createClip(image, project, { trimOut: 20 }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'text').id, createTextClip(project, { text: '第三秒出现', start: 3, trimOut: 2 }))
   assert.equal(activeClips(project, 4).length, 2)
   assert.equal(activeClips(project, 5).length, 1)
   assert.equal(projectDuration(project), 20)
@@ -99,10 +99,10 @@ test('导入丢弃机器路径和活动URL，并拒绝重复标识、无效引�
   duplicate.assets.push({ ...duplicate.assets[0] })
   assert.throws(() => validateProject(duplicate), /重复/)
   const invalid = structuredClone(project)
-  invalid.tracks[1].clips[0].assetId = 'unknown'
+  invalid.tracks.find(track => track.kind === 'video').clips[0].assetId = 'unknown'
   assert.throws(() => validateProject(invalid), /不存在/)
-  invalid.tracks[1].clips[0].assetId = 'asset-video'
-  invalid.tracks[1].clips[0].start = Infinity
+  invalid.tracks.find(track => track.kind === 'video').clips[0].assetId = 'asset-video'
+  invalid.tracks.find(track => track.kind === 'video').clips[0].start = Infinity
   assert.throws(() => validateProject(invalid), /范围/)
   const activeUrl = structuredClone(project)
   activeUrl.assets[0].url = 'javascript:alert(1)'

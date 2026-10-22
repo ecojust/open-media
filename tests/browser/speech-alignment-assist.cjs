@@ -22,10 +22,10 @@ async function main() {
       const project = createProject('声画对齐界面')
       for (const [id, start, length] of [['one', 0, 4], ['two', 3, 2], ['three', 10, 2]]) {
         const text = createSubtitleClip(project, { id, start, text: `${id} 演示旁白`, trimOut: 2 })
-        project.tracks[0].clips.push(text)
+        project.tracks.find(track => track.kind === 'text').clips.push(text)
         const audio = { id: `${id}-asset`, name: '现有配音', kind: 'audio', duration: length, width: 0, height: 0, size: 100, url: `blob:${id}`, mime: 'audio/wav' }
         project.assets.push(audio)
-        project.tracks[2].clips.push(createClip(audio, project, { id: `${id}-speech`, start, speech: { textClipId: id, text: text.text, voiceId: 'existing', rate: 1 } }))
+        project.tracks.find(track => track.kind === 'audio').clips.push(createClip(audio, project, { id: `${id}-speech`, start, speech: { textClipId: id, text: text.text, voiceId: 'existing', rate: 1 } }))
       }
       let history = createHistory(project)
       const fixture = window.speechAlignment = { current: shallowRef(project), commits: 0, seeks: [], notices: [], disabled: ref(false), theme: ref('light') }
@@ -51,10 +51,10 @@ async function main() {
     await panel.getByTestId('speech-alignment-preview').click()
     await panel.getByTestId('speech-alignment-apply').click()
     assert.equal(await page.evaluate(() => window.speechAlignment.commits), 1)
-    assert.equal(await page.evaluate(() => window.speechAlignment.current.value.tracks[2].clips[1].start), 5)
+    assert.equal(await page.evaluate(() => window.speechAlignment.current.value.tracks.find(track => track.kind === 'audio').clips[1].start), 5)
     await expect(panel).toContainText('0 个待检查项')
     await page.evaluate(() => window.speechAlignment.undo())
-    assert.equal(await page.evaluate(() => window.speechAlignment.current.value.tracks[2].clips[1].start), 3)
+    assert.equal(await page.evaluate(() => window.speechAlignment.current.value.tracks.find(track => track.kind === 'audio').clips[1].start), 3)
     await expect(panel).toContainText('字幕比现有配音短')
     await panel.getByLabel('对齐最小句间停顿').fill('9')
     await panel.getByTestId('speech-alignment-preview').click()

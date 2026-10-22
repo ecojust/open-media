@@ -1,28 +1,30 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { findClip } from '../core/timeline'
-import { snapClipPosition, visibleVisualClips } from '../core/preview-position'
-import type { PreviewGuides, PreviewPosition } from '../core/preview-position'
+import { snapClipPosition, resizeClipFromCorner, visibleVisualClips } from '../core/preview-position'
+import type { PreviewGuides, PreviewPosition, PreviewGeometry, PreviewCorner } from '../core/preview-position'
 import type { Clip, Project } from '../core/types'
 
 const props = defineProps<{ project: Project; clipId: string; time: number; disabled: boolean }>()
-const emit = defineEmits<{ start: []; move: [position: PreviewPosition]; finish: []; cancel: []; nudge: [position: PreviewPosition] }>()
+const emit = defineEmits<{ start: []; move: [position: PreviewGeometry]; finish: []; cancel: []; nudge: [position: PreviewPosition] }>()
 const svg = ref<SVGSVGElement>()
 const dragging = ref(false)
 const guides = ref<PreviewGuides>({ x: null, y: null })
+const scale = ref(1)
+const corners: PreviewCorner[] = ['nw', 'ne', 'sw', 'se']
 const visible = computed(() => visibleVisualClips(props.project, props.time))
 const selected = computed(() => {
   if (props.disabled) return undefined
   const item = dragging.value ? findClip(props.project, props.clipId) : visible.value.find(item => item.clip.id === props.clipId)
   return item && !item.track.locked && !item.track.hidden ? item.clip : undefined
 })
-let drag: { pointerId: number; handle: SVGRectElement; original: Clip; start: PreviewPosition; inverse: DOMMatrix; scale: number; others: Clip[]; moved: boolean; lastEvent: PointerEvent } | undefined
+let drag: { pointerId: number; handle: SVGRectElement; original: Clip; start: PreviewPosition; inverse: DOMMatrix; scale: number; others: Clip[]; moved: boolean; lastEvent: PointerEvent; corner?: PreviewCorner } | undefined
 
 function point(event: PointerEvent, inverse: DOMMatrix): PreviewPosition {
   const transformed = new DOMPoint(event.clientX, event.clientY).matrixTransform(inverse)
   return { x: transformed.x, y: transformed.y }
 }
-function start(event: PointerEvent): void {
+function start(event: PointerEvent, corner?: PreviewCorner): void {
   if (event.button !== 0 || !event.isPrimary || !selected.value || drag) return
   const matrix = svg.value?.getScreenCTM()
   if (!matrix) return
@@ -31,7 +33,8 @@ function start(event: PointerEvent): void {
   handle.focus({ preventScroll: true })
   const original = { ...selected.value }
   const inverse = matrix.inverse()
-  drag = { pointerId: event.pointerId, handle, original, start: point(event, inverse), inverse, scale: Math.hypot(matrix.a, matrix.b), others: visible.value.filter(item => item.clip.id !== original.id).map(item => ({ ...item.clip })), moved: false, lastEvent: event }
+  scale.value = Math.hypot(matrix.a, matrix.b)
+  drag = { pointerId: event.pointerId, handle, original, start: point(event, inverse), inverse, scale: Math.hypot(matrix.a, matrix.b), others: visible.value.filter(item => item.clip.id !== original.id).map(item => ({ ...item.clip })), moved: false, lastEvent: event, corner }
   dragging.value = true
   emit('start')
   if (!drag) return
@@ -53,9 +56,17 @@ function move(event: PointerEvent, bypass = event.altKey): void {
   const dx = current.x - drag.start.x, dy = current.y - drag.start.y
   if (!drag.moved && Math.hypot(dx, dy) * drag.scale < 2) return
   drag.moved = true
-  const result = snapClipPosition(drag.original, { x: drag.original.x + dx, y: drag.original.y + dy }, props.project, drag.others, 6 / drag.scale, !bypass)
-  guides.value = result.guides
-  emit('move', { x: result.x, y: result.y })
+  if (drag.corner) {
+    const image = props.project.assets.find(asset => asset.id === drag!.original.assetId)?.kind === 'image'
+    const keepAspect = image ? !event.shiftKey : event.shiftKey
+    const result = resizeClipFromCorner(drag.original, { x: dx, y: dy }, drag.corner, props.project, drag.others, 6 / drag.scale, !bypass, keepAspect)
+    guides.value = result.guides
+    emit('move', { x: result.x, y: result.y, width: result.width, height: result.height })
+  } else {
+    const result = snapClipPosition(drag.original, { x: drag.original.x + dx, y: drag.original.y + dy }, props.project, drag.others, 6 / drag.scale, !bypass)
+    guides.value = result.guides
+    emit('move', { x: result.x, y: result.y })
+  }
 }
 function clear(): boolean {
   const current = drag
@@ -88,6 +99,14 @@ function dragKeyboard(event: KeyboardEvent): void {
   if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancel() }
   else if (event.key === 'Alt') { event.preventDefault(); move(drag.lastEvent, event.type === 'keydown') }
 }
+function updateScale(): void {
+  const matrix = svg.value?.getScreenCTM()
+  if (matrix) scale.value = Math.hypot(matrix.a, matrix.b)
+}
+function cornerPosition(corner: PreviewCorner): PreviewPosition {
+  const clip = selected.value!
+  return { x: clip.x + (corner.endsWith('e') ? clip.width : 0), y: clip.y + (corner.startsWith('s') ? clip.height : 0) }
+}
 function nudge(event: KeyboardEvent): void {
   if (!selected.value || drag || event.metaKey || event.ctrlKey || event.altKey) return
   const directions: Record<string, PreviewPosition> = { ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 } }
@@ -97,17 +116,21 @@ function nudge(event: KeyboardEvent): void {
   const step = event.shiftKey ? 10 : 1
   emit('nudge', { x: Math.max(-65536, Math.min(65536, selected.value.x + direction.x * step)), y: Math.max(-65536, Math.min(65536, selected.value.y + direction.y * step)) })
 }
+watch(selected, () => { void nextTick(updateScale) })
+onMounted(() => window.addEventListener('resize', updateScale))
+onBeforeUnmount(() => window.removeEventListener('resize', updateScale))
 watch([() => props.clipId, () => props.project.id, () => props.project.width, () => props.project.height, () => props.time, () => props.disabled], cancel)
 onBeforeUnmount(cancel)
 defineExpose({ cancel })
 </script>
 
 <template>
-  <svg v-if="selected" ref="svg" class="preview-selection" :class="{ dragging }" :viewBox="`0 0 ${project.width} ${project.height}`" preserveAspectRatio="xMidYMid meet" data-testid="preview-selection">
+  <svg v-if="selected" ref="svg" class="preview-selection" :class="{ dragging }" :viewBox="`0 0 ${project.width} ${project.height}`" preserveAspectRatio="xMidYMid meet" data-testid="preview-selection" @pointerenter="updateScale">
     <rect class="selection-shadow" :x="selected.x" :y="selected.y" :width="selected.width" :height="selected.height" :transform="`rotate(${selected.rotation} ${selected.x + selected.width / 2} ${selected.y + selected.height / 2})`" vector-effect="non-scaling-stroke" aria-hidden="true" />
     <rect class="selection-box" :x="selected.x" :y="selected.y" :width="selected.width" :height="selected.height" :transform="`rotate(${selected.rotation} ${selected.x + selected.width / 2} ${selected.y + selected.height / 2})`" vector-effect="non-scaling-stroke" tabindex="0" role="button" :aria-label="`调整${selected.name}的位置，拖动或使用方向键`" data-testid="preview-selected-clip" :data-preview-clip-id="selected.id" :data-x="selected.x" :data-y="selected.y" @pointerdown="start" @keydown="nudge" @contextmenu.prevent>
       <title>拖动调整位置，自动吸附边缘与中心；Alt 临时关闭吸附，方向键微调，Shift + 方向键移动 10 像素。</title>
     </rect>
+    <rect v-for="corner in corners" :key="corner" class="selection-resize" :class="corner" :x="cornerPosition(corner).x - 5 / scale" :y="cornerPosition(corner).y - 5 / scale" :width="10 / scale" :height="10 / scale" :transform="`rotate(${selected.rotation} ${selected.x + selected.width / 2} ${selected.y + selected.height / 2})`" vector-effect="non-scaling-stroke" :data-testid="`preview-resize-${corner}`" :aria-label="`缩放${selected.name}，${({ nw: '左上角', ne: '右上角', sw: '左下角', se: '右下角' })[corner]}`" tabindex="-1" @pointerdown="start($event, corner)" @contextmenu.prevent><title>拖动角点调整尺寸并吸附；图片默认保持比例，Shift 切换比例限制，Alt 临时关闭吸附。</title></rect>
     <line v-if="guides.x !== null" class="alignment-guide" :x1="guides.x" :x2="guides.x" y1="0" :y2="project.height" vector-effect="non-scaling-stroke" data-testid="preview-snap-x" aria-hidden="true" />
     <line v-if="guides.y !== null" class="alignment-guide" x1="0" :x2="project.width" :y1="guides.y" :y2="guides.y" vector-effect="non-scaling-stroke" data-testid="preview-snap-y" aria-hidden="true" />
   </svg>
@@ -117,6 +140,7 @@ defineExpose({ cancel })
 .preview-selection{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;user-select:none}
 .selection-shadow{fill:none;stroke:#111a;stroke-width:4;pointer-events:none}
 .selection-box{fill:transparent;stroke:#c3a4ff;stroke-width:1.5;pointer-events:all;cursor:move;touch-action:none;outline:none}
+.selection-resize{fill:#f8f5ff;stroke:#845bd3;stroke-width:1.5;pointer-events:all;touch-action:none}.selection-resize.nw,.selection-resize.se{cursor:nwse-resize}.selection-resize.ne,.selection-resize.sw{cursor:nesw-resize}
 .selection-box:focus-visible{stroke:#fff;stroke-dasharray:5 3}
 .dragging .selection-box{cursor:grabbing;stroke:#e5d6ff;stroke-dasharray:none}
 .alignment-guide{stroke:#fa73bd;stroke-width:1;stroke-dasharray:5 3;pointer-events:none}

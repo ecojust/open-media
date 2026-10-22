@@ -185,7 +185,7 @@ async function verifyRealtimeComposition() {
   })]
   const images = createTrack('video', 'Image watermark')
   images.clips = [createClip(watermark, project, { id: 'image-watermark', trimOut: 6, x: 260, y: 20, width: 40, height: 40, fit: 'fill', opacity: .5 })]
-  project.tracks.unshift(images)
+  project.tracks.push(images)
   project = addTransition(project, 3, 'fade', 1, project.tracks.find(track => track.clips.some(clip => clip.id === 'before-cut'))!.id)
 
   // Observe real media elements without changing their loading or playback behavior.
@@ -440,7 +440,7 @@ async function verifyRealtimeComposition() {
         effectProject.assets.push(dots)
         const layer = createTrack('video', 'Chroma video watermark')
         layer.clips = [createClip(dots, effectProject, { id: 'chroma-watermark', x: 10, y: 10, width: 64, height: 36, trimOut: 4, volume: 0, chromaKey: { enabled: true, color: '#00ff00', similarity: .18, blend: .08, spillSuppression: true } })]
-        effectProject.tracks.unshift(layer)
+        effectProject.tracks.push(layer)
       }
       try {
         preview.setProject(effectProject)

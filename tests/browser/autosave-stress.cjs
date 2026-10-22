@@ -98,21 +98,22 @@ async function seed(page) {
     const { saveProject } = await import('/src/core/storage.ts')
     const video = await (await fetch('/autosave-fixture.webm')).blob(), audio = await (await fetch('/autosave-fixture.wav')).blob()
     const project = createProject('六十素材草稿压力测试', { width: 640, height: 360, fps: 24 })
-    project.tracks = [createTrack('text', '字幕'), createTrack('video', '主视频'), createTrack('video', '后段视频'), createTrack('audio', '配音')]
+    const mainVideo = createTrack('video', '主视频'), laterVideo = createTrack('video', '后段视频'), narration = createTrack('audio', '配音'), subtitles = createTrack('text', '字幕')
+    project.tracks = [mainVideo, laterVideo, narration, subtitles]
     const blobs = new Map()
     for (let i = 0; i < 60; i++) {
       const isVideo = i < 40, file = new File([isVideo ? video : audio], `真实素材-${i + 1}.${isVideo ? 'webm' : 'wav'}`, { type: isVideo ? 'video/webm' : 'audio/wav' })
       const asset = await importMediaFile(file)
       project.assets.push(asset); blobs.set(asset.id, file)
-      const track = isVideo ? project.tracks[i < 30 ? 1 : 2] : project.tracks[3]
+      const track = isVideo ? (i < 30 ? mainVideo : laterVideo) : narration
       track.clips.push(createClip(asset, project, { start: isVideo ? i * 4 : (i - 40) * 4, trimOut: 4 }))
     }
-    project.tracks[0].clips.push(createTextClip(project, { text: '自动保存与连续预览', start: 0, trimOut: 160, fontSize: 24 }))
+    subtitles.clips.push(createTextClip(project, { text: '自动保存与连续预览', start: 0, trimOut: 160, fontSize: 24 }))
     await saveProject(project, blobs)
     localStorage.setItem('open-media:last-project', project.id)
     localStorage.setItem('open-media:autosave', 'true')
     project.assets.forEach(asset => URL.revokeObjectURL(asset.url))
-    return { id: project.id, assets: project.assets.length, clips: project.tracks.flatMap(track => track.clips).length, bytes: [...blobs.values()].reduce((sum, blob) => sum + blob.size, 0), firstClip: project.tracks[1].clips[0].id, secondClip: project.tracks[1].clips[1].id, audioClip: project.tracks[3].clips[0].id }
+    return { id: project.id, assets: project.assets.length, clips: project.tracks.flatMap(track => track.clips).length, bytes: [...blobs.values()].reduce((sum, blob) => sum + blob.size, 0), firstClip: mainVideo.clips[0].id, secondClip: mainVideo.clips[1].id, audioClip: narration.clips[0].id }
   })
 }
 

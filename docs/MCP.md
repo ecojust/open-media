@@ -2,7 +2,7 @@
 
 Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。视频剪辑顶部“项目设置”左侧的 **M** 按钮打开简洁的服务弹窗，显示连接地址、Token 和“复制配置”按钮，通过服务开关启停。有已认证的客户端连接时，M 按钮显示青紫色流动荧光；连接断开或服务停止后恢复普通样式。自动化任务的进度和取消操作位于“处理任务”中。
 
-服务只操作界面中当前打开的工程，使用其撤销历史和保存位置；新建、打开、切换工程及选择保存位置由用户在界面中完成。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场及转场音效、背景音乐、片头片尾、素材二创、配音、共享模型管理、图像／歌曲／视频生成和视频导出，共 **101 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
+服务只操作界面中当前打开的工程，使用其撤销历史和保存位置；新建、打开、切换工程及选择保存位置由用户在界面中完成。工具覆盖项目设置、全部轨道类型、片段编辑、字幕、水印、转场及转场音效、背景音乐、片头片尾、素材二创、配音、共享模型管理、图像／歌曲／视频生成和视频导出，共 **100 个**。完整参数以服务的 `tools/list` 或仓库的[工具清单](../src/mcp-tools.json)为准。
 
 ## 连接
 
@@ -41,7 +41,7 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 
 ## 工具范围
 
-以下均为完整工具名。`trackId`、`clipId`、`assetId` 从工程查询结果获取，素材库 ID 从 `open_media_material_list` 获取。时间统一使用秒，画面坐标使用项目像素；轨道索引从 0 开始，顺序为前景到背景。
+以下均为完整工具名。`trackId`、`clipId`、`assetId` 从工程查询结果获取，素材库 ID 从 `open_media_material_list` 获取。时间统一使用秒，画面坐标使用项目像素；轨道索引从 0 开始，顺序为背景到前景；查询返回的 `zIndex` 等于数组下标，越靠后的轨道层级越高。`track_add` 与 `track_reorder` 可用 `zIndex`（或等价的 `index`）指定位置。图片与视频使用 video 轨道，图片片段支持固定时长、项目坐标、透明度和关键帧。
 
 | 工具 | 功能 |
 | --- | --- |
@@ -87,9 +87,8 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | `open_media_speech_model` | 查询、下载、取消下载或修复声音模型 |
 | `open_media_material_list` | 搜索并分页浏览水印、配乐、片头片尾和转场音效素材 |
 | `open_media_material_add` | 添加内置素材，片头片尾支持前插／后插及编辑标题，转场音效支持指定切点与重音位置 |
-| `open_media_motion_brief_get` | 读取启用状态、所选素材、默认代码生成流程、风格提示词与用户额外要求，只读且不能远程改配置 |
-| `open_media_motion_style_list` | 搜索 25 种素材二创风格，返回各自默认提示词、配色、标签及 `presetSupported` 能力说明 |
-| `open_media_motion_clip_generate` | 为支持预设的 15 种风格提供内置二维快捷合成，生成视频素材或插入普通视频片段 |
+| `open_media_motion_brief_get` | 读取启用状态、所选素材、代码素材生成与轨道编排流程、风格提示词和额外要求，只读且不能远程改配置 |
+| `open_media_motion_style_list` | 搜索 25 种素材二创风格，返回默认提示词、独立素材与分层方案、配色和标签 |
 | `open_media_export_start` | 按项目尺寸导出 MP4、WebM、MOV 或 GIF |
 | `open_media_video_generation_status` | 查询平台支持、视频模型大小、下载、校验状态与当前 `selectedModelId` |
 | `open_media_video_model_download` | 经用户同意许可后按需下载视频模型与运行时，支持统一进度查询和取消 |
@@ -112,7 +111,7 @@ Open Media 桌面端提供 MCP 服务，供外部 AI 操作当前剪辑工程。
 | 工具 | 功能 |
 | --- | --- |
 | `open_media_asset_upload` | 分块上传媒体并导入当前工程 |
-| `open_media_asset_read` | 分块下载当前工程源素材，供客户端代码渲染；带文件版本与分块校验，不暴露本地路径 |
+| `open_media_asset_read` | 分块下载当前工程源素材，供客户端分析和生成分层素材；带文件版本与分块校验，不暴露本地路径 |
 | `open_media_asset_import_url` | 从公开 HTTP/HTTPS 直链下载图片、音频或视频并导入工程，保存来源与 SHA-256 |
 | `open_media_asset_probe` | 读取素材真实编码、显示尺寸、时长、帧率、音轨、旋转角度和 Alpha 通道信息；返回已保存的来源记录 |
 | `open_media_asset_get_frame` | 按素材源时间提取真实 PNG 帧，返回可读取的图像数据、请求时间和实际帧时间 |
@@ -386,100 +385,53 @@ MCP 的配音、试听、图像、歌曲及视频生成只能使用用户在界�
 
 ## MCP 素材二创
 
-此功能由外部 Agent 根据所选素材编写画面与动画代码，渲染效果视频后导入当前工程，再使用剪辑工具与原视频、字幕、配音、音乐和转场融合。用户先开启 MCP 服务，再在 **MCP 弹窗**中开启素材二创、选择素材和视觉风格；每种风格都会自动带入独立的默认提示词，下面的“创作要求”仅作为额外提示追加，留空也会使用默认流程与风格。
+用户先开启 MCP 服务，再在 **MCP 弹窗**中开启素材二创、选择工程图片或视频及视觉风格。Agent 根据真实素材用代码生成可复用图片、透明图层或独立透明／绿幕特效素材，通过 MCP 分别放入工程轨道。原视频、图片、文字、装饰与声音保持独立可编辑，最终成片由剪辑器合成和导出；不让 Agent 将完整画面烘焙成一个视频再导入。
 
-素材列表显示实际可用数量与已选数量，可选择全部可用视觉素材，搜索时另显示匹配数量。仅列出当前工程可用的图片和视频；音频、内置包装素材与历史压缩副本不计入此数量，压缩素材显示当前工作副本。
+素材列表按当前可用图片与视频显示实际数量与已选数量，可选择全部视觉素材。音频、内置包装素材与历史压缩副本不计入数量，压缩素材使用当前工作副本。用户额外要求只追加到默认流程和风格要求之后，留空也会完整执行默认方案。
 
-Agent 首先调用 `open_media_motion_brief_get`，同步获得 `enabled`、`ready`、`errors`、所选 `assetIds`／素材信息、`styleId`／风格信息，以及以下提示词：
+Agent 首先调用 `open_media_motion_brief_get`，确认 `ready=true`，读取所选素材、风格、当前工程标识和提示词：
 
 | 字段 | 含义 |
 | --- | --- |
-| `workflowPrompt` | 默认素材分析、代码渲染、导入和轨道融合流程，包含当前工程尺寸和帧率 |
-| `stylePrompt` | 所选视觉风格的默认要求，与 `style.prompt` 一致 |
+| `workflowPrompt` | 默认素材分析、代码生成独立素材、轨道分层编排与编辑器导出流程 |
+| `stylePrompt` | 所选风格的默认要求、具体素材清单及分层方案 |
 | `userPrompt` | 用户额外要求，`prompt` 同样保留这段原始文本 |
-| `effectivePrompt` | 默认流程、所选风格、额外要求按顺序合并后的执行提示词 |
+| `effectivePrompt` | 默认流程、风格、额外要求按顺序合并后的执行提示词 |
+| `generationMode` | `agent-assets-timeline` |
+| `workflow.codeExecution` | `external-agent`，代码运行在 Agent 自己的环境 |
+| `workflow.finalComposition` | `editor-timeline`，最终合成由当前工程时间线完成 |
+| `workflow.trackOrder` / `zIndex` | `back-to-front` / `array-index`，数组下标越大越靠前景 |
+| `workflow.assetOutputs` | 图片、透明图片、独立图效视频、绿幕图效 |
+| `workflow.presetGenerationTool` | `null`，整片快捷合成不用于素材二创 |
 
-`generationMode` 为 `agent-code-render`；`workflow.codeExecution` 为 `external-agent`，并列出源素材读取、视频回传、剪辑、校验和任务查询工具。风格的 `presetSupported` 标识是否支持内置二维快捷合成：为 `true` 时，`workflow.presetGenerationTool` 返回 `open_media_motion_clip_generate`；为 `false` 时返回 `null`，需要外部代码渲染。`workflow.capabilityTools` 列出模型检查工具，`workflow.generationTools` 列出补充图片和音乐生成工具。`motion_brief_get` 会刷新模型与运行环境状态，并通过 `additionalAssetGeneration` 返回本地能力；检查失败保留 `checked: false`／`unknown`，不能视为没有模型。`project_get` 中的 `mcpMotionBrief` 是配置快照，不执行模型探测，需按其中的 `check` 调用获取当前能力。配置仍由用户在界面修改，远程工具不能开启功能、改选素材、切换风格或改写额外要求；未就绪时不得开始生成。开启只保存配置，应用不会自行启动大模型或执行任意代码。
+轨道顺序是堆叠层级的唯一依据，`zIndex` 从 0 开始；底图放前面的轨道，主视频和内容放中间，装饰和文字放后面。使用 `track_add`、`track_reorder` 改变层级；图片片段和固定字幕一样设置开始时间、时长、位置、尺寸与透明度。普通位移、缩放、旋转和显隐使用 `clip_keyframes_set`，裁切使用 `clip_crop`，标题与字幕使用可编辑文字片段。
 
-```json
-{"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"open_media_motion_brief_get","arguments":{"expectedProjectId":"current-project-id"}}}
-```
+绿幕图效使用纯净且与主体区分的底色。先 `clip_add`，再通过 `clip_update.patch.chromaKey` 开启抠像，设置实际幕色、`similarity`、`blend` 和 `spillSuppression`。静态图片优先回传 PNG；SVG 可以作为生成源，但必须先栅格化为 PNG，MCP 上传不接收 SVG。透明素材需检查 alpha、编码兼容性与合成边缘；独立图效文件不混入主视频、字幕和配乐。复杂图效内部变化需重做时，只重新生成该素材，其他层仍可直接编辑。
 
-补充素材按需生成，默认采用以下策略。用户已选素材仍是内容来源边界，新生成的图片和音乐可作为补充，但不能借此读取未选中的既有视觉素材，也不会自动修改用户选择。
+`motion_brief_get` 自动刷新 `additionalAssetGeneration` 本地能力。`project_get` 中的 brief 仅是配置快照，不执行探测。需要额外图片或音乐时按以下规则处理：
 
-| 对应能力状态 | 补充图片／音乐的处理方式 |
+| 对应能力状态 | 补充素材处理 |
 | --- | --- |
-| `checked: false` 或 `availability: unknown` | 调用 `open_media_ai_status({probeRuntime:true})`，读取 `generationCapabilities` 后再决定；查询失败不能当成无模型 |
-| `selectedModelId` 已列入 `readyModelIds` | 默认调用对应 `open_media_image_generate`／`open_media_music_generate`，仅使用用户所选模型；省略 `modelId` 自动沿用 |
-| 确认所选模型 `unavailable` | 由 Agent 生成，再通过 `asset_upload`／`asset_import_url` 加入工程；不能改用其他已下载模型 |
-| `busy: true` | 等待正在执行的任务并重新检查；忙碌不等于没有模型 |
-| 用户明确要求 Agent 自行生成 | 可覆盖默认本地优先方式，按用户要求执行 |
+| `checked: false` 或 `availability: unknown` | 先调用 `open_media_ai_status({probeRuntime:true})`；查询失败不能当成无模型 |
+| 用户当前 `selectedModelId` 已列入 `readyModelIds` | 默认使用对应 MCP 生成工具及当前所选模型，不能换成其他已下载模型 |
+| 确认所选模型 `unavailable` | 由 Agent 生成后上传或导入工程 |
+| `busy: true` | 等待并重新检查，不能当成无模型 |
+| 用户明确要求 Agent 自制 | 可覆盖默认本地优先方式 |
 
-MCP 生成的补充素材使用 `destination: assets` 或 `timeline`，背景音乐显式设置 `instrumental: true`。需要把新生成图片放入外部动画代码时，先加入工程素材，再按返回的 `assetId` 读取。仅在任务确实需要时生成，不自动下载或修复模型；生成失败要报告真实原因，不能把请求已提交视为生成成功。有限预设工具仍只使用用户原先所选视觉素材；补充图像可用于外部代码渲染流程。
+配音同样沿用用户当前音色。补充素材使用 `destination: assets` 或 `timeline`，背景音乐明确 `instrumental: true`。只有任务确需时生成，不自动下载、修复或切换模型。异步任务完成取得真实素材后才能使用，新素材不改变用户既有素材选择，也不能借此读取未选中的既有图片或视频。
 
-推荐工作流程：
+推荐调用顺序：
 
-1. 读取任务、`effectivePrompt` 和当前工程版本。
-2. 用 `asset_probe`、`asset_get_frame` 或 `asset_storyboard` 检查内容；通过 `asset_read` 按块取得所选源素材。续传保持同一 `sourceVersion`，逐块校验哈希后拼接。
-3. Agent 根据默认风格和额外要求规划故事、镜头、节拍与声音；若需要补充图片或音乐，先检查对应能力并按上述策略生成，再在自己的执行环境编写确定性的动画代码，例如按时间绘制任意帧的 `renderAt(t)`；先检查关键帧和低清预览，再编码真实视频。
-4. 用 `asset_upload` 回传视频，或用 `asset_import_url` 导入公开视频直链；等待异步任务完成并取得 `assetId`。
-5. 用 `clip_add` 或 `timeline_batch_edit` 把效果视频放入当前工程轨道，再添加字幕、配音、音乐和转场，与完整工程融合。
-6. 用 `preview_render`、`timeline_get_frame` 和 `export_validate` 检查实际效果并迭代。
+1. 读取 `motion_brief_get`、`project_get` 和有效的 `expectedProjectId`／`expectedRevision`。
+2. 用 `asset_probe`、`asset_get_frame`、`asset_storyboard` 检查真实内容；用 `asset_read` 按块取得所选素材，保持同一 `sourceVersion` 并校验哈希。
+3. 按风格提示词规划独立素材和轨道，生成底图、装饰与必要图效，用 `asset_upload` 或 `asset_import_url` 导入并等待任务成功。
+4. 建立底图、主内容、装饰和文字等轨道，分别添加片段，设置位置、时长、关键帧、抠像、配音、音乐和转场。批量操作可以预检查后原子提交。
+5. 用 `timeline_get_frame`、`preview_render` 和 `export_validate` 检查编辑器的实际合成结果，修正遮挡、黑帧、文字和声音问题。
+6. 按用户要求用 `export_start` 由编辑器导出完整成片。
 
-上述简写均带 `open_media_` 前缀。代码执行环境由外部 Agent 提供，应用只接收渲染好的媒体，不执行任意代码。缺少所需渲染环境时应说明限制；当所选风格 `presetSupported: true` 且内置二维预设满足任务时，可改用 `motion_clip_generate`，先以 `dryRun` 检查分镜再生成视频。新增的 10 种风格不支持此快捷路径，调用会明确报错，不会静默替换风格。生成视频作为普通素材继续裁剪、变速或添加转场，原工程与源文件保留。
+上述简写均带 `open_media_` 前缀。所有写操作遵守当前工程及版本检查；任务返回 `jobId` 时查询到 `completed` 后读取真实结果，不将请求已提交视为成功。配置由用户在界面修改，远程工具不能开启功能、改选素材、切换风格或改写额外要求。应用不自行调用大模型，也不执行 Agent 任意代码。
 
-用 `open_media_asset_list` 获取当前工程素材 ID，再查询风格。`open_media_motion_style_list` 同步返回 `items`、`total`、`count` 和 `capabilities`；可按名称、标签、说明或 ID 搜索，共 25 种风格。每项包含 `prompt` 与 `presetSupported`，原有 15 种为 `true`；新增发布会聚焦、证据档案、双屏对照、节拍声场、银幕胶片、路线漫游、微距解构、视差长镜、数据叙事、工程分解为 `false`，通过外部代码渲染实现。完整目录与设计示意见[素材二创说明](MOTION_STYLES.md)。
-
-```json
-{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"open_media_motion_style_list","arguments":{"search":"科技"}}}
-```
-
-`open_media_motion_clip_generate` 是可选的内置二维预设合成工具，不执行 Agent 代码，仅接受来自 MCP 的请求，并要求所选风格 `presetSupported: true`。`styleId` 可省略以使用用户指定风格；显式填写时必须一致。`scenes` 必填，由 Agent 决定；内置快捷合成每次按顺序处理 1–16 个场景，此单次渲染限制不限制素材二创的可选素材数量。每场只能引用用户在 MCP 弹窗所选的图片或视频（包含已启用的对应压缩工作副本）。`title` 和 `heading` 最多 120 字，`caption` 最多 240 字，`duration` 默认 4 秒，可设置 2–12 秒；视频可用 `trimIn` 选择源起点。剩余源视频不足时缩短场景并返回 `warnings`。可以指定 `accent`、`background`、`textColor` 六位十六进制颜色，选择 `calm`、`balanced`、`energetic` 节奏，并引用当前工程的 `musicAssetId` 音频及用户所选素材中的 `logoAssetId` 图片；音频不需要加入视觉素材选择列表。
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 41,
-  "method": "tools/call",
-  "params": {
-    "name": "open_media_motion_clip_generate",
-    "arguments": {
-      "title": "探索日常中的科学",
-      "scenes": [
-        { "assetId": "imported-video-id", "heading": "从观察开始", "caption": "发现一个值得追问的问题", "trimIn": 2, "duration": 5 },
-        { "assetId": "imported-image-id", "heading": "理解背后的原理", "caption": "用清晰的画面解释关键步骤", "duration": 4 }
-      ],
-      "destination": "assets",
-      "tempo": "balanced",
-      "accent": "#5BE2DA",
-      "musicAssetId": "imported-audio-id",
-      "musicVolume": 0.2,
-      "sourceAudio": false,
-      "dryRun": true,
-      "expectedProjectId": "current-project-id",
-      "expectedRevision": 12
-    }
-  }
-}
-```
-
-以上示例假设用户选择了支持二维预设的科技视窗风格。视觉素材 ID 需替换为 `motion_brief_get` 返回的用户已选素材，音乐 ID 从当前工程的音频素材获取。`dryRun: true` 只检查素材、场景时长和目的地，不编码视频、不导入文件、不修改工程；确认计划后，将其改为 `false` 或省略，再次调用生成。预检和正式生成都会立即返回 `jobId`，使用以下调用查询，直到 `state` 为 `completed` 后读取 `result`；`failed` 时读取 `errorDetails`，`cancelled` 表示没有提交生成结果。
-
-```json
-{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"open_media_job_get","arguments":{"id":"returned-job-id"}}}
-```
-
-正式结果包含 `assetId`、`sourceAssetIds`、`styleId`、`duration`、`width`、`height`、`destination`、`renderer` 和 `warnings`。视频经过实际编码，桌面端生成 MP4，网页端生成 WebM；`renderer` 区分原生编码与网页编码。没有本地文件路径或临时工程对象。收到 `assetId` 后，可读取最新工程版本并通过普通片段工具将视频加入当前工程中未锁定的视频轨道：
-
-```json
-{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"open_media_clip_add","arguments":{"assetId":"returned-video-asset-id","trackId":"current-video-track-id","options":{"start":12,"name":"科技视窗片段"},"expectedProjectId":"current-project-id","expectedRevision":13}}}
-```
-
-也可以在生成时指定 `destination: "timeline"`，并提供 `insert: {"trackId":"current-video-track-id","start":12}`；`insert` 仅适用于此目的地。省略 `start` 时使用当前工程结尾，省略 `trackId` 时新建一个普通视频轨道。成功后只插入一个编码视频片段，结果额外返回 `clipId` 和 `trackId`；默认 `destination: "assets"` 完全不改变原有轨道和时间线标记。
-
-尺寸与帧率沿用当前工程。素材加入及可选插入共用一个撤销步骤，准备或编码期间切换工程、修改版本、更改用户配置、取消任务或生成失败均不会写入部分结果。标题、背景、装饰和入退场动画已经合成到视频内，需要改变这些内容时可使用原素材重新生成；视频本身仍可继续普通剪辑。
-
-这些风格使用二维背景、装饰图层和关键帧呈现动态效果。立体、玻璃和流彩风格的能力边界会在目录的 `note` 中说明；不包含真实三维建模、流体模拟、逐帧折射或用户素材的轮廓变形。
+`open_media_motion_style_list` 可按名称、说明、标签或 ID 搜索 25 种风格，返回 `items`、`total`、`count`、各风格提示词、配色与能力说明。全部风格采用素材生成与时间线编排流程；旧 `open_media_motion_clip_generate` 整片合成工具已退出 MCP 工具清单，旧调用会明确拒绝，不会静默合成替代分层工程。完整目录、分层与抠像示例见[素材二创说明](MOTION_STYLES.md)。
 
 ## 文件路径和导出
 

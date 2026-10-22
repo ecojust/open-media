@@ -57,7 +57,7 @@ async function main() {
       for (const horizontal of ['left', 'center', 'right']) for (const vertical of ['top', 'middle', 'bottom']) {
         const project = createProject('字幕文字背景', { width: 640, height: 360, fps: 20, background: '#000000' })
         const clip = createTextClip(project, { text: '较长的一行文字\n短句', textAlign: horizontal, textVerticalAlign: vertical, fontSize: 28, fontWeight: 600, background: '#c828b4', color: '#ffffff', x: 40, y: 50, width: 560, height: 260, trimOut: 0.6 })
-        project.tracks[0].clips.push(clip)
+        project.tracks.find(track => track.kind === 'text').clips.push(clip)
         const local = canvas(560, 260)
         drawTextClip(local.getContext('2d'), clip)
         const localPixels = local.getContext('2d').getImageData(0, 0, 560, 260).data

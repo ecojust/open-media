@@ -42,7 +42,7 @@ async function installProject(page, url) {
     const { createProject, createTextClip } = await import('/src/core/project.ts')
     const { saveProject } = await import('/src/core/storage.ts')
     const project = createProject('可编辑文字水印验收', { width: 640, height: 360, fps: 20, background: '#102030' })
-    project.tracks[0].clips.push(createTextClip(project, { id: 'original-subtitle', text: '原有字幕', trimOut: 10, x: 8, y: 8, width: 140, height: 24, fontSize: 15 }))
+    project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'original-subtitle', text: '原有字幕', trimOut: 10, x: 8, y: 8, width: 140, height: 24, fontSize: 15 }))
     await saveProject(project, new Map())
     localStorage.setItem('open-media:last-project', project.id)
     localStorage.setItem('open-media:autosave', 'true')

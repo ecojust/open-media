@@ -32,7 +32,7 @@ async function main() {
       const { createProject, createClip, validateProject } = await import('/src/core/project.ts')
       const { importMediaFile } = await import('/src/core/media-import.ts')
       const { TimelinePreview, drawTextClip } = await import('/src/core/preview.ts')
-      const { prepareEditorTool } = await import('/src/core/editor-tool-service.ts')
+      const { prepareMotionStyleTool } = await import('/src/core/motion-style-service.ts')
       const { exportProjectFile, importProjectFile } = await import('/src/core/project-file.ts')
       const files = new Map()
       const importBlob = async (blob, name) => { const asset = await importMediaFile(new File([blob], name, { type: blob.type })); files.set(asset.id, blob); return asset }
@@ -68,7 +68,7 @@ async function main() {
         if(style.id==='neon-retro')exportProject=composed
       }
       const base64 = async blob => new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.readAsDataURL(blob)})
-      // Exercise the public shared tool with an occupied, locked source timeline.
+      // Exercise the internal preset renderer with an occupied, locked source timeline.
       // Only the returned encoded video belongs in the live project, not the
       // internal composition's artwork or text tracks.
       const sourceTrack=project.tracks.find(track=>track.kind==='video')
@@ -77,7 +77,7 @@ async function main() {
       project.mcpMotion={enabled:true,assetIds:[still.id,video.id],styleId:'neon-retro',prompt:'将所选素材编排成两个清晰的创意展示镜头'}
       project=validateProject(project,{trusted:true})
       const before=JSON.stringify(project),progress=[]
-      const prepared=await prepareEditorTool('open_media_motion_clip_generate',{
+      const prepared=await prepareMotionStyleTool('open_media_motion_clip_generate',{
         styleId:'neon-retro',title:'效果片段',scenes:[{assetId:still.id,heading:'创意，从此动起来',duration:2},{assetId:video.id,heading:'生成后继续剪辑',duration:2}],musicAssetId:sound.id,
         expectedRevision:9,expectedProjectId:project.id,
       },{project,revision:9,blobs:files,source:'mcp',signal:new AbortController().signal,onProgress:update=>progress.push(update),assertCurrent:()=>{if(JSON.stringify(project)!==before)throw new Error('Original project was mutated')}})

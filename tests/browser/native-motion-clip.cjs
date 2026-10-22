@@ -27,7 +27,7 @@ async function main() {
       project.tracks.find(track => track.kind === 'text').clips = [createTextClip(project, { text: '原生效果片段', trimOut: 2 })]
       const background = createTrack('video', '背景图层')
       background.clips = [createClip(art, project, { trimOut: 2 })]
-      project.tracks.push(background)
+      project.tracks.unshift(background)
       const original = JSON.stringify(project)
       let mode = 'success', calls = [], release, progress = [], spec
       const wait = async name => { if (mode === name) await new Promise(resolve => { release = resolve }) }

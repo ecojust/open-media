@@ -12,6 +12,8 @@ import { executeVisualTool } from './visual-tools.ts'
 import { setTimelineMarkers } from './project-operations.ts'
 import { classifyVideoClip } from './clip-idle.ts'
 import { getMcpMotionBrief } from './mcp-motion.ts'
+import { trackZIndex } from './track-layers.ts'
+import { imageClipBounds } from './editor-assets.ts'
 import type { Clip, ClipChromaKey, ClipFilters, MediaAsset, Project, Track, TrackKind, TransitionEffect } from './types.ts'
 
 export interface McpSchema {
@@ -91,10 +93,15 @@ function validateSchema(value: unknown, schema: McpSchema, path: string): void {
 }
 
 export function validateMcpToolArguments(name: string, args: unknown): Record<string, unknown> {
+  if (name === 'open_media_motion_clip_generate') throw new Error('素材二创已改为独立素材与轨道编排。请读取 open_media_motion_brief_get，生成图片、透明或绿幕特效素材，再通过轨道与片段工具编排，由剪辑器完成合成。')
   const tool = definitions.get(name)
   if (!tool) throw new Error(`未知的 MCP 工具：${name}`)
   validateSchema(args, tool.inputSchema, name)
   const result = args as Record<string, unknown>
+  if (name === 'open_media_track_add' || name === 'open_media_track_reorder') {
+    if (result.index !== undefined && result.zIndex !== undefined && result.index !== result.zIndex) throw new Error('index 与 zIndex 指向同一轨道位置，不能提供不同值。')
+    if (name === 'open_media_track_reorder' && result.index === undefined && result.zIndex === undefined) throw new Error('移动轨道需要提供 index 或 zIndex。')
+  }
   if (name === 'open_media_clip_update' && !result.filterPreset && !Object.keys((result.patch ?? {}) as object).length) throw new Error('至少提供一个片段属性或滤镜预设。')
   if (name === 'open_media_clip_trim') {
     const source = result.trimIn !== undefined || result.trimOut !== undefined
@@ -137,7 +144,7 @@ function publicAsset(asset: MediaAsset): Omit<MediaAsset, 'url' | 'sourceUrl' | 
 export function inspectMcpProject(project: Project) {
   const copy = cloneProject(project)
   return { ...copy, assets: copy.assets.map(publicAsset), duration: projectDuration(project), renderDuration: renderDuration(project), mcpMotionBrief: getMcpMotionBrief(project),
-    tracks: copy.tracks.map(track => ({ ...track, clipCount: track.clips.length, clips: track.clips.map(clip => ({ ...clip, duration: clipDuration(clip), end: clipEnd(clip) })), subtitleIssues: trackSubtitleIssues(track) })) }
+    trackOrder: 'back-to-front', tracks: copy.tracks.map((track, zIndex) => ({ ...track, zIndex, clipCount: track.clips.length, clips: track.clips.map(clip => ({ ...clip, duration: clipDuration(clip), end: clipEnd(clip) })), subtitleIssues: trackSubtitleIssues(track) })) }
 }
 function requireTrack(project: Project, id: string): Track {
   const track = project.tracks.find(track => track.id === id)
@@ -159,7 +166,7 @@ function changed(project: Project, data: unknown, label: string, selection?: Mcp
 }
 function editedClip(project: Project, clipId: string, label: string): McpProjectToolResult {
   const { clip, track } = requireClip(project, clipId)
-  return changed(project, { trackId: track.id, clip: JSON.parse(JSON.stringify(clip)), duration: clipDuration(clip) }, label, { clipId, trackId: track.id })
+  return changed(project, { trackId: track.id, zIndex: trackZIndex(project, track.id), clip: JSON.parse(JSON.stringify(clip)), duration: clipDuration(clip) }, label, { clipId, trackId: track.id })
 }
 
 /** Pure transaction: the input project is never changed, including validation failures. */
@@ -197,22 +204,28 @@ export function executeProjectTool(project: Project, name: string, rawArgs: unkn
     case 'open_media_track_add': {
       const track = createTrack(string('kind') as TrackKind, args.name as string | undefined)
       let next = addTrack(project, track)
-      if (args.index !== undefined) next = reorderTrack(next, track.id, number('index'))
-      return changed(next, { track }, '添加轨道', { trackId: track.id })
+      const index = args.zIndex ?? args.index
+      if (index !== undefined) {
+        if ((index as number) >= next.tracks.length) throw new Error('目标轨道层级超出当前轨道数量。')
+        next = reorderTrack(next, track.id, index as number)
+      }
+      return changed(next, { track: { ...track, zIndex: trackZIndex(next, track.id) } }, '添加轨道', { trackId: track.id })
     }
     case 'open_media_track_update': {
       const next = setTrack(project, string('trackId'), args.patch as Partial<Pick<Track, 'name' | 'muted' | 'hidden' | 'locked'>>)
-      return changed(next, { track: JSON.parse(JSON.stringify(requireTrack(next, string('trackId')))) }, '更新轨道')
+      return changed(next, { track: { ...JSON.parse(JSON.stringify(requireTrack(next, string('trackId')))), zIndex: trackZIndex(next, string('trackId')) } }, '更新轨道')
     }
     case 'open_media_track_remove': return changed(removeTrack(project, string('trackId')), { removedTrackId: args.trackId }, '删除轨道')
     case 'open_media_track_reorder': {
-      if (number('index') >= project.tracks.length) throw new Error('目标轨道位置超出当前轨道数量。')
-      return changed(reorderTrack(project, string('trackId'), number('index')), { trackId: args.trackId, index: args.index }, '调整轨道顺序')
+      const index = (args.zIndex ?? args.index) as number
+      if (index >= project.tracks.length) throw new Error('目标轨道位置超出当前轨道数量。')
+      return changed(reorderTrack(project, string('trackId'), index), { trackId: args.trackId, index, zIndex: index }, '调整轨道顺序')
     }
     case 'open_media_clip_add': {
       const track = requireTrack(project, string('trackId'))
       if (track.kind !== 'video' && track.kind !== 'audio') throw new Error('媒体片段只能添加到视频或音频轨道。')
-      const clip = createClip(requireAsset(project, string('assetId')), project, (args.options ?? {}) as Partial<Clip>)
+      const asset = requireAsset(project, string('assetId'))
+      const clip = createClip(asset, project, { ...(asset.kind === 'image' ? { ...imageClipBounds(asset, project), volume: 0 } : {}), ...(args.options ?? {}) as Partial<Clip> })
       return editedClip(addClip(project, track.id, clip), clip.id, '添加媒体片段')
     }
     case 'open_media_text_add': {

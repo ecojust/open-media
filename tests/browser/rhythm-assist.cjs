@@ -22,13 +22,13 @@ async function main() {
       const project = createProject('节奏辅助交互')
       const asset = { id: 'source', kind: 'video', name: '操作演示.mp4', url: 'blob:test', duration: 60, width: 1920, height: 1080, size: 100, mime: 'video/mp4' }
       project.assets.push(asset)
-      project.tracks[1].clips.push(createClip(asset, project, { id: 'first', start: 10, trimIn: 12, trimOut: 32, speed: 2 }), createClip(asset, project, { id: 'second', start: 30, trimIn: 12, trimOut: 22 }))
-      project.tracks[0].clips.push(createTextClip(project, { id: 'subtitle', text: '重要的说明', start: 12, trimOut: 4 }))
+      project.tracks.find(track => track.kind === 'video').clips.push(createClip(asset, project, { id: 'first', start: 10, trimIn: 12, trimOut: 32, speed: 2 }), createClip(asset, project, { id: 'second', start: 30, trimIn: 12, trimOut: 22 }))
+      project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'subtitle', text: '重要的说明', start: 12, trimOut: 4 }))
       const state = shallowRef(project), selected = ref('first'), visible = ref(true)
       let history = createHistory(project)
       const fixture = window.rhythm = { state, selected, visible, calls: [], seeks: [], busy: [], commits: 0, hold: false, aborted: 0 }
       fixture.undo = () => { history = undoHistory(history); state.value = history.present }
-      fixture.move = () => { const copy = JSON.parse(JSON.stringify(state.value)); copy.tracks[1].clips[0].start++; state.value = copy }
+      fixture.move = () => { const copy = JSON.parse(JSON.stringify(state.value)); copy.tracks.find(track => track.kind === 'video').clips[0].start++; state.value = copy }
       const run = async (name, args, options) => {
         fixture.calls.push({ name, args })
         if (fixture.hold) await new Promise((resolve, reject) => options.signal.addEventListener('abort', () => { fixture.aborted++; reject(new DOMException('Cancelled', 'AbortError')) }, { once: true }))

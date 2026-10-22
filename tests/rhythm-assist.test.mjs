@@ -11,7 +11,7 @@ function fixture() {
   const asset = { id: 'source', kind: 'video', name: '操作演示.mp4', url: 'blob:source', duration: 60, width: 1920, height: 1080, size: 1024, mime: 'video/mp4' }
   project = addAsset(project, asset)
   const clip = createClip(asset, project, { id: 'video-a', start: 10, trimIn: 12, trimOut: 32, speed: 2 })
-  project = addClip(project, project.tracks[1].id, clip)
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, clip)
   return { project, asset, clip }
 }
 const detected = (start, end, kind = 'freeze') => ({ kind, start, end, confidence: 1, evidence: { detector: kind, noiseDb: -50 } })
@@ -28,7 +28,7 @@ test('节奏候选按裁切与倍速映射为时间线范围，并排除未使�
 
 test('相同素材分割后分别映射，仅选中片段的范围不会混入其他片段', () => {
   let { project, asset } = fixture()
-  project = addClip(project, project.tracks[1].id, createClip(asset, project, { id: 'video-b', start: 25, trimIn: 16, trimOut: 20 }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, createClip(asset, project, { id: 'video-b', start: 25, trimIn: 16, trimOut: 20 }))
   const response = values(detected(16, 20))
   assert.deepEqual(rhythmCandidates(project, response, defaults).map(item => [item.clipId, item.start, item.end]), [['video-a', 12, 14], ['video-b', 25, 29]])
   assert.deepEqual(rhythmCandidates(project, response, { ...defaults, scope: 'selected', selectedClipId: 'video-b' }).map(item => item.clipId), ['video-b'])
@@ -37,7 +37,7 @@ test('相同素材分割后分别映射，仅选中片段的范围不会混入�
 test('变速曲线与裁切保留的源范围使用播放一致的逆映射', () => {
   let { project, asset } = fixture()
   const clip = createClip(asset, project, { id: 'ramp', start: 30, trimIn: 5, trimOut: 25, speed: 1.5, speedRamp: { points: [{ position: 0, speed: .5 }, { position: .5, speed: 3 }, { position: 1, speed: 1 }], easing: 'ease-in-out', preservePitch: true, sourceRange: { start: 0, end: 40 } } })
-  project = addClip(project, project.tracks[1].id, clip)
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, clip)
   for (const source of [5, 6, 10, 12.5, 18, 24.99, 25]) assert.ok(Math.abs(sourceTimeAt(clip, rhythmTimelineTime(clip, source)) - source) < 1e-8)
   const result = rhythmCandidates(project, values(detected(8, 18)), { ...defaults, scope: 'selected', selectedClipId: 'ramp' })
   assert.equal(result.length, 1)
@@ -56,7 +56,7 @@ test('源静音与局部静止的重叠按实际边界区分，不把整段标�
 
 test('达到最短持续时长的连续检测重叠后仍保留全部证据切片', () => {
   const { project } = fixture()
-  Object.assign(project.tracks[1].clips[0], { start: 0, trimIn: 0, trimOut: 10, speed: 1 })
+  Object.assign(project.tracks.find(track => track.kind === 'video').clips[0], { start: 0, trimIn: 0, trimOut: 10, speed: 1 })
   const result = rhythmCandidates(project, values(detected(0, 2), detected(1, 3, 'silence'), detected(5, 6, 'black')), { ...defaults, minimum: 2 })
   assert.deepEqual(result.map(item => [item.start, item.end, item.evidence.map(evidence => evidence.kind)]), [[0, 1, ['freeze']], [1, 2, ['freeze', 'silence']], [2, 3, ['silence']]])
   assert.equal(rhythmSelectedDuration(result), 3)
@@ -83,23 +83,23 @@ test('持续阈值使用变速后的时间，重复检测结果带源参照信�
 test('检测排除隐藏视频、主动定格与内置装饰素材，保留有透明度动画的画面', () => {
   let { project, asset, clip } = fixture()
   const original = { trimIn: 0, trimOut: 4, speed: 1, volume: 1 }
-  project.tracks[1].clips.push({ ...clip, id: 'freeze', start: 30, freezeFrame: { sourceTime: 1, original } }, { ...clip, id: 'transparent', start: 30, opacity: 0 }, { ...clip, id: 'animated', start: 30, opacity: 0, keyframes: { opacity: [{ time: 1, value: 1 }] } })
+  project.tracks.find(track => track.kind === 'video').clips.push({ ...clip, id: 'freeze', start: 30, freezeFrame: { sourceTime: 1, original } }, { ...clip, id: 'transparent', start: 30, opacity: 0 }, { ...clip, id: 'animated', start: 30, opacity: 0, keyframes: { opacity: [{ time: 1, value: 1 }] } })
   const builtIn = { ...asset, id: 'decoration', libraryRole: 'watermark' }
   project.assets.push(builtIn)
-  project.tracks[1].clips.push({ ...clip, id: 'library', assetId: builtIn.id })
+  project.tracks.find(track => track.kind === 'video').clips.push({ ...clip, id: 'library', assetId: builtIn.id })
   const hidden = createTrack('video'); hidden.muted = true; hidden.clips.push({ ...clip, id: 'hidden' }); project.tracks.push(hidden)
   assert.deepEqual(rhythmVideoEntries(project).map(entry => entry.clip.id), ['video-a', 'animated'])
 })
 
 test('候选显示同期字幕、配音、转场与锁轨，检测本身不改工程', () => {
   const { project, clip } = fixture()
-  project.tracks[1].locked = true
-  project.tracks[0].clips.push(createTextClip(project, { id: 'text', start: 12, trimOut: 2, text: '正在解释重要信息' }))
-  project.tracks[2].clips.push({ ...clip, id: 'speech', start: 12, trimIn: 0, trimOut: 2, speed: 1, speech: { text: '重要信息', voiceId: 'voice', rate: 1 } })
+  project.tracks.find(track => track.kind === 'video').locked = true
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'text', start: 12, trimOut: 2, text: '正在解释重要信息' }))
+  project.tracks.find(track => track.kind === 'audio').clips.push({ ...clip, id: 'speech', start: 12, trimIn: 0, trimOut: 2, speed: 1, speech: { text: '重要信息', voiceId: 'voice', rate: 1 } })
   const transition = createTrack('transition'); transition.clips.push({ ...clip, id: 'transition', start: 12, trimIn: 0, trimOut: 2, speed: 1 }); project.tracks.push(transition)
   const before = structuredClone(project)
   const result = rhythmCandidates(project, values(detected(16, 20)), defaults)
-  assert.deepEqual(result[0].context, ['所在轨道已锁定', '同期有字幕 / 标注', '同期有配音', '同期有转场'])
+  assert.deepEqual(result[0].context, ['所在轨道已锁定', '同期有配音', '同期有字幕 / 标注', '同期有转场'])
   assert.deepEqual(project, before)
 })
 
@@ -110,7 +110,7 @@ test('多个画面叠加的候选时长按时间线并集统计，不虚报节�
 
 test('所有素材仅分析一次，最小源时长根据较慢片段换算并报告真实素材进度', async () => {
   let { project, asset } = fixture()
-  project = addClip(project, project.tracks[1].id, createClip(asset, project, { id: 'slow', start: 30, trimIn: 20, trimOut: 30, speed: .5 }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, createClip(asset, project, { id: 'slow', start: 30, trimIn: 20, trimOut: 30, speed: .5 }))
   const calls = [], progress = [], controller = new AbortController()
   const report = await analyzeRhythm(project, { ...defaults, minimum: 2 }, async (name, args, options) => {
     calls.push({ name, args }); options.onProgress({ stage: '正在检测' })
@@ -130,7 +130,7 @@ test('所有素材仅分析一次，最小源时长根据较慢片段换算并�
 test('曲线变速的慢速部分决定分析源阈值，防止漏掉时间线长等待', async () => {
   const { project, clip } = fixture()
   clip.speedRamp = { points: [{ position: 0, speed: .1 }, { position: 1, speed: 2 }], easing: 'linear', preservePitch: true }
-  project.tracks[1].clips[0] = clip
+  project.tracks.find(track => track.kind === 'video').clips[0] = clip
   let actual
   await analyzeRhythm(project, { ...defaults, minimum: 2 }, async (_name, args) => { actual = args.minDuration; return { intervals: [] } }, { signal: new AbortController().signal, onProgress: () => {} })
   assert.equal(actual, Math.max(.05, Math.min(...speedSegments(clip).map(segment => segment.speed)) * 2))
@@ -147,7 +147,7 @@ test('单个素材失败明确返回错误，其他素材仍能完成分析', as
   let { project, asset } = fixture()
   const second = { ...asset, id: 'second', name: '其他视频.mp4' }
   project = addAsset(project, second)
-  project = addClip(project, project.tracks[1].id, createClip(second, project, { id: 'second-clip', start: 30, trimOut: 5 }))
+  project = addClip(project, project.tracks.find(track => track.kind === 'video').id, createClip(second, project, { id: 'second-clip', start: 30, trimOut: 5 }))
   const report = await analyzeRhythm(project, defaults, async (_name, args) => { if (args.assetId === 'source') throw new Error('文件不可读取'); return { intervals: [detected(1, 4)], detectors: ['freeze', 'silence'] } }, { signal: new AbortController().signal, onProgress: () => {} })
   assert.deepEqual(report.errors, ['操作演示.mp4：文件不可读取'])
   assert.equal(report.candidates.length, 1)
@@ -173,9 +173,9 @@ test('标记一次提交、保留原有标记与所有轨道，重复添加幂�
 test('工程源、裁切或时间改变使结果失效，而标记与选择变化不影响分析', () => {
   const { project } = fixture(), report = reportFor(project, rhythmCandidates(project, values(detected(14, 18)), defaults))
   const changed = structuredClone(project)
-  changed.tracks[1].clips[0].start++
+  changed.tracks.find(track => track.kind === 'video').clips[0].start++
   assert.throws(() => addRhythmMarkers(changed, report, [report.candidates[0].id]), /重新分析/)
-  changed.tracks[1].clips[0].start--
+  changed.tracks.find(track => track.kind === 'video').clips[0].start--
   changed.assets[0].nativePath = '/new/file.mp4'
   assert.notEqual(rhythmSignature(changed), report.signature)
   const same = structuredClone(project); same.markers = [{ id: 'new-marker', time: 0, label: '新标记', kind: 'review' }]

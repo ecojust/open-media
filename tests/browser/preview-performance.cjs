@@ -50,11 +50,11 @@ async function main() {
       const videoBlob = await (await fetch('/__performance_video.webm')).blob()
       const asset = { id: 'video', name: '动态视频', kind: 'video', url: URL.createObjectURL(videoBlob), duration: 6, width: 1920, height: 1080, size: videoBlob.size, mime: 'video/webm' }
       project.assets = [asset]
-      project.tracks = [createTrack('text'), createTrack('video'), createTrack('audio')]
-      project.tracks[1].clips = [createClip(asset, project, { id: 'first', trimOut: 3, volume: 0 }), createClip(asset, project, { id: 'second', start: 3, trimIn: 3, trimOut: 6, volume: 0 })]
+      project.tracks = [createTrack('video'), createTrack('audio'), createTrack('text')]
+      project.tracks.find(track => track.kind === 'video').clips = [createClip(asset, project, { id: 'first', trimOut: 3, volume: 0 }), createClip(asset, project, { id: 'second', start: 3, trimIn: 3, trimOut: 6, volume: 0 })]
       // Twelve simultaneous annotations stress layout; the remaining captions
       // exercise traversal without artificially decoding dozens of video files.
-      project.tracks[0].clips = Array.from({ length: 67 }, (_, i) => createTextClip(project, {
+      project.tracks.find(track => track.kind === 'text').clips = Array.from({ length: 67 }, (_, i) => createTextClip(project, {
         id: 'text-' + i, text: `${i + 1} 科普知识 · 从图像认识世界 Open Media keeps video, subtitles and transitions in one preview.`,
         start: i < 12 ? 0 : 10 + (i - 12) * 2, trimOut: 6, fontSize: 24 + (i % 3) * 4, width: 620, height: 150,
         x: (i % 3) * 640, y: Math.floor((i % 12) / 3) * 240, background: i % 2 ? '#102030' : 'transparent',

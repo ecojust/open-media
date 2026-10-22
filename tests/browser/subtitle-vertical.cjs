@@ -65,10 +65,10 @@ async function main() {
       for (const alignment of ['top', 'middle', 'bottom', undefined]) {
         const project = createProject('字幕纵向对齐', { width: 320, height: 240, fps: 20, background: '#000000' })
         const clip = createTextClip(project, { text: '字幕第一行\n第二行', textVerticalAlign: alignment, fontSize: 24, fontFamily: 'sans-serif', fontWeight: 600, x: 20, y: 20, width: 280, height: 200, trimOut: 1.2 })
-        project.tracks[0].clips.push(clip)
+        project.tracks.find(track => track.kind === 'text').clips.push(clip)
         const audio = { id: 'test-tone', name: '测试声音.wav', kind: 'audio', url: audioUrl, nativePath: '/fixture/test-tone.wav', duration: 2, width: 0, height: 0, size: wav.byteLength, mime: 'audio/wav' }
         project.assets.push(audio)
-        project.tracks[2].clips.push(createClip(audio, project, { trimOut: 1.2 }))
+        project.tracks.find(track => track.kind === 'audio').clips.push(createClip(audio, project, { trimOut: 1.2 }))
         const local = makeCanvas(280, 200)
         drawTextClip(local.getContext('2d'), clip)
         const previewCanvas = makeCanvas(320, 240)
@@ -87,12 +87,12 @@ async function main() {
         if (alignment === 'middle') {
           const silentProject = structuredClone(project)
           silentProject.assets = []
-          silentProject.tracks[2].clips = []
+          silentProject.tracks.find(track => track.kind === 'audio').clips = []
           result.textOnly = await decodeExport(silentProject)
-          project.tracks[2].muted = true
+          project.tracks.find(track => track.kind === 'audio').muted = true
           result.muted = await decodeExport(project)
-          project.tracks[2].muted = false
-          project.tracks[2].clips[0].volume = 0
+          project.tracks.find(track => track.kind === 'audio').muted = false
+          project.tracks.find(track => track.kind === 'audio').clips[0].volume = 0
           result.zeroVolume = await decodeExport(project)
         }
         result[String(alignment)] = { local: bounds(local), preview: bounds(previewCanvas), native: bounds(nativeCanvas), identicalNativePixels, exported }

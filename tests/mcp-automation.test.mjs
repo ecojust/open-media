@@ -109,7 +109,7 @@ function fixture(initialProject = createProject('当前工程', { width: 640, he
     async listMcpMaterials(query) { return { kind: query.kind, total: 1, offset: 0, limit: 50, items: [{ id: 'sample', name: '示例' }] } },
     async prepareMcpMaterial(project, args) {
       const clip = createSubtitleClip(project, { text: '内置素材', start: args.start ?? 0 })
-      return { project: addClip(project, project.tracks[0].id, clip), label: '添加素材', selection: { clipId: clip.id, trackId: project.tracks[0].id } }
+      return { project: addClip(project, project.tracks.find(t => t.kind === 'text').id, clip), label: '添加素材', selection: { clipId: clip.id, trackId: project.tracks.find(t => t.kind === 'text').id } }
     },
   }
   globalThis.__openMediaMcpTestIo = Object.fromEntries(Object.keys(io).map(name => [name, (...args) => { calls.push({ name, args }); return io[name](...args) }]))
@@ -178,18 +178,13 @@ test('motion style discovery is synchronous, searchable and isolated from projec
   assert.equal(all.count, 25)
   assert.equal(all.items.length, 25)
   assert.equal(all.capabilities.editable, true)
-  assert.equal(all.capabilities.rendering, 'external-agent-code')
-  assert.equal(all.capabilities.presetRendering, '2d')
+  assert.equal(all.capabilities.rendering, 'editor-timeline')
+  assert.equal(all.capabilities.finalComposition, 'editor-timeline')
   assert.equal(all.capabilities.briefPromptField, 'effectivePrompt')
   assert.equal(all.capabilities.codeExecution, 'agent-environment')
-  assert.deepEqual(all.capabilities.presetStyleIds, MOTION_STYLES.filter(style => style.presetSupported).map(style => style.id))
-  assert.deepEqual(all.capabilities.codeOnlyStyleIds, MOTION_STYLES.filter(style => !style.presetSupported).map(style => style.id))
-  assert.equal(all.capabilities.presetStyleIds.length, 15)
-  assert.equal(all.capabilities.codeOnlyStyleIds.length, 10)
-  assert.equal(all.capabilities.selectedPresetSupported, false)
   assert(all.items.every(item => typeof item.prompt === 'string' && item.prompt.includes(item.id)))
-  assert.equal(all.capabilities.output, 'video-asset')
-  assert.equal(all.capabilities.layered, false)
+  assert.equal(all.capabilities.output, 'layered-timeline')
+  assert.equal(all.capabilities.layered, true)
   assert.equal(all.capabilities.configurationTool, 'open_media_motion_brief_get')
   assert.equal(all.capabilities.configurationOwner, 'user')
   assert.equal(all.capabilities.execution, 'external-agent')
@@ -215,7 +210,7 @@ test('motion style discovery is synchronous, searchable and isolated from projec
   await f.controller.dispose()
 })
 
-test('motion discovery and brief preserve code-only selection without advertising a local preset for it', async () => {
+test('all motion styles use independent assets and editor composition', async () => {
   const project = createProject('代码风格任务')
   project.assets.push(video())
   const f = fixture(project)
@@ -224,35 +219,19 @@ test('motion discovery and brief preserve code-only selection without advertisin
     const list = await f.run('motion_style_list', { search: style.id })
     const brief = await f.run('motion_brief_get')
     assert.deepEqual(list.items.map(item => item.id), [style.id])
-    assert.equal(list.capabilities.selectedPresetSupported, style.presetSupported)
+    assert.equal(list.capabilities.presetTool, null)
+    assert.equal(list.capabilities.trackOrder, 'back-to-front')
+    assert.equal(list.capabilities.zIndex, 'array-index')
     assert.equal(brief.ready, true)
     assert.equal(brief.styleId, style.id)
-    assert.equal(brief.workflow.presetGenerationTool, style.presetSupported ? 'open_media_motion_clip_generate' : null)
-    assert.equal(brief.style.presetSupported, style.presetSupported)
+    assert.equal(brief.workflow.presetGenerationTool, null)
+    assert.equal(brief.generationMode, 'agent-assets-timeline')
+    assert.equal(Object.hasOwn(brief.style, 'presetSupported'), false)
+    assert.equal(Object.hasOwn(list.items[0], 'presetSupported'), false)
   }
   assert.equal(f.commits.length, 0)
   assert.equal(f.controller.list().length, 0)
   await f.controller.dispose()
-})
-
-test('code-only user selection rejects omitted-style preset jobs before any rendering or project change', async () => {
-  const codeStyles = MOTION_STYLES.filter(style => !style.presetSupported)
-  assert.equal(codeStyles.length, 10)
-  for (const style of codeStyles) {
-    const project = createProject('外部代码渲染')
-    project.assets.push(video())
-    project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: style.id }
-    const before = clone(project), f = fixture(project)
-    for (const dryRun of [true, false]) {
-      const done = await finished(f.controller, await f.run('motion_clip_generate', { scenes: [{ assetId: 'source-video' }], dryRun }))
-      assert.equal(done.state, 'failed')
-      assert.match(done.error, /外部 Agent.*不支持内置二维预设/)
-    }
-    assert.deepEqual(f.project, before)
-    assert.equal(f.calls.length, 0)
-    assert.equal(f.commits.length, 0)
-    await f.controller.dispose()
-  }
 })
 
 test('motion brief is discoverable while disabled or busy and contains safe detached user intent', async () => {
@@ -286,27 +265,6 @@ test('motion brief is discoverable while disabled or busy and contains safe deta
   await f.controller.dispose()
 })
 
-test('motion generation requires local opt-in and rejects GUI calls or remote preference changes', async () => {
-  for (const mode of ['disabled', 'missing-assets', 'missing-style', 'other-style', 'unselected-source']) {
-    const project = createProject('用户任务')
-    project.assets.push(video(), video('other-video'))
-    project.mcpMotion = { enabled: mode !== 'disabled', assetIds: mode === 'missing-assets' ? [] : ['source-video'], styleId: mode === 'missing-style' ? '' : 'tech-hud' }
-    const f = fixture(project)
-    const args = { scenes: [{ assetId: mode === 'unselected-source' ? 'other-video' : 'source-video' }], dryRun: true, ...(mode === 'other-style' ? { styleId: 'flat-pop' } : {}) }
-    const done = await finished(f.controller, await f.run('motion_clip_generate', args))
-    assert.equal(done.state, 'failed', mode)
-    assert.equal(f.calls.length, 0, mode)
-    assert.equal(f.commits.length, 0, mode)
-    await f.controller.dispose()
-  }
-  const project = createProject('仅 MCP 执行')
-  project.assets.push(video())
-  project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
-  await assert.rejects(prepareEditorTool('open_media_motion_clip_generate', { scenes: [{ assetId: 'source-video' }], dryRun: true }, {
-    project, revision: 1, blobs: new Map(), source: 'gui', signal: new AbortController().signal, onProgress() {},
-  }), /外部 MCP Agent/)
-})
-
 test('MCP snapshot restore preserves current user-owned motion preferences', async () => {
   const project = createProject('历史工程')
   project.mcpMotion = { enabled: true, assetIds: [], styleId: 'tech-hud' }
@@ -321,126 +279,6 @@ test('MCP snapshot restore preserves current user-owned motion preferences', asy
   assert.deepEqual(f.project.mcpMotion, currentConfig)
   assert.equal(f.project.title, '历史工程')
   await f.controller.dispose()
-})
-
-test('motion clip preflight uses the asynchronous shared tool without rendering media or editing the project', async () => {
-  const project = createProject('风格预检', { width: 640, height: 360 })
-  project.assets.push(video())
-  project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud', prompt: '展示素材重点' }
-  project.tracks[1].clips.push(createClip(project.assets[0], project, { start: 3, trimOut: 2 }))
-  const f = fixture(project), before = clone(project)
-  const args = { scenes: [{ assetId: 'source-video', heading: '测试场景', duration: 4 }], dryRun: true, expectedProjectId: project.id, expectedRevision: f.revision }
-  const job = await f.run('motion_clip_generate', args)
-  assert.equal(job.execution, 'asynchronous')
-  assert.equal(job.responseType, 'job')
-  assert.equal(job.tool, 'open_media_motion_clip_generate')
-  assert.deepEqual(job.poll, { tool: 'open_media_job_get', arguments: { id: job.jobId } })
-  const done = await finished(f.controller, job)
-  assert.equal(done.state, 'completed', done.error)
-  assert.equal(done.result.dryRun, true)
-  assert.equal(done.result.styleId, 'tech-hud')
-  assert.equal(done.result.scenes.length, 1)
-  assert.equal(done.result.duration, 4)
-  assert.equal(done.result.destination, 'assets')
-  assert.equal(done.result.start, 0)
-  assert.equal(done.result.width, 640)
-  assert.equal(done.result.height, 360)
-  assert.deepEqual(done.result.sourceAssetIds, ['source-video'])
-  assert.deepEqual(f.project, before)
-  assert.equal(f.commits.length, 0)
-  assert.equal(f.assets.length, 0)
-  assert.equal(f.calls.length, 0)
-  assert.equal(f.busy, false)
-  const timeline = await finished(f.controller, await f.run('motion_clip_generate', { ...args, destination: 'timeline', insert: { trackId: project.tracks[1].id } }))
-  assert.equal(timeline.state, 'completed', timeline.error)
-  assert.equal(timeline.result.destination, 'timeline')
-  assert.deepEqual(timeline.result.insert, { trackId: project.tracks[1].id, start: 5 })
-  assert.equal(timeline.result.start, 0)
-  assert.deepEqual(f.project, before)
-  const newTrack = await finished(f.controller, await f.run('motion_clip_generate', { ...args, destination: 'timeline' }))
-  assert.equal(newTrack.state, 'completed', newTrack.error)
-  assert.deepEqual(newTrack.result.insert, { start: 5 })
-  const missing = await finished(f.controller, await f.run('motion_clip_generate', { ...args, scenes: [{ assetId: 'missing-asset' }] }))
-  assert.equal(missing.state, 'failed')
-  assert.equal(f.commits.length, 0)
-  assert.deepEqual(f.project, before)
-  const invalidInsert = await finished(f.controller, await f.run('motion_clip_generate', { ...args, insert: { start: 0 } }))
-  assert.equal(invalidInsert.state, 'failed')
-  assert.match(invalidInsert.error, /destination=timeline/)
-  assert.equal(f.commits.length, 0)
-  assert.equal(f.calls.length, 0)
-  await assert.rejects(f.run('motion_compose', args), /未知的 MCP 工具/)
-  await f.controller.dispose()
-})
-
-test('motion clip generation adopts only the encoded video and commits one undo step', async () => {
-  const project = createProject('素材二创', { width: 640, height: 360 })
-  project.assets.push(video())
-  project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
-  project.tracks[1].clips.push(createClip(project.assets[0], project, { start: 3, trimOut: 2 }))
-  const f = fixture(project), before = clone(project)
-  let accepted = 0, discarded = 0
-  f.io.renderMotionClip = async renderProject => {
-    assert.ok(renderProject.tracks.every(track => track.clips.every(clip => clip.id !== project.tracks[1].clips[0].id)))
-    assert.equal(renderProject.width, project.width)
-    assert.equal(renderProject.height, project.height)
-    assert.ok(renderProject.tracks.some(track => track.clips.some(clip => clip.text === '素材二创测试')))
-    return { asset: { ...video('rendered-motion-video'), width: project.width, height: project.height, duration: 4 },
-      accept: async () => { accepted++ }, discard: async () => { discarded++ } }
-  }
-  const result = await finished(f.controller, await f.run('motion_clip_generate', {
-    styleId: 'tech-hud', scenes: [{ assetId: 'source-video', heading: '素材二创测试', duration: 4 }],
-    expectedProjectId: project.id, expectedRevision: f.revision,
-  }))
-  assert.equal(result.state, 'completed', result.error)
-  assert.equal(result.result.assetId, 'rendered-motion-video')
-  assert.equal(result.result.destination, 'assets')
-  assert.equal(result.result.renderer, 'native')
-  assert.equal(result.result.duration, 4)
-  assert.equal(result.result.clipId, undefined)
-  assert.equal(result.result.trackId, undefined)
-  assert.deepEqual(result.result.sourceAssetIds, ['source-video'])
-  assert.equal(/\/private\/|blob:/.test(JSON.stringify(result.result)), false)
-  assert.deepEqual(f.project.tracks, before.tracks)
-  assert.deepEqual(f.project.markers, before.markers)
-  assert.deepEqual(f.project.assets.map(asset => asset.id), ['source-video', 'rendered-motion-video'])
-  assert.deepEqual(f.assets.map(asset => asset.id), ['rendered-motion-video'])
-  assert.equal(f.commits.length, 1)
-  assert.equal(accepted, 1)
-  assert.equal(discarded, 0)
-  await f.run('project_history', { direction: 'undo' })
-  assert.deepEqual(f.project, before)
-  await f.controller.dispose()
-})
-
-test('motion clip jobs discard late encoded output after cancellation or a changed project session', async () => {
-  for (const action of ['cancel', 'revision', 'configuration', 'open', 'reopen', 'encode-failure']) {
-    const project = createProject('二创任务归属', { width: 640, height: 360 })
-    project.assets.push(video())
-    project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
-    const f = fixture(project), encoded = deferred()
-    let accepted = 0, discarded = 0
-    f.io.renderMotionClip = () => encoded.promise
-    const job = await f.run('motion_clip_generate', { styleId: 'tech-hud', scenes: [{ assetId: 'source-video', duration: 4 }] })
-    await until(() => f.calls.some(call => call.name === 'renderMotionClip'), 'motion encoder')
-    if (action === 'cancel') await f.controller.cancel(job.id)
-    if (action === 'revision') f.externalChange()
-    if (action === 'configuration') { f.project.mcpMotion.enabled = false; f.externalChange() }
-    if (action === 'open') f.openOther()
-    if (action === 'reopen') f.reopen()
-    const expected = clone(f.project)
-    if (action === 'encode-failure') encoded.reject(new Error('测试编码失败'))
-    else encoded.resolve({ asset: { ...video('late-motion-video'), width: 640, height: 360, duration: 4 },
-      accept: async () => { accepted++ }, discard: async () => { discarded++ } })
-    const result = await finished(f.controller, job)
-    assert.equal(result.state, action === 'cancel' ? 'cancelled' : 'failed', `${action}: ${result.error}`)
-    assert.equal(accepted, 0, action)
-    assert.equal(discarded, action === 'encode-failure' ? 0 : 1, action)
-    assert.equal(f.commits.length, 0, action)
-    assert.equal(f.assets.length, 0, action)
-    assert.deepEqual(f.project, expected, action)
-    await f.controller.dispose()
-  }
 })
 
 test('expected project identity rejects stale clients before edits, native I/O or settings changes', async () => {
@@ -495,7 +333,7 @@ test('import runs once as an atomic undo step and adopts source size for a fresh
 test('material-producing jobs commit and register only assets owned by the current project', async () => {
   for (const kind of ['import', 'upload', 'url', 'video', 'image', 'music', 'speech']) {
     const source = createProject('工程素材隔离')
-    if (kind === 'speech') source.tracks[0].clips.push(createTextClip(source, { text: '工程内的配音素材。', trimOut: 5 }))
+    if (kind === 'speech') source.tracks.find(t => t.kind === 'text').clips.push(createTextClip(source, { text: '工程内的配音素材。', trimOut: 5 }))
     const f = fixture(source), preparations = []
     f.host.prepareProject = async (candidate, options) => {
       options.assertCurrent()
@@ -574,31 +412,6 @@ test('project preparation remains cancellable and rejects late results from anot
     assert.equal(f.assets.length, 0, action)
     assert.equal(f.project.assets.length, 0, action)
     assert.equal(f.busy, false)
-    await f.controller.dispose()
-  }
-})
-
-test('motion output acceptance and cancellation retain temporary-resource ownership after localization', async () => {
-  for (const action of ['accept', 'cancel', 'reopen', 'copy-failed']) {
-    const source = createProject('素材二创归档')
-    source.assets.push(video())
-    source.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'tech-hud' }
-    const f = fixture(source), pending = deferred()
-    let candidate, accepted = 0, discarded = 0
-    f.io.renderMotionClip = async project => ({ asset: { ...video('motion-output'), width: project.width, height: project.height, duration: 4 }, accept: async () => { accepted++ }, discard: async () => { discarded++ } })
-    f.host.prepareProject = async project => { candidate = project; return pending.promise }
-    const job = await f.run('motion_clip_generate', { scenes: [{ assetId: 'source-video', duration: 4 }] })
-    await until(() => !!candidate)
-    if (action === 'cancel') await f.run('job_cancel', { id: job.id })
-    if (action === 'reopen') f.reopen()
-    if (action === 'copy-failed') pending.reject(new Error('磁盘空间不足'))
-    else pending.resolve(localizeProject(candidate))
-    const done = await finished(f.controller, job)
-    assert.equal(done.state, action === 'accept' ? 'completed' : action === 'cancel' ? 'cancelled' : 'failed', done.error)
-    assert.equal(accepted, action === 'accept' ? 1 : 0)
-    assert.equal(discarded, action === 'accept' ? 0 : 1)
-    assert.equal(f.commits.length, action === 'accept' ? 1 : 0)
-    if (action === 'accept') assert.equal(f.assets[0].nativePath, `/projects/${f.project.id}/assets/motion-output`)
     await f.controller.dispose()
   }
 })
@@ -689,8 +502,8 @@ test('remote old-session jobs expose only status while internal history retains 
 
 test('old-session speech job responses omit generated IDs and skipped subtitle contents', async () => {
   let project = createProject('配音状态归属')
-  project = addClip(project, project.tracks[0].id, createSubtitleClip(project, { id: 'private-caption', name: '私有字幕名称', text: '字幕内容' }))
-  project = addClip(project, project.tracks[0].id, createSubtitleClip(project, { id: 'private-empty', name: '私有空字幕名称', text: '' }))
+  project = addClip(project, project.tracks.find(t => t.kind === 'text').id, createSubtitleClip(project, { id: 'private-caption', name: '私有字幕名称', text: '字幕内容' }))
+  project = addClip(project, project.tracks.find(t => t.kind === 'text').id, createSubtitleClip(project, { id: 'private-empty', name: '私有空字幕名称', text: '' }))
   const f = fixture(project)
   const job = await finished(f.controller, await f.run('speech_generate'))
   assert.equal(job.state, 'completed')
@@ -966,7 +779,7 @@ test('转场音效 MCP 原生导入期间取消、修改或切换工程均不登
 
 test('shared speech settings are used when generation omits voice, rate and alignment', async () => {
   let project = createProject('字幕配音')
-  project = addClip(project, project.tracks[0].id, createSubtitleClip(project, { id: 'spoken-caption', text: '欢迎使用本地视频剪辑软件。' }))
+  project = addClip(project, project.tracks.find(t => t.kind === 'text').id, createSubtitleClip(project, { id: 'spoken-caption', text: '欢迎使用本地视频剪辑软件。' }))
   const f = fixture(project), notifications = []
   const unsubscribe = subscribeSpeechSettings(settings => notifications.push(settings))
   await f.run('speech_settings_set', { voiceId: voice.id, rate: 1.2, alignText: false })
@@ -1080,7 +893,7 @@ test('stale prepared materials are discarded and never registered in the current
     const job = await f.run('material_add', { kind: 'music', id: 'sample', start: 3 })
     await until(() => f.calls.some(call => call.name === 'prepareMcpMaterial'))
     f.externalChange()
-    pending.resolve({ project: cloneProject(f.project), label: '素材', selection: { clipId: 'unused', trackId: f.project.tracks[0].id }, assets: [{ asset: { ...video('prepared'), url: 'blob:discard-material', sourceUrl: 'blob:discard-material-source' }, blob: new Blob(['x']) }] })
+    pending.resolve({ project: cloneProject(f.project), label: '素材', selection: { clipId: 'unused', trackId: f.project.tracks.find(t => t.kind === 'text').id }, assets: [{ asset: { ...video('prepared'), url: 'blob:discard-material', sourceUrl: 'blob:discard-material-source' }, blob: new Blob(['x']) }] })
     const done = await finished(f.controller, job)
     assert.equal(done.state, 'failed')
     assert.equal(f.commits.length, 0)
@@ -1126,7 +939,7 @@ test('a completed write from a prior session does not replace the reopened proje
 
 test('running speech remains exclusive even if the UI host does not preserve the busy flag', async () => {
   let project = createProject('共享操作锁')
-  project = addClip(project, project.tracks[0].id, createSubtitleClip(project, { id: 'caption-locked', text: '测试字幕' }))
+  project = addClip(project, project.tracks.find(t => t.kind === 'text').id, createSubtitleClip(project, { id: 'caption-locked', text: '测试字幕' }))
   const f = fixture(project), pending = deferred()
   f.io.beginSpeechJob = () => pending.promise
   const job = await f.run('speech_generate', { clipIds: ['caption-locked'] })
@@ -1269,12 +1082,12 @@ test('storyboard generates all shots before inserting sequential or combined cli
     const f = fixture()
     const result = await finished(f.controller, await f.run('video_generation_start', {
       modelId: 'h3-base-fl2va', mode: 'storyboard', shots: [{ title: '开场', prompt: '蓝色球体', seconds: 2 }, { title: '结束', prompt: '金色光芒', seconds: 3 }],
-      insert: { mode, trackId: f.project.tracks[1].id, start: 4 },
+      insert: { mode, trackId: f.project.tracks.find(t => t.kind === 'video').id, start: 4 },
     }))
     assert.equal(result.state, 'completed')
     assert.equal(f.commits.length, 1)
     assert.equal(f.project.assets.length, 3)
-    const clips = f.project.tracks[1].clips
+    const clips = f.project.tracks.find(t => t.kind === 'video').clips
     assert.deepEqual(clips.map(clip => clip.start), mode === 'shots' ? [4, 6] : [4])
     assert.deepEqual(clips.map(clip => clip.trimOut), mode === 'shots' ? [2, 3] : [5])
     await f.controller.dispose()
@@ -1288,7 +1101,7 @@ test('generation input validates modes, dimensions, asset ownership and insertio
     generation({ width: 513 }), generation({ width: 1344, height: 1344 }), generation({ seconds: 16 }),
     generation({ prompt: '' }), generation({ nativePath: '/tmp/forged.mp4' }),
     generation({ references: [{ assetId: 'missing', kind: 'image' }] }),
-    generation({ shots: [{ prompt: '混用' }] }), generation({ insert: { trackId: f.project.tracks[0].id } }),
+    generation({ shots: [{ prompt: '混用' }] }), generation({ insert: { trackId: f.project.tracks.find(t => t.kind === 'text').id } }),
     { modelId: 'h3-base-fl2va', mode: 'storyboard', shots: Array.from({ length: 21 }, () => ({ prompt: '超量' })) },
     { modelId: 'h3-base-fl2va', mode: 'storyboard', shots: [{ prompt: '第一镜' }, { prompt: '第二镜' }], joinShots: false, insert: { mode: 'combined' } },
   ]) await assert.rejects(f.run('video_generation_start', args))
@@ -1456,7 +1269,7 @@ test('AI generation resolves references only from project assets and rejects inv
   const project = createProject('AI 参考'), source = { ...video('source-image'), kind: 'image', duration: 0, mime: 'image/png' }
   project.assets = [source, video()]
   const f = fixture(project)
-  for (const args of [aiImage({ modelId: 'unknown' }), aiImage({ mode: 'image-to-image' }), aiImage({ inputAssetId: 'missing' }), aiImage({ inputAssetId: 'source-video' }), aiImage({ nativePath: '/private/reference.png' }), aiImage({ mode: 'text-to-image', inputAssetId: source.id }), aiImage({ width: 513 }), aiImage({ strength: 0 }), aiImage({ modelId: 'z-image-turbo', negativePrompt: 'blur' }), aiImage({ insert: { start: 1 } }), aiImage({ destination: 'timeline', insert: { trackId: project.tracks[0].id } }), aiImage({ expectedRevision: 6 })]) await assert.rejects(f.run('image_generate', args))
+  for (const args of [aiImage({ modelId: 'unknown' }), aiImage({ mode: 'image-to-image' }), aiImage({ inputAssetId: 'missing' }), aiImage({ inputAssetId: 'source-video' }), aiImage({ nativePath: '/private/reference.png' }), aiImage({ mode: 'text-to-image', inputAssetId: source.id }), aiImage({ width: 513 }), aiImage({ strength: 0 }), aiImage({ modelId: 'z-image-turbo', negativePrompt: 'blur' }), aiImage({ insert: { start: 1 } }), aiImage({ destination: 'timeline', insert: { trackId: project.tracks.find(t => t.kind === 'text').id } }), aiImage({ expectedRevision: 6 })]) await assert.rejects(f.run('image_generate', args))
   for (const args of [aiMusic({ instrumental: false }), aiMusic({ instrumental: true, lyrics: '测试歌词' }), aiMusic({ guidance: 5 }), aiMusic({ inputAssetId: source.id }), aiMusic({ seconds: 601 }), aiMusic({ negativePrompt: 'noise' })]) await assert.rejects(f.run('music_generate', args))
   assert.equal(f.calls.filter(call => call.name === 'beginAiGeneration').length, 0)
   const result = await finished(f.controller, await f.run('image_generate', aiImage({ inputAssetId: source.id, strength: .5 })))
@@ -1769,7 +1582,7 @@ test('a model change during project asset preparation prevents stale results bei
 
 test('five installed speech voices do not grant MCP permission to change the selected voice', async () => {
   const project = createProject('限定音色')
-  project.tracks[0].clips.push(createSubtitleClip(project, { id: 'speech-selection', text: '欢迎使用工程剪辑功能。' }))
+  project.tracks.find(t => t.kind === 'text').clips.push(createSubtitleClip(project, { id: 'speech-selection', text: '欢迎使用工程剪辑功能。' }))
   const f = fixture(project), voices = Array.from({ length: 5 }, (_, index) => ({ ...voice, id: `voice-${index}` }))
   updateSpeechSettings({ voiceId: 'voice-3' })
   f.io.getSpeechStatus = async () => ({ ready: true, voices })
@@ -1784,5 +1597,62 @@ test('five installed speech voices do not grant MCP permission to change the sel
   assert.equal(result.state, 'completed', result.error)
   assert.equal(f.calls.find(call => call.name === 'beginSpeechJob').args[0].voiceId, 'voice-3')
   updateSpeechSettings({ voiceId: voice.id })
+  await f.controller.dispose()
+})
+
+test('all styles reject the retired whole-video request without I/O, jobs or edits', async () => {
+  for (const style of MOTION_STYLES) {
+    const project = createProject('素材分层任务')
+    project.assets.push(video())
+    project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: style.id }
+    const f = fixture(project), before = clone(project)
+    for (const dryRun of [true, false]) await assert.rejects(f.run('motion_clip_generate', { scenes: [{ assetId: 'source-video' }], dryRun }), /独立素材与轨道编排/)
+    assert.deepEqual(f.project, before)
+    assert.equal(f.calls.length, 0)
+    assert.equal(f.commits.length, 0)
+    assert.equal(f.controller.list().length, 0)
+    await f.controller.dispose()
+  }
+})
+
+test('generated artwork stays as separate editable layers with image timing, green key and atomic changes', async () => {
+  const project = createProject('分层素材工程', { width: 640, height: 360 })
+  project.assets.push(video())
+  project.mcpMotion = { enabled: true, assetIds: ['source-video'], styleId: 'product-keynote' }
+  const f = fixture(project)
+  f.io.runAssetTool = async operation => {
+    assert.equal(operation, 'asset_import_url')
+    return { asset: { id: 'generated-decoration', name: '装饰.png', kind: 'image', url: 'blob:generated-decoration', nativePath: '/generated/decoration.png', duration: 0, width: 160, height: 80, size: 100, mime: 'image/png' }, source: { kind: 'url', url: 'https://assets.example/decoration.png', sha256: 'a'.repeat(64), importedAt: Date.now() } }
+  }
+  const imported = await finished(f.controller, await f.run('asset_import_url', { url: 'https://assets.example/decoration.png' }))
+  assert.equal(imported.state, 'completed', imported.error)
+  assert.equal(imported.result.assetId, 'generated-decoration')
+  const background = f.project.tracks.find(t => t.kind === 'video').id
+  const source = await f.run('clip_add', { trackId: background, assetId: 'source-video', options: { trimOut: 4 } })
+  const foreground = await f.run('track_add', { kind: 'video', name: '装饰' })
+  const art = await f.run('clip_add', { trackId: foreground.track.id, assetId: imported.result.assetId, options: { start: 0, trimOut: 4 } })
+  const before = clone(f.project), revision = f.revision, commitCount = f.commits.length
+  const operations = [
+    { tool: 'open_media_clip_update', arguments: { clipId: art.clip.id, patch: { x: 30, y: 40, width: 200, height: 100, opacity: 0.8, chromaKey: { color: '#00ff00', spillSuppression: true } } } },
+    { tool: 'open_media_clip_keyframes_set', arguments: { clipId: art.clip.id, keyframes: { x: [{ time: 0, value: 30 }, { time: 2, value: 80, easing: 'ease-in-out' }] } } },
+    { tool: 'open_media_track_reorder', arguments: { trackId: foreground.track.id, zIndex: f.project.tracks.length - 1 } },
+  ]
+  const preflight = await finished(f.controller, await f.run('timeline_batch_edit', { operations, dryRun: true, expectedRevision: revision }))
+  assert.equal(preflight.state, 'completed', preflight.error)
+  assert.deepEqual(f.project, before)
+  const done = await finished(f.controller, await f.run('timeline_batch_edit', { operations, expectedRevision: revision }))
+  assert.equal(done.state, 'completed', done.error)
+  assert.equal(f.commits.length, commitCount + 1)
+  const edited = f.project.tracks.flatMap(t => t.clips).find(c => c.id === art.clip.id)
+  assert.equal(edited.keyframes.x[1].value, 80)
+  assert.equal(edited.chromaKey.color, '#00ff00')
+  assert.equal(f.project.tracks.flatMap(t => t.clips).find(c => c.id === source.clip.id).assetId, 'source-video')
+  assert.deepEqual(f.project.assets.map(a => a.id), ['source-video', 'generated-decoration'])
+  assert.equal(f.calls.some(c => c.name === 'renderMotionClip'), false)
+  const inspection = await f.run('project_get')
+  assert.equal(inspection.tracks.at(-1).id, foreground.track.id)
+  assert.equal(inspection.tracks.at(-1).zIndex, f.project.tracks.length - 1)
+  await f.run('project_history', { direction: 'undo' })
+  assert.deepEqual(f.project, before)
   await f.controller.dispose()
 })

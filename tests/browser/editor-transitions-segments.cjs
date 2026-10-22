@@ -28,7 +28,7 @@ async function mount(page, url) {
       createClip(asset, project, { id: 'part-a', name: '前半段', trimIn: 0, trimOut: 2.5 }),
       createClip(asset, project, { id: 'part-b', name: '后半段', start: 2.5, trimIn: 2.5, trimOut: 5 }),
     )
-    project.tracks[0].clips.push(createTextClip(project, { id: 'original-caption', text: '保留字幕同步', trimOut: 5, fontSize: 22 }))
+    project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'original-caption', text: '保留字幕同步', trimOut: 5, fontSize: 22 }))
     const current = shallowRef(validateProject(project, { trusted: true })), editor = ref(null)
     let history = createHistory(current.value)
     const fixture = window.cutFixture = { current, editor, messages: [], prepared: [], busy: [],

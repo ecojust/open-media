@@ -36,7 +36,7 @@ async function installProject(page, url) {
     const { createProject, createTextClip } = await import('/src/core/project.ts')
     const { saveProject } = await import('/src/core/storage.ts')
     const project = createProject('背景音乐完整流程', { width: 640, height: 360, fps: 20 })
-    project.tracks[0].clips.push(createTextClip(project, { id: 'original-subtitle', text: '保留原有字幕与音频轨道', start: 0, trimOut: 12, fontSize: 25 }))
+    project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'original-subtitle', text: '保留原有字幕与音频轨道', start: 0, trimOut: 12, fontSize: 25 }))
     await saveProject(project)
     localStorage.setItem('open-media:last-project', project.id)
     localStorage.setItem('open-media:autosave', 'true')

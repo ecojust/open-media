@@ -16,9 +16,9 @@ function source(id = 'source', size = 1000) { return { id, name: `${id}.mp4`, ki
 function fixture() {
   const project = createProject('工程压缩', { width: 1280, height: 720, fps: 30 }), video = source()
   project.assets.push(video)
-  project.tracks[1].clips.push(createClip(video, project, { id: 'part-one', trimOut: 120, x: 33, volume: .8, keyframes: { x: [{ time: 0, value: 33 }, { time: 3, value: 50 }] } }), createClip(video, project, { id: 'part-two', start: 120, trimIn: 120, trimOut: 600 }))
-  project.tracks[2].clips.push(createClip(video, project, { id: 'original-sound', trimIn: 100, trimOut: 130, start: 200, volume: .5 }))
-  project.tracks[0].clips.push(createSubtitleClip(project, { id: 'subtitle', text: '不修改字幕', start: 50 }))
+  project.tracks.find(track => track.kind === 'video').clips.push(createClip(video, project, { id: 'part-one', trimOut: 120, x: 33, volume: .8, keyframes: { x: [{ time: 0, value: 33 }, { time: 3, value: 50 }] } }), createClip(video, project, { id: 'part-two', start: 120, trimIn: 120, trimOut: 600 }))
+  project.tracks.find(track => track.kind === 'audio').clips.push(createClip(video, project, { id: 'original-sound', trimIn: 100, trimOut: 130, start: 200, volume: .5 }))
+  project.tracks.find(track => track.kind === 'text').clips.push(createSubtitleClip(project, { id: 'subtitle', text: '不修改字幕', start: 50 }))
   return project
 }
 function output(id = 'compressed', size = 400) { return { ...source(id, size), sourceUrl: undefined } }
@@ -65,7 +65,7 @@ test('所有分段与原声同时切换新ID，时间线其余属性完全保持
 
 test('同一原文件多个ID共享一份输出，但恢复各自原ID且按文件统计', () => {
   const project = fixture(), alias = { ...project.assets[0], id: 'source-alias', name: '另一个素材名.mp4' }
-  project.assets.push(alias); project.tracks[1].clips[1].assetId = alias.id
+  project.assets.push(alias); project.tracks.find(track => track.kind === 'video').clips[1].assetId = alias.id
   const result = applyProjectVideoCompression(project, projectCompressionSources(project), [item(output(), ['source', 'source-alias'])], 'quality', 'balanced')
   assert.equal(result.assets.length, 2)
   assert.equal(result.assets[0].nativePath, result.assets[1].nativePath)
@@ -77,7 +77,7 @@ test('同一原文件多个ID共享一份输出，但恢复各自原ID且按文�
 })
 
 test('明确选一个源时也更新同路径别名，恢复不混淆归属', () => {
-  const project = fixture(), alias = { ...project.assets[0], id: 'alias' }; project.assets.push(alias); project.tracks[2].clips[0].assetId = alias.id
+  const project = fixture(), alias = { ...project.assets[0], id: 'alias' }; project.assets.push(alias); project.tracks.find(track => track.kind === 'audio').clips[0].assetId = alias.id
   const result = applyProjectVideoCompression(project, projectCompressionSources(project, ['source']), [item()], 'quality')
   assert.equal(result.assets.length, 2)
   assert.deepEqual(restoreProjectVideos(result.project).project.tracks, project.tracks)
@@ -113,11 +113,11 @@ test('不完整、重复ID、更大或尺寸改变的输出不产生部分工程
 })
 
 test('锁定视频或原声音轨预检查，压缩前拒绝且恢复不会绕过锁定', async () => {
-  const project = fixture(), deps = dependencies(); project.tracks[2].locked = true
+  const project = fixture(), deps = dependencies(); project.tracks.find(track => track.kind === 'audio').locked = true
   await assert.rejects(prepare(project, deps), /解锁/); assert.deepEqual(deps.calls, [])
-  project.tracks[2].locked = false
+  project.tracks.find(track => track.kind === 'audio').locked = false
   const compressed = applyProjectVideoCompression(project, projectCompressionSources(project), [item()], 'quality').project
-  compressed.tracks[1].locked = true
+  compressed.tracks.find(track => track.kind === 'video').locked = true
   assert.throws(() => restoreProjectVideos(compressed), /解锁/)
 })
 

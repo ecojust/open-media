@@ -18,7 +18,7 @@ test('文字水印保持原生文本及样式，从精确刻度插入且添加�
   const before = structuredClone(original), material = structuredClone(template)
   const result = addTextWatermark(original, material, 3.25), found = findClip(result.project, result.clipId)
   assert.equal(found.track.kind, 'text'); assert.equal(found.track.name, '文字水印轨道')
-  assert.equal(result.project.tracks[0].id, result.trackId)
+  assert.equal(result.project.tracks.at(-1).id, result.trackId)
   const clip = found.clip
   assert.equal(clip.start, 3.25); assert.equal(clip.trimOut, 5)
   for (const name of ['text', 'color', 'background', 'fontFamily', 'fontWeight', 'textAlign', 'fontSize', 'width', 'height']) assert.equal(clip[name], template.textTemplate[name])
@@ -38,7 +38,7 @@ test('复用空闲文字水印轨道，重叠或锁定时新增前景轨道且�
   const overlap = addTextWatermark(first.project, template, 3)
   assert.notEqual(overlap.trackId, first.trackId)
   assert.deepEqual(findClip(overlap.project, first.clipId).clip, findClip(first.project, first.clipId).clip)
-  const locked = structuredClone(first.project); locked.tracks[0].locked = true
+  const locked = structuredClone(first.project); locked.tracks.at(-1).locked = true
   const added = addTextWatermark(locked, template, 7)
   assert.notEqual(added.trackId, first.trackId)
   assert.equal(added.project.tracks.find(track => track.id === first.trackId).locked, true)
@@ -68,7 +68,7 @@ test('素材数量已满仍可添加原生文字；片段或轨道容量不足�
   fullTracks.tracks.at(-1).name = '文字水印轨道'
   assert.equal(addTextWatermark(fullTracks, template, 0).project.tracks.length, MAX_TRACKS)
   const fullClips = createProject(), clip = allClips(result.project)[0]
-  fullClips.tracks[0].clips = Array.from({ length: MAX_CLIPS }, (_, index) => ({ ...clip, id: `clip-${index}` }))
+  fullClips.tracks.find(track => track.kind === 'text').clips = Array.from({ length: MAX_CLIPS }, (_, index) => ({ ...clip, id: `clip-${index}` }))
   const snapshot = structuredClone(fullClips)
   assert.throws(() => addTextWatermark(fullClips, template, 0), /10000 个片段/)
   assert.deepEqual(fullClips, snapshot)

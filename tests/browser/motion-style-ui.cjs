@@ -42,7 +42,7 @@ async function mount(page, url) {
         project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: `caption-${index}`, text: ['用素材讲述一个故事', '把复杂的步骤讲清楚', '从细节到完整的表达'][index % 3], name: `讲解字幕 ${index + 1}`, start: index * 2, trimOut: 2, fontSize: 22, y: 285, height: 45, background: '#162134', fadeIn: .15, fadeOut: .15 }))
         if (index % 2 === 0) titleTrack.clips.push(createTextClip(project, { id: `title-${index}`, text: ['01 创作起点', '02 细节表达', '03 画面节奏'][index / 2 % 3], name: `章节标题 ${index / 2 + 1}`, start: index * 2, trimOut: 3, textRole: 'watermark', fontSize: 30, y: 25, height: 45, textAlign: 'left' }))
       }
-      project.tracks.unshift(titleTrack)
+      project.tracks.push(titleTrack)
       project.tracks.find(track => track.kind === 'audio').clips.push(createClip(music, project, { name: '轻快背景音乐', trimOut: 20, volume: .2 }))
       project.markers = [{ id: 'chapter-one', time: 0, label: '开篇', kind: 'chapter', color: '#55bbc5' }, { id: 'chapter-two', time: 8, label: '细节', kind: 'chapter', color: '#a99cf0' }]
       project = addTransition(project, 4, 'zoom-fade', .8)
@@ -118,7 +118,7 @@ async function main() {
     await expect(section.locator('[data-motion-style-id]')).toHaveCount(25)
     await expect(section.locator('input[type=file]')).toHaveCount(0)
     await expect(section.getByRole('button', { name: /生成|导入/ })).toHaveCount(0)
-    await expect(section).toContainText('由外部 Agent 读取配置并编排、生成与剪辑')
+    await expect(section).toContainText('由外部 Agent 读取配置，用代码生成图片、透明或绿幕特效素材')
     await section.getByRole('button', { name: '柔光立体', exact: true }).click()
     await expect(section).toContainText('不包含真实三维建模或物理模拟')
     await page.keyboard.press('Escape')
@@ -175,8 +175,11 @@ async function main() {
     assert.deepEqual(configured.project.assets, snapshot.assets); assert.deepEqual(configured.project.tracks, snapshot.tracks)
     assert.deepEqual(configured.project.mcpMotion.assetIds, ['source-video', 'source-photo']); assert.equal(configured.project.mcpMotion.styleId, 'tech-hud')
     assert.equal(configured.brief.ready, true); assert.equal(configured.tools.length, 0)
-    assert.equal(configured.brief.generationMode, 'agent-code-render')
+    assert.equal(configured.brief.generationMode, 'agent-assets-timeline')
     assert.equal(configured.brief.workflow.codeExecution, 'external-agent')
+    assert.equal(configured.brief.workflow.finalComposition, 'editor-timeline')
+    assert.equal(configured.brief.workflow.presetGenerationTool, null)
+    await expect(section).toContainText('最终成片由剪辑器合成')
     assert.equal(configured.brief.userPrompt, configured.project.mcpMotion.prompt)
     assert.ok(configured.brief.effectivePrompt.includes(configured.brief.stylePrompt))
     assert.ok(configured.brief.effectivePrompt.includes(configured.brief.userPrompt))
@@ -186,6 +189,9 @@ async function main() {
     await expect(section.getByTestId('mcp-motion-style-prompt')).toContainText('科技视窗')
     await expect(defaults).toContainText('外部 Agent')
     await expect(defaults).toContainText('open_media_asset_read')
+    await expect(defaults).toContainText('素材与轨道方案')
+    await expect(defaults).toContainText('底图在前，主内容在中间，装饰与标题在后')
+    await expect(defaults).toContainText('clip_update.patch')
     const extraPrompt = await prompt.inputValue()
     await section.getByRole('button', { name: '像素节拍', exact: true }).click()
     await expect(section.getByTestId('mcp-motion-style-prompt')).toContainText('最近邻')
@@ -205,7 +211,7 @@ async function main() {
       const brief = await page.evaluate(() => window.motionStyle.brief())
       assert.equal(brief.ready, true)
       assert.equal(brief.workflow.presetGenerationTool, null)
-      assert.equal(brief.style.presetSupported, false)
+      assert.equal('presetSupported' in brief.style, false)
       assert.equal(brief.userPrompt, '')
       assert.match(brief.stylePrompt, /5\. /)
       posters.add(await section.locator(`[data-motion-style-id="${style.id}"] canvas`).evaluate(canvas => {
@@ -221,7 +227,7 @@ async function main() {
     await section.getByRole('button', { name: '科技视窗', exact: true }).click()
     await prompt.fill(extraPrompt)
     await defaults.locator('summary').click()
-    console.log('PASS 默认风格prompt自动切换、额外prompt保留、空输入仍有完整代码渲染要求')
+    console.log('PASS 默认风格prompt自动切换、额外prompt保留、空输入仍有完整素材分层与编辑器合成要求')
     await prompt.press('End'); await prompt.press('Space'); await prompt.press('Space')
     assert.ok((await page.evaluate(() => window.motionStyle.current.value.mcpMotion.prompt)).endsWith('  '), '自动保存保留输入中的空格')
     await prompt.fill('以现有演示视频和封面图片制作 20 秒介绍，突出操作步骤与最终效果。\n科技感画面，标题简洁，节奏清晰。')
@@ -310,7 +316,7 @@ async function main() {
     assert.equal(await page.evaluate(() => window.motionStyle.current.value.mcpMotion.styleId), '')
     assert.equal(await page.evaluate(() => window.motionStyle.toolCalls.length), 0)
     assert.equal(await page.evaluate(() => window.motionStyle.captures), 0)
-    const gallery = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
+    const gallery = await browser.newPage({ viewport: { width: 1440, height: 630 }, deviceScaleFactor: 1 })
     await gallery.goto(`http://127.0.0.1:${server.httpServer.address().port}/__motion_style__`)
     await gallery.evaluate(async () => {
       const { MOTION_STYLES } = await import('/src/core/motion-style-catalog.ts')
@@ -318,7 +324,7 @@ async function main() {
       document.body.innerHTML = ''
       document.body.style.cssText = 'margin:0;height:auto;background:#111722;color:#edf0f6;font-family:sans-serif;padding:32px;box-sizing:border-box'
       const heading = document.createElement('h1'); heading.textContent = 'Open Media · 素材二创'; heading.style.cssText = 'font-size:26px;margin:0 0 10px'; document.body.append(heading)
-      const caption = document.createElement('p'); caption.textContent = '10 种代码创作方向 · 构图示意，实际视频由 Agent 根据所选素材渲染'; caption.style.cssText = 'font-size:14px;color:#9ca9bd;margin:0 0 26px'; document.body.append(caption)
+      const caption = document.createElement('p'); caption.textContent = '10 种素材二创方向 · 独立素材与分层编排，最终成片由剪辑器合成'; caption.style.cssText = 'font-size:14px;color:#9ca9bd;margin:0 0 26px'; document.body.append(caption)
       const grid = document.createElement('div'); grid.style.cssText = 'display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px'; document.body.append(grid)
       for (const style of MOTION_STYLES.filter(style => !style.presetSupported)) {
         const card = document.createElement('div'); card.style.cssText = 'overflow:hidden;border:1px solid #303949;border-radius:10px;background:#1c2432'
@@ -331,7 +337,7 @@ async function main() {
     await gallery.locator('body').screenshot({ path: path.join(output, 'motion-code-style-gallery.png') })
     await gallery.close()
     assert.deepEqual(errors, [])
-    console.log('PASS 10种新风格选择、默认提示词、独立构图缩略图与外部代码能力标记')
+    console.log('PASS 10种新风格选择、默认提示词、独立构图缩略图与编辑器合成能力标记')
     console.log('PASS 18个视觉素材全部可选并保存重开，搜索/失效选择修复/项目切换/窄屏滚动，无媒体生成或设备采集')
     console.log(`截图：${output}`)
   } finally { await browser?.close(); await server.close() }

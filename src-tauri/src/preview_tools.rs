@@ -325,6 +325,9 @@ pub fn discard(store: &MediaStore, jobs: &JobManager, id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const VIDEO_TRACK: usize = 0;
+    const TEXT_TRACK: usize = 1;
+
     fn runtime() -> Runtime {
         Runtime::discover(None, None).expect("real media tools are required")
     }
@@ -399,7 +402,7 @@ mod tests {
             .unwrap();
         assert!(status.success());
         let title = store.probe(runtime, &overlay, "overlay.png").unwrap();
-        json!({"project":{"width":160,"height":90,"fps":20,"background":"#000000","assets":[asset],"tracks":[{"kind":"text","clips":[{"id":"title","start":1,"trimIn":0,"trimOut":1,"speed":1,"width":40,"height":40,"x":10,"y":10,"opacity":1,"volume":0}]},{"kind":"video","muted":false,"clips":[{"id":"video","assetId":asset.id,"start":0,"trimIn":0,"trimOut":3,"speed":1,"width":160,"height":90,"x":0,"y":0,"volume":0.4,"opacity":1}]}]},"textAssets":{"title":title},"start":1.2,"end":1.8,"width":160,"fps":20})
+        json!({"project":{"width":160,"height":90,"fps":20,"background":"#000000","assets":[asset],"tracks":[{"kind":"video","muted":false,"clips":[{"id":"video","assetId":asset.id,"start":0,"trimIn":0,"trimOut":3,"speed":1,"width":160,"height":90,"x":0,"y":0,"volume":0.4,"opacity":1}]},{"kind":"text","clips":[{"id":"title","start":1,"trimIn":0,"trimOut":1,"speed":1,"width":40,"height":40,"x":10,"y":10,"opacity":1,"volume":0}]}]},"textAssets":{"title":title},"start":1.2,"end":1.8,"width":160,"fps":20})
     }
     fn pixels(runtime: &Runtime, asset: &Asset) -> Vec<u8> {
         let output = engine::process(&runtime.encoder)
@@ -427,7 +430,7 @@ mod tests {
         let mut spec = fixture(&store, &runtime);
         spec["frameOnly"] = json!(true);
         spec["start"] = json!(1.237);
-        spec["project"]["tracks"][0]["clips"][0]["keyframes"] = json!({"x":[{"time":0.2,"value":10},{"time":0.3,"value":110}],"opacity":[{"time":0.2,"value":1},{"time":0.3,"value":0}]});
+        spec["project"]["tracks"][TEXT_TRACK]["clips"][0]["keyframes"] = json!({"x":[{"time":0.2,"value":10},{"time":0.3,"value":110}],"opacity":[{"time":0.2,"value":1},{"time":0.3,"value":0}]});
         let jobs = JobManager::default();
         let job = begin(&store, &runtime, &jobs, &spec).unwrap();
         finish(&jobs, &job.id);
@@ -466,7 +469,7 @@ mod tests {
         let mut spec = fixture(&store, &runtime);
         spec["frameOnly"] = json!(true);
         spec["start"] = json!(1.237);
-        let clips = spec["project"]["tracks"][1]["clips"]
+        let clips = spec["project"]["tracks"][VIDEO_TRACK]["clips"]
             .as_array_mut()
             .unwrap();
         let mut second = clips[0].clone();
@@ -523,7 +526,7 @@ mod tests {
         assert!(status.success());
         spec["frameOnly"] = json!(true);
         spec["start"] = json!(1.237);
-        let blur = &mut spec["project"]["tracks"][0]["clips"][0];
+        let blur = &mut spec["project"]["tracks"][TEXT_TRACK]["clips"][0];
         blur["overlay"] = json!({"kind":"blur","blurRadius":10});
         blur["keyframes"] = json!({"x":[{"time":0.2,"value":10},{"time":0.3,"value":110}]});
         let jobs = JobManager::default();
@@ -554,7 +557,7 @@ mod tests {
         spec["frameOnly"] = json!(true);
         spec["start"] = json!(2.0); // subtitle's endpoint is exclusive
         spec["width"] = json!(161);
-        spec["project"]["tracks"][1]["clips"][0]["fit"] = json!("cover");
+        spec["project"]["tracks"][VIDEO_TRACK]["clips"][0]["fit"] = json!("cover");
         let jobs = JobManager::default();
         let job = begin(&store, &runtime, &jobs, &spec).unwrap();
         finish(&jobs, &job.id);
@@ -574,8 +577,8 @@ mod tests {
         discard(&store, &jobs, &job.id).unwrap();
         spec["project"]["width"] = json!(16);
         spec["project"]["height"] = json!(16384);
-        spec["project"]["tracks"][1]["clips"][0]["width"] = json!(16);
-        spec["project"]["tracks"][1]["clips"][0]["height"] = json!(16384);
+        spec["project"]["tracks"][VIDEO_TRACK]["clips"][0]["width"] = json!(16);
+        spec["project"]["tracks"][VIDEO_TRACK]["clips"][0]["height"] = json!(16384);
         spec["width"] = json!(1920);
         let job = begin(&store, &runtime, &jobs, &spec).unwrap();
         finish(&jobs, &job.id);

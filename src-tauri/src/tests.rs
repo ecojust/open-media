@@ -10,6 +10,8 @@ use std::{
 mod media_performance_tests;
 #[path = "motion_style_export_tests.rs"]
 mod motion_style_export_tests;
+#[path = "track_layer_tests.rs"]
+mod track_layer_tests;
 fn runtime() -> Runtime {
     Runtime::discover(None, None).expect("Media runtime required for integration checks")
 }
@@ -605,7 +607,7 @@ fn timeline_composites_audio_transform_and_text_image() {
     text["opacity"] = json!(1);
     text["fadeIn"] = json!(0);
     text["fadeOut"] = json!(0);
-    let spec = json!({"kind":"timeline","project":{"title":"project","width":160,"height":120,"background":"#003300","assets":[asset.clone()],"tracks":[{"kind":"text","muted":false,"clips":[text]},{"kind":"video","muted":false,"clips":[clip(&asset)]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"balanced"},"textAssets":{"title":caption}});
+    let spec = json!({"kind":"timeline","project":{"title":"project","width":160,"height":120,"background":"#003300","assets":[asset.clone()],"tracks":[{"kind":"video","muted":false,"clips":[clip(&asset)]},{"kind":"text","muted":false,"clips":[text]}]},"config":{"format":"mp4","width":160,"height":120,"fps":20,"quality":"balanced"},"textAssets":{"title":caption}});
     let (_, probe) = run(temp.path(), &rt, spec, "timeline.mp4");
     assert_eq!(probe["streams"][0]["width"], 160);
     let duration = probe["format"]["duration"]

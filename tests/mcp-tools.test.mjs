@@ -13,7 +13,7 @@ function fixture() {
   const video = { id: 'video-source', name: '场景.mp4', kind: 'video', url: 'blob:private-url', sourceUrl: 'https://private.example/?token=secret', nativePath: '/private/media.mp4', duration: 20, width: 640, height: 360, size: 500, mime: 'video/mp4' }
   const audio = { id: 'audio-source', name: '声音.wav', kind: 'audio', url: 'blob:audio', duration: 4, width: 0, height: 0, size: 100, mime: 'audio/wav' }
   project = addAsset(addAsset(project, video), audio)
-  const textId = project.tracks[0].id, videoId = project.tracks[1].id, audioId = project.tracks[2].id
+  const textId = project.tracks.find(t => t.kind === 'text').id, videoId = project.tracks.find(t => t.kind === 'video').id, audioId = project.tracks.find(t => t.kind === 'audio').id
   project = addClip(project, videoId, createClip(video, project, { id: 'first', trimOut: 5 }))
   project = addClip(project, videoId, createClip(video, project, { id: 'second', start: 5, trimIn: 5, trimOut: 10 }))
   project = addClip(project, textId, createSubtitleClip(project, { id: 'subtitle-first', text: '测试第一段', trimOut: 3 }))
@@ -29,7 +29,7 @@ function assertUnchangedAfterFailure(project, tool, args, regex) {
 }
 
 test('MCP catalog is unique, restrictive and contains the declared runtime and editing operations', () => {
-  assert.equal(MCP_TOOLS.length, 101)
+  assert.equal(MCP_TOOLS.length, 100)
   assert.equal(new Set(MCP_TOOLS.map(tool => tool.name)).size, MCP_TOOLS.length)
   assert.equal(MCP_TOOLS.filter(tool => isProjectTool(tool.name)).length, 39)
   for (const tool of MCP_TOOLS) {
@@ -56,49 +56,17 @@ test('shared AI tool contracts are identical to the published aggregate catalog'
   }
 })
 
-test('motion clip generation advertises real-video destinations, bounded inputs and distinct execution contracts', () => {
+test('motion discovery requires editable layers and exposes no whole-video generation tool', () => {
   const list = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_style_list')
-  const compose = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_clip_generate')
+  const brief = MCP_TOOLS.find(tool => tool.name === 'open_media_motion_brief_get')
   assert.equal(list.annotations.readOnlyHint, true)
   assert.equal(list._meta['openmedia/execution'].mode, 'synchronous')
-  assert.equal(compose.annotations.readOnlyHint, false)
-  assert.equal(compose.annotations.idempotentHint, false)
-  assert.equal(compose._meta['openmedia/execution'].mode, 'asynchronous')
-  assert.equal(compose._meta['openmedia/execution'].pollingTool, 'open_media_job_get')
-  assert.equal(compose._meta['openmedia/execution'].cancelTool, 'open_media_job_cancel')
-  assert.equal(MCP_TOOLS.some(tool => tool.name === 'open_media_motion_compose'), false)
-  assert.equal(compose.inputSchema.properties.destination.default, 'assets')
-  assert.deepEqual(compose.inputSchema.required, ['scenes'])
-  assert.deepEqual(compose.inputSchema.properties.destination.enum, ['assets', 'timeline'])
-  const presets = MOTION_STYLES.filter(style => style.presetSupported)
-  const codeStyles = MOTION_STYLES.filter(style => !style.presetSupported)
-  assert.equal(presets.length, 15)
-  assert.equal(codeStyles.length, 10)
-  assert.deepEqual(compose.inputSchema.properties.styleId.enum, presets.map(style => style.id))
-  assert.match(list.description, /25 类/)
-  assert.match(list.description, /presetSupported/)
-  assert.match(compose.description, /presetSupported=true/)
-  const validate = args => validateMcpToolArguments(compose.name, args)
-  const scene = { assetId: 'existing-video', heading: '标题', caption: '素材说明', duration: 4, trimIn: 1 }
-  const base = { styleId: 'tech-hud', scenes: [scene] }
-  for (const style of codeStyles) assert.throws(() => validate({ ...base, styleId: style.id }), undefined, `${style.id} is external-code only`)
-  assert.doesNotThrow(() => validate({ scenes: [scene] }))
-  assert.doesNotThrow(() => validate({ ...base, destination: 'timeline', insert: { trackId: 'existing-track', start: 12 }, title: '说明片', accent: '#abcdef', background: '#010203', textColor: '#FFFFFF', musicAssetId: 'existing-audio', musicVolume: 0.25, sourceAudio: true, tempo: 'energetic', logoAssetId: 'existing-image', dryRun: true, expectedRevision: 7, expectedProjectId: 'current-project' }))
-  assert.doesNotThrow(() => validate({ ...base, scenes: Array.from({ length: 16 }, () => ({ ...scene, heading: '字'.repeat(120), caption: '字'.repeat(240), duration: 12 })) }))
-  for (const patch of [
-    { styleId: 'unknown-style' }, { scenes: [] }, { scenes: Array(17).fill(scene) },
-    { scenes: [{ ...scene, duration: 1.99 }] }, { scenes: [{ ...scene, duration: 12.01 }] },
-    { scenes: [{ ...scene, trimIn: -1 }] }, { scenes: [{ ...scene, duration: NaN }] },
-    { scenes: [{ ...scene, heading: '字'.repeat(121) }] }, { scenes: [{ ...scene, caption: '字'.repeat(241) }] },
-    { scenes: [{ assetId: '  ' }] }, { scenes: [{ ...scene, url: 'https://example.test/source.mp4' }] },
-    { title: '字'.repeat(121) }, { accent: 'red' }, { textColor: '#fff' }, { background: 'url(file:///private/source)' },
-    { musicVolume: -0.01 }, { musicVolume: 1.01 }, { placement: 'append' }, { tempo: 'random' },
-    { destination: 'generated' }, { destination: 'timeline', insert: { trackId: ' ' } },
-    { destination: 'timeline', insert: { start: -1 } }, { destination: 'timeline', insert: { start: Infinity } },
-    { destination: 'timeline', insert: { start: 86401 } }, { destination: 'timeline', insert: { path: '/tmp/video.mp4' } },
-    { outputPath: '/tmp/video.mp4' }, { project: { title: 'temporary-project' } },
-    { width: 1920 }, { sourceAudio: 'yes' }, { dryRun: 'yes' },
-  ]) assert.throws(() => validate({ ...base, ...patch }), undefined, JSON.stringify(patch))
+  assert.equal(MOTION_STYLES.length, 25)
+  assert.match(list.description, /layered-timeline/)
+  assert.match(brief.description, /agent-assets-timeline/)
+  assert.match(brief.description, /剪辑器合成/)
+  assert.equal(MCP_TOOLS.some(tool => tool.name === 'open_media_motion_clip_generate'), false)
+  for (const dryRun of [true, false]) assert.throws(() => validateMcpToolArguments('open_media_motion_clip_generate', { scenes: [{ assetId: 'source' }], dryRun }), /独立素材与轨道编排/)
   assert.throws(() => validateMcpToolArguments(list.name, { search: '字'.repeat(201) }), /长度/)
 })
 
@@ -120,9 +88,9 @@ test('project inspection returns IDs and timing while omitting private asset cap
   const json = JSON.stringify(data)
   for (const forbidden of ['private-url', 'private.example', '/private/', 'nativePath', 'sourceUrl']) assert.ok(!json.includes(forbidden))
   assert.equal(data.duration, 10)
-  assert.equal(data.tracks[1].clips[0].end, 5)
-  assert.equal(data.tracks[0].clipCount, 2)
-  data.tracks[0].clips[0].text = '外部修改'
+  assert.equal(data.tracks.find(t => t.kind === 'video').clips[0].end, 5)
+  assert.equal(data.tracks.find(t => t.kind === 'text').clipCount, 2)
+  data.tracks.find(t => t.kind === 'text').clips[0].text = '外部修改'
   assert.equal(findClip(project, 'subtitle-first').clip.text, '测试第一段')
   assert.deepEqual(exec(project, 'asset_list', { kind: 'audio' }).data.assets.map(asset => asset.id), ['audio-source'])
   assert.equal(inspectMcpProject(project).id, project.id)
@@ -330,4 +298,38 @@ test('material text and speech settings schema match actual implementation limit
   for (const patch of [{ time: 4 }, { transitionClipId: 'transition-1' }, { anchor: 0.2 }]) {
     assert.throws(() => validateMcpToolArguments('open_media_material_add', { kind: 'music', id: 'piano', ...patch }), /仅适用/)
   }
+})
+
+test('MCP layer indices are derived from track order and support unambiguous zIndex edits', () => {
+  const { project, videoId, textId } = fixture()
+  const original = structuredClone(project)
+  const view = inspectMcpProject(project)
+  assert.equal(view.trackOrder, 'back-to-front')
+  assert.deepEqual(view.tracks.map(t => t.zIndex), [0, 1, 2])
+  assert.equal(view.tracks[0].id, videoId)
+  assert.equal(view.tracks[2].id, textId)
+  const added = exec(project, 'track_add', { kind: 'video', name: '装饰', zIndex: 3 })
+  assert.equal(added.data.track.zIndex, 3)
+  const reordered = exec(added.project, 'track_reorder', { trackId: added.data.track.id, zIndex: 0 })
+  assert.equal(reordered.data.zIndex, 0)
+  assert.equal(inspectMcpProject(reordered.project).tracks[0].id, added.data.track.id)
+  assert.deepEqual(inspectMcpProject(reordered.project).tracks.map(t => t.zIndex), [0, 1, 2, 3])
+  assert.doesNotThrow(() => exec(project, 'track_reorder', { trackId: videoId, index: 2, zIndex: 2 }))
+  for (const args of [{ trackId: videoId }, { trackId: videoId, index: 1, zIndex: 2 }, { trackId: videoId, zIndex: -1 }, { trackId: videoId, zIndex: 1.5 }, { trackId: videoId, zIndex: 99 }]) assert.throws(() => exec(project, 'track_reorder', args))
+  assert.throws(() => exec(project, 'track_add', { kind: 'video', zIndex: 99 }), /超出/)
+  assert.deepEqual(project, original)
+})
+
+test('MCP images are editable static overlays and retain explicit full-frame background geometry', () => {
+  let { project, videoId } = fixture()
+  project = addAsset(project, { id: 'image-overlay', name: '透明装饰.png', kind: 'image', url: 'blob:overlay', duration: 0, width: 160, height: 80, size: 100, mime: 'image/png' })
+  const overlayTrack = exec(project, 'track_add', { kind: 'video', name: '装饰' })
+  const added = exec(overlayTrack.project, 'clip_add', { trackId: overlayTrack.data.track.id, assetId: 'image-overlay', options: { start: 1, trimOut: 8 } })
+  assert.deepEqual(['x', 'y', 'width', 'height', 'volume'].map(key => added.data.clip[key]), [240, 140, 160, 80, 0])
+  assert.equal(added.data.duration, 8)
+  assert.equal(added.data.zIndex, 3)
+  const background = exec(project, 'clip_add', { trackId: videoId, assetId: 'image-overlay', options: { start: 12, trimOut: 4, x: 0, y: 0, width: 640, height: 360, fit: 'cover' } })
+  assert.equal(background.data.clip.width, 640)
+  assert.equal(background.data.clip.height, 360)
+  assert.equal(background.data.zIndex, 0)
 })

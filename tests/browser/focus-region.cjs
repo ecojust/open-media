@@ -23,7 +23,7 @@ async function main() {
     const { createProject, createClip } = await import('/src/core/project.ts')
     const project = createProject('重点框选', { width: 640, height: 360 })
     project.assets.push({ id: 'image', kind: 'image', name: '图片', url: 'blob:test', duration: 0, width: 320, height: 180, size: 1, mime: 'image/png' })
-    project.tracks[1].clips = [createClip(project.assets[0], project, { id: 'clip', start: 0, trimOut: 5, x: 100, y: 50, width: 320, height: 180, crop: { x: .2, y: .2, width: .6, height: .6 }, fit: 'contain' })]
+    project.tracks.find(track => track.kind === 'video').clips = [createClip(project.assets[0], project, { id: 'clip', start: 0, trimOut: 5, x: 100, y: 50, width: 320, height: 180, crop: { x: .2, y: .2, width: .6, height: .6 }, fit: 'contain' })]
     const current = shallowRef(project), active = ref(true), time = ref(1)
     window.focusFixture = { current, active, time, selections: [], cancellations: 0 }
     createApp({ render: () => h(component.default, { project: current.value, clipId: 'clip', time: time.value, active: active.value, onSelect: region => window.focusFixture.selections.push(region), onCancel: () => { window.focusFixture.cancellations++; active.value = false } }) }).mount('#app')
@@ -36,7 +36,7 @@ async function main() {
   await page.mouse.down(); await page.mouse.move(40 + (100 + 320) * 1.25, 40 + 75 + (50 + 180 * .75) * 1.25); await page.mouse.up()
   const picked = await page.evaluate(() => window.focusFixture.selections[0])
   for (const [key, value] of Object.entries({ x: .5, y: .25, width: .5, height: .5 })) assert(Math.abs(picked[key] - value) < 1e-6, `${key}: ${picked[key]}`)
-  await page.evaluate(() => { const p = structuredClone(window.focusFixture.current.value); p.tracks[1].clips[0].rotation = 90; window.focusFixture.current.value = p })
+  await page.evaluate(() => { const p = structuredClone(window.focusFixture.current.value); p.tracks.find(track => track.kind === 'video').clips[0].rotation = 90; window.focusFixture.current.value = p })
   // Rotate local points around the clip center (260,140); the preview keeps the same letterbox projection.
   const start = { x: 260 + 45, y: 140 }, end = { x: 260 - 45, y: 140 + 160 }
   await page.mouse.move(40 + start.x * 1.25, 40 + 75 + start.y * 1.25); await page.mouse.down(); await page.mouse.move(40 + end.x * 1.25, 40 + 75 + end.y * 1.25); await page.mouse.up()
@@ -52,7 +52,7 @@ async function main() {
     const ctx = source.getContext('2d'); ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, 80, 90); ctx.fillStyle = '#0000ff'; ctx.fillRect(80, 0, 80, 90)
     const project = createProject('聚焦预览与导出', { width: 160, height: 90, fps: 20, background: '#000000' })
     project.assets = [{ id: 'image', kind: 'image', name: '红蓝', url: source.toDataURL(), duration: 0, width: 160, height: 90, size: 1, mime: 'image/png' }]
-    project.tracks[1].clips = [createClip(project.assets[0], project, { id: 'clip', trimOut: 2, volume: 0 })]
+    project.tracks.find(track => track.kind === 'video').clips = [createClip(project.assets[0], project, { id: 'clip', trimOut: 2, volume: 0 })]
     const focused = executeVisualTool(project, 'focus_region', { clipId: 'clip', region: { x: .5, y: .25, width: .5, height: .5 }, start: .2, duration: .4, holdDuration: .4, returnDuration: .4 }).project
     const canvas = document.querySelector('canvas'), preview = new TimelinePreview(canvas, focused); await preview.prepare()
     const pixels = []

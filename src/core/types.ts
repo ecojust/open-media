@@ -170,7 +170,7 @@ export interface McpMotionConfig {
   prompt?: string
 }
 
-/** Tracks are ordered from foreground to background. */
+/** Tracks are ordered from background to foreground; array index is their z-index. */
 export interface Project {
   version: 1
   id: string

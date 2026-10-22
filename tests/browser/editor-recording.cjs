@@ -140,7 +140,7 @@ async function synchronizedPicture(browser, url) {
       const { addClip } = await import('/src/core/timeline.ts')
       let project = createProject('同步画面验证', { width: 320, height: 180 })
       for (const [start, end, background] of [[0, 1, '#cc2233'], [1, 0.3, '#2244dd']]) {
-        project = addClip(project, project.tracks[0].id, createTextClip(project, { start, trimOut: end, background, textRole: 'watermark', text: '', x: 0, y: 0, width: 320, height: 180 }))
+        project = addClip(project, project.tracks.find(track => track.kind === 'text').id, createTextClip(project, { start, trimOut: end, background, textRole: 'watermark', text: '', x: 0, y: 0, width: 320, height: 180 }))
       }
       const current = ref(project), editor = ref(null), messages = []
       createApp({ render: () => h(Editor, { ref: editor, project: current.value, onChange: value => { current.value = value }, onStatus: value => messages.push(value) }) }).mount('#app')

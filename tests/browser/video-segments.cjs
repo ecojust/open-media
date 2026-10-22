@@ -35,8 +35,8 @@ async function main() {
       const blob = await (await fetch(VIDEO_SEGMENTS[2].url)).blob()
       const asset = { id: 'original-video', name: '原视频.webm', kind: 'video', url: URL.createObjectURL(blob), duration: 5, width: 1280, height: 720, size: blob.size, mime: 'video/webm' }
       original.assets.push(asset)
-      original.tracks[1].clips.push(createClip(asset, original, { id: 'original-video-clip', volume: 0 }))
-      original.tracks[0].clips.push(createTextClip(original, { id: 'original-text', text: '保留正文字幕', trimOut: 3, fontSize: 14 }))
+      original.tracks.find(track => track.kind === 'video').clips.push(createClip(asset, original, { id: 'original-video-clip', volume: 0 }))
+      original.tracks.find(track => track.kind === 'text').clips.push(createTextClip(original, { id: 'original-text', text: '保留正文字幕', trimOut: 3, fontSize: 14 }))
       const current = shallowRef(original)
       const fixture = window.segmentFixture = { current, changes: [], prepared: [], nextTick }
       fixture.app = createApp({ render: () => h(Editor, { project: current.value,

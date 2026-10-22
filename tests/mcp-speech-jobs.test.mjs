@@ -15,8 +15,8 @@ function deferred() {
 function fixture(overrides = {}) {
   updateSpeechSettings({ voiceId: voice.id, rate: 1, alignText: true })
   let project = createProject('远程配音测试'), revision = 1, projectSession = 1, busy = false
-  project.tracks[0].clips.push(createTextClip(project, { id: 'first', text: '第一段字幕。', start: 1, trimOut: 3 }))
-  project.tracks[0].clips.push(createTextClip(project, { id: 'second', text: '第二段字幕。', start: 6, trimOut: 3 }))
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'first', text: '第一段字幕。', start: 1, trimOut: 3 }))
+  project.tracks.find(track => track.kind === 'text').clips.push(createTextClip(project, { id: 'second', text: '第二段字幕。', start: 6, trimOut: 3 }))
   const original = structuredClone(project)
   const calls = { begin: [], cancel: [], discard: [], accept: [], commits: [], assets: [], events: [] }
   function completed(request) {
@@ -95,7 +95,7 @@ test('立即返回任务编号，完整批次一次写入原生素材并接收�
   assert.equal(f.calls.discard.length, 0)
   assert.equal(f.calls.begin[0].speed, 1.15)
   assert.equal(f.calls.begin[0].text, '第一段字幕。')
-  assert.equal(f.project.tracks[0].clips[0].trimOut, 3)
+  assert.equal(f.project.tracks.find(track => track.kind === 'text').clips[0].trimOut, 3)
   assert.ok(f.project.assets.every(asset => asset.nativePath && !asset.url.startsWith('blob:')))
   assert.ok(f.calls.events.filter(event => event.state === 'running').every(event => event.progress === undefined || event.progress < 1))
   const external = f.service.status(job.id)

@@ -18,7 +18,7 @@ import { applyMcpVideoGeneration, prepareMcpVideoGeneration } from './mcp-video-
 import { beginAiGeneration, cancelAiJob, cancelAiModelDownload, downloadAiModel, getAiJob, getAiStatus, repairAiModel } from '../native-ai.ts'
 import { applyMcpAiGeneration, prepareMcpAiGeneration, publicAiJob, publicAiStatus } from './mcp-ai-generation.ts'
 import { MOTION_STYLES } from './motion-style-catalog.ts'
-import { getMcpMotionBrief } from './mcp-motion.ts'
+import { getMcpMotionBrief, publicMotionStyle } from './mcp-motion.ts'
 import { getMcpGenerationCapabilities } from './mcp-generation-capabilities.ts'
 
 export interface McpPlayback { time: number; playing: boolean; selectedClipId: string }
@@ -208,19 +208,17 @@ export function createMcpAutomation(host: McpAutomationHost) {
       const items = MOTION_STYLES.filter(style => !search || [style.id, style.name, style.description, ...style.tags].join(' ').toLocaleLowerCase().includes(search))
       const brief = getMcpMotionBrief(host.getProject())
       return {
-        items: structuredClone(items), total: MOTION_STYLES.length, count: items.length,
+        items: items.map(publicMotionStyle), total: MOTION_STYLES.length, count: items.length,
         capabilities: {
-          editable: true, rendering: 'external-agent-code', output: 'video-asset', layered: false,
+          editable: true, rendering: 'editor-timeline', output: 'layered-timeline', layered: true,
           defaultPromptField: 'prompt', briefPromptField: 'effectivePrompt',
-          codeExecution: 'agent-environment', presetRendering: '2d', presetTool: 'open_media_motion_clip_generate',
-          presetStyleIds: MOTION_STYLES.filter(style => style.presetSupported).map(style => style.id),
-          codeOnlyStyleIds: MOTION_STYLES.filter(style => !style.presetSupported).map(style => style.id),
-          selectedPresetSupported: brief.style?.presetSupported ?? false,
+          codeExecution: 'agent-environment', assetGeneration: 'external-agent-code', finalComposition: 'editor-timeline',
+          assetOutputs: ['image', 'transparent-image', 'effect-video', 'green-screen-effect'],
+          trackOrder: 'back-to-front', zIndex: 'array-index', presetTool: null,
           configurationTool: 'open_media_motion_brief_get', configurationOwner: 'user', execution: 'external-agent',
           enabled: brief.enabled, ready: brief.ready,
-          description: '默认由外部 Agent 根据风格提示词和所选素材编写代码、渲染视频，上传或导入当前工程后添加到轨道剪辑与融合；仅 presetSupported=true 的风格支持内置二维预设快捷路径，其他风格必须由 Agent 代码渲染。',
-          limitations: ['应用不执行任意代码；外部代码渲染所需环境由 Agent 提供。', '生成视频内的文字、背景与动画修改后需要重新渲染。'],
-          presetLimitations: ['内置二维预设不生成真实三维模型或物理模拟。', '内置二维预设不执行流体模拟、逐帧折射或用户素材轮廓变形。'],
+          description: '25 种风格均由 Agent 生成独立图片、透明图层或绿幕特效素材，并通过 MCP 在当前工程分层编排；位置、尺寸、关键帧、文字、配音和转场保留在时间线上，最终预览与成片由剪辑器合成。轨道数组从底层到顶层，zIndex 越大越靠上。',
+          limitations: ['应用不执行任意代码；Agent 负责生成独立素材，不能以外部完整成片代替工程剪辑。', '素材内部已栅格化的图形修改需重新生成；轨道位置、尺寸、时长、关键帧和文字可继续编辑。'],
         },
         projectId: host.getProject().id, revision: host.getRevision(),
       }

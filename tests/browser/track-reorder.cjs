@@ -34,7 +34,7 @@ async function installEditor(page, url) {
     const project = createProject('轨道拖拽排序验证', { width: 320, height: 180, fps: 20 })
     const blobs = new Map()
     project.tracks = []
-    for (const [id, name, color] of [['red', '红色前景', '#cc2233'], ['blue', '蓝色背景', '#2244dd']]) {
+    for (const [id, name, color] of [['red', '红色底图', '#cc2233'], ['blue', '蓝色上层', '#2244dd']]) {
       const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180
       const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, 320, 180)
       const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
@@ -73,7 +73,7 @@ async function installEditor(page, url) {
     fixture.app.mount('#app'); await nextTick(); editor.value.seek(1)
   })
   await expect(handle(page, 'track-red')).toBeVisible()
-  await expect.poll(() => pixel(page)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => pixel(page)).toEqual([34, 68, 221, 255])
 }
 
 async function startDrag(page, id) {
@@ -119,18 +119,18 @@ async function basicChecks(page) {
   assertTracksUnchanged(before, await state(page))
   await expect(page.locator('[data-clip-id="clip-red"]')).toHaveClass(/selected/)
   assert.equal(await page.locator('.ruler-label').innerText(), playhead, '轨道排序不得跳动播放头')
-  await expect.poll(() => pixel(page)).toEqual([34, 68, 221, 255])
+  await expect.poll(() => pixel(page)).toEqual([204, 34, 51, 255])
   await page.evaluate(() => window.trackFixture.undo())
   assert.deepEqual(await order(page), initialOrder)
-  await expect.poll(() => pixel(page)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => pixel(page)).toEqual([34, 68, 221, 255])
   await page.evaluate(() => window.trackFixture.redo())
   assert.deepEqual(await order(page), forward)
-  await expect.poll(() => pixel(page)).toEqual([34, 68, 221, 255])
+  await expect.poll(() => pixel(page)).toEqual([204, 34, 51, 255])
   console.log('PASS 拖动手柄上移轨道，松手只产生一次历史；选中片段、播放头、全部数据不变；真实图片叠放、撤销及重做同步更新')
 
   await dragTo(page, 'track-blue', 'track-labels', 'after')
   assert.deepEqual(await order(page), ['track-red', 'track-sound', 'track-labels', 'track-blue'])
-  await expect.poll(() => pixel(page)).toEqual([204, 34, 51, 255])
+  await expect.poll(() => pixel(page)).toEqual([34, 68, 221, 255])
   await dragTo(page, 'track-blue', 'track-red', 'before')
   assert.deepEqual(await order(page), forward)
   assert.equal(await changes(page), 3)
@@ -239,7 +239,7 @@ async function keyboardAndPersistenceChecks(page) {
   })
   assert.deepEqual(saved.draft, before); assert.deepEqual(saved.reopened, before)
   writeFileSync(path.join(artifacts, 'sorted-tracks.omedia'), Buffer.from(saved.bytes))
-  await expect.poll(() => pixel(page)).toEqual([34, 68, 221, 255])
+  await expect.poll(() => pixel(page)).toEqual([204, 34, 51, 255])
   assert.deepEqual(await page.locator('[data-track-row-id]').evaluateAll(rows => rows.map(element => element.dataset.trackRowId)), before)
   console.log('PASS 聚焦手柄后 Alt+上下方向键排序；本地草稿和便携项目保存重开都保留顺序及真实叠放结果')
 }
