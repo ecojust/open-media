@@ -178,9 +178,15 @@ async function main() {
     await page.getByTestId('preview-play').click()
     // A second click during decoder preparation cancels playback; wait until it has actually started.
     await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '暂停（空格）')
+    const previewPixel = () => page.getByTestId('video-preview').evaluate(canvas => [...canvas.getContext('2d').getImageData(20, 20, 1, 1).data])
+    // This corner lies outside the centered image and subtitle, so it must contain the source video.
+    await expect.poll(async () => { const pixel = await previewPixel(); return pixel[0] > 150 && pixel[1] < 100 && pixel[2] < 150 }, { message: '播放中应显示实际视频帧' }).toBe(true)
     await page.waitForTimeout(450)
     await page.getByTestId('preview-play').click()
-    const pixel = await page.getByTestId('video-preview').evaluate(canvas => [...canvas.getContext('2d').getImageData(20, 20, 1, 1).data])
+    await expect(page.getByTestId('preview-play')).toHaveAttribute('title', '播放（空格）')
+    // Pausing corrects decoder drift with a seek; sample only after its decoded frame has been redrawn.
+    await expect.poll(async () => { const pixel = await previewPixel(); return pixel[0] > 150 && pixel[1] < 100 && pixel[2] < 150 }, { message: '暂停后应恢复实际视频帧' }).toBe(true)
+    const pixel = await previewPixel()
     assert(pixel[0] + pixel[1] + pixel[2] > 100, `预览没有显示实际素材：${pixel}`)
     await page.getByTitle('回到开头', { exact: true }).click()
   })

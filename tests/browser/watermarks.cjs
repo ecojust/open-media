@@ -114,8 +114,8 @@ async function selectAllMaterials(page) {
 
 async function galleryChecks(page, format) {
   const button = page.getByTestId('watermark-open')
-  const position = await button.evaluate(element => ({ previous: element.previousElementSibling?.textContent.trim(), svg: element.querySelectorAll('svg').length }))
-  assert.equal(position.previous, '字幕', '添加水印应紧接字幕按钮右侧')
+  const position = await button.evaluate(element => ({ sequence: [element.previousElementSibling?.previousElementSibling?.textContent.trim(), element.previousElementSibling?.textContent.trim(), element.textContent.trim()], svg: element.querySelectorAll('svg').length }))
+  assert.deepEqual(position.sequence, ['字幕', '图片', '水印'], '时间线素材入口应按字幕、图片、水印顺序排列')
   assert.equal(position.svg, 1)
   await button.click()
   const dialog = page.getByRole('dialog', { name: '添加水印', exact: true })
@@ -159,7 +159,7 @@ async function galleryChecks(page, format) {
   await dialog.getByRole('button', { name: '关闭添加水印' }).click()
   await expect(dialog).not.toBeVisible()
   assert(await page.evaluate(() => window.watermarkActivePreview?.paused && !window.watermarkActivePreview.getAttribute('src')), '关闭弹窗必须暂停并释放素材预览')
-  console.log('PASS 添加水印位于字幕右侧；分类、搜索、空结果恢复、真实动画与透明预览，以及关闭后的媒体释放')
+  console.log('PASS 字幕、图片、水印入口依次排列；分类、搜索、空结果恢复、真实动画与透明预览，以及关闭后的媒体释放')
 }
 
 async function addBuiltin(page, id = 'thumb-pulse') {
