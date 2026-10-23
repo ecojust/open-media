@@ -9,6 +9,7 @@ export interface CaptureControlsSnapshot {
   microphonePending?: boolean
   busy: boolean
   error?: string | null
+  countdown?: number | null
 }
 
 export function recordingClock(seconds: number): string {

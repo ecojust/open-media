@@ -980,6 +980,7 @@ mod desktop {
                 phase: status.state.clone(), elapsed: status.elapsed,
                 muted: status.muted, audio_available: status.audio_available, microphone_enabled: status.microphone_enabled, microphone_pending, busy,
                 error: error.or_else(|| status.error.clone()),
+                countdown: None,
             });
         }
     }
@@ -995,7 +996,7 @@ mod desktop {
             let result = change(&mut capture);
             let status = capture.status();
             if let Some((source, region)) = capture.controls_target() {
-                let _ = app.state::<ControlsManager>().set_target(&app, source, region);
+                let _ = app.state::<ControlsManager>().set_target(&app, source, region, capture.controls_zoom_path());
             }
             sync_recording_controls(&app, &status, false, false, result.as_ref().err().cloned());
             result
@@ -1012,11 +1013,14 @@ mod desktop {
     #[tauri::command]
     pub async fn start_capture(
         options: CaptureOptions,
+        countdown: Option<u32>,
         app: tauri::AppHandle,
         window: tauri::WebviewWindow,
         state: State<'_, MediaState>,
     ) -> engine::Result<CaptureStatus> {
         project_files::require_main_window(window.label())?;
+        let countdown = countdown.unwrap_or(0);
+        if countdown > 10 { return Err("录制倒计时应为 0 至 10 秒。".into()); }
         let state = state.inner().clone();
         let request_id = options.request_id.clone().unwrap_or_else(engine::new_id);
         let cancelled = state.capture_starts.token(&request_id)?;
@@ -1030,9 +1034,16 @@ mod desktop {
         let worker_app = app.clone();
         let result = blocking(move || {
             let mut capture = worker_state.capture.lock().unwrap();
-            let status = capture.start_cancellable(&worker_state.runtime()?, options, &cancelled)?;
+            let status = capture.start_with_preparation(&worker_state.runtime()?, options, &cancelled, |source, region| {
+                let controls = worker_app.state::<ControlsManager>();
+                controls.set_target(&worker_app, source.clone(), region.cloned(), None)?;
+                controls.wait_ready(&cancelled)?;
+                crate::recording_controls::countdown_wait(countdown, &cancelled, |remaining| {
+                    controls.sync(&worker_app, ControlsSnapshot { countdown: remaining, ..Default::default() })
+                })
+            })?;
             if let Some((source, region)) = capture.controls_target() {
-                let _ = worker_app.state::<ControlsManager>().set_target(&worker_app, source, region);
+                let _ = worker_app.state::<ControlsManager>().set_target(&worker_app, source, region, capture.controls_zoom_path());
             }
             sync_recording_controls(&worker_app, &status, false, false, None);
             Ok(status)

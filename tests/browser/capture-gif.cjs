@@ -256,6 +256,44 @@ async function run() {
     assert.deepEqual(latePermission, { cancelled: true, opened: false, stopped: true })
     console.log('PASS cancelling before system source permission resolves also releases any late stream')
 
+    const zoomedRecording = await page.evaluate(async () => {
+      window.createPatternSource(320, 180, 'monitor')
+      let previewReady = false
+      const capture = await window.capture.startBrowserCapture({
+        fps: 20, microphone: false, systemAudio: false, interactiveZoom: true,
+        onPreview: (stream, source) => { previewReady = stream.getVideoTracks().length === 1 && source.outputWidth === 320 },
+      })
+      await new Promise(resolve => setTimeout(resolve, 400))
+      for (let i = 0; i < 10; i++) capture.zoomAt(1, 0.5, -120)
+      const focused = capture.source
+      await new Promise(resolve => setTimeout(resolve, 600))
+      for (let i = 0; i < 10; i++) capture.zoomAt(1, 0.5, 120)
+      const restored = capture.source
+      await new Promise(resolve => setTimeout(resolve, 400))
+      const output = await capture.stop()
+      window.cleanupSource()
+      return { previewReady, focused, restored, bytes: Array.from(new Uint8Array(await output.blob.arrayBuffer())) }
+    })
+    assert.equal(zoomedRecording.previewReady, true, 'selected crop is ready to display before countdown')
+    assert.equal(zoomedRecording.focused.outputWidth, 320)
+    assert.equal(zoomedRecording.focused.outputHeight, 180)
+    assert.equal(zoomedRecording.focused.region.x + zoomedRecording.focused.region.width, 320)
+    assert.deepEqual(zoomedRecording.restored.region, { x: 0, y: 0, width: 320, height: 180 })
+    if (decoder) {
+      const file = join(directory, 'recording-zoom.webm')
+      writeFileSync(file, Buffer.from(zoomedRecording.bytes))
+      const pixels = execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vsync', '0', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 16 * 1024 * 1024 })
+      const frameBytes = 320 * 180 * 3, frames = pixels.length / frameBytes
+      assert.ok(Number.isInteger(frames) && frames > 10)
+      const pixel = (frame, x) => [...pixels.subarray(frame * frameBytes + (90 * 320 + x) * 3, frame * frameBytes + (90 * 320 + x) * 3 + 3)]
+      const red = color => color[0] > 220 && color[1] < 25 && color[2] < 25
+      const blue = color => color[2] > 220 && color[0] < 25 && color[1] < 25
+      assert.ok(red(pixel(0, 16)) && blue(pixel(0, 304)))
+      assert.ok(Array.from({ length: frames }, (_, index) => index).some(frame => blue(pixel(frame, 16)) && blue(pixel(frame, 304))), 'zoom changes encoded pixels, not only the preview outline')
+      assert.ok(red(pixel(frames - 1, 16)) && blue(pixel(frames - 1, 304)), 'zoom out restores the exact initial recording area')
+    }
+    console.log('PASS live recording focus changes encoded content, retains output dimensions and restores initial bounds')
+
     const transformed = await page.evaluate(async () => {
       const cases = [
         { width: 320, height: 180, surface: 'monitor', options: { sourceType: 'region', region: { x: 160, y: 0, width: 160, height: 180 }, outputSize: { width: 160, height: 180 } } },

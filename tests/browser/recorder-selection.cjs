@@ -39,8 +39,10 @@ async function mountRecorder(page, baseURL, native, surface = 'window') {
             return new Promise(resolve => { state.resolvePicker = resolve })
           }
           if (command === 'cancel_capture_picker') { state.resolvePicker(null); return }
+          if (command === 'cancel_capture_start') { state.rejectPendingStart?.(new Error('已取消录制。')); return }
           if (command === 'start_capture') {
             if (state.startFailure) { state.startFailure = false; throw new Error('录制来源已关闭，请重新选择。') }
+            if (args.countdown > 0) return new Promise((_, reject) => { state.rejectPendingStart = reject })
             const options = args.options
             state.status = { state: 'recording', elapsed: 0, segments: 0, audioAvailable: options.microphone, muted: !options.microphone, microphoneEnabled: options.microphone, sourceId: options.sourceId, sourceName: state.selectedName ?? '演示窗口', sourceWidth: 1200, sourceHeight: 900, outputSize: options.outputSize ?? options.region ?? { width: 1200, height: 900 } }
             return { ...state.status }
@@ -206,11 +208,15 @@ async function main() {
     await page.getByTestId('record-start').click()
     await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'pick_capture_source').length)).toBe(6)
     await page.evaluate(() => window.recorderHarness.resolvePicker({ microphone: false, sourceId: 'screen:1', sourceWidth: 1920, sourceHeight: 1080 }))
-    await expect(page.getByText('3 秒后开始', { exact: true })).toBeVisible()
+    await expect(page.locator('.stage-toolbar')).toContainText('正在准备')
+    await expect.poll(() => page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'start_capture').length)).toBe(2)
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'start_capture').at(-1).args.countdown), 3)
+    assert.equal(await page.locator('.capture-countdown').count(), 0, '桌面倒计时在原生选区中央显示，不留在隐藏主窗口')
     await page.getByTestId('record-stop').click()
     await page.getByTestId('record-start').waitFor()
     await expect.poll(restoreCount).toBe(6)
-    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'start_capture').length), 1, '倒计时取消不能启动录制')
+    assert.equal(await page.evaluate(() => window.recorderHarness.calls.filter(call => call.command === 'cancel_capture_start').length), 1, '倒计时取消到达原生待启动任务')
+    assert.equal(await page.evaluate(() => window.recorderHarness.status.state), 'idle', '倒计时取消不能启动编码')
     await page.getByLabel('开始倒计时').selectOption('0')
     await page.evaluate(() => { window.recorderHarness.startFailure = true })
     await page.getByTestId('record-start').click()
@@ -254,6 +260,26 @@ async function main() {
     assert.deepEqual(border, { width: '3px', color: 'rgb(239, 69, 87)', pointerEvents: 'none' })
     assert.match(await page.locator('.settings-hint').innerText(), /共享标识由浏览器提供/)
     await page.waitForFunction(() => document.querySelector('[data-testid="recording-preview"] video').currentTime > 0.2)
+    const readPreviewPixel = () => page.getByTestId('recording-preview').locator('video').evaluate(video => {
+      const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 90
+      canvas.getContext('2d').drawImage(video, 0, 0, 160, 90)
+      return [...canvas.getContext('2d').getImageData(35, 25, 1, 1).data]
+    })
+    const yellow = pixel => pixel[0] > 220 && pixel[1] > 170 && pixel[2] < 120
+    assert.ok(yellow(await readPreviewPixel()))
+    const previewBox = await page.getByTestId('recording-preview').locator('video').boundingBox()
+    await page.mouse.move(previewBox.x + previewBox.width * 0.8, previewBox.y + previewBox.height * 0.5)
+    await page.mouse.wheel(0, -240)
+    assert.ok(yellow(await readPreviewPixel()), '普通滚轮不改变采集范围')
+    await page.keyboard.down('Control')
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, -120)
+    await page.keyboard.up('Control')
+    await expect.poll(async () => yellow(await readPreviewPixel())).toBe(false)
+    await page.keyboard.down('Control')
+    for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 120)
+    await page.keyboard.up('Control')
+    await expect.poll(async () => yellow(await readPreviewPixel())).toBe(true)
+    console.log('PASS 预览内 Ctrl＋滚轮更改真实采集范围，普通滚轮不缩放，缩小回原始范围')
     const toolbar = page.getByTestId('recording-toolbar')
     await expect(toolbar).toBeVisible()
     await expect(toolbar.getByRole('button', { name: '开启麦克风', exact: true })).toBeEnabled()

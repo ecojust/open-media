@@ -1,6 +1,6 @@
 [package]
 name = "open-media"
-version = "0.3.7"
+version = "0.3.8"
 description = "Local recording, editing and media conversion"
 edition = "2021"
 rust-version = "1.90"

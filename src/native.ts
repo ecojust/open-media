@@ -11,7 +11,7 @@ export type MediaJobSpec =
 export interface MediaJob { id: string; state: 'running' | 'completed' | 'failed' | 'cancelled'; progress: number; name: string; outputPath?: string; error?: string; startedAt?: number; elapsedSeconds?: number; encodedFrames?: number; outputTime?: number; outputIdleSeconds?: number | null; backend?: string; stage?: string; fallbackReason?: string }
 export interface CaptureSize { width: number; height: number }
 export interface CaptureRegion extends CaptureSize { x: number; y: number }
-export interface CaptureOptions { fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
+export interface CaptureOptions { countdown?: number; fps: number; microphone: boolean; sourceId?: string; screenId?: string; audioDevice?: string; region?: CaptureRegion; outputSize?: CaptureSize; requestId?: string }
 export interface CaptureStatus { state: 'idle' | 'recording' | 'paused' | 'stopping'; elapsed: number; segments: number; error?: string; sourceId?: string; sourceName?: string; sourceWidth?: number; sourceHeight?: number; outputSize?: CaptureSize; muted?: boolean; audioAvailable?: boolean; microphoneEnabled?: boolean }
 export interface CaptureDevice { id: string; name: string; kind: 'screen' | 'window' | 'audio'; width?: number; height?: number; bounds?: CaptureRegion; scaleFactor?: number }
 export interface CapturePickerPreferences { purpose?: 'record' | 'screenshot'; mode: 'region' | 'window' | 'screen'; sourceId?: string; outputSize?: CaptureSize; microphone?: boolean; audioDevice?: string }
@@ -106,7 +106,7 @@ export async function listCaptureDevices(requestPermission = false): Promise<Cap
 export async function pickCaptureSource(requestId: string, preferences: CapturePickerPreferences): Promise<CaptureSelection | null> { return call('pick_capture_source', { requestId, preferences }) }
 export async function cancelCapturePicker(requestId: string): Promise<void> { return call('cancel_capture_picker', { requestId }) }
 export async function getCaptureStatus(): Promise<CaptureStatus> { return call('get_capture_status') }
-export async function startCapture(options: CaptureOptions): Promise<CaptureStatus> { return call('start_capture', { options }) }
+export async function startCapture({ countdown, ...options }: CaptureOptions): Promise<CaptureStatus> { return call('start_capture', { options, countdown }) }
 export async function cancelCaptureStart(requestId: string): Promise<void> { return call('cancel_capture_start', { requestId }) }
 export async function pauseCapture(): Promise<CaptureStatus> { return call('pause_capture') }
 export async function resumeCapture(): Promise<CaptureStatus> { return call('resume_capture') }

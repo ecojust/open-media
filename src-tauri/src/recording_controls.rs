@@ -12,6 +12,7 @@ pub const ACTION_EVENT: &str = "capture-controls-action";
 const WIDTH: f64 = 244.0;
 const HEIGHT: f64 = 44.0;
 const MARGIN: f64 = 8.0;
+const COUNTDOWN_SIZE: f64 = 176.0;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +25,7 @@ pub struct ControlsSnapshot {
     pub microphone_pending: bool,
     pub busy: bool,
     pub error: Option<String>,
+    pub countdown: Option<u32>,
 }
 
 impl Default for ControlsSnapshot {
@@ -37,6 +39,7 @@ impl Default for ControlsSnapshot {
             microphone_pending: false,
             busy: true,
             error: None,
+            countdown: None,
         }
     }
 }
@@ -120,6 +123,52 @@ fn placement(target: &CaptureBounds, work_area: &CaptureBounds, scale: f64) -> (
     )
 }
 
+fn countdown_placement(target: &CaptureBounds, screen: &CaptureBounds, scale: f64) -> (f64, f64) {
+    let size = COUNTDOWN_SIZE * scale;
+    // Very small selections at a screen edge must still leave Cancel reachable.
+    (
+        (target.x + (target.width - size) / 2.0).clamp(screen.x, (screen.x + screen.width - size).max(screen.x)),
+        (target.y + (target.height - size) / 2.0).clamp(screen.y, (screen.y + screen.height - size).max(screen.y)),
+    )
+}
+
+fn focused_bounds(bounds: CaptureBounds, state_path: Option<&std::path::Path>) -> CaptureBounds {
+    let viewport = state_path.and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice::<CaptureBounds>(&bytes).ok());
+    let Some(viewport) = viewport.filter(|viewport| valid_bounds(viewport)
+        && viewport.x >= 0.0 && viewport.y >= 0.0
+        && viewport.x + viewport.width <= 1.0 + 1e-9
+        && viewport.y + viewport.height <= 1.0 + 1e-9) else { return bounds; };
+    CaptureBounds {
+        x: bounds.x + viewport.x * bounds.width,
+        y: bounds.y + viewport.y * bounds.height,
+        width: bounds.width * viewport.width,
+        height: bounds.height * viewport.height,
+    }
+}
+
+/// Poll cancellation while waiting, including before the first visible tick.
+pub fn countdown_wait(
+    seconds: u32,
+    cancelled: &std::sync::atomic::AtomicBool,
+    mut tick: impl FnMut(Option<u32>) -> Result<()>,
+) -> Result<()> {
+    use std::{sync::atomic::Ordering, time::{Duration, Instant}};
+    if seconds > 10 { return Err("录制倒计时应为 0 至 10 秒。".into()); }
+    let check = || if cancelled.load(Ordering::SeqCst) { Err("录制已取消。".to_string()) } else { Ok(()) };
+    check()?;
+    for remaining in (1..=seconds).rev() {
+        tick(Some(remaining))?;
+        let until = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < until {
+            check()?;
+            std::thread::sleep(until.saturating_duration_since(Instant::now()).min(Duration::from_millis(25)));
+        }
+    }
+    check()?;
+    tick(None)
+}
+
 #[cfg(feature = "desktop")]
 mod desktop {
     use super::*;
@@ -136,12 +185,14 @@ mod desktop {
     struct Target {
         source: CaptureDevice,
         region: Option<Region>,
+        zoom_state_path: Option<std::path::PathBuf>,
     }
 
     struct Session {
         snapshot: ControlsSnapshot,
         target: Option<Target>,
         cancelled: Arc<AtomicBool>,
+        ready: bool,
     }
 
     #[derive(Clone, Default)]
@@ -167,6 +218,7 @@ mod desktop {
                     snapshot,
                     target: None,
                     cancelled: cancelled.clone(),
+                    ready: false,
                 });
             }
             let manager = self.clone();
@@ -239,8 +291,7 @@ mod desktop {
                 return Err("录制已取消。".into());
             }
             set_native_level(&window)?;
-            position_window(&window, None)?;
-            window.show().map_err(|error| error.to_string())?;
+            // Stay hidden until validated source bounds are known; never flash at a default corner.
             Ok(())
         }
 
@@ -249,12 +300,13 @@ mod desktop {
             app: &tauri::AppHandle,
             source: CaptureDevice,
             region: Option<Region>,
+            zoom_state_path: Option<std::path::PathBuf>,
         ) -> Result<()> {
             selection_bounds(&source, region.as_ref())?;
             let (target, token) = {
                 let mut inner = self.inner.lock().map_err(|_| "录制控制状态不可用。")?;
                 let session = inner.as_mut().ok_or("录制控制栏已关闭。")?;
-                let target = Target { source, region };
+                let target = Target { source, region, zoom_state_path };
                 session.target = Some(target.clone());
                 (target, session.cancelled.clone())
             };
@@ -273,16 +325,34 @@ mod desktop {
 
         pub fn ready(&self, _app: &tauri::AppHandle, label: &str) -> Result<ControlsSnapshot> {
             require_controls(label)?;
-            self.snapshot()
+            let mut inner = self.inner.lock().map_err(|_| "录制控制状态不可用。")?;
+            let session = inner.as_mut().ok_or("录制控制栏已关闭。")?;
+            session.ready = true;
+            Ok(session.snapshot.clone())
+        }
+
+        pub fn wait_ready(&self, cancelled: &AtomicBool) -> Result<()> {
+            let deadline = std::time::Instant::now() + Duration::from_secs(15);
+            loop {
+                if cancelled.load(Ordering::SeqCst) { return Err("录制已取消。".into()); }
+                let ready = self.inner.lock().map_err(|_| "录制控制状态不可用。")?
+                    .as_ref().ok_or("录制控制栏已关闭。")?.ready;
+                if ready { return Ok(()); }
+                if std::time::Instant::now() >= deadline { return Err("录制倒计时窗口加载超时，请重试。".into()); }
+                std::thread::sleep(Duration::from_millis(25));
+            }
         }
 
         pub fn sync(&self, app: &tauri::AppHandle, snapshot: ControlsSnapshot) -> Result<()> {
             validate_snapshot(&snapshot)?;
-            {
+            let (target, token, changed_phase) = {
                 let mut inner = self.inner.lock().map_err(|_| "录制控制状态不可用。")?;
                 let session = inner.as_mut().ok_or("录制控制栏已关闭。")?;
+                let changed_phase = session.snapshot.phase != snapshot.phase;
                 session.snapshot = snapshot.clone();
-            }
+                (session.target.clone(), session.cancelled.clone(), changed_phase)
+            };
+            if changed_phase { self.queue_position(app, &token, target); }
             if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
                 window
                     .emit(STATE_EVENT, snapshot)
@@ -300,12 +370,12 @@ mod desktop {
             require_controls(label)?;
             let snapshot = self.snapshot()?;
             let allowed = (!snapshot.busy
-                || matches!(action, ControlsAction::Stop) && snapshot.microphone_pending)
+                || matches!(action, ControlsAction::Stop) && (snapshot.microphone_pending || snapshot.phase == "starting"))
                 && match action {
                     ControlsAction::Pause => snapshot.phase == "recording",
                     ControlsAction::Resume => snapshot.phase == "paused",
                     ControlsAction::Stop => {
-                        matches!(snapshot.phase.as_str(), "recording" | "paused")
+                        matches!(snapshot.phase.as_str(), "starting" | "recording" | "paused")
                     }
                     ControlsAction::ToggleMicrophone => {
                         matches!(snapshot.phase.as_str(), "recording" | "paused")
@@ -402,7 +472,9 @@ mod desktop {
                 if manager.is_current(&token) {
                     if let Some(window) = dispatch.get_webview_window(WINDOW_LABEL) {
                         // Keep the last accessible position when a target is minimized or gone.
-                        let _ = position_window(&window, Some(&bounds));
+                        let starting = manager.snapshot().is_ok_and(|snapshot| snapshot.phase == "starting");
+                        let _ = position_window(&window, Some(&bounds), starting);
+                        let _ = window.show();
                     }
                 }
             });
@@ -485,7 +557,7 @@ mod desktop {
                 height: f64::from(current.bounds.height),
             });
         }
-        selection_bounds(&source, target.region.as_ref())
+        selection_bounds(&source, target.region.as_ref()).map(|bounds| focused_bounds(bounds, target.zoom_state_path.as_deref()))
     }
 
     fn monitor_bounds(monitor: &tauri::Monitor, work_area: bool) -> CaptureBounds {
@@ -508,7 +580,7 @@ mod desktop {
         }
     }
 
-    fn position_window(window: &WebviewWindow, target: Option<&CaptureBounds>) -> Result<()> {
+    fn position_window(window: &WebviewWindow, target: Option<&CaptureBounds>, starting: bool) -> Result<()> {
         let monitors = window
             .available_monitors()
             .map_err(|error| error.to_string())?;
@@ -539,7 +611,14 @@ mod desktop {
         } else {
             monitor.scale_factor()
         };
-        let (x, y) = placement(target.unwrap_or(&work_area), &work_area, scale);
+        let target = target.unwrap_or(&work_area);
+        let (x, y) = if starting { countdown_placement(target, &work_area, scale) } else { placement(target, &work_area, scale) };
+        let (width, height) = if starting { (COUNTDOWN_SIZE, COUNTDOWN_SIZE) } else { (WIDTH, HEIGHT) };
+        let size = tauri::LogicalSize::new(width, height);
+        if window.inner_size().map_err(|error| error.to_string())?
+            != size.to_physical::<u32>(window.scale_factor().map_err(|error| error.to_string())?) {
+            window.set_size(size).map_err(|error| error.to_string())?;
+        }
         #[cfg(target_os = "macos")]
         window
             .set_position(tauri::LogicalPosition::new(x, y))
@@ -605,6 +684,70 @@ mod tests {
             y,
             width,
             height,
+        }
+    }
+
+    #[test]
+    fn countdown_is_centered_in_selected_region_on_scaled_and_secondary_displays() {
+        for (target, scale) in [
+            (bounds(220.0, 140.0, 800.0, 600.0), 1.0),
+            (bounds(-1920.0, -600.0, 1600.0, 900.0), 1.5),
+            (bounds(3840.0, 320.0, 1200.0, 800.0), 2.0),
+        ] {
+            let (x, y) = countdown_placement(&target, &bounds(-4000.0, -2000.0, 12000.0, 6000.0), scale);
+            assert_eq!(x + COUNTDOWN_SIZE * scale / 2.0, target.x + target.width / 2.0);
+            assert_eq!(y + COUNTDOWN_SIZE * scale / 2.0, target.y + target.height / 2.0);
+        }
+    }
+
+    #[test]
+    fn countdown_cancel_remains_on_screen_for_tiny_edge_selections() {
+        let screen = bounds(-1920.0, 24.0, 1920.0, 1056.0);
+        for target in [bounds(-1920.0, 24.0, 16.0, 16.0), bounds(-16.0, 1064.0, 16.0, 16.0)] {
+            let (x, y) = countdown_placement(&target, &screen, 1.0);
+            assert!(x >= screen.x && y >= screen.y);
+            assert!(x + COUNTDOWN_SIZE <= screen.x + screen.width);
+            assert!(y + COUNTDOWN_SIZE <= screen.y + screen.height);
+        }
+    }
+
+    #[test]
+    fn countdown_can_cancel_before_recording_without_finishing_remaining_ticks() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let cancelled = AtomicBool::new(false);
+        let mut ticks = Vec::new();
+        let result = countdown_wait(3, &cancelled, |tick| {
+            ticks.push(tick);
+            cancelled.store(true, Ordering::SeqCst);
+            Ok(())
+        });
+        assert!(result.unwrap_err().contains("取消"));
+        assert_eq!(ticks, [Some(3)]);
+        ticks.clear();
+        assert!(countdown_wait(0, &cancelled, |tick| { ticks.push(tick); Ok(()) }).is_err());
+        assert!(ticks.is_empty());
+    }
+
+    #[test]
+    fn disabled_countdown_starts_immediately_and_invalid_durations_are_rejected() {
+        let cancelled = std::sync::atomic::AtomicBool::new(false);
+        let mut ticks = Vec::new();
+        countdown_wait(0, &cancelled, |tick| { ticks.push(tick); Ok(()) }).unwrap();
+        assert_eq!(ticks, [None]);
+        assert!(countdown_wait(11, &cancelled, |_| panic!("invalid timer must never start")).is_err());
+    }
+
+    #[test]
+    fn controls_follow_zoom_in_original_bounds_and_ignore_corrupt_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("capture-viewport.json");
+        std::fs::write(&path, br#"{"x":0.25,"y":0.125,"width":0.5,"height":0.5}"#).unwrap();
+        let result = focused_bounds(bounds(-1000.0, 100.0, 800.0, 600.0), Some(&path));
+        assert_eq!((result.x, result.y, result.width, result.height), (-800.0, 175.0, 400.0, 300.0));
+        for invalid in [r#"{"x":0.9,"y":0,"width":0.5,"height":0.5}"#, r#"{"x":0,"y":0,"width":0,"height":0.5}"#, "{"] {
+            std::fs::write(&path, invalid).unwrap();
+            let result = focused_bounds(bounds(100.0, 200.0, 800.0, 600.0), Some(&path));
+            assert_eq!((result.x, result.y, result.width, result.height), (100.0, 200.0, 800.0, 600.0));
         }
     }
 

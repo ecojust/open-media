@@ -212,18 +212,12 @@ async function begin(): Promise<void> {
       const remembered = readMicrophonePreference(microphoneScope)
       writeMicrophonePreference(microphoneScope, { deviceId: chosen.audioDevice ?? '', name: remembered.deviceId === chosen.audioDevice ? remembered.name : '' })
       phase.value = 'starting'
-      for (let count = countdown.value; count > 0; count--) {
-        if (abort.signal.aborted) throw new DOMException('已取消录制。', 'AbortError')
-        remaining.value = count
-        await new Promise<void>(resolve => setTimeout(resolve, 1000))
-      }
-      remaining.value = 0
       if (abort.signal.aborted) throw new DOMException('已取消录制。', 'AbortError')
       const cancelPendingStart = () => { void cancelCaptureStart(requestId).catch(() => {}) }
       abort.signal.addEventListener('abort', cancelPendingStart, { once: true })
       let result: CaptureStatus
       try {
-        result = await startCapture({ requestId, fps: fps.value, microphone: microphone.value, audioDevice: chosen.audioDevice, sourceId: chosen.sourceId, ...(chosen.region ? { region: chosen.region } : {}), ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) })
+        result = await startCapture({ requestId, countdown: countdown.value, fps: fps.value, microphone: microphone.value, audioDevice: chosen.audioDevice, sourceId: chosen.sourceId, ...(chosen.region ? { region: chosen.region } : {}), ...(chosen.outputSize ? { outputSize: chosen.outputSize } : {}) })
       } finally { abort.signal.removeEventListener('abort', cancelPendingStart) }
       nativeStarted = true
       updateNativeSource(result)
@@ -233,7 +227,11 @@ async function begin(): Promise<void> {
     } else {
       controller = await startBrowserCapture({
         fps: fps.value, microphone: microphone.value, audioDevice: pickerPreferences.value.audioDevice, systemAudio: systemAudio.value, chooseSource: chooseBrowserSource,
-        countdown: countdown.value, signal: abort.signal,
+        countdown: countdown.value, signal: abort.signal, interactiveZoom: true,
+        onPreview: (stream, source) => {
+          actualSource.value = { ...source }
+          void nextTick(() => { if (preview.value && !abort.signal.aborted) { preview.value.muted = true; preview.value.srcObject = stream; void preview.value.play().catch(() => {}) } })
+        },
         onCountdown: value => { remaining.value = value; phase.value = 'starting' },
         onFinished: result => finished(result.blob, result.name),
         onError: cause => { error.value = captureErrorMessage(cause) },
@@ -256,6 +254,24 @@ async function begin(): Promise<void> {
     if (startAbort === abort) startAbort = undefined
     if (phase.value === 'idle') await restoreAfterCapture()
   }
+}
+function zoomPreview(event: WheelEvent): void {
+  if (props.native || !event.ctrlKey || !controller || !preview.value || !['recording', 'paused'].includes(phase.value)) return
+  const source = controller.source
+  const rect = preview.value.getBoundingClientRect()
+  const crop = source.region ?? { width: source.width, height: source.height }
+  const outputWidth = source.outputWidth, outputHeight = source.outputHeight
+  if (!rect.width || !rect.height || !crop.width || !crop.height || !outputWidth || !outputHeight) return
+  const videoScale = Math.min(rect.width / outputWidth, rect.height / outputHeight)
+  const contentScale = Math.min(outputWidth / crop.width, outputHeight / crop.height) * videoScale
+  const width = crop.width * contentScale, height = crop.height * contentScale
+  const x = (event.clientX - rect.left - (rect.width - width) / 2) / width
+  const y = (event.clientY - rect.top - (rect.height - height) / 2) / height
+  if (x < 0 || x > 1 || y < 0 || y > 1) return
+  event.preventDefault()
+  const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? rect.height : 1)
+  controller.zoomAt(x, y, delta)
+  actualSource.value = { ...controller.source }
 }
 async function recoverNativeStop(cause: unknown): Promise<void> {
   const originalError = captureErrorMessage(cause)
@@ -424,7 +440,7 @@ defineExpose({ isRecording: () => active.value, stop })
       <p v-if="screenshotError && !screenshotSettingsOpen" class="capture-error screenshot-page-error" role="alert">{{ screenshotError }}</p>
       <div class="capture-stage">
         <div class="stage-toolbar"><span><i :class="{ live: phase === 'recording', paused: phase === 'paused' }" />{{ phaseLabel }}</span><strong>{{ clockLabel }}</strong><span>{{ fps }} FPS</span></div>
-        <div class="capture-video-wrap" :class="{ 'recording-border': liveBorder }" data-testid="recording-preview" @contextmenu="selectedRecording && !active && mediaMenu?.open($event, selectedRecording)">
+        <div class="capture-video-wrap" :class="{ 'recording-border': liveBorder }" data-testid="recording-preview" @wheel="zoomPreview" @contextmenu="selectedRecording && !active && mediaMenu?.open($event, selectedRecording)">
           <video ref="preview" playsinline :controls="!active" :class="{ visible: active && !native || !!latestName }" aria-label="录制画面预览" />
           <div v-if="(!active && !latestName) || (native && active)" class="capture-placeholder"><div class="capture-symbol"><Icon :name="sourceType === 'region' ? 'crop' : sourceType === 'window' ? 'panel' : 'monitor'" :size="46" /></div><h2>{{ native && active ? (phase === 'selecting' ? '选择要录制的范围' : phase === 'starting' ? '正在准备录制' : '正在录制所选画面') : '让想法被看见' }}</h2><p>{{ native && active ? (phase === 'selecting' ? '拖动框选区域，或点击窗口；确认后才会开始录制。' : '红色边框标示当前录制范围，可随时返回这里暂停或停止。') : '点击开始录制，直接选择想要记录的画面。' }}</p><span v-if="!active">{{ native ? '屏幕 / 窗口 / 区域 · 分段暂停 · 麦克风' : '屏幕 / 窗口 / 区域 · 分段暂停 · 音频' }}</span></div>
           <div v-if="remaining" class="capture-countdown" aria-live="assertive">{{ remaining }}</div>
@@ -447,7 +463,7 @@ defineExpose({ isRecording: () => active.value, stop })
         <div v-if="!native && !browserCaptureAvailable()" class="capture-error">此浏览器无法采集屏幕，请在桌面端使用录制功能。</div>
         <button v-if="!active" class="record-start" :disabled="screenshotBusy || !native && !browserCaptureAvailable()" data-testid="record-start" @click="begin"><Icon name="record" :size="18" />开始录制</button>
         <div v-else class="record-actions"><button v-if="phase === 'recording' || phase === 'paused'" :disabled="controlBusy" @click="pauseOrResume"><Icon :name="phase === 'paused' ? 'play' : 'pause'" :size="17" />{{ phase === 'paused' ? '继续' : '暂停' }}</button><button v-if="phase === 'recording' || phase === 'paused'" :disabled="controlBusy" :aria-pressed="microphoneEnabled" :aria-label="microphoneEnabled ? '关闭麦克风' : '开启麦克风'" :title="microphoneEnabled ? '关闭麦克风' : '开启麦克风'" @click="toggleMicrophone"><Icon :name="microphoneEnabled ? 'mic' : 'mic-off'" :size="17" /></button><button class="stop-recording" :disabled="phase === 'stopping' || controlBusy && !microphonePending" data-testid="record-stop" @click="stop"><Icon name="stop" :size="17" />{{ phase === 'selecting' || phase === 'starting' ? '取消' : '停止' }}</button></div>
-        <p class="settings-hint">{{ native ? '录制时使用红框标出实际范围，暂停后仍可继续，停止时自动合并片段。' : '红框标示画面预览中的录制范围；桌面上的共享标识由浏览器提供。共享音频取决于所选来源。' }}</p>
+        <p class="settings-hint">{{ native ? '录制时按住 Ctrl 并滚动鼠标滚轮，以鼠标位置缩放红框，最多放大 8 倍，不超出初始范围。' : '在此预览画面上按 Ctrl＋滚轮可缩放录制范围，最多放大 8 倍；桌面共享标识由浏览器提供。' }}</p>
       </aside>
     </template>
     <template #overlays>

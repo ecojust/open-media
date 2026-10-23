@@ -191,7 +191,7 @@ impl CaptureManager {
                 let _ = active.child.wait();
                 self.elapsed += active.started.elapsed().as_secs_f64();
                 #[cfg(target_os = "windows")]
-                drop(active.border.take());
+                if let Some(mut border) = active.border.take() { border.finish_frames(&mut active.child); }
                 if self.recoverable(&active.path) {
                     self.segments.push(active.path);
                 }
@@ -260,8 +260,17 @@ impl CaptureManager {
     pub fn start_cancellable(
         &mut self,
         runtime: &Runtime,
+        options: CaptureOptions,
+        cancelled: &AtomicBool,
+    ) -> Result<CaptureStatus> {
+        self.start_with_preparation(runtime, options, cancelled, |_, _| Ok(()))
+    }
+    pub fn start_with_preparation(
+        &mut self,
+        runtime: &Runtime,
         mut options: CaptureOptions,
         cancelled: &AtomicBool,
+        prepare: impl FnOnce(&CaptureDevice, Option<&Region>) -> Result<()>,
     ) -> Result<CaptureStatus> {
         check_cancelled(cancelled)?;
         if self.state != "idle" {
@@ -276,6 +285,9 @@ impl CaptureManager {
         options.source_id = Some(source.id.clone());
         options.screen_id = None;
         prepare_audio_choice(&devices, &mut options)?;
+        check_cancelled(cancelled)?;
+        // Finish the visible countdown before opening recording devices or the encoder.
+        prepare(&source, options.region.as_ref())?;
         check_cancelled(cancelled)?;
         self.runtime = Some(runtime.clone());
         self.options = Some(options);
@@ -322,11 +334,11 @@ impl CaptureManager {
         let readiness = root.join(format!("{id}.progress"));
         let stderr = fs::File::create(&error_file).map_err(|e| e.to_string())?;
         #[cfg(target_os = "windows")]
-        let (mut command, border) = {
+        let (mut command, mut border) = {
             use crate::capture_windows::{self, BorderIndicator};
             let target = capture_windows::resolve_target(&source.id)?;
             let region = windows_region(options.region.as_ref());
-            let bounds = capture_windows::capture_bounds(&target, region.as_ref())?;
+            capture_windows::capture_bounds(&target, region.as_ref())?;
             let mut command = process(&runtime.encoder);
             command.args([
                 "-hide_banner",
@@ -338,34 +350,31 @@ impl CaptureManager {
                 "-progress",
             ]);
             command.arg(&readiness);
+            let size = options.output_size.ok_or("请选择输出尺寸。")?;
             command.args([
+                "-nostdin",
+                "-thread_queue_size",
+                "8",
+                "-use_wallclock_as_timestamps",
+                "1",
                 "-f",
-                "gdigrab",
+                "rawvideo",
+                "-pixel_format",
+                "bgra",
+                "-video_size",
+                &format!("{}x{}", size.width, size.height),
                 "-framerate",
                 &options.fps.to_string(),
-                "-draw_mouse",
-                "1",
+                "-i",
+                "pipe:0",
             ]);
-            if source.kind == "window" {
-                let hwnd = capture_windows::window_handle(&source.id)?;
-                command.args(["-i", &format!("hwnd={hwnd}")]);
-            } else {
-                command.args([
-                    "-offset_x",
-                    &bounds.x.to_string(),
-                    "-offset_y",
-                    &bounds.y.to_string(),
-                    "-video_size",
-                    &format!("{}x{}", bounds.width, bounds.height),
-                    "-i",
-                    "desktop",
-                ]);
-            }
             if options.microphone {
                 let device = options.audio_device.as_deref().ok_or("请选择麦克风。")?;
                 command.args([
                     "-thread_queue_size",
                     "1024",
+                    "-use_wallclock_as_timestamps",
+                    "1",
                     "-f",
                     "dshow",
                     "-i",
@@ -404,7 +413,7 @@ impl CaptureManager {
             } else {
                 command.arg("-an");
             }
-            command.arg(&output).stdout(Stdio::null());
+            command.arg("-shortest").arg(&output).stdout(Stdio::null());
             let border = BorderIndicator::start(target, region)?;
             (command, border)
         };
@@ -413,6 +422,9 @@ impl CaptureManager {
             let config = root.join(format!("{id}.json"));
             let mut configuration = serde_json::to_value(options).map_err(|e| e.to_string())?;
             configuration["muted"] = serde_json::Value::Bool(self.muted);
+            configuration["zoomStatePath"] =
+                serde_json::to_value(root.join("capture-viewport.json"))
+                    .map_err(|e| e.to_string())?;
             fs::write(
                 &config,
                 serde_json::to_vec(&configuration).map_err(|e| e.to_string())?,
@@ -433,6 +445,20 @@ impl CaptureManager {
         check_cancelled(cancelled)?;
         command.stdin(Stdio::piped()).stderr(Stdio::from(stderr));
         let mut child = command.spawn().map_err(|e| format!("无法启动录屏：{e}"))?;
+        #[cfg(target_os = "windows")]
+        {
+            let frame_input = child.stdin.take().ok_or("录制画面管道不可用。")?;
+            if let Err(error) = border.start_frames(
+                frame_input,
+                options.output_size.ok_or("请选择输出尺寸。")?,
+                options.fps,
+                &root.join("capture-viewport.json"),
+            ) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error);
+            }
+        }
         if let Err(error) = wait_until_ready(
             &mut child,
             &readiness,
@@ -440,15 +466,20 @@ impl CaptureManager {
             cfg!(target_os = "macos"),
             cancelled,
         ) {
+            #[cfg(target_os = "windows")]
+            border.finish_frames(&mut child);
             stop_child(&mut child, Duration::from_secs(2));
             return Err(error);
         }
         #[cfg(target_os = "windows")]
         if let Some(error) = border.error() {
+            border.finish_frames(&mut child);
             stop_child(&mut child, Duration::from_secs(2));
             return Err(error);
         }
         if let Err(error) = check_cancelled(cancelled) {
+            #[cfg(target_os = "windows")]
+            border.finish_frames(&mut child);
             stop_child(&mut child, Duration::from_secs(2));
             return Err(error);
         }
@@ -470,7 +501,7 @@ impl CaptureManager {
             return Ok(());
         };
         #[cfg(target_os = "windows")]
-        drop(active.border.take());
+        if let Some(mut border) = active.border.take() { border.finish_frames(&mut active.child); }
         let result = stop_child(&mut active.child, Duration::from_secs(10));
         self.elapsed += active.started.elapsed().as_secs_f64();
         if (result
@@ -494,6 +525,9 @@ impl CaptureManager {
         self.state = "paused".into();
         result?;
         Ok(self.status())
+    }
+    pub fn controls_zoom_path(&self) -> Option<PathBuf> {
+        self.workspace.as_ref().map(|directory| directory.path().join("capture-viewport.json"))
     }
     pub fn controls_target(&self) -> Option<(CaptureDevice, Option<Region>)> {
         Some((self.source.clone()?, self.options.as_ref()?.region.clone()))
@@ -616,14 +650,32 @@ impl CaptureManager {
             return Err("本次录制未启用声音。".into());
         }
         if self.muted != muted {
-            if let Some(active) = self.active.as_mut() {
-                let input = active.child.stdin.as_mut().ok_or("录制声音控制不可用。")?;
-                input
-                    .write_all(mute_command(muted, cfg!(target_os = "macos")))
-                    .and_then(|_| input.flush())
-                    .map_err(|error| format!("无法切换录制声音：{error}"))?;
+            #[cfg(target_os = "windows")]
+            {
+                let was_recording = self.active.is_some();
+                if was_recording {
+                    self.finish_segment()?;
+                    self.state = "paused".into();
+                }
+                self.muted = muted;
+                if was_recording {
+                    self.spawn_segment(&AtomicBool::new(false))
+                        .inspect_err(|error| {
+                            self.error = Some(error.clone());
+                        })?;
+                }
             }
-            self.muted = muted;
+            #[cfg(not(target_os = "windows"))]
+            {
+                if let Some(active) = self.active.as_mut() {
+                    let input = active.child.stdin.as_mut().ok_or("录制声音控制不可用。")?;
+                    input
+                        .write_all(mute_command(muted, cfg!(target_os = "macos")))
+                        .and_then(|_| input.flush())
+                        .map_err(|error| format!("无法切换录制声音：{error}"))?;
+                }
+                self.muted = muted;
+            }
         }
         Ok(self.status())
     }
@@ -751,10 +803,10 @@ impl CaptureManager {
     }
     pub fn abort(&mut self) {
         if let Some(mut active) = self.active.take() {
-            #[cfg(target_os = "windows")]
-            drop(active.border.take());
             let _ = active.child.kill();
             let _ = active.child.wait();
+            #[cfg(target_os = "windows")]
+            if let Some(mut border) = active.border.take() { border.finish_frames(&mut active.child); }
         }
         self.state = "idle".into();
         self.workspace = None;

@@ -52,6 +52,8 @@ export interface BrowserCaptureOptions {
   outputSize?: CaptureOutputSize
   chooseSource?: (request: BrowserCaptureSelectionRequest) => Promise<BrowserCaptureSelection | null>
   countdown?: number
+  interactiveZoom?: boolean
+  onPreview?: (stream: MediaStream, source: BrowserCaptureSource) => void
   signal?: AbortSignal
   onCountdown?: (remaining: number) => void
   onFinished?: (recording: CapturedRecording) => void
@@ -98,6 +100,7 @@ export interface BrowserCapture {
   readonly audioAvailable: boolean
   readonly microphoneEnabled: boolean
   setMicrophoneEnabled(enabled: boolean): Promise<void>
+  zoomAt(x: number, y: number, delta: number): void
   setMuted(muted: boolean): void
   pause(): void
   resume(): void
@@ -111,6 +114,22 @@ export function validateCaptureRegion(region: CaptureRegion, width: number, heig
     || region.x + region.width > width || region.y + region.height > height) {
     throw new Error(`录制区域超出所选屏幕范围，请在 ${width} × ${height} 像素内设置位置和尺寸。`)
   }
+}
+
+/** Preserve the initial aspect ratio and keep every focused crop inside its selection. */
+export function zoomCaptureRegion(initial: CaptureRegion, current: CaptureRegion, pointer: { x: number; y: number }, delta: number): CaptureRegion {
+  if (![pointer.x, pointer.y, delta].every(Number.isFinite)
+    || pointer.x < initial.x || pointer.y < initial.y
+    || pointer.x > initial.x + initial.width || pointer.y > initial.y + initial.height) return { ...current }
+  const minimumScale = Math.min(1, Math.max(1 / 8, 16 / initial.width, 16 / initial.height))
+  const scale = Math.max(minimumScale, Math.min(1, current.width / initial.width * Math.exp(Math.max(-300, Math.min(300, delta)) * 0.002)))
+  const width = Math.min(initial.width, Math.max(1, Math.round(initial.width * scale)))
+  const height = Math.min(initial.height, Math.max(1, Math.round(initial.height * scale)))
+  const anchorX = Math.max(current.x, Math.min(current.x + current.width, pointer.x))
+  const anchorY = Math.max(current.y, Math.min(current.y + current.height, pointer.y))
+  const x = Math.round(anchorX - (anchorX - current.x) / current.width * width)
+  const y = Math.round(anchorY - (anchorY - current.y) / current.height * height)
+  return { x: Math.max(initial.x, Math.min(initial.x + initial.width - width, x)), y: Math.max(initial.y, Math.min(initial.y + initial.height - height, y)), width, height }
 }
 
 function validateOutputSize(size: CaptureOutputSize): void {
@@ -204,7 +223,7 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     let outputSize = options.outputSize ? { ...options.outputSize } : undefined
     let microphoneSelected = options.microphone
     let audioDeviceSelected = options.audioDevice
-    let transformsVideo = !!(region || outputSize)
+    let transformsVideo = !!(region || outputSize || options.interactiveZoom)
     const source: BrowserCaptureSource = {
       type: settings.displaySurface === 'monitor' ? 'screen' : settings.displaySurface === 'window' ? 'window' : settings.displaySurface === 'browser' ? 'tab' : 'unknown',
       label: videoTrack.label || '所选录制来源',
@@ -262,12 +281,15 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       outputSize = selected.outputSize ? { ...selected.outputSize } : undefined
       microphoneSelected = selected.microphone ?? microphoneSelected
       audioDeviceSelected = selected.audioDevice ?? audioDeviceSelected
-      transformsVideo = !!(region || outputSize)
+      transformsVideo = !!(region || outputSize || options.interactiveZoom)
       updateSource()
     }
     if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
     if (outputSize) validateOutputSize(outputSize)
     if (region && source.type !== 'screen') throw new Error('屏幕区域录制需要选择整个屏幕；当前选择的是窗口、标签页或无法确认的来源，请重新选择。')
+    const initialRegion = { ...(region ?? { x: 0, y: 0, width: source.width, height: source.height }) }
+    const selectedRegion = !!region
+    let activeCrop = { ...initialRegion }
     if (transformsVideo) {
       const video = sourceVideo!
       if (region) { validateCaptureRegion(region, source.width, source.height); source.region = region }
@@ -283,9 +305,9 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
         try {
           if (video.readyState < 2) return
           updateSource()
-          if (region && source.type !== 'screen') throw new Error('录制来源已不再是整个屏幕，已结束区域录制并保留内容。')
-          if (region) validateCaptureRegion(region, video.videoWidth, video.videoHeight)
-          const crop = region ?? { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight }
+          if (selectedRegion && source.type !== 'screen') throw new Error('录制来源已不再是整个屏幕，已结束区域录制并保留内容。')
+          if (region || options.interactiveZoom) validateCaptureRegion(activeCrop, video.videoWidth, video.videoHeight)
+          const crop = region || options.interactiveZoom ? activeCrop : { x: 0, y: 0, width: video.videoWidth, height: video.videoHeight }
           const scale = Math.min(canvas.width / crop.width, canvas.height / crop.height)
           const width = crop.width * scale, height = crop.height * scale
           painter.fillStyle = '#000000'
@@ -366,6 +388,8 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     destination.stream.getTracks().forEach(track => ownedTracks.add(track))
     tracks.push(...destination.stream.getAudioTracks())
     await context.resume()
+    const stream = new MediaStream(tracks)
+    options.onPreview?.(stream, { ...source })
     for (let remaining = Math.max(0, Math.min(10, Math.floor(options.countdown ?? 0))); remaining > 0; remaining--) {
       if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
       options.onCountdown?.(remaining)
@@ -380,7 +404,6 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
     if (preparation.signal.aborted) throw cancelledCapture(preparation.signal)
     if (transformFailure) throw transformFailure
     if (!screen.getVideoTracks().some(track => track.readyState === 'live')) throw new Error('屏幕共享已结束，请重新选择录制来源。')
-    const stream = new MediaStream(tracks)
     const mime = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'].find(value => MediaRecorder.isTypeSupported(value))
     recorder = new MediaRecorder(stream, { ...(mime ? { mimeType: mime } : {}), videoBitsPerSecond: 8_000_000 })
     let phase: CapturePhase = 'recording'
@@ -508,6 +531,12 @@ export async function startBrowserCapture(options: BrowserCaptureOptions): Promi
       get audioAvailable() { return audioAvailable() },
       get microphoneEnabled() { return microphoneEnabled() },
       setMicrophoneEnabled,
+      zoomAt(x, y, delta) {
+        if (!options.interactiveZoom || phase === 'stopped' || !Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) return
+        activeCrop = zoomCaptureRegion(initialRegion, activeCrop, { x: activeCrop.x + x * activeCrop.width, y: activeCrop.y + y * activeCrop.height }, delta)
+        source.region = { ...activeCrop }
+        // The frame loop coalesces wheel bursts instead of encoding duplicate timestamps.
+      },
       setMuted(value) {
         if (!audioAvailable()) return
         // Disable the mixed output as well as every authorized source. Keep the

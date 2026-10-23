@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { GifEncoder, quantizeGifFrame, validateGifSegments } from '../src/core/gif.ts'
-import { recordingFileName, captureErrorMessage, browserCaptureAvailable } from '../src/core/capture.ts'
+import { recordingFileName, captureErrorMessage, browserCaptureAvailable, zoomCaptureRegion } from '../src/core/capture.ts'
 
 test('segment validation permits deliberate overlap and ordering while rejecting invalid ranges', () => {
   assert.equal(validateGifSegments([{ start: 4, end: 8 }, { start: 1, end: 6 }], 10), null)
@@ -74,4 +74,33 @@ test('recording names use an extension matching the actual container', () => {
   assert.match(captureErrorMessage(new DOMException('denied', 'NotAllowedError')), /权限/)
   assert.match(captureErrorMessage(new DOMException('missing input', 'OverconstrainedError')), /所选麦克风当前不可用/)
   assert.equal(browserCaptureAvailable(), false)
+})
+
+
+test('recording zoom preserves pointer anchor and returns to original bounds', () => {
+  const initial = { x: 100, y: 80, width: 800, height: 450 }
+  const pointer = { x: 700, y: 170 }
+  const cropped = zoomCaptureRegion(initial, initial, pointer, -100)
+  assert.ok(cropped.width < initial.width)
+  assert.ok(Math.abs((pointer.x - initial.x) / initial.width - (pointer.x - cropped.x) / cropped.width) < 0.002)
+  assert.ok(Math.abs((pointer.y - initial.y) / initial.height - (pointer.y - cropped.y) / cropped.height) < 0.002)
+  let restored = cropped
+  for (let i = 0; i < 10; i++) restored = zoomCaptureRegion(initial, restored, pointer, 100)
+  assert.deepEqual(restored, initial)
+})
+
+test('recording zoom clamps edges, keeps original aspect and limits magnification', () => {
+  const initial = { x: 7, y: 23, width: 1920, height: 1080 }
+  let cropped = initial
+  for (let i = 0; i < 1000; i++) {
+    const pointer = { x: initial.x + (i % 2 ? initial.width : 0), y: initial.y + (i % 3 ? initial.height : 0) }
+    cropped = zoomCaptureRegion(initial, cropped, pointer, i % 7 ? -100 : 100)
+    assert.ok(cropped.x >= initial.x && cropped.y >= initial.y)
+    assert.ok(cropped.x + cropped.width <= initial.x + initial.width)
+    assert.ok(cropped.y + cropped.height <= initial.y + initial.height)
+    assert.ok(cropped.width >= initial.width / 8 && cropped.height >= initial.height / 8)
+    assert.ok(Math.abs(cropped.width / initial.width - cropped.height / initial.height) < 0.001)
+  }
+  assert.deepEqual(zoomCaptureRegion(initial, cropped, { x: -1, y: 50 }, -100), cropped)
+  assert.deepEqual(zoomCaptureRegion(initial, cropped, { x: 20, y: 50 }, NaN), cropped)
 })

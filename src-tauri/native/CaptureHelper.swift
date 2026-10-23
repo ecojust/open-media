@@ -55,6 +55,7 @@ struct Options: Decodable {
     let region: Region?
     let outputSize: OutputSize
     var muted: Bool? = nil
+    var zoomStatePath: String? = nil
 
     func validate(sourceWidth: Int, sourceHeight: Int, isWindow: Bool) throws {
         guard (1...60).contains(fps) else { throw CaptureFailure("录制帧率应为 1 至 60。") }
@@ -131,6 +132,45 @@ func appKitRect(_ rect: CGRect, primaryTop: CGFloat) -> CGRect {
     CGRect(x: rect.minX, y: primaryTop - rect.maxY, width: rect.width, height: rect.height)
 }
 
+// Coordinates are normalized to the original selection, with a top-left origin.
+// Keeping this independent of screen pixels preserves the source aspect ratio
+// and lets the red border and encoded crop use exactly the same viewport.
+struct CaptureZoom {
+    private(set) var viewport = CGRect(x: 0, y: 0, width: 1, height: 1)
+
+    mutating func restore(_ bounds: Bounds) -> Bool {
+        guard [bounds.x, bounds.y, bounds.width, bounds.height].allSatisfy({ $0.isFinite }),
+              bounds.width >= 0.125, bounds.width <= 1, abs(bounds.width - bounds.height) < 0.000001,
+              bounds.x >= 0, bounds.y >= 0,
+              bounds.x + bounds.width <= 1.000001, bounds.y + bounds.height <= 1.000001 else { return false }
+        viewport = CGRect(x: min(bounds.x, 1 - bounds.width), y: min(bounds.y, 1 - bounds.width),
+                          width: bounds.width, height: bounds.width)
+        return true
+    }
+
+    mutating func scroll(at point: CGPoint, in original: CGRect, steps: Double) -> Bool {
+        guard original.width > 0, original.height > 0, original.contains(point),
+              steps.isFinite, steps != 0 else { return false }
+        let scale = exp(-min(8, max(-8, steps)) * log(1.15))
+        let size = min(1, max(0.125, viewport.width * scale))
+        let ratio = size / viewport.width
+        let anchor = CGPoint(x: min(viewport.maxX, max(viewport.minX, (point.x - original.minX) / original.width)),
+                             y: min(viewport.maxY, max(viewport.minY, (point.y - original.minY) / original.height)))
+        let next = CGRect(x: min(1 - size, max(0, anchor.x - (anchor.x - viewport.minX) * ratio)),
+                          y: min(1 - size, max(0, anchor.y - (anchor.y - viewport.minY) * ratio)),
+                          width: size, height: size)
+        guard next != viewport else { return false }
+        viewport = next
+        return true
+    }
+
+    func bounds(in original: CGRect) -> CGRect {
+        CGRect(x: original.minX + viewport.minX * original.width,
+               y: original.minY + viewport.minY * original.height,
+               width: viewport.width * original.width, height: viewport.height * original.height)
+    }
+}
+
 func aspectFit(source: CGSize, output: OutputSize) -> CGRect {
     let scale = min(Double(output.width) / source.width, Double(output.height) / source.height)
     let width = source.width * scale, height = source.height * scale
@@ -171,7 +211,9 @@ func makeRenderPool(size: OutputSize) throws -> CVPixelBufferPool {
     return pool
 }
 
-func letterboxedFrame(_ source: CVPixelBuffer, contentSize: CGSize? = nil, pool: CVPixelBufferPool, context: CIContext) throws -> CVPixelBuffer {
+func letterboxedFrame(_ source: CVPixelBuffer, contentSize: CGSize? = nil,
+                      viewport: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1),
+                      pool: CVPixelBufferPool, context: CIContext) throws -> CVPixelBuffer {
     var output: CVPixelBuffer?
     guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &output) == kCVReturnSuccess,
           let output = output else { throw CaptureFailure("无法分配录制画面缓冲区。") }
@@ -179,8 +221,15 @@ func letterboxedFrame(_ source: CVPixelBuffer, contentSize: CGSize? = nil, pool:
     let sourceSize = CGSize(width: CVPixelBufferGetWidth(source), height: CVPixelBufferGetHeight(source))
     let placement = aspectFit(source: contentSize ?? sourceSize, output: outputSize)
     let surface = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height)
+    // Image coordinates start at the bottom left; capture coordinates start at
+    // the top left. Crop before scaling so pixels outside the frame cannot leak.
+    let crop = CGRect(x: viewport.minX * sourceSize.width,
+                      y: (1 - viewport.maxY) * sourceSize.height,
+                      width: viewport.width * sourceSize.width, height: viewport.height * sourceSize.height)
     let image = CIImage(cvPixelBuffer: source)
-        .transformed(by: CGAffineTransform(scaleX: placement.width / sourceSize.width, y: placement.height / sourceSize.height))
+        .cropped(to: crop)
+        .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+        .transformed(by: CGAffineTransform(scaleX: placement.width / crop.width, y: placement.height / crop.height))
         .transformed(by: CGAffineTransform(translationX: placement.minX, y: placement.minY))
     let background = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 1)).cropped(to: surface)
     context.render(image.composited(over: background), to: output, bounds: surface, colorSpace: CGColorSpaceCreateDeviceRGB())
@@ -537,7 +586,14 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
     private var renderPool: CVPixelBufferPool?
     private var captureContentSize: CGSize?
     private let renderContext = CIContext(options: [.cacheIntermediates: false])
+    private var latestSourceFrame: CVPixelBuffer?
     private var latestFrame: CVPixelBuffer?
+    private let viewportLock = NSLock()
+    private var requestedViewport = CGRect(x: 0, y: 0, width: 1, height: 1)
+    private var renderedViewport = CGRect(x: 0, y: 0, width: 1, height: 1)
+    private var zoom = CaptureZoom()
+    private var globalScrollMonitor: Any?
+    private var localScrollMonitor: Any?
     private var frameTimer: DispatchSourceTimer?
     private var monitor: Timer?
     private var border: RecordingBorder?
@@ -662,6 +718,12 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         sourceScale = screenScale(for: sourceBounds)
         let sourceSize = pixelSize(sourceBounds, scale: sourceScale)
         try options.validate(sourceWidth: sourceSize.0, sourceHeight: sourceSize.1, isWindow: selectedWindow != nil)
+        if let path = options.zoomStatePath,
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let saved = try? JSONDecoder().decode(Bounds.self, from: data) {
+            _ = zoom.restore(saved)
+        }
+        setRequestedViewport(zoom.viewport)
         if options.microphone {
             reportStage("microphone")
             try await prepareMicrophone(options.audioDevice)
@@ -711,7 +773,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         if showsBorder {
             reportStage("indicator")
             let border = RecordingBorder()
-            border.update(borderRect(source: sourceBounds, region: options.region, scale: sourceScale))
+            border.update(zoom.bounds(in: originalRecordingBounds()))
             self.border = border
         }
         let filter: SCContentFilter
@@ -757,6 +819,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         do { try await stream.startCapture() }
         catch { throw captureError(error, during: "启动屏幕采集") }
         try requireActive()
+        if showsBorder { startZoomMonitoring() }
         reportStage("frame")
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now(), repeating: .nanoseconds(1_000_000_000 / options.fps))
@@ -769,6 +832,59 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
 
     private func requireActive() throws {
         if stopping { throw CaptureFailure("录制已取消。") }
+    }
+
+    @MainActor private func originalRecordingBounds() -> CGRect {
+        borderRect(source: sourceBounds, region: options?.region, scale: sourceScale)
+    }
+
+    @MainActor private func startZoomMonitoring() {
+        // A passive global scroll monitor keeps the recording frame click-through
+        // and does not request keyboard monitoring or change system permissions.
+        globalScrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            _ = self?.handleZoomScroll(event)
+        }
+        localScrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            self?.handleZoomScroll(event) == true ? nil : event
+        }
+    }
+
+    @MainActor private func handleZoomScroll(_ event: NSEvent) -> Bool {
+        guard !stopping, event.modifierFlags.contains(.control), event.momentumPhase == [] else { return false }
+        // CGEvent uses the same desktop origin as the capture source, including
+        // monitors positioned above or to the left of the primary display.
+        guard let point = event.cgEvent?.location else { return false }
+        let steps = Double(event.scrollingDeltaY) / (event.hasPreciseScrollingDeltas ? 40 : 3)
+        guard zoom.scroll(at: point, in: originalRecordingBounds(), steps: steps) else { return false }
+        setRequestedViewport(zoom.viewport)
+        border?.update(zoom.bounds(in: originalRecordingBounds()))
+        if let path = options?.zoomStatePath,
+           let data = try? JSONEncoder().encode(Bounds(zoom.viewport)) {
+            // The parent uses this same viewport for its separate control bar.
+            // Atomic replacement lets polling readers and resumed segments see
+            // either the previous complete state or the next complete state.
+            try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+        return true
+    }
+
+    private func currentViewport() -> CGRect {
+        viewportLock.lock(); defer { viewportLock.unlock() }
+        return requestedViewport
+    }
+
+    private func setRequestedViewport(_ viewport: CGRect) {
+        viewportLock.lock(); defer { viewportLock.unlock() }
+        requestedViewport = viewport
+    }
+
+    // Runs only on the serial capture queue. Retaining one source surface lets
+    // a scroll gesture update a static screen without waiting for a new sample.
+    private func renderLatestFrame(viewport: CGRect) throws {
+        guard let source = latestSourceFrame, let pool = renderPool else { return }
+        latestFrame = try letterboxedFrame(source, contentSize: captureContentSize, viewport: viewport,
+                                          pool: pool, context: renderContext)
+        renderedViewport = viewport
     }
 
     @MainActor private func displayFilter(_ display: SCDisplay, excluding border: RecordingBorder) async throws -> SCContentFilter {
@@ -856,15 +972,22 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let rawStatus = attachments.first?[.status] as? Int,
               SCFrameStatus(rawValue: rawStatus) == .complete,
-              let buffer = CMSampleBufferGetImageBuffer(sampleBuffer), let renderPool = renderPool else { return }
+              let buffer = CMSampleBufferGetImageBuffer(sampleBuffer), renderPool != nil else { return }
         receivedScreenFrames += 1
-        do { latestFrame = try letterboxedFrame(buffer, contentSize: captureContentSize, pool: renderPool, context: renderContext) }
+        latestSourceFrame = buffer
+        do { try renderLatestFrame(viewport: currentViewport()) }
         catch { reportFailure(error); return }
         if !started { appendVideoFrame() }
     }
 
     private func appendVideoFrame() {
-        guard !stopping, let writer = writer, let video = video,
+        guard !stopping else { return }
+        let viewport = currentViewport()
+        if viewport != renderedViewport {
+            do { try renderLatestFrame(viewport: viewport) }
+            catch { reportFailure(error); return }
+        }
+        guard let writer = writer, let video = video,
               let pixels = pixels, let buffer = latestFrame else { return }
         let now = CMClockGetTime(CMClockGetHostTimeClock())
         if let previous = lastVideoPTS, CMTimeCompare(now, previous) <= 0 { return }
@@ -938,10 +1061,10 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             guard rect.size == sourceBounds.size, screenScale(for: rect) == sourceScale else {
                 stop(error: CaptureFailure("窗口尺寸或缩放已改变，录制已暂停；继续录制会使用新的窗口尺寸。")); return
             }
-            border?.update(rect)
             sourceBounds = rect
+            border?.update(zoom.bounds(in: originalRecordingBounds()))
         } else if let id = displayID {
-            guard CGDisplayIsActive(id) != 0, let options = options else {
+            guard CGDisplayIsActive(id) != 0, options != nil else {
                 stop(error: CaptureFailure("所选屏幕已断开，录制已暂停。")); return
             }
             let rect = CGDisplayBounds(id), scale = screenScale(for: rect)
@@ -949,7 +1072,7 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
             guard rect == sourceBounds, scale == sourceScale else {
                 stop(error: CaptureFailure("屏幕尺寸或缩放已改变，请重新选择录制区域。")); return
             }
-            border?.update(borderRect(source: rect, region: options.region, scale: scale))
+            border?.update(zoom.bounds(in: originalRecordingBounds()))
         }
         if let microphone = microphone, !microphone.isRunning {
             stop(error: CaptureFailure("麦克风已断开，录制已暂停。"))
@@ -962,6 +1085,9 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
         stopFlag = true
         stopLock.unlock()
         terminalError = error
+        if let globalScrollMonitor = globalScrollMonitor { NSEvent.removeMonitor(globalScrollMonitor) }
+        if let localScrollMonitor = localScrollMonitor { NSEvent.removeMonitor(localScrollMonitor) }
+        globalScrollMonitor = nil; localScrollMonitor = nil
         border?.close()
         if smokeTestOutput != nil { smokeTestBorderClosed = border?.panel.isVisible != true }
         border = nil
@@ -978,6 +1104,8 @@ final class Recorder: NSObject, SCStreamDelegate, SCStreamOutput, AVCaptureAudio
                 }
             }
             self.queue.async {
+                self.latestSourceFrame = nil
+                self.latestFrame = nil
                 guard let writer = self.writer, self.started, writer.status == .writing else {
                     self.writer?.cancelWriting()
                     self.complete(error: self.terminalError ?? CaptureFailure("没有收到可录制画面。"))
@@ -1105,10 +1233,55 @@ func runSelfTests() throws {
         throw CaptureFailure("录制参数验证失败。")
     }
     try verifyRecordingStreamConfiguration()
+    try verifyCaptureZoomGeometry()
     try verifyAudioTiming()
     try verifyVideoEncoding(sourceSize: OutputSize(width: 120, height: 240), outputSize: OutputSize(width: 320, height: 180))
     try verifyVideoEncoding(sourceSize: OutputSize(width: 240, height: 120), outputSize: OutputSize(width: 180, height: 320))
-    print("Capture geometry, validation, stream configuration copying, audio timing, video encoding and decoded pixel checks passed.")
+    try verifyVideoEncoding(sourceSize: OutputSize(width: 240, height: 120), outputSize: OutputSize(width: 180, height: 320),
+                            viewport: CGRect(x: 0.5, y: 0, width: 0.5, height: 0.5))
+    try verifyVideoEncoding(sourceSize: OutputSize(width: 120, height: 240), outputSize: OutputSize(width: 320, height: 180),
+                            viewport: CGRect(x: 0, y: 0.5, width: 0.5, height: 0.5))
+    print("Capture geometry, bounded pointer zoom, validation, stream configuration copying, audio timing, video encoding and decoded pixel checks passed.")
+}
+
+func verifyCaptureZoomGeometry() throws {
+    let original = CGRect(x: -1820, y: -150, width: 800, height: 600)
+    let pointer = CGPoint(x: -1220, y: 0)
+    var zoom = CaptureZoom()
+    guard zoom.scroll(at: pointer, in: original, steps: 1) else { throw CaptureFailure("录制缩放没有响应。") }
+    let actual = zoom.bounds(in: original)
+    let oldX = (pointer.x - original.minX) / original.width
+    let oldY = (pointer.y - original.minY) / original.height
+    guard abs((pointer.x - actual.minX) / actual.width - oldX) < 0.000001,
+          abs((pointer.y - actual.minY) / actual.height - oldY) < 0.000001,
+          abs(actual.width / actual.height - original.width / original.height) < 0.000001,
+          original.contains(actual) else { throw CaptureFailure("录制缩放未保持鼠标锚点、比例或原始边界。") }
+    var edgeZoom = CaptureZoom()
+    _ = edgeZoom.restore(Bounds(CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)))
+    let previousEdge = edgeZoom.viewport
+    _ = edgeZoom.scroll(at: CGPoint(x: original.maxX - 1, y: original.minY + 1), in: original, steps: 1)
+    guard abs(edgeZoom.viewport.maxX - previousEdge.maxX) < 0.000001,
+          abs(edgeZoom.viewport.minY - previousEdge.minY) < 0.000001 else {
+        throw CaptureFailure("鼠标位于当前红框外时，缩放未锚定到红框边界。")
+    }
+    for _ in 0..<100 { _ = zoom.scroll(at: CGPoint(x: original.maxX - 1, y: original.maxY - 1), in: original, steps: 8) }
+    guard zoom.viewport.width == 0.125, original.contains(zoom.bounds(in: original)) else {
+        throw CaptureFailure("录制缩放超出了八倍或原始边界。")
+    }
+    let beforeOutside = zoom.viewport
+    var restored = CaptureZoom()
+    guard restored.restore(Bounds(beforeOutside)), restored.viewport == beforeOutside,
+          !restored.restore(Bounds(CGRect(x: -1, y: 0, width: 0.5, height: 0.5))),
+          !restored.restore(Bounds(CGRect(x: 0, y: 0, width: 0.5, height: 0.75))),
+          restored.viewport == beforeOutside else {
+        throw CaptureFailure("录制缩放恢复未校验边界或改变了有效状态。")
+    }
+    guard !zoom.scroll(at: CGPoint(x: 5000, y: 5000), in: original, steps: 1),
+          !zoom.scroll(at: pointer, in: original, steps: .nan), zoom.viewport == beforeOutside else {
+        throw CaptureFailure("录制范围外的滚轮改变了画面。")
+    }
+    for _ in 0..<100 { _ = zoom.scroll(at: pointer, in: original, steps: -8) }
+    guard zoom.bounds(in: original) == original else { throw CaptureFailure("录制缩小未恢复原始范围。") }
 }
 
 func verifyRecordingStreamConfiguration() throws {
@@ -1184,7 +1357,8 @@ func verifyAudioTiming() throws {
     }
 }
 
-func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize) throws {
+func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize,
+                         viewport: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)) throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("open-media-capture-check-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -1213,12 +1387,16 @@ func verifyVideoEncoding(sourceSize: OutputSize, outputSize: OutputSize) throws 
     for y in 0..<sourceSize.height {
         for x in 0..<sourceSize.width {
             let offset = y * stride + x * 4
-            base[offset] = 0; base[offset + 1] = 0; base[offset + 2] = 255; base[offset + 3] = 255
+            let inside = viewport.contains(CGPoint(x: (Double(x) + 0.5) / Double(sourceSize.width),
+                                                   y: (Double(y) + 0.5) / Double(sourceSize.height)))
+            base[offset] = inside ? 0 : 255; base[offset + 1] = 0
+            base[offset + 2] = inside ? 255 : 0; base[offset + 3] = 255
         }
     }
     CVPixelBufferUnlockBaseAddress(buffer, [])
     let pool = try makeRenderPool(size: outputSize)
-    let frame = try letterboxedFrame(buffer, pool: pool, context: CIContext(options: [.useSoftwareRenderer: true]))
+    let frame = try letterboxedFrame(buffer, viewport: viewport, pool: pool,
+                                    context: CIContext(options: [.useSoftwareRenderer: true]))
     for frameIndex in 0..<6 {
         let deadline = Date().addingTimeInterval(5)
         var appended = false

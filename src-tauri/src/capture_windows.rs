@@ -3,6 +3,10 @@
 
 use crate::engine::Result;
 use serde::{Deserialize, Serialize};
+#[path = "capture_zoom.rs"]
+mod zoom_geometry;
+#[cfg(windows)]
+use zoom_geometry::ZoomViewport;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,7 +171,7 @@ impl BorderIndicator {
 mod platform {
     use super::{
         border_rects, capture_bounds, parse_window_id, tracked_bounds, CaptureBounds, Result,
-        VisualTarget,
+        VisualTarget, ZoomViewport,
     };
     use std::{
         ffi::c_void,
@@ -176,12 +180,12 @@ mod platform {
         path::Path,
         ptr::{null, null_mut},
         sync::{
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
             mpsc::{self, Receiver, RecvTimeoutError, Sender},
             Arc, Mutex,
         },
         thread::{self, JoinHandle},
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     type Handle = *mut c_void;
@@ -771,14 +775,31 @@ mod platform {
         }
     }
 
+    mod zoom {
+        use super::*;
+        include!("capture_windows_zoom.rs");
+    }
+
     pub struct BorderIndicator {
         stop: Sender<()>,
         worker: Option<JoinHandle<()>>,
         error: Arc<Mutex<Option<String>>>,
+        viewport: Arc<Mutex<ZoomViewport>>,
+        enabled: Arc<AtomicBool>,
+        target: VisualTarget,
+        frames: Option<zoom::RecordingFrames>,
+        state_path: Arc<Mutex<Option<std::path::PathBuf>>>,
+        persistence_stop: Arc<AtomicBool>,
     }
     impl BorderIndicator {
         pub fn start(target: VisualTarget, region: Option<CaptureBounds>) -> Result<Self> {
-            capture_bounds(&target, region.as_ref())?;
+            let bounds = capture_bounds(&target, region.as_ref())?;
+            let viewport = Arc::new(Mutex::new(ZoomViewport::new(bounds)));
+            let worker_viewport = viewport.clone();
+            let enabled = Arc::new(AtomicBool::new(false));
+            let worker_enabled = enabled.clone();
+            let state_path = Arc::new(Mutex::new(None));
+            let saved_target = target.clone();
             let (stop, stopped) = mpsc::channel();
             let (ready, started) = mpsc::sync_channel(1);
             let error = Arc::new(Mutex::new(None));
@@ -804,13 +825,28 @@ mod platform {
                     if ready.send(Ok(())).is_err() {
                         return;
                     }
-                    follow_target(windows, target, region, initial_rect, stopped, worker_error);
+                    follow_target(
+                        windows,
+                        target,
+                        region,
+                        initial_rect,
+                        stopped,
+                        worker_error,
+                        worker_viewport,
+                        worker_enabled,
+                    );
                 })
                 .map_err(|e| format!("无法启动录制边框：{e}"))?;
             let mut indicator = Self {
                 stop,
                 worker: Some(worker),
                 error,
+                viewport,
+                enabled,
+                target: saved_target,
+                frames: None,
+                state_path,
+                persistence_stop: Arc::new(AtomicBool::new(false)),
             };
             match started.recv_timeout(Duration::from_secs(3)) {
                 Ok(Ok(())) => Ok(indicator),
@@ -824,10 +860,84 @@ mod platform {
                 }
             }
         }
+        pub fn start_frames(
+            &mut self,
+            input: std::process::ChildStdin,
+            size: crate::capture::OutputSize,
+            fps: u32,
+            state_path: &Path,
+        ) -> Result<()> {
+            if let Ok(bytes) = std::fs::read(state_path) {
+                if let Ok(value) = serde_json::from_slice(&bytes) {
+                    self.viewport
+                        .lock()
+                        .map_err(|_| "录制范围不可用。")?
+                        .restore(&value);
+                }
+            }
+            *self.state_path.lock().map_err(|_| "录制范围不可用。")? = Some(state_path.to_path_buf());
+            let viewport = self.viewport.clone();
+            let path = state_path.to_path_buf();
+            let write_lock = self.state_path.clone();
+            let stopping = self.persistence_stop.clone();
+            // Disk and antivirus latency must never block the global hook or
+            // sampled frames. Coalesce changes for the floating controls.
+            thread::Builder::new()
+                .name("recording-viewport-state".into())
+                .spawn(move || {
+                    let mut previous = None;
+                    while !stopping.load(Ordering::Acquire) {
+                        let snapshot = viewport.lock().ok().map(|view| view.snapshot());
+                        if snapshot != previous {
+                            if let Some(snapshot) = snapshot.as_ref() {
+                                if let Ok(_guard) = write_lock.lock() {
+                                    if !stopping.load(Ordering::Acquire) {
+                                        persist_viewport(&path, snapshot);
+                                    }
+                                }
+                            }
+                            previous = snapshot;
+                        }
+                        thread::sleep(Duration::from_millis(200));
+                    }
+                })
+                .map_err(|error| format!("无法同步录制范围：{error}"))?;
+            self.frames = Some(zoom::RecordingFrames::start(
+                input,
+                self.target.clone(),
+                self.viewport.clone(),
+                self.enabled.clone(),
+                self.error.clone(),
+                size.width,
+                size.height,
+                fps,
+            )?);
+            Ok(())
+        }
+        pub fn finish_frames(&mut self, child: &mut std::process::Child) {
+            self.enabled.store(false, Ordering::Release);
+            // Once finalization begins no old periodic snapshot may replace
+            // the final viewport used when resuming the next segment.
+            self.persistence_stop.store(true, Ordering::Release);
+            if let Some(mut frames) = self.frames.take() {
+                frames.finish(child);
+            }
+            self.save_viewport();
+        }
+        fn save_viewport(&self) {
+            if let (Ok(viewport), Ok(path)) = (self.viewport.lock(), self.state_path.lock()) {
+                if let Some(path) = path.as_ref() {
+                    persist_viewport(path, &viewport.snapshot());
+                }
+            }
+        }
         pub fn error(&self) -> Option<String> {
             self.error.lock().ok().and_then(|error| error.clone())
         }
         fn shutdown(&mut self) {
+            self.enabled.store(false, Ordering::Release);
+            self.persistence_stop.store(true, Ordering::Release);
+            self.save_viewport();
             let _ = self.stop.send(());
             if let Some(worker) = self.worker.take() {
                 let _ = worker.join();
@@ -839,6 +949,20 @@ mod platform {
             self.shutdown();
         }
     }
+    fn persist_viewport(path: &Path, snapshot: &serde_json::Value) {
+        if let Ok(bytes) = serde_json::to_vec(snapshot) {
+            // Keep a complete previous snapshot visible while writing the next.
+            static NEXT_WRITE: AtomicU64 = AtomicU64::new(1);
+            let temporary = path.with_extension(format!(
+                "{}.tmp",
+                NEXT_WRITE.fetch_add(1, Ordering::Relaxed)
+            ));
+            if std::fs::write(&temporary, bytes).is_ok() {
+                let _ = std::fs::rename(&temporary, path);
+            }
+            let _ = std::fs::remove_file(temporary);
+        }
+    }
     fn follow_target(
         windows: BorderWindows,
         target: VisualTarget,
@@ -846,7 +970,20 @@ mod platform {
         mut last_bounds: CaptureBounds,
         stopped: Receiver<()>,
         error: Arc<Mutex<Option<String>>>,
+        viewport: Arc<Mutex<ZoomViewport>>,
+        enabled: Arc<AtomicBool>,
     ) {
+        let _hook = match zoom::WheelHook::install(viewport.clone(), enabled.clone()) {
+            Ok(hook) => hook,
+            Err(reason) => {
+                if let Ok(mut error) = error.lock() {
+                    *error = Some(reason);
+                }
+                return;
+            }
+        };
+        let mut source_check = Instant::now();
+        let mut original = last_bounds.clone();
         loop {
             let mut message: Message = unsafe { zeroed() };
             unsafe {
@@ -855,20 +992,29 @@ mod platform {
                     DispatchMessageW(&message);
                 }
             }
-            match stopped.recv_timeout(Duration::from_millis(80)) {
+            match stopped.recv_timeout(Duration::from_millis(16)) {
                 Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
                 Err(RecvTimeoutError::Timeout) => {}
             }
-            let current = resolve_target(&target.id)
-                .and_then(|current| tracked_bounds(&target, &current, region.as_ref()));
-            let outcome = current.and_then(|rect| {
+            let outcome = (|| {
+                if source_check.elapsed() >= Duration::from_millis(80) {
+                    original = resolve_target(&target.id)
+                        .and_then(|current| tracked_bounds(&target, &current, region.as_ref()))?;
+                    source_check = Instant::now();
+                }
+                let rect = {
+                    let mut viewport = viewport.lock().map_err(|_| "录制范围不可用。")?;
+                    viewport.original = original.clone();
+                    viewport.absolute()
+                };
                 if rect != last_bounds {
                     windows.place(&rect)?;
                     last_bounds = rect;
                 }
-                Ok(())
-            });
+                Ok::<_, String>(())
+            })();
             if let Err(reason) = outcome {
+                enabled.store(false, Ordering::Release);
                 windows.hide();
                 if let Ok(mut error) = error.lock() {
                     *error = Some(reason);
@@ -889,6 +1035,7 @@ mod platform {
             fn GetDC(window: Hwnd) -> Handle;
             fn ReleaseDC(window: Hwnd, dc: Handle) -> i32;
             fn GetForegroundWindow() -> Hwnd;
+            fn FillRect(dc: Handle, rect: *const Rect, brush: Handle) -> i32;
         }
         #[link(name = "gdi32")]
         extern "system" {
@@ -1264,6 +1411,127 @@ mod platform {
                         "sourceListingMs": listing_elapsed.as_secs_f64() * 1000.0, "timings": timings })).unwrap()).unwrap();
             }
         }
+        #[test]
+        fn real_native_zoom_changes_recorded_pixels_with_fixed_output_dimensions() {
+            use crate::engine::{process, Runtime};
+            use std::process::Stdio;
+            let _desktop = DESKTOP_TEST.lock().unwrap();
+            let _physical = PhysicalCoordinates::enter();
+            let fixture = Fixture::start();
+            let id = format!("window:{}:{}", fixture.hwnd, unsafe {
+                GetCurrentProcessId()
+            });
+            let selected = resolve_target(&id).unwrap();
+            wait_for(|| captured_pixel(selected.bounds.x + 1, selected.bounds.y + 1) == 0x0020a040);
+            let dc = unsafe { GetDC(fixture.hwnd as Hwnd) };
+            let brush = unsafe { CreateSolidBrush(0x002040e0) };
+            assert!(!dc.is_null() && !brush.is_null());
+            assert_ne!(
+                unsafe {
+                    FillRect(
+                        dc,
+                        &Rect {
+                            left: 90,
+                            top: 60,
+                            right: 270,
+                            bottom: 180,
+                        },
+                        brush,
+                    )
+                },
+                0
+            );
+            unsafe {
+                GdiFlush();
+                DeleteObject(brush);
+                ReleaseDC(fixture.hwnd as Hwnd, dc);
+            }
+            wait_for(|| captured_pixel(selected.bounds.x + 180, selected.bounds.y + 120) == 0x002040e0);
+            let border = BorderIndicator::start(selected.clone(), None).unwrap();
+            let full = zoom::fixture_frame(&selected, selected.bounds.clone(), (360, 240), 0.0).unwrap();
+            let close = zoom::fixture_frame(
+                &selected,
+                selected.bounds.clone(),
+                (360, 240),
+                2.0_f64.ln() / 1.15_f64.ln(),
+            )
+            .unwrap();
+            let pixel =
+                |frame: &[u8], x: usize, y: usize| frame[(y * 360 + x) * 4..(y * 360 + x) * 4 + 3].to_vec();
+            assert_eq!(pixel(&full, 20, 20), vec![32, 160, 64]);
+            assert_eq!(
+                pixel(&close, 20, 20),
+                vec![32, 64, 224],
+                "zoom must change captured pixels, not just the border"
+            );
+            assert_eq!(
+                pixel(&full, 1, 1),
+                vec![32, 160, 64],
+                "red indicator must remain excluded"
+            );
+            drop(border);
+            let runtime = Runtime::discover(None, None).expect("Media runtime required");
+            let root = tempfile::tempdir().unwrap();
+            let output = root.path().join("zoom.mkv");
+            let mut encoder = process(&runtime.encoder)
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "bgra",
+                    "-video_size",
+                    "360x240",
+                    "-framerate",
+                    "10",
+                    "-i",
+                    "pipe:0",
+                    "-c:v",
+                    "ffv1",
+                ])
+                .arg(&output)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            {
+                let mut input = encoder.stdin.take().unwrap();
+                for frame in [&full, &close] {
+                    for _ in 0..10 {
+                        input.write_all(frame).unwrap();
+                    }
+                }
+            }
+            let encoded = encoder.wait_with_output().unwrap();
+            assert!(
+                encoded.status.success(),
+                "{}",
+                String::from_utf8_lossy(&encoded.stderr)
+            );
+            for (time, expected) in [("0.5", vec![32, 160, 64]), ("1.5", vec![32, 64, 224])] {
+                let decoded = process(&runtime.encoder)
+                    .args(["-v", "error", "-ss", time, "-i"])
+                    .arg(&output)
+                    .args([
+                        "-frames:v",
+                        "1",
+                        "-pix_fmt",
+                        "bgra",
+                        "-f",
+                        "rawvideo",
+                        "pipe:1",
+                    ])
+                    .output()
+                    .unwrap();
+                assert!(decoded.status.success());
+                assert_eq!(decoded.stdout.len(), 360 * 240 * 4);
+                assert_eq!(pixel(&decoded.stdout, 20, 20), expected);
+            }
+        }
+
         #[test]
         fn real_screenshot_window_region_and_screen_need_no_media_process() {
             let _desktop = DESKTOP_TEST.lock().unwrap();

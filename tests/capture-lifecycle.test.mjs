@@ -598,3 +598,24 @@ test('cancelling before the floating action listener is ready never opens a pick
   assert.equal(unlistened, 1)
   assert.equal(harness.state.phase.value, 'idle')
 })
+
+
+test('native countdown is delegated to selected-area controls and cancellation reaches pending start', async () => {
+  const pending = deferred(), calls = [], cancellations = []
+  const harness = workspace('RecorderWorkspace', {
+    startCapture: options => { calls.push(options); return pending.promise },
+    cancelCaptureStart: async id => { cancellations.push(id); pending.reject(new DOMException('已取消录制。', 'AbortError')) },
+  })
+  try {
+    harness.state.countdown.value = 5
+    const starting = harness.state.begin()
+    await settle(); await settle()
+    assert.equal(calls.length, 1, 'countdown runs natively after selection, without a hidden-page timer')
+    assert.equal(calls[0].countdown, 5)
+    assert.equal(harness.state.phase.value, 'starting')
+    await harness.state.stop()
+    await starting
+    assert.deepEqual(cancellations, [calls[0].requestId])
+    assert.equal(harness.state.phase.value, 'idle')
+  } finally { harness.dispose() }
+})
