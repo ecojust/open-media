@@ -513,9 +513,17 @@ export class TimelinePreview {
   }
 
   async seekReady(time: number, signal?: AbortSignal): Promise<void> {
-    this.playbackGeneration++
+    const generation = ++this.playbackGeneration
     this.cancelVideoPresentationWaits()
     await this.waitForSeek(time, signal)
+    if (signal?.aborted || this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
+    // seeked can precede a drawable texture, including paused/frozen video.
+    // Reuse already-presented frames; only active video needs a presentation.
+    await Promise.all(this.activeEntries(time)
+      .filter(entry => this.assets.get(entry.assetId)?.kind === 'video' && entry.media instanceof HTMLVideoElement)
+      .map(entry => this.waitForVideoPresentation(entry.media as HTMLVideoElement, signal)))
+    if (signal?.aborted || this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
+    this.draw()
   }
 
   private async waitForSeek(time: number, signal?: AbortSignal): Promise<void> {
@@ -534,6 +542,7 @@ export class TimelinePreview {
       media.addEventListener('seeked', finish, { once: true })
       signal?.addEventListener('abort', abort, { once: true })
     })))
+    if (signal?.aborted || this.disposed || generation !== this.playbackGeneration) throw new DOMException('播放已取消', 'AbortError')
     this.draw()
   }
 

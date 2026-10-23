@@ -163,6 +163,95 @@ test('尚未呈现首帧时移除或销毁素材释放帧回调，迟到回调�
   assert.equal(harness.imagesDrawn, 0)
 })
 
+test('显式定位等待首帧可绘制，定格画面只等待一次且不会自动播放', async t => {
+  const harness = playbackHarness(t, { video: true, frameReady: true })
+  const { preview, media, project } = harness
+  const clip = project.tracks.find(track => track.kind === 'video').clips[0]
+  clip.freezeFrame = { sourceTime: 3, original: { trimIn: clip.trimIn, trimOut: clip.trimOut, speed: clip.speed, volume: clip.volume } }
+  preview.setProject(project)
+  let ready = false
+  const start = preview.seekReady(.1).then(() => { ready = true })
+  await new Promise(setImmediate)
+  assert.equal(media.currentTime, 3)
+  media.finishSeek()
+  await new Promise(setImmediate)
+  assert.equal(media.readyState, 4)
+  assert.equal(ready, false, 'seeked 和 readyState 不能代替可绘制的定格帧')
+  const drawn = harness.imagesDrawn
+  for (const [id, presented] of [...media.frameCallbacks]) { media.frameCallbacks.delete(id); presented() }
+  await start
+  assert.equal(ready, true)
+  assert(harness.imagesDrawn > drawn, '定位返回前使用已呈现的帧重绘')
+  assert.equal(media.plays, 0)
+  const seeks = [...media.seeks]
+  await preview.seekReady(1.5)
+  assert.deepEqual(media.seeks, seeks, '同一定格帧无需重新定位')
+  assert.equal(media.frameCallbacks.size, 0, '已呈现静帧不能等待不存在的下一帧')
+  assert.equal(preview.videoPresentationWaits.size, 0)
+})
+
+for (const options of [{ video: false, frameReady: true }, { video: true, frameReady: false }]) {
+  test(`显式定位${options.video ? '在无帧回调的环境' : '音频'}不等待视频呈现`, async t => {
+    const { preview, media } = playbackHarness(t, options)
+    await preview.seekReady(0)
+    assert.equal(preview.videoPresentationWaits.size, 0)
+    assert.equal(media.plays, 0)
+  })
+}
+
+for (const cancellation of ['pause', 'seek', 'project', 'dispose', 'signal']) {
+  test(`显式定位等待帧期间 ${cancellation} 立即取消，迟到帧不完成旧定位`, async t => {
+    const harness = playbackHarness(t, { video: true, frameReady: true })
+    const { preview, media } = harness
+    const controller = new AbortController()
+    const start = preview.seekReady(0, controller.signal)
+    const rejected = assert.rejects(start, error => error.name === 'AbortError')
+    await new Promise(setImmediate)
+    const presentation = [...media.frameCallbacks.values()].at(-1)
+    if (cancellation === 'pause') preview.pause()
+    if (cancellation === 'seek') preview.seek(1, false)
+    if (cancellation === 'project') preview.setProject(createProject('替换项目', { width: 32, height: 32 }))
+    if (cancellation === 'dispose') preview.dispose()
+    if (cancellation === 'signal') controller.abort()
+    await rejected
+    assert.equal(preview.videoPresentationWaits.size, 0)
+    const drawn = harness.imagesDrawn
+    presentation()
+    assert.equal(harness.imagesDrawn, drawn)
+    assert.equal(media.plays, 0)
+    assert.equal(media.paused, true)
+  })
+}
+
+test('显式定位在帧呈现后被新定位替换，旧承诺不会成功返回或重绘', async t => {
+  const harness = playbackHarness(t, { video: true, frameReady: true })
+  const { preview, media } = harness
+  const start = preview.seekReady(0)
+  const rejected = assert.rejects(start, error => error.name === 'AbortError')
+  await new Promise(setImmediate)
+  const [id, presented] = [...media.frameCallbacks].at(-1)
+  media.frameCallbacks.delete(id)
+  presented()
+  preview.seek(1, false)
+  const drawn = harness.imagesDrawn
+  await rejected
+  assert.equal(harness.imagesDrawn, drawn)
+  assert.equal(preview.lastTime, 1)
+})
+
+test('显式定位等待帧超时会释放等待，不遗留准备状态', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { preview, media } = playbackHarness(t, { video: true, frameReady: true })
+  const start = preview.seekReady(0)
+  const rejected = assert.rejects(start, /视频画面准备超时/)
+  await new Promise(setImmediate)
+  t.mock.timers.tick(10000)
+  await rejected
+  assert.equal(preview.videoPresentationWaits.size, 0)
+  assert.equal(media.frameCallbacks.size, 1, '保留静止预览自身的呈现监听')
+  assert.equal(media.plays, 0)
+})
+
 test('视频的加载和播放承诺完成后，仍等待实际呈现帧才完成播放准备并重绘', async t => {
   const harness = playbackHarness(t, { video: true, frameReady: true })
   let ready = false

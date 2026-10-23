@@ -29,7 +29,7 @@ async function main(){
   const blur=run(p,'overlay_add',{kind:'blur',start:0,duration:2,x:50,y:5,width:60,height:80,blurRadius:10}).project;await render(blur,1);const blurPixel=pixel(80,45)
   const spotlight=run(p,'overlay_add',{kind:'spotlight',start:0,duration:2,x:100,y:20,width:30,height:30,opacity:1}).project;await render(spotlight,1);const spotlightPixels=[pixel(20,20),pixel(110,30)]
   const movie=structuredClone(p);movie.tracks.find(track => track.kind === 'video').clips=[createClip(p.assets[1],movie,{id:'movie-clip',volume:0})]
-  const frozen=run(movie,'clip_freeze_frame',{clipId:'movie-clip',sourceTime:1.5,duration:2}).project;const frozenPixels=[];for(const t of [.1,1.5])frozenPixels.push(await render(frozen,t))
+  const frozen=run(movie,'clip_freeze_frame',{clipId:'movie-clip',sourceTime:1.5,duration:2}).project;const frozenPixels=[];for(let cold=0;cold<3;cold++){preview.setProject(p);for(const t of [.1,1.5])frozenPixels.push(await render(frozen,t))}
   const split=structuredClone(movie);split.tracks.find(track => track.kind === 'video').clips=[createClip(p.assets[1],movie,{id:'before',trimOut:1,opacity:.5,volume:0}),createClip(p.assets[1],movie,{id:'after',start:1,trimIn:1,trimOut:2,opacity:.5,volume:0})]
   let colored=addTransition(split,1,'fade',1);colored=run(colored,'transition_parameters_set',{clipId:colored.tracks.find(track => track.kind === 'transition').clips[0].id,color:'#00ff00'}).project
   const fadePixel=await render(colored,.75)
@@ -57,7 +57,7 @@ async function main(){
   return {overlayPixels,nativeRasters,overlayOutput:[...new Uint8Array(await overlayOutput.arrayBuffer())],cropPixel,movePixels,focusPixel,maskPixel,blurPixel,spotlightPixels,frozenPixels,fadePixel,output:[...new Uint8Array(await output.arrayBuffer())]}
  })
  const blue=p=>p[2]>220&&p[0]<20,black=p=>p[0]+p[1]+p[2]<10
- assert(blue(result.cropPixel));assert(black(result.movePixels[0]));assert(result.movePixels[1][0]>110&&result.movePixels[1][0]<140);assert(blue(result.focusPixel));assert(result.maskPixel[1]>240&&result.maskPixel[0]<10);assert(result.blurPixel[0]>50&&result.blurPixel[2]>50);assert(black(result.spotlightPixels[0])&&blue(result.spotlightPixels[1]));assert(result.frozenPixels.every(blue));assert(result.fadePixel[0]>55&&result.fadePixel[0]<75&&result.fadePixel[1]>55&&result.fadePixel[1]<75&&result.fadePixel[2]<10,`colored fade opacity ${result.fadePixel}`)
+ assert(blue(result.cropPixel));assert(black(result.movePixels[0]));assert(result.movePixels[1][0]>110&&result.movePixels[1][0]<140);assert(blue(result.focusPixel));assert(result.maskPixel[1]>240&&result.maskPixel[0]<10);assert(result.blurPixel[0]>50&&result.blurPixel[2]>50);assert(black(result.spotlightPixels[0])&&blue(result.spotlightPixels[1]));assert(result.frozenPixels.every(blue),`定格应始终显示源视频蓝帧：${JSON.stringify(result.frozenPixels)}`);assert(result.fadePixel[0]>55&&result.fadePixel[0]<75&&result.fadePixel[1]>55&&result.fadePixel[1]<75&&result.fadePixel[2]<10,`colored fade opacity ${result.fadePixel}`)
  console.log('PASS 源裁剪/移动透明关键帧/区域聚焦/遮罩/聚光/局部模糊/停帧的实际 Canvas 像素')
  const out=path.join(folder,'crop-export.webm');await fs.writeFile(out,Buffer.from(result.output));const pixels=execFileSync('ffmpeg',['-v','error','-i',out,'-vf','crop=2:2:79:44,scale=1:1','-f','rawvideo','-pix_fmt','rgb24','-']);assert(pixels.length>90);for(let i=0;i<pixels.length;i+=3)assert(pixels[i+2]>180&&pixels[i]<50)
  console.log(`PASS 浏览器真实裁剪导出并逐帧解码验证 ${out}`)
