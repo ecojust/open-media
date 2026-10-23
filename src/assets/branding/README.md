@@ -2,13 +2,12 @@
 
 `open-media-logo.png` 是根据用户提供的紫色生肖鸡图案，经图像工具整理的透明背景原稿，尺寸为 1254 × 1254 像素。保留黑色与米白色雕刻纹理、紫色圆角底板，不包含名称文字。
 
-应用图标由原稿转换为各平台需要的尺寸和格式：
+桌面应用图标由原稿统一转换为各平台需要的尺寸和格式：
 
 ```sh
-./node_modules/.bin/tauri icon src/assets/branding/open-media-logo.png --output src-tauri/icons
-node scripts/generate-macos-icon.mjs
+node scripts/generate-app-icons.mjs
 ```
 
-`public/brand-mark.png` 使用生成的 `128x128@2x.png`，供顶部和信息弹窗显示；`public/favicon.png` 使用生成的 `32x32.png`，供浏览器标签页显示。图标自身带透明边距与圆角，界面无需再次裁切。上述命令只转换图标资源，不构建应用。
+保留原稿图案，以主体居中，四周约 2.5% 留白。脚本同步生成 `src-tauri/icons` 下的 ICO 多尺寸图层、ICNS 多倍率图层与桌面 PNG 资源，使任务栏、快捷方式、安装程序及 Dock 使用一致的图案占比。已有 ICNS 图层内容未变化时保留原容器，避免生成器条目排序造成无意义的文件变化。
 
-macOS 应用图标使用单独的画布取景：保留原稿图案，以主体居中，四周约 2.5% 留白，避免 Dock 与“应用程序”中的图标偏小。`scripts/generate-macos-icon.mjs` 只重新生成 `src-tauri/icons/icon.icns`，包含各倍率图层，不改变原稿、界面图标及其他平台资源。单独调整 macOS 图标时只需运行第二条命令。
+`public/brand-mark.png` 供顶部和信息弹窗显示，`public/favicon.png` 供浏览器标签页显示；这些界面资源与原稿保持不变，不随桌面图标重新生成。图标自身带透明边距与圆角，界面无需再次裁切。上述命令只转换图标资源，不构建应用。
